@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenterSm } from '../../theme';
+import { colors, fonts, rp } from '../../theme';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -41,45 +41,83 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const todayId = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
   const timeId = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
 
+  const status = (
+    <>
+      <View style={styles.checkCircle}>
+        <Text style={styles.checkMark}>✓</Text>
+      </View>
+      <Text style={styles.title}>Pembayaran Berhasil</Text>
+      <Text style={styles.orderNo}>{orderNo}</Text>
+      <Text style={styles.dateLine}>{todayId} · {timeId}</Text>
+    </>
+  );
+
+  const receipt = (
+    <View style={styles.receipt}>
+      <ScrollView>
+        <Text style={styles.shopName}>ESB Cabang Poris</Text>
+        <Text style={styles.shopSub}>Kasir Gista • Dine In</Text>
+        <View style={styles.divider} />
+        <View style={styles.row}>
+          <Text style={styles.label}>Total</Text>
+          <Text style={styles.value}>{rp(total)}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.label}>Metode</Text>
+          <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
+        </View>
+        {method === 'cash' && (
+          <>
+            <View style={styles.row}>
+              <Text style={styles.label}>Tunai Diterima</Text>
+              <Text style={styles.value}>{rp(cash)}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.label}>Kembalian</Text>
+              <Text style={styles.changeValue}>{rp(change)}</Text>
+            </View>
+          </>
+        )}
+        <View style={styles.divider} />
+        <Text style={styles.thanks}>Terima kasih atas kunjungan Anda</Text>
+      </ScrollView>
+    </View>
+  );
+
+  if (isTablet) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.split}>
+          <View style={styles.statusSide}>{status}</View>
+          <View style={styles.receiptSide}>{receipt}</View>
+        </View>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.printBtn}
+            onPress={() => navigation?.navigate('Receipt', receiptParams)}>
+            <Text style={styles.printBtnText}>Cetak Struk</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.printBtn}
+            onPress={() => navigation?.navigate('History')}>
+            <Text style={styles.printBtnText}>Lihat Riwayat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.newOrderBtn}
+            onPress={() => navigation?.navigate('Cashier')}>
+            <Text style={styles.newOrderBtnText}>Order Baru</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
-      <View style={[styles.body, isTablet && wideCenterSm]}>
-        <View style={styles.checkCircle}>
-          <Text style={styles.checkMark}>✓</Text>
-        </View>
-        <Text style={styles.title}>Pembayaran Berhasil</Text>
-        <Text style={styles.orderNo}>{orderNo}</Text>
-        <Text style={styles.dateLine}>{todayId} · {timeId}</Text>
-
-        <View style={styles.receipt}>
-          <ScrollView>
-            <Text style={styles.shopName}>ESB Cabang Poris</Text>
-            <Text style={styles.shopSub}>Kasir Gista • Dine In</Text>
-            <View style={styles.divider} />
-            <View style={styles.row}>
-              <Text style={styles.label}>Total</Text>
-              <Text style={styles.value}>{rp(total)}</Text>
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.label}>Metode</Text>
-              <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
-            </View>
-            {method === 'cash' && (
-              <>
-                <View style={styles.row}>
-                  <Text style={styles.label}>Tunai Diterima</Text>
-                  <Text style={styles.value}>{rp(cash)}</Text>
-                </View>
-                <View style={styles.row}>
-                  <Text style={styles.label}>Kembalian</Text>
-                  <Text style={styles.changeValue}>{rp(change)}</Text>
-                </View>
-              </>
-            )}
-            <View style={styles.divider} />
-            <Text style={styles.thanks}>Terima kasih atas kunjungan Anda</Text>
-          </ScrollView>
-        </View>
+      <View style={styles.body}>
+        {status}
+        {receipt}
       </View>
 
       <View style={styles.footer}>
@@ -106,6 +144,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1, alignItems: 'center', padding: 24 },
+  split: { flex: 1, flexDirection: 'row', padding: 24, gap: 20 },
+  statusSide: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  receiptSide: { flex: 1.2, justifyContent: 'center' },
   checkCircle: {
     width: 84,
     height: 84,

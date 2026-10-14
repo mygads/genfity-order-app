@@ -17,23 +17,24 @@ Hook verifikasi: `EXPO_PUBLIC_NAV_HOOK=1` → `__NAV__.go(name)` di `App.tsx`.
 Skala 1–10 (visual vs ref APK + kelengkapan interaksi), dinilai dari screenshot
 verifikasi Playwright (Expo web, viewport phone ±390px & tablet ±820px).
 
-### 1a. Layar utama (10) — phone 10/10 semua, tablet rata-rata 7,7
+### 1a. Layar utama (10) — phone 10/10 semua, tablet rata-rata 8,7
 
 | # | Layar (route) | Phone | Tablet | Catatan tablet |
 |---|---|---|---|---|
-| 1 | Login | 10 | 6 | kolom phone di tengah (`wideCenterSm`); belum 2-panel |
+| 1 | Login | 10 | 9 | 2-panel: panel brand navy (outlet/kasir live) + form PIN |
 | 2 | Dashboard | 10 | 8 | grid menu adaptif (`menuGridTablet`); KPI/chart ikut melebar |
 | 3 | Cashier | 10 | 9 | 2-panel katalog + cart (`bodyRow`/`cartPanel`, `numColumns=2`) |
 | 4 | Pay | 10 | 9 | split tunai/non-tunai (`tabletSplit`/`tabletContent`); CTA bawah disembunyikan di tablet |
-| 5 | Receipt | 10 | 6 | kolom struk di tengah; belum 2-panel |
-| 6 | Success | 10 | 6 | kolom di tengah (tunai+kembalian+tanggal OK); belum 2-panel |
+| 5 | Receipt | 10 | 9 | 2-panel: kertas struk + panel ringkasan/aksi vertikal |
+| 6 | Success | 10 | 9 | 2-panel: status + kartu struk; footer 3 tombol full-width |
 | 7 | History | 10 | 9 | split list + detail (`split`/`splitList`/`splitDetail`); filter sheet khusus phone |
-| 8 | Member | 10 | 6 | kolom di tengah (`wideCenterLg`); belum 2-panel |
-| 9 | Booking | 10 | 6 | kolom di tengah (`wideCenter`); belum 2-panel |
+| 8 | Member | 10 | 9 | 2-panel: daftar + panel detail (saldo/poin, Deposit, Terapkan) |
+| 9 | Booking | 10 | 9 | 2-panel: daftar reservasi kiri + form reservasi/pindah meja kanan |
 | 10 | Tables | 10 | 8 | grid kartu meja + filter; centered `wideCenterLg` |
 
-5 tablet sudah 2-panel/adaptif (dashboard, cashier, pay, history, tables);
-5 masih kolom phone terpusat (login, receipt, success, member, booking).
+10 tablet sudah 2-panel/adaptif (dashboard, cashier, pay, history, tables,
+login, receipt, success, member, booking). Pola: konten phone diekstrak ke
+fragmen/variabel lalu disusun ulang di cabang `isTablet`, phone tidak berubah.
 
 ### 1b. Layar tambahan (15+) — phone ≥9 semua
 
@@ -44,10 +45,10 @@ Printers, Settings. Total route terdaftar: **29** (`src/navigation/types.ts`).
 ### 1c. Bukti screenshot
 
 - `docs/shots/` — 66 file: 28 phone + 28 tablet RN (`phone-*`, `tablet-*`,
-  driver `verify/shot.win.cjs` + `shot.fix.cjs`) + 10 bukti APK asli `apk-*`
-  dari emulator (intro 1–4, chrome-welcome, registrasi, web-login).
-  Detail pemetaan APK→RN: `PETA-REA.md`.
-- `verify/final/` — 14 screenshot final phone+tablet (cashier, dashboard,
+  driver `verify/shot.win.cjs` + `shot.fix.cjs` + `shot.2panel.cjs`) + 10 bukti
+  APK asli `apk-*` dari emulator (intro 1–4, chrome-welcome, registrasi,
+  web-login). Detail pemetaan APK→RN: `PETA-REA.md`.
+- `verify/final/` — 19 screenshot final phone+tablet (cashier, dashboard,
   history, pay-tunai, login, booking, member, receipt, success, tables).
 
 ---
@@ -151,7 +152,7 @@ Yang **belum ada di RN** (prioritas):
 | Tombol cetak no-op (Cashier, BillPreview, DineIn, CartDetail, Qris) | ⚠️ masih mock — butuh printer (§3.4) |
 | 5 rute orphan dari UI (DineIn, Voucher, QrScan, EsbOrder, Settings) | ✅ terhubung Okt 2026: DineIn←Cashier:527,572; Voucher←Pay:261/Member:98; QrScan←Member:95; EsbOrder←Settings:83 (reroute, bukan orphan) |
 | `EdcScreen` vs form EDC inline di Pay | ✅ koeksis by-design Okt 2026: Edc←Pay:480, mirroring APK (BCA EDC-01 app-switch, approval 6 digit) |
-| 5 layar tablet masih kolom phone (login, receipt, success, member, booking) | ⚠️ TODO §7.1 |
+| 5 layar tablet masih kolom phone (login, receipt, success, member, booking) | ✅ 2-panel Okt 2026 (skor tablet 9; pola ekstrak-fragmen, phone tak berubah) |
 
 ---
 
@@ -159,7 +160,7 @@ Yang **belum ada di RN** (prioritas):
 
 ### 7.1 Prioritas (sesuai skor & gap)
 
-1. Tablet 2-panel: login, receipt, success, member, booking (target ≥8).
+1. ~~Tablet 2-panel: login, receipt, success, member, booking (target ≥8)~~ ✅ selesai Okt 2026 (tablet 9/9/9/9/9; bukti `verify/tablet-{Login,Receipt,Success,Member,Booking}.png`).
 2. Samakan label `Order Fee`/`Ongkir` + sisa bahasa Inggris.
 3. ~~Putuskan orphan routes + `EdcScreen` vs inline~~ ✅ diputuskan Okt 2026 (semua terhubung; Edc koeksis dgn inline, cerminkan APK).
 4. Gap APK (§3): install/klaim → split-bill → recap/expense → printer → deposit.

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { colors, fonts, rp } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -57,16 +57,8 @@ export default function BookingScreen({ navigation }: Props) {
     setName(''); setPhone(''); setPax(''); setTime(''); setNote('');
   };
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack()} hitSlop={12}>
-          <Text style={styles.back}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Booking</Text>
-        <View style={{ width: 26 }} />
-      </View>
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+  const reservasiList = (
+    <>
       <Text style={styles.count}>ESB Cabang Poris · {list.length} reservasi aktif</Text>
 
       <Text style={styles.sec}>Daftar Reservasi</Text>
@@ -94,14 +86,18 @@ export default function BookingScreen({ navigation }: Props) {
           <TouchableOpacity onPress={() => navigation?.navigate('Cashier')}><Text style={styles.link}>Buka di Kasir ›</Text></TouchableOpacity>
         </View>
       </View>
+    </>
+  );
 
+  const bookingForm = (
+    <>
       <Text style={styles.sec}>Reservasi Baru</Text>
       <Text style={styles.hint}>Form pemesanan meja (BookTable).</Text>
       <Text style={styles.label}>Nama customer</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nama" />
       <Text style={styles.label}>No. HP</Text>
       <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="08xx" keyboardType="phone-pad" />
-      <Text style={[styles.label, styles.labelGap]}>Jumlah tamu</Text>
+      <Text style={styles.label}>Jumlah tamu</Text>
       <TextInput style={styles.input} value={tamu} onChangeText={setPax} placeholder="2" keyboardType="numeric" />
       <Text style={styles.label}>Meja</Text>
       <View style={styles.chips}>
@@ -139,7 +135,33 @@ export default function BookingScreen({ navigation }: Props) {
       <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Tables')}>
         <Text style={styles.primaryT}>Pindahkan Meja</Text>
       </TouchableOpacity>
-      </ScrollView>
+    </>
+  );
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation?.goBack()} hitSlop={12}>
+          <Text style={styles.back}>‹</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Booking</Text>
+        <View style={{ width: 26 }} />
+      </View>
+      {isTablet ? (
+        <View style={styles.split}>
+          <ScrollView style={styles.listSide} contentContainerStyle={styles.body}>
+            {reservasiList}
+          </ScrollView>
+          <ScrollView style={styles.formSide} contentContainerStyle={styles.body}>
+            {bookingForm}
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.body}>
+          {reservasiList}
+          {bookingForm}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -179,7 +201,9 @@ const styles = StyleSheet.create({
   labelGap: { marginTop: 28 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
+  split: { flex: 1, flexDirection: 'row' },
+  listSide: { flex: 1 },
+  formSide: { flex: 1, borderLeftWidth: 1, borderLeftColor: colors.line, backgroundColor: colors.card },  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   chipTOn: { color: colors.orangeDark },

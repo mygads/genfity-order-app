@@ -9,7 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import { colors, fonts, rp, rpNum } from '../../theme';
 
 type Props = { navigation?: any };
 
@@ -71,6 +71,91 @@ export default function MemberScreen({ navigation }: Props) {
     setDepositNominal('');
   };
 
+  const list = (
+    <ScrollView contentContainerStyle={s.body}>
+      <Text style={s.count}>
+        {hasil.length} member terdaftar{q.trim() ? ` · hasil “${q.trim()}”` : ''}
+      </Text>
+      {hasil.length === 0 ? (
+        <View style={s.empty}>
+          <Text style={s.emptyTitle}>Maaf, Member Tidak Terdeteksi</Text>
+          <Text style={s.emptySub}>Coba kata kunci lain atau tambah member baru</Text>
+          <TouchableOpacity style={s.primaryBtn} onPress={() => setAddVisible(true)}>
+            <Text style={s.primaryTxt}>Tambah Member Baru</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        hasil.map((m) => (
+          <TouchableOpacity
+            key={m.id}
+            style={[s.card, selected?.id === m.id && s.cardActive]}
+            onPress={() => setSelected(m)}>
+            <View style={s.cardTop}>
+              <View style={s.avatar}>
+                <Text style={s.avatarTxt}>{m.nama.charAt(0)}</Text>
+              </View>
+              <View style={s.cardInfo}>
+                <Text style={s.cardName}>{m.nama}</Text>
+                <Text style={s.cardMeta}>
+                  {m.id} • {maskHp(m.noHp)}
+                </Text>
+                <Text style={[s.cardTipe, m.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>{m.tipe} Member{m.tipe === 'Gold' ? ' ★' : ''}</Text>
+              </View>
+            </View>
+            <View style={s.cardBottom}>
+              <Text style={s.saldoTxt}>Saldo {rp(m.saldo)}</Text>
+              <Text style={s.poinTxt}>{m.poin} poin</Text>
+            </View>
+          </TouchableOpacity>
+        ))
+      )}
+    </ScrollView>
+  );
+
+  const detail = (
+    <View style={s.detailSide}>
+      {selected ? (
+        <>
+          <View style={s.detailAvatar}>
+            <Text style={s.detailAvatarTxt}>{selected.nama.charAt(0)}</Text>
+          </View>
+          <Text style={s.detailName}>{selected.nama}</Text>
+          <Text style={s.detailMeta}>
+            {selected.id} • {maskHp(selected.noHp)}
+          </Text>
+          <Text style={[s.cardTipe, selected.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>
+            {selected.tipe} Member{selected.tipe === 'Gold' ? ' ★' : ''}
+          </Text>
+          <View style={s.detailStats}>
+            <View style={s.detailStat}>
+              <Text style={s.detailStatLabel}>Saldo</Text>
+              <Text style={s.detailStatValue}>{rp(selected.saldo)}</Text>
+            </View>
+            <View style={s.detailStat}>
+              <Text style={s.detailStatLabel}>Poin</Text>
+              <Text style={s.detailStatValue}>{selected.poin} poin</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={s.ghostBtnFull}
+            onPress={() => setDepositVisible(true)}>
+            <Text style={s.ghostTxt}>Deposit / Top Up</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.applyBtnFull}
+            onPress={() => navigation?.goBack?.()}>
+            <Text style={s.applyTxt}>Terapkan Member</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <View style={s.detailEmpty}>
+          <Text style={s.emptyTitle}>Pilih member</Text>
+          <Text style={s.emptySub}>Ketuk salah satu member di daftar untuk melihat detail</Text>
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <View style={s.root}>
       <View style={s.header}>
@@ -101,59 +186,30 @@ export default function MemberScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
-        <Text style={s.count}>
-          {hasil.length} member terdaftar{q.trim() ? ` · hasil “${q.trim()}”` : ''}
-        </Text>
-        {hasil.length === 0 ? (
-          <View style={s.empty}>
-            <Text style={s.emptyTitle}>Maaf, Member Tidak Terdeteksi</Text>
-            <Text style={s.emptySub}>Coba kata kunci lain atau tambah member baru</Text>
-            <TouchableOpacity style={s.primaryBtn} onPress={() => setAddVisible(true)}>
-              <Text style={s.primaryTxt}>Tambah Member Baru</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          hasil.map((m) => (
-            <TouchableOpacity
-              key={m.id}
-              style={[s.card, selected?.id === m.id && s.cardActive]}
-              onPress={() => setSelected(m)}>
-              <View style={s.cardTop}>
-                <View style={s.avatar}>
-                  <Text style={s.avatarTxt}>{m.nama.charAt(0)}</Text>
-                </View>
-                <View style={s.cardInfo}>
-                  <Text style={s.cardName}>{m.nama}</Text>
-                  <Text style={s.cardMeta}>
-                    {m.id} • {maskHp(m.noHp)}
-                  </Text>
-                  <Text style={[s.cardTipe, m.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>{m.tipe} Member{m.tipe === 'Gold' ? ' ★' : ''}</Text>
-                </View>
-              </View>
-              <View style={s.cardBottom}>
-                <Text style={s.saldoTxt}>Saldo {rp(m.saldo)}</Text>
-                <Text style={s.poinTxt}>{m.poin} poin</Text>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-
-      {selected ? (
-        <View style={s.footer}>
-          <TouchableOpacity
-            style={s.ghostBtn}
-            onPress={() => setDepositVisible(true)}>
-            <Text style={s.ghostTxt}>Deposit / Top Up</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.applyBtn}
-            onPress={() => navigation?.goBack?.()}>
-            <Text style={s.applyTxt}>Terapkan Member</Text>
-          </TouchableOpacity>
+      {isTablet ? (
+        <View style={s.split}>
+          <View style={s.listSide}>{list}</View>
+          {detail}
         </View>
-      ) : null}
+      ) : (
+        <>
+          {list}
+          {selected ? (
+            <View style={s.footer}>
+              <TouchableOpacity
+                style={s.ghostBtn}
+                onPress={() => setDepositVisible(true)}>
+                <Text style={s.ghostTxt}>Deposit / Top Up</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.applyBtn}
+                onPress={() => navigation?.goBack?.()}>
+                <Text style={s.applyTxt}>Terapkan Member</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </>
+      )}
 
       {/* Tambah member */}
       <Modal visible={addVisible} transparent animationType="slide">
@@ -276,6 +332,49 @@ const s = StyleSheet.create({
   },
   count: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted, marginBottom: 4 },
   body: { padding: 16, paddingBottom: 110 },
+  split: { flex: 1, flexDirection: 'row' },
+  listSide: { flex: 1 },
+  detailSide: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.line,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.navy,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailAvatarTxt: { color: colors.white, fontSize: 30, fontFamily: fonts.bold },
+  detailName: { fontSize: 19, fontFamily: fonts.bold, color: colors.text, marginTop: 12 },
+  detailMeta: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 4 },
+  detailStats: { flexDirection: 'row', gap: 12, marginTop: 16, marginBottom: 20 },
+  detailStat: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, minWidth: 130, alignItems: 'center' },
+  detailStatLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
+  detailStatValue: { fontSize: 16, fontFamily: fonts.bold, color: colors.navy, marginTop: 4 },
+  detailEmpty: { alignItems: 'center' },
+  ghostBtnFull: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  applyBtnFull: {
+    width: '100%',
+    backgroundColor: colors.orange,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
   card: {
     backgroundColor: colors.white,
     borderRadius: 12,

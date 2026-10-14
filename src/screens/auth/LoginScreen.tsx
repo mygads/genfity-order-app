@@ -8,7 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, wideCenterSm } from '../../theme';
+import { colors, fonts } from '../../theme';
 import { loginDemo } from '../../session';
 
 type Nav = {
@@ -52,8 +52,8 @@ export default function LoginScreen({ navigation }: Props) {
     if (navigation?.navigate) navigation.navigate('Dashboard');
   };
 
-  return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+  const form = (
+    <>
       <Text style={styles.brand}>ESB POSLite</Text>
       <Text style={styles.sub}>Login Kasir · v3.2.1 · Online</Text>
       <Text style={styles.welcome}>Selamat Datang</Text>
@@ -114,6 +114,33 @@ export default function LoginScreen({ navigation }: Props) {
         <Text style={styles.demoText}>Masuk Demo</Text>
       </TouchableOpacity>
       <Text style={styles.foot}>Hanya username yang diingat di perangkat ini · PIN tidak pernah disimpan</Text>
+    </>
+  );
+
+  if (isTablet) {
+    return (
+      <View style={styles.split}>
+        <View style={styles.brandPanel}>
+          <Text style={styles.brandPanelTitle}>ESB POSLite</Text>
+          <Text style={styles.brandPanelSub}>Login Kasir · v3.2.1 · Online</Text>
+          <View style={styles.brandCard}>
+            <Text style={styles.brandCardLabel}>Outlet aktif</Text>
+            <Text style={styles.brandCardValue}>{outlet}</Text>
+            <Text style={styles.brandCardLabel}>Kasir</Text>
+            <Text style={styles.brandCardValue}>{username || '—'}</Text>
+          </View>
+          <Text style={styles.brandPanelFoot}>PIN tidak pernah disimpan di perangkat ini</Text>
+        </View>
+        <ScrollView style={styles.formSide} contentContainerStyle={styles.body}>
+          {form}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.root} contentContainerStyle={styles.body}>
+      {form}
     </ScrollView>
   );
 }
@@ -152,4 +179,13 @@ const styles = StyleSheet.create({
   demo: { backgroundColor: colors.navy, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 10 },
   demoText: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
   foot: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 16 },
+  split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+  brandPanel: { flex: 1, backgroundColor: colors.navy, padding: 32, justifyContent: 'center' },
+  brandPanelTitle: { fontFamily: fonts.bold, fontSize: 32, color: colors.white },
+  brandPanelSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 6 },
+  brandCard: { backgroundColor: colors.navyDark, borderRadius: 12, padding: 16, marginTop: 24 },
+  brandCardLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 10 },
+  brandCardValue: { fontFamily: fonts.bold, fontSize: 17, color: colors.white, marginTop: 2 },
+  brandPanelFoot: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 24 },
+  formSide: { flex: 1.2, backgroundColor: colors.bg },
 });
