@@ -43,8 +43,10 @@ Printers, Settings. Total route terdaftar: **29** (`src/navigation/types.ts`).
 
 ### 1c. Bukti screenshot
 
-- `docs/shots/` — 37 file: `01–10` (phone utama), `t01–t10` (tablet utama),
-  `11–12` (fix booking/history), `20–34` (15 layar tambahan).
+- `docs/shots/` — 66 file: 28 phone + 28 tablet RN (`phone-*`, `tablet-*`,
+  driver `verify/shot.win.cjs` + `shot.fix.cjs`) + 10 bukti APK asli `apk-*`
+  dari emulator (intro 1–4, chrome-welcome, registrasi, web-login).
+  Detail pemetaan APK→RN: `PETA-REA.md`.
 - `verify/final/` — 14 screenshot final phone+tablet (cashier, dashboard,
   history, pay-tunai, login, booking, member, receipt, success, tables).
 
@@ -68,7 +70,8 @@ Rantai utama **nyambung penuh**. Tombol Keluar (Dashboard + Settings)
 sudah memanggil `logout()` (perbaikan dari AUDIT-STATIC §3).
 `Success` sudah punya 3 aksi: Cetak Struk → Receipt, Lihat Riwayat → History,
 Order Baru → Cashier (`SuccessScreen.tsx:88,93,98`).
-Catatan: `EdcScreen` ter-bypass — Pay memakai form EDC inline (`edcCode`).
+Catatan: `EdcScreen` koeksis dgn form EDC inline Pay (`edcCode`) — Edc←Pay:480,
+cerminkan APK (app-switch EDC BCA + approval 6 digit). Putusan Okt 2026, lihat §6.
 
 ---
 
@@ -146,8 +149,8 @@ Yang **belum ada di RN** (prioritas):
 | Typo header ESS/Apriviinta (GAP D1) | ✅ ESB Cabang Poris / Gista (`session.ts`) |
 | Label phone `Order Fee` vs tablet `Ongkir` (Cashier:253) | ⚠️ **masih ada** — samakan ("Ongkos Kirim"/"Promo") |
 | Tombol cetak no-op (Cashier, BillPreview, DineIn, CartDetail, Qris) | ⚠️ masih mock — butuh printer (§3.4) |
-| 5 rute orphan dari UI (DineIn, Voucher, QrScan, EsbOrder, Settings) | ⚠️ cek ulang inbound / hapus rute |
-| `EdcScreen` vs form EDC inline di Pay | ⚠️ putuskan salah satu |
+| 5 rute orphan dari UI (DineIn, Voucher, QrScan, EsbOrder, Settings) | ✅ terhubung Okt 2026: DineIn←Cashier:527,572; Voucher←Pay:261/Member:98; QrScan←Member:95; EsbOrder←Settings:83 (reroute, bukan orphan) |
+| `EdcScreen` vs form EDC inline di Pay | ✅ koeksis by-design Okt 2026: Edc←Pay:480, mirroring APK (BCA EDC-01 app-switch, approval 6 digit) |
 | 5 layar tablet masih kolom phone (login, receipt, success, member, booking) | ⚠️ TODO §7.1 |
 
 ---
@@ -158,7 +161,7 @@ Yang **belum ada di RN** (prioritas):
 
 1. Tablet 2-panel: login, receipt, success, member, booking (target ≥8).
 2. Samakan label `Order Fee`/`Ongkir` + sisa bahasa Inggris.
-3. Putuskan orphan routes + `EdcScreen` vs inline.
+3. ~~Putuskan orphan routes + `EdcScreen` vs inline~~ ✅ diputuskan Okt 2026 (semua terhubung; Edc koeksis dgn inline, cerminkan APK).
 4. Gap APK (§3): install/klaim → split-bill → recap/expense → printer → deposit.
 5. Cetak nyata (ganti no-op) + `logout()` di semua titik keluar.
 
