@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# REA artefacts (APK/XAPK + hasil bedah, tidak ikut repo — lihat DOKUMENTASI.md §4)
+apktest/
+*.xapk
+*.apk
