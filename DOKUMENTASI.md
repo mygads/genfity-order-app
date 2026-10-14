@@ -44,13 +44,13 @@ Printers, Settings. **Alur install/klaim tamu (6 route baru, Okt 2026)**:
 Intro (4 halaman onboarding APK), Install (klaim terminal + simulasi pindai),
 SelectBranch (3 cabang + radio), InstallProgress (3 langkah auto + %),
 CreatePin (PIN pad 2 fase + mismatch-reset), ForgotPin (reset via supervisor).
-Total route terdaftar: **35** (`src/navigation/types.ts`).
+Total route terdaftar: **36** (`src/navigation/types.ts`).
 
 ### 1c. Bukti screenshot
 
-- `docs/shots/` — 88 file: 39 phone + 39 tablet RN (`phone-*`, `tablet-*`,
+- `docs/shots/` — 98 file: 44 phone + 44 tablet RN (`phone-*`, `tablet-*`,
   driver `verify/shot.win.cjs` + `shot.fix.cjs` + `shot.2panel.cjs` +
-  `shot.gas.cjs` + `shot.recap.cjs`) + 10 bukti
+  `shot.gas.cjs` + `shot.recap.cjs` + `shot.gas2.cjs`) + 10 bukti
   APK asli `apk-*` dari emulator (intro 1–4, chrome-welcome, registrasi,
   web-login). Detail pemetaan APK→RN: `PETA-REA.md`.
 - `verify/final/` — 19 screenshot final phone+tablet (cashier, dashboard,
@@ -95,17 +95,33 @@ Yang **belum ada di RN** (prioritas):
    (Intro/Install/SelectBranch/InstallProgress/CreatePin/ForgotPin),
    Login 2-panel + tautan "Terminal baru? Klaim di sini ›", PIN-lokal hanya
    demo (tetap `loginDemo()`, lihat §4). Sisa: revalidasi PIN ke server.
-2. `order_full_service` + `split-bill` / `move-items` / `move-table` /
-   `select-promotion` / `order-list`.
-3. `detail-recap/shift-recap` (rekap per menu/kategori/mode/payment/user),
-   `expense` + `petty-cash` (form, CoA, foto, approve).
-4. Printer BT (SPP/RFCOMM via `flutter_blue_classic`) / USB / LAN + cash
-   drawer (ESC/POS `ESC p m…` via koneksi printer) + flag autocut.
-5. `member-deposit/top-up`, payment lanjutan (deposit/online/OVO/external,
+2. ~~`order_full_service` + `split-bill` / `move-items` / `move-table` /
+   `select-promotion` / `order-list`~~ ✅ selesai Okt 2026 kecuali
+   full-service/move-items: BillPreview split **fungsional** (rata + per-item
+   assign ketuk + nominal dgn sisa + Bayar & Tandai Lunas per split);
+   Tables **pindah** (ke kosong), **gabung** (total merge), **batalkan**
+   (konfirmasi 2-ketuk); select-promotion = Voucher di Pay (sudah ada);
+   order-list = filter status History (sudah ada).
+3. ~~`detail-recap/shift-recap` (rekap per menu/kategori/mode/payment/user),
+   `expense` + `petty-cash` (form, CoA, foto, approve)~~ ✅ selesai Okt 2026:
+   Recap form + CoA chips + badge approve + tombol Setujui + **foto struk**
+   (`expo-image-picker`, thumbnail di baris expense).
+4. ~~Printer BT (SPP/RFCOMM via `flutter_blue_classic`) / USB / LAN + cash
+   drawer (ESC/POS `ESC p m…` via koneksi printer) + flag autocut~~ ✅ sebagian
+   Okt 2026: `src/lib/escpos.ts` (generator byte 32-kolom: init, judul 2x,
+   total tebal, potong kertas) + Uji Cetak di Printers menghasilkan byte
+   **nyata** (371 byte contoh) dengan aksi Salin Hex / Unduh .bin / Kirim
+   Bluetooth (Web Bluetooth BLE Nordic UART, Chrome/Edge). Sisa native:
+   SPP klasik/USB/LAN + cash drawer (butuh modul native).
+5. ~~`member-deposit/top-up`, payment lanjutan (deposit/online/OVO/external,
    others/compliment/nonsales, pluxee/ultra-vouchers, payment-auth,
    send-email), `sales-detail/void` + filter history, settings lanjutan
    (menu-printing, printer-connection, stock, sync-data, app-setting, log),
-   `web-view`, `customer-display` (4 screen), seluruh varian tablet (38 file).
+   `web-view`, `customer-display` (4 screen), seluruh varian tablet (38 file)~~
+   ✅ sebagian Okt 2026: deposit fungsional; **CustomerDisplay** (route ke-36,
+   papan antrean Disiapkan/Siap + promo + Panggil Berikutnya, dibuka dari
+   Pengaturan → Tampilan Pelanggan). Sisa: payment lanjutan, web-view,
+   sinkronisasi display via WS/event.
 
 ---
 
@@ -159,8 +175,11 @@ Yang **belum ada di RN** (prioritas):
 | Hex liar 17 file (AUDIT §2) | ✅ dikonsolidasi ke token `src/theme` |
 | Typo header ESS/Apriviinta (GAP D1) | ✅ ESB Cabang Poris / Gista (`session.ts`) |
 | Label phone `Order Fee` vs tablet `Ongkir` (Cashier:253) | ✅ disamakan Okt 2026: selalu "Ongkir"; BillPreview "Info pelanggan"→"Pelanggan", Dashboard sub "split"→"bagi bill", "void"→"pembatalan" |
-| Tombol cetak no-op (Cashier, BillPreview, DineIn, CartDetail, Qris) | ⚠️ sebagian: `src/lib/print.ts` (`printReceipt`→window.print di web, `shareReceipt`→Share/clipboard) dipakai Receipt (Cetak/Bagikan); titik lain masih mock — butuh printer ESC/POS (§3.4) |
-| Pengeluaran kas tanpa CoA/approve + deposit member mati | ✅ Okt 2026: Recap CoA chips + badge Disetujui/Menunggu + tombol Setujui; MemberDeposit menambah saldo + poin, sinkron panel detail |
+| Tombol cetak no-op (Cashier, BillPreview, DineIn, CartDetail, Qris) | ✅ sebagian Okt 2026: `lib/escpos.ts` + Uji Cetak Printers (byte nyata + Salin/Unduh/BT); Receipt Cetak→`printReceipt()` + Bagikan→`shareReceipt()`; titik kasir lain masih mock |
+| Pengeluaran kas tanpa CoA/approve + deposit member mati | ✅ Okt 2026: Recap CoA chips + badge Disetujui/Menunggu + tombol Setujui + foto struk; MemberDeposit menambah saldo + poin, sinkron panel detail |
+| Aksi meja mati (Pindah/Gabung/Batalkan hanya tutup modal) | ✅ Okt 2026: pindah ke meja kosong, gabung (merge total), batalkan (konfirmasi 2-ketuk) — state lokal |
+| Split-bill hanya rata visual | ✅ Okt 2026: rata + per-item (ketuk assign) + nominal (sisa) + Bayar & Lunas per split |
+| Tampilan Pelanggan mati (hanya Switch) | ✅ Okt 2026: route CustomerDisplay (papan antrean + promo + panggil), dibuka dari baris Pengaturan |
 | 5 rute orphan dari UI (DineIn, Voucher, QrScan, EsbOrder, Settings) | ✅ terhubung Okt 2026: DineIn←Cashier:527,572; Voucher←Pay:261/Member:98; QrScan←Member:95; EsbOrder←Settings:83 (reroute, bukan orphan) |
 | `EdcScreen` vs form EDC inline di Pay | ✅ koeksis by-design Okt 2026: Edc←Pay:480, mirroring APK (BCA EDC-01 app-switch, approval 6 digit) |
 | 5 layar tablet masih kolom phone (login, receipt, success, member, booking) | ✅ 2-panel Okt 2026 (skor tablet 9; pola ekstrak-fragmen, phone tak berubah) |
@@ -174,7 +193,7 @@ Yang **belum ada di RN** (prioritas):
 1. ~~Tablet 2-panel: login, receipt, success, member, booking (target ≥8)~~ ✅ selesai Okt 2026 (tablet 9/9/9/9/9; bukti `verify/tablet-{Login,Receipt,Success,Member,Booking}.png`).
 2. ~~Samakan label `Order Fee`/`Ongkir` + sisa bahasa Inggris~~ ✅ selesai Okt 2026 (Cashier selalu "Ongkir", BillPreview/Dashboard labels ID).
 3. ~~Putuskan orphan routes + `EdcScreen` vs inline~~ ✅ diputuskan Okt 2026 (semua terhubung; Edc koeksis dgn inline, cerminkan APK).
-4. ~~Gap APK (§3): install/klaim → split-bill → recap/expense → printer → deposit~~ ✅ selesai Okt 2026 kecuali split-bill/move-items (tetap gap): install 6 route, Recap CoA+approve, deposit fungsional, `lib/print.ts`. Sisa: split-bill, ESC/POS, foto expense, customer-display.
+4. ~~Gap APK (§3): install/klaim → split-bill → recap/expense → printer → deposit~~ ✅ selesai Okt 2026: +split per-item/nominal+lunas, pindah/gabung/batal meja, ESC/POS nyata (Salin/Unduh/BT), foto expense, CustomerDisplay. Sisa butuh backend/native: revalidasi PIN server, SPP klasik/USB/LAN + drawer, payment lanjutan, WS display.
 5. ~~Cetak nyata (ganti no-op) + `logout()` di semua titik keluar~~ ✅ selesai Okt 2026: Receipt Cetak→`printReceipt()` (window.print di web) + Bagikan→`shareReceipt()`; sweep logout bersih (hanya 2 `logout()`, keduanya di Dashboard + Settings).
 
 ### 7.2 Cara delegasi (Claude Code)

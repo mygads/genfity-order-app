@@ -34,4 +34,5 @@ export type RootStackParamList = {
   Kitchen: undefined;
   Printers: undefined;
   Settings: undefined;
+  CustomerDisplay: undefined;
 };

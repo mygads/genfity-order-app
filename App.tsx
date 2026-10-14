@@ -43,6 +43,7 @@ import EsbOrderScreen from './src/screens/history/EsbOrderScreen';
 import KitchenScreen from './src/screens/history/KitchenScreen';
 import PrintersScreen from './src/screens/settings/PrintersScreen';
 import SettingsScreen from './src/screens/settings/SettingsScreen';
+import CustomerDisplayScreen from './src/screens/display/CustomerDisplayScreen';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -105,6 +106,7 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       <Stack.Screen name="Kitchen" component={KitchenScreen} options={{ title: 'Tiket Dapur' }} />
       <Stack.Screen name="Printers" component={PrintersScreen} options={{ title: 'Printer' }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Pengaturan' }} />
+      <Stack.Screen name="CustomerDisplay" component={CustomerDisplayScreen} options={{ title: 'Tampilan Pelanggan', headerShown: false }} />
     </Stack.Navigator>
   );
 }

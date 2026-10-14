@@ -11,6 +11,13 @@ import {
 } from 'react-native';
 import { colors, fonts, wideCenter } from '../../theme';
 import { printers, type PrinterDevice, type PrinterType } from '../../data/mock';
+import {
+  buildReceiptBytes,
+  downloadBin,
+  sendOverWebBluetooth,
+  toHex,
+} from '../../lib/escpos';
+import { shareReceipt } from '../../lib/print';
 
 const typeFilters = ['Semua', 'Bluetooth', 'USB', 'LAN'] as const;
 
@@ -27,6 +34,10 @@ export default function PrintersScreen() {
   const [connected, setConnected] = useState<string[]>(printers.filter((p) => p.connected).map((p) => p.id));
   const [testing, setTesting] = useState<string | null>(null);
   const [testOk, setTestOk] = useState<string | null>(null);
+  const [escBytes, setEscBytes] = useState<Uint8Array | null>(null);
+  const [escFor, setEscFor] = useState('');
+  const [escMsg, setEscMsg] = useState('');
+  const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [confirm, setConfirm] = useState<PrinterDevice | null>(null);
 
@@ -40,14 +51,72 @@ export default function PrintersScreen() {
     setConfirm(null);
   };
 
+  /** Uji cetak nyata: susun byte ESC/POS struk contoh (32 kolom). */
   const testPrint = (p: PrinterDevice) => {
     setTesting(p.id);
     setTestOk(null);
+    setEscMsg('');
     setTimeout(() => {
+      const bytes = buildReceiptBytes({
+        shop: 'ESB CABANG PORIS',
+        addr: 'Jl. Poris Indah No. 88',
+        trx: 'UJI CETAK · Kasir Gista',
+        items: [
+          { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
+          { name: 'Es Teh Manis', qty: 2, price: 8000 },
+        ],
+        subtotal: 61000,
+        service: 3050,
+        total: 64050,
+        method: 'Tunai',
+      });
+      setEscBytes(bytes);
+      setEscFor(p.name);
       setTesting(null);
       setTestOk(p.id);
-      setTimeout(() => setTestOk(null), 2500);
-    }, 1200);
+      setTimeout(() => setTestOk(null), 6000);
+    }, 600);
+  };
+
+  const copyHex = async () => {
+    if (!escBytes) return;
+    const hex = toHex(escBytes);
+    try {
+      const g = globalThis as unknown as { navigator?: { clipboard?: { writeText: (s: string) => Promise<void> } } };
+      if (g.navigator?.clipboard) {
+        await g.navigator.clipboard.writeText(hex);
+        setEscMsg('Hex tersalin ke clipboard.');
+        return;
+      }
+      throw new Error('no-clipboard');
+    } catch {
+      await shareReceipt(hex);
+      setEscMsg('Clipboard tak tersedia — dibuka via dialog bagikan.');
+    }
+  };
+
+  const download = () => {
+    if (!escBytes) return;
+    setEscMsg(
+      downloadBin(escBytes, 'uji-cetak-escpos.bin')
+        ? 'File uji-cetak-escpos.bin terunduh.'
+        : 'Unduh hanya tersedia di web.',
+    );
+  };
+
+  const sendBt = async () => {
+    if (!escBytes || busy) return;
+    setBusy(true);
+    setEscMsg('Memilih printer Bluetooth…');
+    try {
+      const name = await sendOverWebBluetooth(escBytes);
+      setEscMsg(`Terkirim ke ${name} via Bluetooth.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Gagal mengirim.';
+      setEscMsg(msg.includes('User cancelled') || msg.includes('cancelled') ? 'Pemilihan printer dibatalkan.' : msg);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const scan = () => {
@@ -78,6 +147,30 @@ export default function PrintersScreen() {
           <Text style={styles.scanBtnText}>{scanning ? 'Memindai...' : 'Pindai'}</Text>
         </Pressable>
       </View>
+
+      {escBytes && (
+        <View style={[styles.escCard, isTablet && wideCenter]}>
+          <Text style={styles.escTitle}>✓ ESC/POS dibuat · {escFor}</Text>
+          <Text style={styles.escSub}>
+            {escBytes.length} byte · 32 kolom · init + teks + total tebal + potong kertas
+          </Text>
+          <Text style={styles.escHex} numberOfLines={2}>
+            {toHex(escBytes).slice(0, 120)}…
+          </Text>
+          <View style={styles.escBtns}>
+            <Pressable style={styles.escBtn} onPress={copyHex}>
+              <Text style={styles.escBtnText}>Salin Hex</Text>
+            </Pressable>
+            <Pressable style={styles.escBtn} onPress={download}>
+              <Text style={styles.escBtnText}>Unduh .bin</Text>
+            </Pressable>
+            <Pressable style={[styles.escBtnPrimary, busy && styles.btnDisabled]} onPress={sendBt} disabled={busy}>
+              <Text style={styles.escBtnPrimaryText}>{busy ? 'Mengirim…' : 'Kirim Bluetooth'}</Text>
+            </Pressable>
+          </View>
+          {escMsg ? <Text style={styles.escMsg}>{escMsg}</Text> : null}
+        </View>
+      )}
 
       <FlatList
         data={list}
@@ -270,4 +363,35 @@ const styles = StyleSheet.create({
   btnDangerText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   foot: { paddingHorizontal: 16, paddingBottom: 20 },
   footText: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center' },
+  escCard: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.green,
+  },
+  escTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.greenDark },
+  escSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  escHex: { fontFamily: fonts.regular, fontSize: 10, color: colors.faint, marginTop: 6 },
+  escBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  escBtn: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  escBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
+  escBtnPrimary: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: colors.navy,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  escBtnPrimaryText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  escMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.navy, marginTop: 8 },
 });

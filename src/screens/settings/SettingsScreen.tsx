@@ -29,7 +29,7 @@ export default function SettingsScreen({ navigation }: { navigation: Nav }) {
         sub="2 terhubung • Struk & Dapur"
         onPress={() => navigation.navigate('Printers')}
       />
-      <MenuRow title="Tampilan Pelanggan" sub="Layar info pesanan untuk pelanggan" right={
+      <MenuRow title="Tampilan Pelanggan" sub="Layar info pesanan untuk pelanggan" onPress={() => navigation.navigate('CustomerDisplay')} right={
         <Switch value={customerDisplay} onValueChange={setCustomerDisplay} trackColor={{ true: colors.green, false: colors.stroke }} />
       } />
       <MenuRow title="Pengaturan Cetakan" sub="Ukuran struk, footer, logo" onPress={() => navigation.navigate('Printers')} />

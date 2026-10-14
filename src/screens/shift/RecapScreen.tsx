@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
-interface Expense { id: string; name: string; time: string; amount: number; coa: string; approved: boolean; }
+interface Expense { id: string; name: string; time: string; amount: number; coa: string; approved: boolean; photo?: string; }
 
 /** Akun (CoA) pengeluaran kas kecil ala APK. */
 const COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Lainnya'];
@@ -20,13 +21,22 @@ export default function RecapScreen({ navigation }: Props) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [coa, setCoa] = useState(COA[0]);
+  const [photo, setPhoto] = useState<string | null>(null);
   const expTotal = expenses.reduce((s, e) => s + e.amount, 0);
+
+  const pickPhoto = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.5,
+    });
+    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+  };
 
   const add = () => {
     const n = Number(amount.replace(/[^0-9]/g, ''));
     if (!name.trim() || !n) return;
-    setExpenses((l) => [...l, { id: `e${Date.now()}`, name: name.trim(), time: '13:40', amount: n, coa, approved: false }]);
-    setName(''); setAmount('');
+    setExpenses((l) => [...l, { id: `e${Date.now()}`, name: name.trim(), time: '13:40', amount: n, coa, approved: false, photo: photo ?? undefined }]);
+    setName(''); setAmount(''); setPhoto(null);
   };
 
   const approve = (id: string) =>
@@ -62,6 +72,9 @@ export default function RecapScreen({ navigation }: Props) {
       <View style={styles.card}>
         {expenses.map((e) => (
           <View key={e.id} style={styles.row}>
+            {e.photo ? (
+              <Image source={{ uri: e.photo }} style={styles.thumb} />
+            ) : null}
             <View style={{ flex: 1 }}>
               <Text style={styles.item}>{e.name}</Text>
               <Text style={styles.meta}>
@@ -105,6 +118,20 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.chipT, coa === c && styles.chipTOn]}>{c}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+        <Text style={styles.label}>Foto struk (opsional)</Text>
+        <View style={styles.photoRow}>
+          {photo ? (
+            <Image source={{ uri: photo }} style={styles.preview} />
+          ) : null}
+          <TouchableOpacity style={styles.photoBtn} onPress={pickPhoto}>
+            <Text style={styles.photoBtnT}>{photo ? 'Ganti Foto' : '📷 Ambil Foto'}</Text>
+          </TouchableOpacity>
+          {photo ? (
+            <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={10} style={styles.delBtn}>
+              <Text style={styles.del}>Hapus</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
         <TouchableOpacity style={styles.primary} onPress={add}>
           <Text style={styles.primaryT}>Tambah</Text>
@@ -153,6 +180,17 @@ const styles = StyleSheet.create({
   label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 10, marginBottom: 6 },
   input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text, marginBottom: 8 },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 12, alignItems: 'center', marginTop: 4 },
+  thumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: colors.line },
+  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  preview: { width: 56, height: 56, borderRadius: 10, backgroundColor: colors.line },
+  photoBtn: {
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
   primaryT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },

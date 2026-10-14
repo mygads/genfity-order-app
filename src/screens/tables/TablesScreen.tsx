@@ -46,16 +46,80 @@ const STATUS_META: Record<TableStatus, { label: string; bg: string; fg: string }
 export default function TablesScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const [tables, setTables] = useState<Table[]>(TABLES);
   const [filter, setFilter] = useState<'semua' | TableStatus>('semua');
   const [selected, setSelected] = useState<Table | null>(null);
+  const [moveMode, setMoveMode] = useState<'pindah' | 'gabung' | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [bookingVisible, setBookingVisible] = useState(false);
   const [namaBooking, setNamaBooking] = useState('');
   const [jamBooking, setJamBooking] = useState('');
   const [pax, setPax] = useState('');
 
-  const shown = TABLES.filter((t) => filter === 'semua' || t.status === filter);
+  const shown = tables.filter((t) => filter === 'semua' || t.status === filter);
 
-  const openDetail = (t: Table) => setSelected(t);
+  const openDetail = (t: Table) => {
+    setSelected(t);
+    setMoveMode(null);
+    setConfirmCancel(false);
+  };
+
+  const closeModal = () => {
+    setSelected(null);
+    setMoveMode(null);
+    setConfirmCancel(false);
+  };
+
+  /** Pindah: tamu+total pindah ke meja kosong. Gabung: total digabung ke meja terisi. */
+  const applyMove = (target: Table) => {
+    if (!selected) return;
+    setTables((list) =>
+      list.map((t) => {
+        if (moveMode === 'pindah') {
+          if (t.id === target.id)
+            return { ...t, status: 'terisi' as TableStatus, namaTamu: selected.namaTamu, total: selected.total };
+          if (t.id === selected.id)
+            return { ...t, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined };
+          return t;
+        }
+        // gabung
+        if (t.id === target.id)
+          return {
+            ...t,
+            status: 'gabung' as TableStatus,
+            total: (t.total ?? 0) + (selected.total ?? 0),
+            namaTamu: `${t.no}+${selected.no}${t.namaTamu ? ` · ${t.namaTamu}` : ''}`,
+          };
+        if (t.id === selected.id)
+          return { ...t, status: 'gabung' as TableStatus, namaTamu: `${selected.no}+${target.no}`, total: undefined };
+        return t;
+      }),
+    );
+    closeModal();
+  };
+
+  const cancelTable = () => {
+    if (!selected) return;
+    if (!confirmCancel) {
+      setConfirmCancel(true);
+      return;
+    }
+    const id = selected.id;
+    setTables((list) =>
+      list.map((t) =>
+        t.id === id ? { ...t, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined } : t,
+      ),
+    );
+    closeModal();
+  };
+
+  const moveTargets = tables.filter((t) =>
+    !selected || t.id === selected.id
+      ? false
+      : moveMode === 'pindah'
+        ? t.status === 'kosong'
+        : t.status === 'terisi',
+  );
 
   const saveBooking = () => {
     setBookingVisible(false);
@@ -126,10 +190,39 @@ export default function TablesScreen({ navigation }: Props) {
       </ScrollView>
 
       {/* Detail / aksi meja */}
-      <Modal visible={!!selected} transparent animationType="slide" onRequestClose={() => setSelected(null)}>
+      <Modal visible={!!selected} transparent animationType="slide" onRequestClose={closeModal}>
         <View style={s.modalBg}>
           <View style={s.modalCard}>
             {selected ? (
+              moveMode ? (
+                <>
+                  <Text style={s.modalTitle}>
+                    {moveMode === 'pindah' ? `Pindah dari Meja ${selected.no}` : `Gabung Meja ${selected.no}`}
+                  </Text>
+                  <Text style={s.modalHint}>
+                    {moveMode === 'pindah'
+                      ? 'Pilih meja kosong tujuan — tamu & total ikut pindah.'
+                      : 'Pilih meja terisi tujuan — total digabungkan.'}
+                  </Text>
+                  {moveTargets.length === 0 && (
+                    <Text style={s.modalHint}>
+                      {moveMode === 'pindah' ? 'Tidak ada meja kosong.' : 'Tidak ada meja terisi lain.'}
+                    </Text>
+                  )}
+                  {moveTargets.map((t) => (
+                    <TouchableOpacity key={t.id} style={s.targetRow} onPress={() => applyMove(t)}>
+                      <Text style={s.targetNo}>Meja {t.no}</Text>
+                      <Text style={s.targetMeta}>
+                        {STATUS_META[t.status].label} • {t.kapasitas} pax
+                        {t.total ? ` • ${rp(t.total)}` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity style={s.cancelBtn} onPress={() => setMoveMode(null)}>
+                    <Text style={s.cancelTxt}>Kembali</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
               <>
                 <Text style={s.modalTitle}>Meja {selected.no}</Text>
                 <Text style={s.modalHint}>
@@ -140,7 +233,7 @@ export default function TablesScreen({ navigation }: Props) {
                 <TouchableOpacity
                   style={s.primaryBtn}
                   onPress={() => {
-                    setSelected(null);
+                    closeModal();
                     navigation?.navigate?.('Cashier', { table: selected.no });
                   }}>
                   <Text style={s.primaryTxt}>
@@ -153,30 +246,39 @@ export default function TablesScreen({ navigation }: Props) {
                     onPress={() => setBookingVisible(true)}>
                     <Text style={s.secondaryTxt}>Booking Meja</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.secondaryBtn}
-                    onPress={() => setSelected(null)}>
-                    <Text style={s.secondaryTxt}>Pindah Meja</Text>
-                  </TouchableOpacity>
+                  {selected.status !== 'kosong' && (
+                    <TouchableOpacity
+                      style={s.secondaryBtn}
+                      onPress={() => setMoveMode('pindah')}>
+                      <Text style={s.secondaryTxt}>Pindah Meja</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <View style={s.actionRow}>
-                  <TouchableOpacity
-                    style={s.secondaryBtn}
-                    onPress={() => setSelected(null)}>
-                    <Text style={s.secondaryTxt}>Gabungkan Meja</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.dangerBtn}
-                    onPress={() => setSelected(null)}>
-                    <Text style={s.dangerTxt}>Batalkan Meja</Text>
-                  </TouchableOpacity>
+                  {selected.status === 'terisi' && (
+                    <TouchableOpacity
+                      style={s.secondaryBtn}
+                      onPress={() => setMoveMode('gabung')}>
+                      <Text style={s.secondaryTxt}>Gabungkan Meja</Text>
+                    </TouchableOpacity>
+                  )}
+                  {selected.status !== 'kosong' && (
+                    <TouchableOpacity
+                      style={confirmCancel ? s.dangerBtnSolid : s.dangerBtn}
+                      onPress={cancelTable}>
+                      <Text style={confirmCancel ? s.dangerSolidTxt : s.dangerTxt}>
+                        {confirmCancel ? 'Yakin? Ketuk lagi' : 'Batalkan Meja'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <TouchableOpacity
                   style={s.cancelBtn}
-                  onPress={() => setSelected(null)}>
+                  onPress={closeModal}>
                   <Text style={s.cancelTxt}>Tutup</Text>
                 </TouchableOpacity>
               </>
+              )
             ) : null}
           </View>
         </View>
@@ -348,6 +450,25 @@ const s = StyleSheet.create({
     marginHorizontal: 4,
   },
   dangerTxt: { fontSize: 13, fontFamily: fonts.medium, color: colors.red },
+  dangerBtnSolid: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: colors.red,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  dangerSolidTxt: { fontSize: 13, fontFamily: fonts.bold, color: colors.white },
+  targetRow: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
+  },
+  targetNo: { fontSize: 15, fontFamily: fonts.bold, color: colors.navy },
+  targetMeta: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted, marginTop: 2 },
   cancelBtn: { marginTop: 10, padding: 10, alignItems: 'center' },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.muted },
   input: {

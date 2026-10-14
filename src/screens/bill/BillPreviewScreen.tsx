@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -24,10 +24,34 @@ export default function BillPreviewScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [mode, setMode] = useState<Mode>('none');
-  const [splits, setSplits] = useState(3);
+  const [splits, setSplitsRaw] = useState(3);
+  const [paid, setPaid] = useState<boolean[]>([false, false, false]);
+  const [assign, setAssign] = useState<Record<string, number>>(() =>
+    Object.fromEntries(ITEMS.map((it, i) => [it.name, i % 3])),
+  );
+  const [nominals, setNominals] = useState<string[]>(['', '', '']);
   const total = TOTAL;
 
+  const resetSplits = (n: number) => {
+    setSplitsRaw(n);
+    setPaid(Array(n).fill(false));
+    setNominals(Array(n).fill(''));
+    setAssign(Object.fromEntries(ITEMS.map((it, i) => [it.name, i % n])));
+  };
+
+  const togglePaid = (i: number) => setPaid((p) => p.map((v, j) => (j === i ? !v : v)));
+  const cycleAssign = (name: string) =>
+    setAssign((a) => ({ ...a, [name]: ((a[name] ?? 0) + 1) % splits }));
+
+  const splitNames = ['QoQi', 'Bimo', 'Sinta', 'Guest'];
   const splitVal = Math.round(total / splits);
+  const itemTotals = Array(splits).fill(0) as number[];
+  ITEMS.forEach((it) => {
+    itemTotals[assign[it.name] ?? 0] += it.qty * it.price;
+  });
+  const nominalNums = nominals.map((s) => Number(s.replace(/[^0-9]/g, '')) || 0);
+  const nominalSum = nominalNums.reduce((s, v) => s + v, 0);
+  const paidCount = paid.filter(Boolean).length;
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
@@ -76,31 +100,85 @@ export default function BillPreviewScreen({ navigation }: Props) {
           <Text style={styles.label}>Jumlah split</Text>
           <View style={styles.chips}>
             {[2, 3, 4].map((n) => (
-              <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn]} onPress={() => setSplits(n)}>
+              <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn]} onPress={() => resetSplits(n)}>
                 <Text style={[styles.chipT, splits === n && styles.chipTOn]}>÷{n}</Text>
               </TouchableOpacity>
             ))}
           </View>
-          {['QoQi', 'Bimo', 'Sinta', 'Guest'].slice(0, splits).map((n, i) => (
-            <View key={n} style={styles.row}>
-              <Text style={styles.item}>Split #{i + 1} · {n}</Text>
-              <Text style={styles.price}>{rp(splitVal)}</Text>
-            </View>
-          ))}
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.ghost} onPress={() => setMode('none')}>
-              <Text style={styles.ghostT}>Batalkan Split</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', { total: splitVal })}>
-              <Text style={styles.primaryT}>Bayar Split #1 ›</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.paidBanner}>
+            {paidCount}/{splits} split lunas
+          </Text>
+
+          {mode === 'item' && (
+            <>
+              <Text style={styles.hint}>Ketuk item untuk memindahkan ke split berikut.</Text>
+              {ITEMS.map((it) => (
+                <TouchableOpacity key={it.name} style={styles.row} onPress={() => cycleAssign(it.name)}>
+                  <Text style={styles.item}>{it.qty}× {it.name}</Text>
+                  <Text style={styles.splitBadge}>Split #{(assign[it.name] ?? 0) + 1} ›</Text>
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+
+          {mode === 'nominal' && (
+            <>
+              <Text style={styles.hint}>Isi nominal tiap split — total harus pas {rp(total)}.</Text>
+              {splitNames.slice(0, splits).map((n, i) => (
+                <View key={n} style={styles.nomRow}>
+                  <Text style={styles.item}>Split #{i + 1} · {n}</Text>
+                  <TextInput
+                    style={styles.nomInput}
+                    value={nominals[i]}
+                    onChangeText={(v) =>
+                      setNominals((arr) => arr.map((x, j) => (j === i ? v : x)))
+                    }
+                    placeholder="Rp 0"
+                    placeholderTextColor={colors.faint}
+                    keyboardType="numeric"
+                  />
+                </View>
+              ))}
+              <View style={styles.row}>
+                <Text style={styles.item}>Sisa belum dibagi</Text>
+                <Text style={[styles.price, nominalSum > total && styles.over]}>
+                  {rp(total - nominalSum)}
+                </Text>
+              </View>
+            </>
+          )}
+
+          {splitNames.slice(0, splits).map((n, i) => {
+            const val = mode === 'item' ? itemTotals[i] : mode === 'nominal' ? nominalNums[i] : splitVal;
+            return (
+              <View key={n} style={styles.splitRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.item}>Split #{i + 1} · {n}</Text>
+                  <Text style={paid[i] ? styles.lunas : styles.price}>{paid[i] ? '✓ Lunas' : rp(val)}</Text>
+                </View>
+                {!paid[i] && (
+                  <TouchableOpacity
+                    style={styles.payBtn}
+                    disabled={val <= 0}
+                    onPress={() => navigation?.navigate('Pay', { total: val })}>
+                    <Text style={styles.payBtnT}>Bayar ›</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => togglePaid(i)} hitSlop={10} style={styles.lunasBtn}>
+                  <Text style={styles.lunasT}>{paid[i] ? 'Batalkan' : 'Tandai Lunas'}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+          <TouchableOpacity style={styles.ghost} onPress={() => setMode('none')}>
+            <Text style={styles.ghostT}>Batalkan Split</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Cancel')}><Text style={styles.link}>Butuh void? → Pembatalan</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>Info pelanggan → Pelanggan</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>Pelanggan</Text></TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -136,6 +214,36 @@ const styles = StyleSheet.create({
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   chipTOn: { color: colors.orangeDark },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 10 },
+  paidBanner: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark, marginTop: 10 },
+  splitBadge: { fontFamily: fonts.bold, fontSize: 12, color: colors.orangeDark },
+  splitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    marginTop: 6,
+  },
+  payBtn: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  payBtnT: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  lunasBtn: { paddingVertical: 8, paddingLeft: 4 },
+  lunasT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
+  lunas: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },
+  nomRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+  nomInput: {
+    width: 130,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    padding: 8,
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.text,
+    textAlign: 'right',
+  },
+  over: { color: colors.red },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: colors.line },
   links: { gap: 8, marginTop: 16 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
