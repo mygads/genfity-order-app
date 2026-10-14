@@ -101,7 +101,7 @@ export default function BookingScreen({ navigation }: Props) {
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nama" />
       <Text style={styles.label}>No. HP</Text>
       <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="08xx" keyboardType="phone-pad" />
-      <Text style={styles.label}>Jumlah tamu</Text>
+      <Text style={[styles.label, styles.labelGap]}>Jumlah tamu</Text>
       <TextInput style={styles.input} value={tamu} onChangeText={setPax} placeholder="2" keyboardType="numeric" />
       <Text style={styles.label}>Meja</Text>
       <View style={styles.chips}>
@@ -175,6 +175,8 @@ const styles = StyleSheet.create({
   links: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
   label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 12, marginBottom: 6 },
+  /** Jarak ekstra agar garis bawah viewport phone jatuh di gap, bukan di tengah label. */
+  labelGap: { marginTop: 28 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },

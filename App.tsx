@@ -73,7 +73,7 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       <Stack.Screen name="Tables" component={TablesScreen} options={{ title: 'Meja', headerShown: false }} />
       <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'Booking', headerShown: false }} />
       <Stack.Screen name="Member" component={MemberScreen} options={{ title: 'Member', headerShown: false }} />
-      <Stack.Screen name="Voucher" component={VoucherScreen} options={{ title: 'Voucher' }} />
+      <Stack.Screen name="Voucher" component={VoucherScreen} options={{ title: 'Voucher', headerShown: false }} />
       <Stack.Screen name="QrScan" component={QrScanScreen} options={{ title: 'Scan QR' }} />
       <Stack.Screen name="Pay" component={PayScreen} options={{ title: 'Pembayaran', headerShown: false }} />
       <Stack.Screen name="Qris" component={QrisScreen} options={{ title: 'QRIS', headerShown: false }} />

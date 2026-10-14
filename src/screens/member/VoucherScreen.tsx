@@ -65,21 +65,17 @@ export default function VoucherScreen({ navigation }: Props) {
       </View>
 
       <View style={s.searchWrap}>
-        <TextInput
-          style={s.search}
-          placeholder="Isi Kode Voucher / Cari promo"
-          placeholderTextColor={colors.faint}
-          value={q}
-          onChangeText={setQ}
-        />
         <View style={s.manualRow}>
           <TextInput
             style={[s.search, s.manualInput]}
-            placeholder="Isi Kode Voucher"
+            placeholder="Isi Kode Voucher / Cari promo"
             placeholderTextColor={colors.faint}
             autoCapitalize="characters"
             value={kodeManual}
-            onChangeText={setKodeManual}
+            onChangeText={(t) => {
+              setKodeManual(t);
+              setQ(t);
+            }}
           />
           <TouchableOpacity
             style={s.checkBtn}
