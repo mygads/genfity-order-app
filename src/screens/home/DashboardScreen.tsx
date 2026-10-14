@@ -30,9 +30,9 @@ const MENU: { label: string; sub: string; route: string }[] = [
   { label: 'Booking', sub: 'Reservasi · 3 aktif', route: 'Booking' },
   { label: 'Member', sub: '342 terdaftar', route: 'Member' },
   { label: 'Menu Custom', sub: 'Stasiun Bill', route: 'CustomMenu' },
-  { label: 'Pratinjau Bill', sub: 'split', route: 'BillPreview' },
+  { label: 'Pratinjau Bill', sub: 'bagi bill', route: 'BillPreview' },
   { label: 'Laporan', sub: 'Shift & kas', route: 'Recap' },
-  { label: 'Batal / Void', sub: 'void', route: 'Cancel' },
+  { label: 'Batal / Void', sub: 'pembatalan', route: 'Cancel' },
   { label: 'Pengaturan', sub: 'Printer · sinkron', route: 'Settings' },
 ];
 

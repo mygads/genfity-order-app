@@ -39,6 +39,7 @@ export default function MemberScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [q, setQ] = useState('');
+  const [members, setMembers] = useState<Member[]>(DUMMY);
   const [selected, setSelected] = useState<Member | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [depositVisible, setDepositVisible] = useState(false);
@@ -51,8 +52,8 @@ export default function MemberScreen({ navigation }: Props) {
 
   const hasil =
     q.trim().length === 0
-      ? DUMMY
-      : DUMMY.filter(
+      ? members
+      : members.filter(
           (m) =>
             m.nama.toLowerCase().includes(q.toLowerCase()) ||
             m.noHp.includes(q) ||
@@ -67,6 +68,18 @@ export default function MemberScreen({ navigation }: Props) {
   };
 
   const saveDeposit = () => {
+    const n = Number(depositNominal) || 0;
+    if (selected && n > 0) {
+      const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
+      setMembers((ms) =>
+        ms.map((m) =>
+          m.id === selected.id ? { ...m, saldo: m.saldo + n, poin: m.poin + poin } : m,
+        ),
+      );
+      setSelected((s) =>
+        s ? { ...s, saldo: s.saldo + n, poin: s.poin + poin } : s,
+      );
+    }
     setDepositVisible(false);
     setDepositNominal('');
   };

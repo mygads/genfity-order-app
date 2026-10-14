@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import { printReceipt, shareReceipt } from '../../lib/print';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string } } };
@@ -40,15 +41,17 @@ export default function ReceiptScreen({ navigation, route }: Props) {
     </View>
   );
 
+  const shareText = `ESB Cabang Poris · Struk ${no} · ${mode} · ${method} · TOTAL ${rp(33900)}`;
+
   const actions = (
     <View style={[styles.actions, isTablet && styles.actionsStack]}>
       <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('Dashboard')}>
         <Text style={styles.ghostT}>Kembali</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('History')}>
+      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => printReceipt()}>
         <Text style={styles.ghostT}>🖨 Cetak</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('History')}>
+      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => { void shareReceipt(shareText); }}>
         <Text style={styles.ghostT}>⤴ Bagikan</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[styles.primary, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('Cashier')}>

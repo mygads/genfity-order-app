@@ -32,8 +32,8 @@ export default function SettingsScreen({ navigation }: { navigation: Nav }) {
       <MenuRow title="Tampilan Pelanggan" sub="Layar info pesanan untuk pelanggan" right={
         <Switch value={customerDisplay} onValueChange={setCustomerDisplay} trackColor={{ true: colors.green, false: colors.stroke }} />
       } />
-      <MenuRow title="Pengaturan Cetakan" sub="Ukuran struk, footer, logo" />
-      <MenuRow title="Pengaturan Cetakan Menu" sub="Cetak per grup menu dapur" />
+      <MenuRow title="Pengaturan Cetakan" sub="Ukuran struk, footer, logo" onPress={() => navigation.navigate('Printers')} />
+      <MenuRow title="Pengaturan Cetakan Menu" sub="Cetak per grup menu dapur" onPress={() => navigation.navigate('Kitchen')} />
       <MenuRow title="Pengaturan Meja" sub="Denah, kapasitas, status" onPress={() => navigation.navigate('Tables')} />
 
       <Text style={styles.groupLabel}>Pesanan</Text>

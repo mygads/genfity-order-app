@@ -5,25 +5,32 @@ import { colors, fonts, rp, wideCenter } from '../../theme';
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
-interface Expense { id: string; name: string; time: string; amount: number; }
+interface Expense { id: string; name: string; time: string; amount: number; coa: string; approved: boolean; }
+
+/** Akun (CoA) pengeluaran kas kecil ala APK. */
+const COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Lainnya'];
 
 export default function RecapScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [expenses, setExpenses] = useState<Expense[]>([
-    { id: 'e1', name: 'Belanja plastik & tissue', time: '10:20', amount: 45000 },
-    { id: 'e2', name: 'Bensin antar online', time: '12:05', amount: 20000 },
+    { id: 'e1', name: 'Belanja plastik & tissue', time: '10:20', amount: 45000, coa: 'Operasional', approved: true },
+    { id: 'e2', name: 'Bensin antar online', time: '12:05', amount: 20000, coa: 'Operasional', approved: true },
   ]);
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
+  const [coa, setCoa] = useState(COA[0]);
   const expTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
   const add = () => {
     const n = Number(amount.replace(/[^0-9]/g, ''));
     if (!name.trim() || !n) return;
-    setExpenses((l) => [...l, { id: `e${Date.now()}`, name: name.trim(), time: '13:40', amount: n }]);
+    setExpenses((l) => [...l, { id: `e${Date.now()}`, name: name.trim(), time: '13:40', amount: n, coa, approved: false }]);
     setName(''); setAmount('');
   };
+
+  const approve = (id: string) =>
+    setExpenses((l) => l.map((e) => (e.id === id ? { ...e, approved: true } : e)));
 
   const rows: [string, string, number][] = [
     ['Tunai (18 trx)', '', 486500],
@@ -57,9 +64,24 @@ export default function RecapScreen({ navigation }: Props) {
           <View key={e.id} style={styles.row}>
             <View style={{ flex: 1 }}>
               <Text style={styles.item}>{e.name}</Text>
-              <Text style={styles.meta}>{e.time}</Text>
+              <Text style={styles.meta}>
+                {e.time} · {e.coa} ·{' '}
+                {e.approved ? (
+                  <Text style={styles.okBadge}>✓ Disetujui</Text>
+                ) : (
+                  <Text style={styles.waitBadge}>Menunggu persetujuan</Text>
+                )}
+              </Text>
             </View>
             <Text style={styles.disc}>-{rp(e.amount)}</Text>
+            {!e.approved && (
+              <TouchableOpacity
+                onPress={() => approve(e.id)}
+                hitSlop={10}
+                style={styles.approveBtn}>
+                <Text style={styles.approve}>Setujui</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={() => setExpenses((l) => l.filter((x) => x.id !== e.id))}
               hitSlop={10}
@@ -76,6 +98,14 @@ export default function RecapScreen({ navigation }: Props) {
         <Text style={styles.label}>Tambah pengeluaran</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nama pengeluaran" placeholderTextColor={colors.faint} />
         <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder="Nominal Rp" placeholderTextColor={colors.faint} keyboardType="numeric" />
+        <Text style={styles.label}>Akun (CoA)</Text>
+        <View style={styles.chips}>
+          {COA.map((c) => (
+            <TouchableOpacity key={c} style={[styles.chip, coa === c && styles.chipOn]} onPress={() => setCoa(c)}>
+              <Text style={[styles.chipT, coa === c && styles.chipTOn]}>{c}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <TouchableOpacity style={styles.primary} onPress={add}>
           <Text style={styles.primaryT}>Tambah</Text>
         </TouchableOpacity>
@@ -110,6 +140,15 @@ const styles = StyleSheet.create({
   disc: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
   delBtn: { paddingVertical: 8, paddingLeft: 12 },
   del: { fontFamily: fonts.semibold, fontSize: 12, color: colors.faint },
+  approveBtn: { paddingVertical: 8, paddingLeft: 12 },
+  approve: { fontFamily: fonts.bold, fontSize: 12, color: colors.greenDark },
+  okBadge: { fontFamily: fonts.semibold, color: colors.greenDark },
+  waitBadge: { fontFamily: fonts.semibold, color: colors.amberDark },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
+  chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
+  chipTOn: { color: colors.orangeDark },
   totalL: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, flex: 1 },
   label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 10, marginBottom: 6 },
   input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text, marginBottom: 8 },

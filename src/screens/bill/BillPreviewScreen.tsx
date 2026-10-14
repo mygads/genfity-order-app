@@ -100,7 +100,7 @@ export default function BillPreviewScreen({ navigation }: Props) {
 
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Cancel')}><Text style={styles.link}>Butuh void? → Pembatalan</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>Info customer → Customer</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>Info pelanggan → Pelanggan</Text></TouchableOpacity>
       </View>
     </ScrollView>
   );

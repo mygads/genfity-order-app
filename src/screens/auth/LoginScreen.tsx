@@ -83,7 +83,9 @@ export default function LoginScreen({ navigation }: Props) {
         ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Text style={styles.pinHelp}>Lupa PIN? Minta reset ke supervisor outlet ›</Text>
+      <TouchableOpacity onPress={() => navigation?.navigate('ForgotPin')}>
+        <Text style={styles.pinHelp}>Lupa PIN? Minta reset ke supervisor outlet ›</Text>
+      </TouchableOpacity>
 
       <View style={styles.keys}>
         {KEYS.map((k) => (
@@ -112,6 +114,9 @@ export default function LoginScreen({ navigation }: Props) {
       </TouchableOpacity>
       <TouchableOpacity style={styles.demo} onPress={demo}>
         <Text style={styles.demoText}>Masuk Demo</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => navigation?.navigate('Install')}>
+        <Text style={styles.claimLink}>Terminal baru? Klaim di sini ›</Text>
       </TouchableOpacity>
       <Text style={styles.foot}>Hanya username yang diingat di perangkat ini · PIN tidak pernah disimpan</Text>
     </>
@@ -178,6 +183,7 @@ const styles = StyleSheet.create({
   primaryText: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
   demo: { backgroundColor: colors.navy, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 10 },
   demoText: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
+  claimLink: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, textAlign: 'center', marginTop: 12 },
   foot: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 16 },
   split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
   brandPanel: { flex: 1, backgroundColor: colors.navy, padding: 32, justifyContent: 'center' },

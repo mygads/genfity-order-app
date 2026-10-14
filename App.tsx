@@ -7,8 +7,14 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, loginDemo, subscribeSession } from './src/session';
+import { getSession, loginDemo, logout, subscribeSession } from './src/session';
 
+import IntroScreen from './src/screens/install/IntroScreen';
+import InstallScreen from './src/screens/install/InstallScreen';
+import SelectBranchScreen from './src/screens/install/SelectBranchScreen';
+import InstallProgressScreen from './src/screens/install/InstallProgressScreen';
+import CreatePinScreen from './src/screens/install/CreatePinScreen';
+import ForgotPinScreen from './src/screens/install/ForgotPinScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import DashboardScreen from './src/screens/home/DashboardScreen';
 import CashierScreen from './src/screens/cashier/CashierScreen';
@@ -49,11 +55,17 @@ const screenOptions = {
   animation: 'default' as const,
 };
 
-/** Guard navigator: belum login hanya bisa buka Login. */
+/** Guard navigator: belum login hanya bisa buka alur intro/install/Login. */
 function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
   if (!loggedIn) {
     return (
-      <Stack.Navigator screenOptions={screenOptions}>
+      <Stack.Navigator initialRouteName="Intro" screenOptions={screenOptions}>
+        <Stack.Screen name="Intro" component={IntroScreen} options={{ title: 'Selamat Datang', headerShown: false }} />
+        <Stack.Screen name="Install" component={InstallScreen} options={{ title: 'Klaim Terminal' }} />
+        <Stack.Screen name="SelectBranch" component={SelectBranchScreen} options={{ title: 'Pilih Cabang' }} />
+        <Stack.Screen name="InstallProgress" component={InstallProgressScreen} options={{ title: 'Menyiapkan', headerBackVisible: false }} />
+        <Stack.Screen name="CreatePin" component={CreatePinScreen} options={{ title: 'Buat PIN', headerBackVisible: false }} />
+        <Stack.Screen name="ForgotPin" component={ForgotPinScreen} options={{ title: 'Lupa PIN' }} />
         <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Masuk', headerShown: false }} />
       </Stack.Navigator>
     );
@@ -134,6 +146,19 @@ export default function App() {
           go: (name: string, params?: any) => {
             if (getSession() === null) {
               loginDemo();
+              setTimeout(() => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (navRef as any).navigate(name as never, params as never);
+              }, 300);
+              return;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (navRef as any).navigate(name as never, params as never);
+          },
+          // Navigasi alur tamu (intro/install): keluar sesi dulu bila sedang login.
+          goGuest: (name: string, params?: any) => {
+            if (getSession() !== null) {
+              logout();
               setTimeout(() => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (navRef as any).navigate(name as never, params as never);

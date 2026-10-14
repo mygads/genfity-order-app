@@ -250,7 +250,7 @@ export default function CashierScreen({ navigation }: Props) {
       </TouchableOpacity>
       <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
         <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>{isWide ? 'Ongkir' : 'Order Fee'}</Text>
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>Ongkir</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />

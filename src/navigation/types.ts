@@ -1,4 +1,10 @@
 export type RootStackParamList = {
+  Intro: undefined;
+  Install: undefined;
+  SelectBranch: undefined;
+  InstallProgress: { branch?: string } | undefined;
+  CreatePin: { branch?: string } | undefined;
+  ForgotPin: undefined;
   Login: undefined;
   Dashboard: undefined;
   Cashier: undefined;
