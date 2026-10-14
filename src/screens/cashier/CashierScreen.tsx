@@ -1,0 +1,1004 @@
+import React, { useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { colors, fonts, rp } from '../../theme';
+
+type Nav = {
+  navigate: (screen: string, params?: Record<string, unknown>) => void;
+  goBack: () => void;
+};
+
+type Props = { navigation?: Nav };
+
+export type CartModifier = { name: string; price: number };
+export type CartItem = {
+  id: string;
+  name: string;
+  basePrice: number;
+  qty: number;
+  modifiers: CartModifier[];
+  discount: number;
+};
+
+type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean };
+
+const CATEGORIES: { name: string; subs: string[] }[] = [
+  { name: 'Favorit', subs: [] },
+  { name: 'Minuman', subs: ['Dingin', 'Panas', 'Coffee', 'Shake'] },
+  { name: 'Makanan', subs: ['Makanan Cepat', 'Makanan Ringan'] },
+  { name: 'Dessert', subs: ['Cake', 'Puding'] },
+  { name: 'Pasta', subs: ['Spaghetti', 'Macaroni'] },
+  { name: 'Cake', subs: ['Slice', 'Whole'] },
+];
+
+const PRODUCTS: Product[] = [
+  { id: 'p1', name: 'Ayam Geprek Pelakor', price: 45000, category: 'Makanan', tags: ['Makanan Cepat'], fav: true },
+  { id: 'p2', name: 'Ayam Goreng Dada', price: 15000, category: 'Makanan', tags: ['Makanan Cepat'] },
+  { id: 'p3', name: 'Ayam Goreng Paha', price: 5000, category: 'Makanan', tags: ['Makanan Cepat'] },
+  { id: 'p4', name: 'Bebek Dada 1st', price: 15000, category: 'Makanan', tags: ['Makanan Ringan'] },
+  { id: 'p5', name: 'Maria 2', price: 1000, category: 'Makanan', tags: ['Makanan Ringan'] },
+  { id: 'p6', name: 'test baru', price: 20000, category: 'Makanan', tags: ['Makanan Ringan'], fav: true },
+  { id: 'p7', name: 'Kopi Susu Gula Aren', price: 22000, category: 'Minuman', tags: ['Coffee', 'Dingin'], fav: true },
+  { id: 'p8', name: 'Americano Ice', price: 18000, category: 'Minuman', tags: ['Coffee', 'Dingin'] },
+  { id: 'p9', name: 'Teh Manis Panas', price: 8000, category: 'Minuman', tags: ['Panas'] },
+  { id: 'p10', name: 'Paket Nasi + Ayam', price: 28000, category: 'Makanan', tags: ['Makanan Cepat'] },
+  { id: 'p11', name: 'Sudirman Coffee', price: 12900, category: 'Minuman', tags: ['Coffee', 'Dingin'], fav: true },
+  { id: 'p12', name: 'Choco Shake', price: 25000, category: 'Minuman', tags: ['Shake', 'Dingin'] },
+  { id: 'p13', name: 'Cheese Cake Slice', price: 32000, category: 'Cake', tags: ['Slice'] },
+  { id: 'p14', name: 'Spaghetti Bolognese', price: 35000, category: 'Pasta', tags: ['Spaghetti'] },
+  { id: 'p15', name: 'Puding Coklat', price: 12000, category: 'Dessert', tags: ['Puding'] },
+];
+
+const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
+
+export const itemTotal = (c: CartItem) =>
+  (c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0)) * c.qty - c.discount;
+
+export const unitPrice = (c: CartItem) => c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0);
+
+/** Vektor kaca pembesar — tidak ada aset magnifier di APK, jadi digambar tajam via View. */
+function SearchGlyph({ size = 16, color = colors.navy }: { size?: number; color?: string }) {
+  const r = size * 0.62;
+  return (
+    <View style={{ width: size, height: size }}>
+      <View
+        style={{
+          width: r,
+          height: r,
+          borderRadius: r / 2,
+          borderWidth: 2,
+          borderColor: color,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          left: size * 0.47,
+          top: size * 0.62,
+          width: size * 0.44,
+          height: 2.4,
+          borderRadius: 1.2,
+          backgroundColor: color,
+          transform: [{ rotate: '45deg' }],
+        }}
+      />
+    </View>
+  );
+}
+
+export default function CashierScreen({ navigation }: Props) {
+  const { width } = useWindowDimensions();
+  const isWide = width >= 768;
+  const [activeCategory, setActiveCategory] = useState('Makanan');
+  const [activeSub, setActiveSub] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [customer, setCustomer] = useState('');
+  const [mode, setMode] = useState('DINE IN');
+  const [showModes, setShowModes] = useState(false);
+  const catScrollRef = useRef<ScrollView>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [cart, setCart] = useState<CartItem[]>([
+    {
+      id: 'p11',
+      name: 'Sudirman Coffee',
+      basePrice: 12900,
+      qty: 1,
+      modifiers: [{ name: 'Creamy Pandan Kayu Manis', price: 7000 }],
+      discount: 0,
+    },
+    { id: 'p6', name: 'test baru', basePrice: 20000, qty: 1, modifiers: [], discount: 0 },
+    { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 3, modifiers: [], discount: 2500 },
+  ]);
+
+  const subs = useMemo(
+    () => CATEGORIES.find((c) => c.name === activeCategory)?.subs ?? [],
+    [activeCategory],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return PRODUCTS.filter((p) => {
+      const matchCat = activeCategory === 'Favorit' ? p.fav : p.category === activeCategory;
+      const matchSub = !activeSub || p.tags.includes(activeSub);
+      const matchQuery = q.length === 0 || p.name.toLowerCase().includes(q);
+      return matchCat && matchSub && matchQuery;
+    });
+  }, [activeCategory, activeSub, query]);
+
+  /** Tablet 2-kolom strict: ganjil → tambah spacer agar item terakhir tidak melebar. */
+  const gridData = useMemo<(Product | null)[]>(
+    () => (isWide && filtered.length % 2 === 1 ? [...filtered, null] : filtered),
+    [filtered, isWide],
+  );
+
+  const qtyOf = (id: string) => cart.find((c) => c.id === id)?.qty ?? 0;
+
+  /** D4: count produk per kategori untuk label chip `Nama (Npcs)` ala ref. */
+  const catCount = (name: string) =>
+    name === 'Favorit' ? PRODUCTS.filter((p) => p.fav).length : PRODUCTS.filter((p) => p.category === name).length;
+
+  const addToCart = (p: Product) => {
+    setCart((prev) => {
+      const found = prev.find((c) => c.id === p.id);
+      if (found) return prev.map((c) => (c.id === p.id ? { ...c, qty: c.qty + 1 } : c));
+      return [...prev, { id: p.id, name: p.name, basePrice: p.price, qty: 1, modifiers: [], discount: 0 }];
+    });
+  };
+
+  const incQty = (id: string) =>
+    setCart((prev) => prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1 } : c)));
+
+  const decQty = (id: string) =>
+    setCart((prev) => prev.map((c) => (c.id === id ? { ...c, qty: Math.max(1, c.qty - 1) } : c)));
+
+  const removeItem = (id: string) => setCart((prev) => prev.filter((c) => c.id !== id));
+
+  const subtotalGross = cart.reduce((s, c) => s + (c.basePrice + c.modifiers.reduce((m, x) => m + x.price, 0)) * c.qty, 0);
+  const discountTotal = cart.reduce((s, c) => s + c.discount, 0);
+  const subtotal = subtotalGross - discountTotal;
+  const service = Math.round(subtotal * 0.05);
+  const pb1incl = Math.round((subtotal * 10) / 110);
+  const total = subtotal + service;
+  const itemCount = cart.reduce((s, c) => s + c.qty, 0);
+
+  /** Qty cart per kategori — badge di chip agar footer lintas-kategori bisa diaudit sekilas. */
+  const cartQtyByCat = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of cart) {
+      const p = PRODUCTS.find((x) => x.id === c.id);
+      const cats = p ? [p.category, ...(p.fav ? ['Favorit'] : [])] : [];
+      for (const k of cats) map[k] = (map[k] ?? 0) + c.qty;
+    }
+    return map;
+  }, [cart]);
+
+  const goCart = () => navigation?.navigate('CartDetail', { items: cart, total });
+  const goSaved = () => navigation?.navigate('SavedTransactions');
+
+  const today = new Date().toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <View style={styles.headerLeft}>
+        <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.outletName}>ESB Cabang Poris</Text>
+          <View style={styles.shiftRow}>
+            <View style={styles.shiftDot} />
+            <Text style={styles.shiftText}>Gista | Shift Open</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.headerRight}>
+        {isWide && (
+          <View style={styles.headerDateWrap}>
+            <Image source={require('../../../assets/icons/calendar.webp')} style={styles.dateIcon} resizeMode="contain" />
+            <Text style={styles.headerDate}>{today}</Text>
+          </View>
+        )}
+        <View style={styles.onlineBadge}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.onlineText}>Online</Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderToolbar = () => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.toolbarScroll}
+      contentContainerStyle={styles.toolbar}>
+      <TouchableOpacity style={styles.modeBtn} onPress={() => setShowModes((v) => !v)}>
+        <Image source={require('../../../assets/icons/icon_category.webp')} style={styles.toolIcon} resizeMode="contain" />
+        <Text style={styles.modeText}>
+          {isWide ? 'Mode Transaksi' : mode} <Text style={styles.modeDim}>▾</Text>
+        </Text>
+      </TouchableOpacity>
+      {isWide && (
+        <View style={styles.customerWrap}>
+          <TextInput
+            style={styles.customerInput}
+            placeholder="Info tambahan / nama customer"
+            placeholderTextColor={colors.faint}
+            value={customer}
+            onChangeText={setCustomer}
+          />
+        </View>
+      )}
+      <TouchableOpacity style={styles.toolBtn} onPress={() => setShowSearch((v) => !v)}>
+        <SearchGlyph size={17} color={colors.navy} />
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]} onPress={goSaved}>
+        <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>Tersimpan</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
+        <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>{isWide ? 'Ongkir' : 'Order Fee'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
+        <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>Promo</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+
+  const renderCats = () => (
+    <View style={!isWide ? styles.catWrapPhone : styles.catWrapWide}>
+      <ScrollView
+        ref={catScrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        onContentSizeChange={() => {
+          // Default aktif = Makanan (chip ke-3): geser agar label pcs terlihat di phone.
+          if (!isWide) catScrollRef.current?.scrollTo({ x: 120, animated: false });
+        }}
+        contentContainerStyle={[styles.catRow, !isWide && styles.catRowPhone]}
+        style={styles.catScroll}>
+        {CATEGORIES.map((c) => {
+          const active = c.name === activeCategory;
+          // Favorit virtual (overlap) — tanpa badge agar jumlah badge = Jumlah footer.
+          const inCart = c.name === 'Favorit' ? 0 : (cartQtyByCat[c.name] ?? 0);
+          return (
+            <TouchableOpacity
+              key={c.name}
+              style={[styles.catChip, active && styles.catChipActive]}
+              onPress={() => {
+                setActiveCategory(c.name);
+                setActiveSub(null);
+              }}>
+              <Text style={[styles.catText, active && styles.catTextActive]} numberOfLines={1}>
+                {c.name} ({catCount(c.name)}pcs)
+              </Text>
+              {inCart > 0 && (
+                <View style={styles.catCartBadge}>
+                  <Text style={styles.catCartBadgeText}>{inCart}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      {!isWide && (
+        <View style={styles.catEdge} pointerEvents="none">
+          <View style={styles.catEdgeDot}>
+            <Text style={styles.catEdgeArrow}>›</Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderBreadcrumb = () => (
+    <View style={styles.crumbRow}>
+      <Text style={styles.crumbActive}>{activeCategory}</Text>
+      {activeSub && (
+        <>
+          <Text style={styles.crumbDim}> {'›'} </Text>
+          <Text style={styles.crumbActive}>{activeSub}</Text>
+        </>
+      )}
+      <Text style={styles.crumbDim}> · {filtered.length} menu · PB1 incl, service excl</Text>
+    </View>
+  );
+
+  /** Sub-tile + tile Semua: reset filter. Tile aktif: border orange + bg pale orange + teks orange. */
+  const renderSubs = () =>
+    subs.length > 0 ? (
+      <View style={styles.subGrid}>
+        <TouchableOpacity
+          style={[styles.subTile, subs.length > 2 && (isWide ? styles.subTileEvenWide : styles.subTileEven), !activeSub && styles.subTileActive]}
+          onPress={() => setActiveSub(null)}>
+          <Text style={[styles.subTileText, !activeSub && styles.subTileTextActive]}>Semua</Text>
+        </TouchableOpacity>
+        {subs.map((s) => {
+          const active = activeSub === s;
+          const even = subs.length > 2;
+          return (
+            <TouchableOpacity
+              key={s}
+              style={[styles.subTile, even && (isWide ? styles.subTileEvenWide : styles.subTileEven), active && styles.subTileActive]}
+              onPress={() => setActiveSub((prev) => (prev === s ? null : s))}>
+              <Text style={[styles.subTileText, active && styles.subTileTextActive]}>{s}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    ) : null;
+
+  const renderMenu = () => (
+    <FlatList
+      key={isWide ? 'grid' : 'list'}
+      data={isWide ? gridData : filtered}
+      keyExtractor={(p) => (p ? p.id : '__spacer')}
+      numColumns={isWide ? 2 : 1}
+      contentContainerStyle={styles.list}
+      renderItem={({ item, index }) => {
+        if (!item) return <View style={styles.cardSpacer} />;
+        const qty = qtyOf(item.id);
+        if (isWide) {
+          return (
+            <TouchableOpacity style={styles.card} onPress={() => addToCart(item)} activeOpacity={0.7}>
+              <Text style={styles.cardName}>{item.name}</Text>
+              <View style={styles.cardFoot}>
+                <Text style={styles.cardPrice}>{rp(item.price)}</Text>
+                {qty > 0 ? (
+                  <View style={styles.qtyBadge}>
+                    <Text style={styles.qtyBadgeText}>{qty}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.addBtn}>
+                    <Text style={styles.addBtnText}>+</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        }
+        return (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => addToCart(item)}
+            activeOpacity={0.7}>
+            <Text style={styles.rowName}>{item.name}</Text>
+            {qty > 0 ? (
+              <View style={styles.stepperInline}>
+                <TouchableOpacity style={styles.stepBtnSm} onPress={() => decQty(item.id)}>
+                  <Text style={styles.stepTxtSm}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.stepQtySm}>{qty}</Text>
+                <TouchableOpacity style={styles.stepBtnSm} onPress={() => incQty(item.id)}>
+                  <Text style={styles.stepTxtSm}>+</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.addBtnLg} onPress={() => addToCart(item)}>
+                <Text style={styles.addBtnLgText}>+ Tambah</Text>
+              </TouchableOpacity>
+            )}
+            <Text style={styles.rowPrice}>{rp(item.price)}</Text>
+          </TouchableOpacity>
+        );
+      }}
+      ListEmptyComponent={<Text style={styles.empty}>Menu tidak ditemukan</Text>}
+      ItemSeparatorComponent={!isWide ? () => <View style={styles.rowSep} /> : undefined}
+    />
+  );
+
+  const renderCartPanel = () => (
+    <View style={isWide ? styles.cartPanel : styles.cartHidden}>
+      <View style={styles.cartHeader}>
+        <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
+        <Text style={styles.cartTitle}>
+          {mode} - {itemCount} item - {customer.trim() || 'QoQi'}
+        </Text>
+      </View>
+      <FlatList
+        data={cart}
+        keyExtractor={(c) => c.id}
+        contentContainerStyle={styles.cartList}
+        ItemSeparatorComponent={() => <View style={styles.cartDivider} />}
+        renderItem={({ item }) => (
+          <View style={styles.cartRow}>
+            <View style={styles.stepper}>
+              <TouchableOpacity
+                style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled]}
+                onPress={() => decQty(item.id)}
+                disabled={item.qty <= 1}>
+                <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>−</Text>
+              </TouchableOpacity>
+              <Text style={styles.stepQty}>{item.qty}</Text>
+              <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(item.id)}>
+                <Text style={styles.stepTxt}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.cartInfo}>
+              <Text style={styles.cartName}>{item.name}</Text>
+              {item.modifiers.length === 0 ? (
+                <Text style={styles.cartUnit}>@ {rp(item.basePrice)}</Text>
+              ) : (
+                <Text style={styles.cartUnit}>
+                  {rp(item.basePrice)} + {item.modifiers.map((m) => rp(m.price)).join(' + ')} = {rp(unitPrice(item))}/pcs
+                </Text>
+              )}
+              {item.modifiers.map((m, i) => (
+                <Text key={i} style={styles.cartMod}>
+                  + {m.name} + {rp(m.price)}
+                </Text>
+              ))}
+              {item.discount > 0 && (
+                <Text style={styles.cartDisc}>Diskon -{rp(item.discount)}</Text>
+              )}
+            </View>
+            <View style={styles.cartRight}>
+              <TouchableOpacity style={styles.cartXBtn} onPress={() => removeItem(item.id)} hitSlop={8}>
+                <Image source={require('../../../assets/icons/close.webp')} style={styles.cartXIcon} resizeMode="contain" />
+              </TouchableOpacity>
+              <Text style={styles.cartPrice}>{rp(itemTotal(item))}</Text>
+            </View>
+          </View>
+        )}
+        ListEmptyComponent={<Text style={styles.empty}>Keranjang kosong</Text>}
+      />
+      <View style={styles.totals}>
+        <View style={styles.totalsSeparator} />
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Subtotal (bruto)</Text>
+          <Text style={styles.totalVal}>{rp(subtotalGross)}</Text>
+        </View>
+        {discountTotal > 0 && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Diskon</Text>
+            <Text style={[styles.totalVal, styles.discVal]}>-{rp(discountTotal)}</Text>
+          </View>
+        )}
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Subtotal (net)</Text>
+          <Text style={styles.totalVal}>{rp(subtotal)}</Text>
+        </View>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Pajak PB1 (incl)</Text>
+          <Text style={styles.totalVal}>{rp(pb1incl)}</Text>
+        </View>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Service 5% (excl)</Text>
+          <Text style={styles.totalVal}>{rp(service)}</Text>
+        </View>
+        <View style={[styles.totalRow, styles.grandRow]}>
+          <Text style={styles.grandLabel}>Total</Text>
+          <Text style={styles.grandVal}>{rp(total)}</Text>
+        </View>
+      </View>
+      <View style={styles.cartActions}>
+        <View style={styles.cartActionsRow}>
+          <TouchableOpacity style={styles.btnSave} onPress={goSaved}>
+            <Image source={require('../../../assets/icons/export.webp')} style={styles.btnIcon} resizeMode="contain" />
+            <Text style={styles.btnSaveText}>Simpan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnPrint} onPress={() => navigation?.navigate('Receipt', { total })}>
+            <Image source={require('../../../assets/icons/print_blue.webp')} style={styles.btnIcon} resizeMode="contain" />
+            <Text style={styles.btnPrintText}>Cetak Struk</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.btnPay, cart.length === 0 && styles.ctaDisabled]}
+          disabled={cart.length === 0}
+          onPress={goCart}>
+          <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
+          <Text style={styles.btnPayText}>Bayar | {rp(total)}</Text>
+          <Text style={styles.btnPayArrow}>›</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  if (isWide) {
+    return (
+      <View style={styles.root}>
+        {renderHeader()}
+        <View style={styles.bodyRow}>
+          <View style={styles.catalog}>
+            {renderToolbar()}
+            {showModes && (
+              <View style={styles.modeDropdown}>
+                {MODES.map((m) => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.modeOption, m === mode && styles.modeOptionActive]}
+                    onPress={() => {
+                      setMode(m);
+                      setShowModes(false);
+                      if (m === 'DINE IN') navigation?.navigate('DineIn');
+                    }}>
+                    <Text style={[styles.modeOptionText, m === mode && styles.modeOptionTextActive]}>
+                      {m}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            {showSearch && (
+              <View style={styles.searchWrap}>
+                <SearchGlyph size={15} color={colors.faint} />
+                <TextInput
+                  style={styles.search}
+                  placeholder="Cari menu…"
+                  placeholderTextColor={colors.faint}
+                  value={query}
+                  onChangeText={setQuery}
+                />
+              </View>
+            )}
+            {renderCats()}
+            {renderBreadcrumb()}
+            {renderSubs()}
+            <View style={styles.menuFlex}>{renderMenu()}</View>
+          </View>
+          {renderCartPanel()}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.root}>
+      {renderHeader()}
+      {renderToolbar()}
+      {showModes && (
+        <View style={styles.modeDropdown}>
+          {MODES.map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[styles.modeOption, m === mode && styles.modeOptionActive]}
+              onPress={() => {
+                setMode(m);
+                setShowModes(false);
+                if (m === 'DINE IN') navigation?.navigate('DineIn');
+              }}>
+              <Text style={[styles.modeOptionText, m === mode && styles.modeOptionTextActive]}>{m}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {renderCats()}
+      {renderBreadcrumb()}
+      {renderSubs()}
+      {(showSearch || query.length > 0) && (
+        <View style={styles.searchWrap}>
+          <SearchGlyph size={15} color={colors.faint} />
+          <TextInput
+            style={styles.search}
+            placeholder="Cari menu…"
+            placeholderTextColor={colors.faint}
+            value={query}
+            onChangeText={setQuery}
+          />
+        </View>
+      )}
+      <View style={styles.menuFlex}>{renderMenu()}</View>
+
+      {/* CTA bawah BIRU: Jumlah + Lihat Pesanan + total */}
+      <View style={styles.ctaWrap}>
+        {(() => {
+          const visibleQty = filtered.reduce((s, p) => s + qtyOf(p.id), 0);
+          const hiddenQty = itemCount - visibleQty;
+          const visibleSum = filtered.reduce((s, p) => s + (cart.find((c) => c.id === p.id)?.qty ?? 0) * p.price, 0);
+          return hiddenQty > 0 ? (
+            <Text style={styles.ctaNote}>
+              {visibleQty} item {activeCategory} ({rp(visibleSum)}) + {hiddenQty} item kategori lain = {itemCount} item
+            </Text>
+          ) : null;
+        })()}
+        <TouchableOpacity
+          style={[styles.cta, cart.length === 0 && styles.ctaDisabled]}
+          disabled={cart.length === 0}
+          onPress={goCart}
+          activeOpacity={0.85}>
+          <View style={styles.ctaCount}>
+            <Text style={styles.ctaCountLabel}>Jumlah</Text>
+            <Text style={styles.ctaCountValue}>{itemCount}</Text>
+          </View>
+          <View style={styles.ctaDivider} />
+          <Text style={styles.ctaText}>
+            Lihat Pesanan | {rp(total)}
+          </Text>
+          <Text style={styles.ctaArrow}>›</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    backgroundColor: colors.navy,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  hamburgerIcon: { width: 22, height: 22 },
+  headerTitleWrap: { flex: 1, minWidth: 0 },
+  outletName: { color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
+  shiftRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
+  shiftDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
+  shiftText: { color: colors.navyTint, fontFamily: fonts.regular, fontSize: 12 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
+  headerDateWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dateIcon: { width: 22, height: 22 },
+  headerDate: { color: colors.navyTint, fontFamily: fonts.regular, fontSize: 12 },
+  onlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.green,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  onlineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.white },
+  onlineText: { color: colors.white, fontFamily: fonts.semibold, fontSize: 12 },
+  bodyRow: { flex: 1, flexDirection: 'row' },
+  catalog: { flex: 1, minWidth: 0 },
+  menuFlex: { flex: 1 },
+  toolbarScroll: { flexGrow: 0, backgroundColor: colors.white, borderBottomWidth: 1, borderBottomColor: colors.line },
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    paddingRight: 20,
+    gap: 8,
+  },
+  modeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    backgroundColor: colors.white,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  toolIcon: { width: 16, height: 16 },
+  toolIconSm: { width: 14, height: 14 },
+  modeText: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy, flexShrink: 1 },
+  modeDim: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
+  customerWrap: {
+    flex: 1,
+    minWidth: 110,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    backgroundColor: colors.white,
+  },
+  customerInput: {
+    paddingVertical: 9,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.text,
+    outlineStyle: 'none' as never,
+  },
+  toolBtn: {
+    width: 38,
+    height: 38,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    flexShrink: 0,
+  },
+  toolBtnWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: 38,
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    flexShrink: 0,
+  },
+  toolBtnWideText: { fontFamily: fonts.medium, fontSize: 11, color: colors.navy, flexShrink: 0 },
+  toolBtnWidePhone: { paddingHorizontal: 7, gap: 4 },
+  modeDropdown: {
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  modeOption: { paddingHorizontal: 16, paddingVertical: 10 },
+  modeOptionActive: { backgroundColor: colors.paleBlue },
+  modeOptionText: { fontFamily: fonts.regular, fontSize: 14, color: colors.text },
+  modeOptionTextActive: { fontFamily: fonts.semibold, color: colors.navy },
+  catScroll: { flexGrow: 0, backgroundColor: 'transparent' },
+  catWrapPhone: { position: 'relative' },
+  catRow: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 10, gap: 8, alignItems: 'center' },
+  catRowPhone: { paddingRight: 44 },
+  catChip: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexShrink: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 38,
+  },
+  catEdge: {
+    position: 'absolute',
+    right: 6,
+    top: 8,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  catEdgeDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catEdgeArrow: { color: colors.navy, fontFamily: fonts.bold, fontSize: 15, lineHeight: 17 },
+  catChipActive: { backgroundColor: colors.orange, borderColor: colors.orange },
+  catCartBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    backgroundColor: colors.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  catCartBadgeText: { color: colors.white, fontFamily: fonts.bold, fontSize: 11 },
+  catWrapWide: { paddingRight: 4 },
+  catText: { fontFamily: fonts.medium, fontSize: 13, color: colors.navy },
+  catTextActive: { color: colors.white, fontFamily: fonts.semibold },
+  crumbRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: 8, flexWrap: 'wrap' },
+  crumbDim: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint },
+  crumbActive: { fontFamily: fonts.semibold, fontSize: 12, color: colors.blue },
+  subGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingTop: 8, gap: 8 },
+  subTile: {
+    flex: 1,
+    minWidth: 110,
+    backgroundColor: colors.paleBlue,
+    borderRadius: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  subTileEven: { flexGrow: 0, flexShrink: 1, flexBasis: '48%', maxWidth: '48%', minWidth: 0 },
+  subTileEvenWide: { flexGrow: 0, flexShrink: 1, flexBasis: '24%', maxWidth: '24%', minWidth: 0 },
+  subTileActive: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  subTileText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text, textAlign: 'center' },
+  subTileTextActive: { fontFamily: fonts.semibold, color: colors.orangeDark },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  search: {
+    flex: 1,
+    paddingVertical: 9,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text,
+    outlineStyle: 'none' as never,
+  },
+  list: { padding: 12, paddingBottom: 16 },
+  rowSep: { height: 1, backgroundColor: colors.line, marginHorizontal: 16 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  rowAlt: { backgroundColor: colors.paleBlue },
+  rowName: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
+  rowPrice: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, minWidth: 80, maxWidth: 140, textAlign: 'right', flexShrink: 0 },
+  stepperInline: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
+  stepBtnSm: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.navy, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  stepTxtSm: { color: colors.navy, fontFamily: fonts.bold, fontSize: 18 },
+  stepQtySm: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 24, textAlign: 'center' },
+  addBtnLg: { borderWidth: 1, borderColor: colors.orange, borderRadius: 20, paddingHorizontal: 14, minHeight: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  addBtnLgText: { color: colors.orange, fontFamily: fonts.bold, fontSize: 13 },
+  qtyBadge: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    backgroundColor: colors.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  qtyBadgeText: { color: colors.white, fontFamily: fonts.bold, fontSize: 12 },
+  card: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 12,
+    margin: 6,
+    minWidth: 0,
+  },
+  cardSpacer: { flex: 1, margin: 6, minWidth: 0 },
+  cardName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text, minHeight: 38, flexShrink: 1 },
+  cardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, gap: 8 },
+  cardPrice: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy, flex: 1, minWidth: 0 },
+  addBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  addBtnText: { color: colors.white, fontFamily: fonts.bold, fontSize: 16, lineHeight: 18 },
+  empty: { textAlign: 'center', marginTop: 40, fontFamily: fonts.regular, fontSize: 14, color: colors.faint },
+  cartHidden: { display: 'none' },
+  cartPanel: {
+    width: 320,
+    backgroundColor: colors.white,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.line,
+  },
+  cartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  cartCheckIcon: { width: 18, height: 18, flexShrink: 0 },
+  cartTitle: { flex: 1, minWidth: 0, fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
+  cartList: { paddingVertical: 4 },
+  cartDivider: { height: 1, backgroundColor: colors.line, marginHorizontal: 14 },
+  cartRow: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  stepper: { alignItems: 'center', gap: 2, flexShrink: 0, paddingTop: 1 },
+  stepBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnDisabled: { borderColor: colors.line },
+  stepTxt: { color: colors.navy, fontFamily: fonts.bold, fontSize: 15, lineHeight: 17 },
+  stepTxtDisabled: { color: colors.faint },
+  stepQty: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, minWidth: 26, textAlign: 'center' },
+  cartInfo: { flex: 1, minWidth: 0 },
+  cartName: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, flexShrink: 1 },
+  cartUnit: { fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 },
+  cartMod: { fontFamily: fonts.regular, fontSize: 11, color: colors.blue, marginTop: 1, flexShrink: 1 },
+  cartDisc: { fontFamily: fonts.medium, fontSize: 11, color: colors.red, marginTop: 1 },
+  cartRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, maxWidth: 120 },
+  cartXBtn: { padding: 8, marginTop: -8, marginRight: -8 },
+  cartXIcon: { width: 13, height: 13 },
+  cartPrice: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'right', maxWidth: 112 },
+  totals: { borderTopWidth: 1, borderTopColor: colors.line, paddingHorizontal: 14, paddingTop: 4, paddingBottom: 4 },
+  totalsSeparator: { height: 1, backgroundColor: colors.line, marginBottom: 6 },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 2, gap: 12 },
+  totalLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, flexShrink: 1 },
+  totalVal: { fontFamily: fonts.medium, fontSize: 12, color: colors.text, textAlign: 'right', maxWidth: 170, flexShrink: 1 },
+  discVal: { color: colors.red },
+  grandRow: { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 6, paddingTop: 8 },
+  grandLabel: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
+  grandVal: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy, textAlign: 'right', maxWidth: 180, flexShrink: 1 },
+  cartActions: { padding: 12, gap: 8 },
+  cartActionsRow: { flexDirection: 'row', gap: 8 },
+  btnSave: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: colors.orange,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    minWidth: 0,
+  },
+  btnSaveText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orange, flexShrink: 1 },
+  btnPrint: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: colors.blue,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+    minWidth: 0,
+  },
+  btnPrintText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.blue, flexShrink: 1 },
+  btnIcon: { width: 17, height: 17, flexShrink: 0 },
+  btnPay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.blueDark,
+    borderWidth: 1.5,
+    borderColor: colors.blueDark,
+    borderRadius: 10,
+    paddingVertical: 11,
+  },
+  btnPayText: { color: colors.white, fontFamily: fonts.bold, fontSize: 15, flexShrink: 1 },
+  btnPayArrow: { color: colors.white, fontSize: 20, fontFamily: fonts.bold },
+  ctaWrap: { padding: 12, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.line, gap: 6 },
+  ctaNote: { fontFamily: fonts.regular, fontSize: 11, color: colors.muted, textAlign: 'center' },
+  cta: {
+    backgroundColor: colors.blueDark,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  ctaDisabled: { opacity: 0.45 },
+  ctaCount: { alignItems: 'center', marginRight: 12, flexShrink: 0 },
+  ctaCountLabel: { color: colors.white, fontFamily: fonts.regular, fontSize: 11, opacity: 0.85 },
+  ctaCountValue: { color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
+  ctaDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.4)', marginRight: 12, flexShrink: 0 },
+  ctaText: { flex: 1, minWidth: 0, color: colors.white, fontFamily: fonts.bold, fontSize: 15 },
+  ctaArrow: { color: colors.white, fontSize: 22, fontFamily: fonts.bold, flexShrink: 0 },
+});
