@@ -11,7 +11,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { fonts, wideCenterSm } from '../../theme';
-import { loginDemo } from '../../session';
+import { loginDemo, loginEmployee } from '../../session';
+import { validateEmployee } from '../../lib/apiSource';
+import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
+import { useLang } from '../../lib/i18n';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -84,11 +87,14 @@ function QrTabletArt() {
 export default function LoginScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const [mode, setMode] = useState<'email' | 'qr'>('email');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [busy, setBusy] = useState(false);
   const [help, setHelp] = useState(false);
 
   const filled = username.trim().length > 0 && password.length > 0;
@@ -98,15 +104,45 @@ export default function LoginScreen({ navigation }: Props) {
     else navigation?.navigate('Intro');
   };
 
+  /**
+   * Login T1: username/PIN direvalidasi ke server via validateEmployee
+   * (kontrak esb/employee/validate; offline jalan via dummy apiSource).
+   * Lolos server lalu cocokkan/seed hash lokal via pin.ts (PIN plaintext
+   * hanya di memori, tidak pernah disimpan), baru kunci sesi.
+   * Kredensial ditolak (E401) tampilkan error + tawarkan klaim ulang terminal.
+   * Gate panjang lokal dipertahankan untuk kompatibilitas perilaku lama.
+   */
   const submit = () => {
+    if (busy) return;
     if (!username.trim() || !password) return;
     if (password.length < 4) {
       setError(true);
       return;
     }
     setError(false);
-    loginDemo();
-    navigation?.navigate('Dashboard');
+    setServerError('');
+    setBusy(true);
+    void (async () => {
+      try {
+        const s = await validateEmployee(username.trim(), password);
+        if (!s.ok || !s.userId) {
+          setServerError(t('login_fail'));
+          return;
+        }
+        try {
+          const rec = await loadPinRecord(s.userId);
+          if (!rec || !verifyPinHash(password, rec)) {
+            await savePinHash(s.userId, password);
+          }
+        } catch {
+          /* hash lokal opsional - server tetap sumber benar */
+        }
+        loginEmployee({ nama: s.nama, username: username.trim() });
+        navigation?.navigate('Dashboard');
+      } finally {
+        setBusy(false);
+      }
+    })();
   };
 
   const scanQr = () => {
@@ -122,7 +158,7 @@ export default function LoginScreen({ navigation }: Props) {
       <TouchableOpacity
         key={which}
         style={[styles.card, on ? styles.cardOn : styles.cardOff]}
-        onPress={() => { setMode(which); setError(false); }}>
+        onPress={() => { setMode(which); setError(false); setServerError(''); }}>
         <View style={[styles.iconBox, on ? styles.iconBoxOn : styles.iconBoxOff]}>
           <Image
             source={which === 'email' ? (on ? ICONS.userBlue : ICONS.userGray) : on ? ICONS.qrBlue : ICONS.qrGray}
@@ -132,12 +168,12 @@ export default function LoginScreen({ navigation }: Props) {
         </View>
         {which === 'email' ? (
           <Text style={[styles.cardLabel, on ? styles.cardLabelOn : styles.cardLabelOff]}>
-            <Text style={styles.cardLabelBold}>Username</Text> atau{' '}
-            <Text style={styles.cardLabelBold}>Email</Text>
+            <Text style={styles.cardLabelBold}>{t('g_login_card_user')}</Text> {t('g_login_card_or')}{' '}
+            <Text style={styles.cardLabelBold}>{t('g_login_card_email')}</Text>
           </Text>
         ) : (
           <Text style={[styles.cardLabel, styles.cardLabelBold, on ? styles.cardLabelOn : styles.cardLabelOff]}>
-            Scan QR
+            {t('g_login_scan')}
           </Text>
         )}
       </TouchableOpacity>
@@ -166,8 +202,8 @@ export default function LoginScreen({ navigation }: Props) {
           style={styles.logo}
           resizeMode="contain"
         />
-        <Text style={styles.title}>Selamat Datang Juragan!</Text>
-        <Text style={styles.sub}>Silakan masuk dengan akun Anda</Text>
+        <Text style={styles.title}>{t('g_login_welcome')}</Text>
+        <Text style={styles.sub}>{t('g_login_sub')}</Text>
 
         <View style={styles.cards}>
           {card('email')}
@@ -177,38 +213,38 @@ export default function LoginScreen({ navigation }: Props) {
         {mode === 'email' ? (
           <View style={styles.form}>
             <Text style={styles.label}>
-              Username atau Email<Text style={styles.star}>*</Text>
+              {t('g_login_label_user')}<Text style={styles.star}>*</Text>
             </Text>
-            <View style={[styles.inputBox, error && styles.inputBoxError]}>
+            <View style={[styles.inputBox, (error || serverError) && styles.inputBoxError]}>
               <Image
                 source={ICONS.username}
-                style={[styles.fieldIcon, error && { tintColor: RED }]}
+                style={[styles.fieldIcon, (error || serverError) && { tintColor: RED }]}
                 resizeMode="contain"
               />
               <TextInput
                 style={styles.input}
                 value={username}
-                onChangeText={(t) => { setUsername(t); setError(false); }}
-                placeholder="Masukkan Username atau Email Anda"
+                onChangeText={(v) => { setUsername(v); setError(false); setServerError(''); }}
+                placeholder={t('g_login_ph_user')}
                 placeholderTextColor={INPUT_BORDER}
                 autoCapitalize="none"
               />
             </View>
 
             <Text style={[styles.label, styles.labelGap]}>
-              Password<Text style={styles.star}>*</Text>
+              {t('g_login_label_pass')}<Text style={styles.star}>*</Text>
             </Text>
-            <View style={[styles.inputBox, error && styles.inputBoxError]}>
+            <View style={[styles.inputBox, (error || serverError) && styles.inputBoxError]}>
               <Image
                 source={ICONS.password}
-                style={[styles.fieldIcon, error && { tintColor: RED }]}
+                style={[styles.fieldIcon, (error || serverError) && { tintColor: RED }]}
                 resizeMode="contain"
               />
               <TextInput
                 style={styles.input}
                 value={password}
-                onChangeText={(t) => { setPassword(t); setError(false); }}
-                placeholder="Masukkan Password Anda"
+                onChangeText={(v) => { setPassword(v); setError(false); setServerError(''); }}
+                placeholder={t('g_login_ph_pass')}
                 placeholderTextColor={INPUT_BORDER}
                 secureTextEntry={!showPass}
               />
@@ -221,26 +257,33 @@ export default function LoginScreen({ navigation }: Props) {
               </TouchableOpacity>
             </View>
 
-            {error ? (
+            {error || serverError ? (
               <View style={styles.errorRow}>
                 <Image source={ICONS.fail} style={styles.errorIcon} resizeMode="contain" />
                 <Text style={styles.errorText}>
-                  Username atau Password yang Anda masukkan salah. Silakan coba kembali.
+                  {serverError || t('g_login_error_local')}
                 </Text>
               </View>
+            ) : null}
+            {serverError ? (
+              <TouchableOpacity
+                style={styles.forgotLink}
+                onPress={() => navigation?.navigate('Install')}>
+                <Text style={styles.forgotLinkT}>{t('login_claim')}</Text>
+              </TouchableOpacity>
             ) : null}
 
             <TouchableOpacity
               style={styles.forgotLink}
               onPress={() => navigation?.navigate('ForgotPin')}>
-              <Text style={styles.forgotLinkT}>Lupa PIN?</Text>
+              <Text style={styles.forgotLinkT}>{t('g_login_forgot')}</Text>
             </TouchableOpacity>
 
             <View style={styles.spacer} />
             <TouchableOpacity
-              style={[styles.primary, !filled && styles.primaryIdle]}
+              style={[styles.primary, (!filled || busy) && styles.primaryIdle]}
               onPress={submit}>
-              <Text style={styles.primaryT}>Masuk</Text>
+              <Text style={styles.primaryT}>{busy ? t('login_verifying') : t('g_login_submit')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -250,10 +293,10 @@ export default function LoginScreen({ navigation }: Props) {
             </View>
             <View style={styles.spacer} />
             <TouchableOpacity style={styles.outline} onPress={() => navigation?.navigate('QrHow')}>
-              <Text style={styles.outlineT}>Cara mendapatkan QR</Text>
+              <Text style={styles.outlineT}>{t('g_login_how')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.primary, styles.scanGlow]} onPress={scanQr}>
-              <Text style={styles.primaryT}>Scan QR</Text>
+              <Text style={styles.primaryT}>{t('g_login_scan')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -266,16 +309,16 @@ export default function LoginScreen({ navigation }: Props) {
               <View style={styles.helpLogoCircle}>
                 <Image source={ICONS.logo} style={styles.helpLogoImg} resizeMode="contain" />
               </View>
-              <Text style={styles.helpGreenTitle}>ESB Restaurant Technology</Text>
-              <Text style={styles.helpGreenSub}>PT. Esensi Solusi Buana</Text>
+              <Text style={styles.helpGreenTitle}>{t('g_login_help_title')}</Text>
+              <Text style={styles.helpGreenSub}>{t('g_login_help_sub')}</Text>
               <Image source={ICONS.waQr} style={styles.helpQrImg} resizeMode="contain" />
             </View>
             <Text style={styles.helpBody}>
-              Silakan scan barcode di atas untuk bantuan langsung atau hubungi kami melalui nomor{' '}
+              {t('g_login_help_body')}{' '}
               <Text style={styles.helpPhone}>0822-1066-6969</Text>
             </Text>
             <TouchableOpacity style={styles.primary} onPress={() => setHelp(false)}>
-              <Text style={styles.primaryT}>Oke</Text>
+              <Text style={styles.primaryT}>{t('g_login_help_ok')}</Text>
             </TouchableOpacity>
           </View>
         </View>

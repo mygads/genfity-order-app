@@ -9,9 +9,13 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 import ExtraPaySection from './ExtraPaySection';
-import { recordSale, type SaleItemIn } from '../../lib/payments';
+import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
+import { nextSalesNum, saveSale } from '../../lib/sales';
+import { validateVoucherCode } from '../../lib/apiSource';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -20,11 +24,36 @@ type Nav = {
 
 type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number; items?: SaleItemIn[] } };
+  route?: {
+    params?: {
+      total?: number;
+      items?: SaleItemIn[];
+      mode?: string;
+      table?: string;
+      ongkir?: number;
+      customer?: string;
+      memberId?: string;
+      /** Kode voucher dari CartDetail/BillPreview (mis. HEMAT10K) - langsung aktif. */
+      voucher?: string | { code: string; amount: number };
+      /** Diskon bawaan order (dari BillPreview) agar tidak hilang di rantai. */
+      discount?: number;
+    };
+  };
 };
 
 type Tab = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
-type Split = { id: string; label: string; amount: number };
+/** Split parsial: label untuk tampilan, method mentah untuk payload (bank/dompet masing-masing). */
+type Split = { id: string; label: string; method: string; amount: number };
+
+/** Label generik ExtraPay → method mentah agar payload tidak ke-strip. */
+const extraLabelToMethod = (label: string): string => {
+  const k = label.trim().toLowerCase();
+  if (k.includes('transfer')) return 'transfer';
+  if (k.includes('deposit')) return 'deposit';
+  if (k.includes('kompli')) return 'compliment';
+  if (k.includes('non')) return 'nonsales';
+  return label;
+};
 
 const CASH_DRAWERS = ['Laci 1', 'Laci 2', 'Laci 3'];
 
@@ -42,7 +71,7 @@ const WALLETS = [
   { id: 'shopeepay', name: 'ShopeePay', img: null },
 ];
 
-/** Deposit member mock — di app nyata diambil dari server (member butuh online). */
+/** Deposit member mock - di app nyata diambil dari server (member butuh online). */
 const MEMBER_DEPOSIT_DB = [
   { id: 'M001', nama: 'Budi Santoso', saldo: 150000 },
   { id: 'M002', nama: 'Sinta Dewi', saldo: 500000 },
@@ -52,21 +81,21 @@ const MEMBER_DEPOSIT_DB = [
 const VOUCHER_VALUE = 10000;
 let splitSeq = 0;
 
-const SIDEBAR: { id: Tab; title: string; sub: string }[] = [
-  { id: 'tunai', title: 'Tunai', sub: '(Uang kertas & koin)' },
-  { id: 'nontunai', title: 'Non-Tunai', sub: '(Debit/Kredit via EDC)' },
-  { id: 'online', title: 'Pembayaran Online', sub: '(E-Wallet, QRIS, transfer)' },
-  { id: 'member', title: 'Deposit Member', sub: '(Potong saldo)' },
-  { id: 'lainnya', title: 'Pluxee / Ultra', sub: '(Voucher tender)' },
-];
+const SIDEBAR_IDS: Tab[] = ['tunai', 'nontunai', 'online', 'member', 'lainnya'];
 
 const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 export default function PayScreen({ navigation, route }: Props) {
   const total = route?.params?.total ?? 266000;
+  const orderMode = route?.params?.mode;
+  const tableNo = route?.params?.table;
+  const ongkir = route?.params?.ongkir ?? 0;
+  const customerName = route?.params?.customer;
+  const memberIdParam = route?.params?.memberId;
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang();
   const todayStr = useMemo(() => {
     const d = new Date();
     return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
@@ -75,8 +104,18 @@ export default function PayScreen({ navigation, route }: Props) {
   const [drawer, setDrawer] = useState(CASH_DRAWERS[0]);
 
   const [voucherOpen, setVoucherOpen] = useState(false);
-  const [voucherCode, setVoucherCode] = useState('');
-  const [voucherApplied, setVoucherApplied] = useState(0);
+  // Voucher bawaan dari kasir/BillPreview langsung aktif: nominal dari params
+  // (objek {code, amount} / discount) atau standar VOUCHER_VALUE untuk kode string.
+  const voucherParam = route?.params?.voucher;
+  const voucherParamCode = typeof voucherParam === 'string' ? voucherParam : (voucherParam?.code ?? '');
+  const voucherParamAmount =
+    route?.params?.discount ??
+    (typeof voucherParam === 'object' ? voucherParam.amount : undefined) ??
+    (voucherParam ? VOUCHER_VALUE : 0);
+  const [voucherCode, setVoucherCode] = useState(voucherParamCode);
+  const [voucherApplied, setVoucherApplied] = useState(voucherParam ? voucherParamAmount : 0);
+  const [voucherBusy, setVoucherBusy] = useState(false);
+  const [voucherMsg, setVoucherMsg] = useState('');
 
   const [splits, setSplits] = useState<Split[]>([]);
 
@@ -101,8 +140,10 @@ export default function PayScreen({ navigation, route }: Props) {
   const [tenderCode, setTenderCode] = useState('');
   const [tenderKind, setTenderKind] = useState<'Pluxee' | 'Ultra' | 'Lainnya'>('Pluxee');
   const [tenderAmt, setTenderAmt] = useState('');
+  const [tenderBusy, setTenderBusy] = useState(false);
+  const [tenderMsg, setTenderMsg] = useState('');
 
-  const payable = total - voucherApplied;
+  const payable = total + ongkir - voucherApplied;
   const paid = useMemo(() => splits.reduce((s, x) => s + x.amount, 0), [splits]);
   const remaining = Math.max(0, payable - paid);
 
@@ -128,10 +169,29 @@ export default function PayScreen({ navigation, route }: Props) {
   const customNum = Number(customAmt.replace(/[^0-9]/g, '')) || 0;
   const tendered = customMode ? customNum : (cashSel ?? 0);
 
-  const applyVoucher = () => {
-    if (voucherCode.trim().length >= 3) {
-      setVoucherApplied(VOUCHER_VALUE);
+  /**
+   * Pasang voucher: validasi ke server dulu (PAY-09). Nominal ikut server
+   * (bukan VOUCHER_VALUE), dan minSpend ditegakkan.
+   */
+  const applyVoucher = async () => {
+    const code = voucherCode.trim().toUpperCase();
+    if (code.length < 3 || voucherBusy) return;
+    setVoucherBusy(true);
+    setVoucherMsg(t('pay_voucher_checking'));
+    try {
+      const v = await validateVoucherCode(code, total + ongkir);
+      if (!v.ok || (v.minSpend > 0 && payable < v.minSpend)) {
+        setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));
+        return;
+      }
+      setVoucherCode(code);
+      setVoucherApplied(Math.min(v.amount, total + ongkir));
+      setVoucherMsg('');
       setVoucherOpen(false);
+    } catch {
+      setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
+    } finally {
+      setVoucherBusy(false);
     }
   };
 
@@ -140,36 +200,65 @@ export default function PayScreen({ navigation, route }: Props) {
     setVoucherCode('');
   };
 
-  const addSplit = (label: string, amount: number) => {
+  const addSplit = (label: string, amount: number, method?: string) => {
     if (amount <= 0) return;
     splitSeq += 1;
-    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, amount }]);
+    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, method: method ?? label, amount }]);
   };
 
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
 
-  const goSuccess = (method: string, cash: number, change: number, detail?: { approvalCode?: string }) => {
-    recordSale({
+  /**
+   * Selesaikan pembayaran dengan SATU nomor struk: nomor TRX diterbitkan dulu,
+   * dipakai saveSale + push + Success + Receipt (sebelumnya Success/Receipt
+   * memakai L-timestamp yang beda dari yang tersimpan di DB).
+   */
+  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string }) => {
+    const orderNo = await nextSalesNum();
+    const saleMemberId = detail?.memberId ?? memberIdParam;
+    const input: SaleInput = {
       method,
+      salesNum: orderNo,
       grandTotal: payable,
       discountTotal: voucherApplied,
       cash,
       change,
       items: route?.params?.items,
       payments: [
-        ...splits.map((s) => ({ method: s.label, amount: s.amount })),
+        ...splits.map((s) => ({ method: s.method, amount: s.amount })),
         { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
       ],
       ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+      ...(saleMemberId ? { memberId: saleMemberId } : {}),
+      ...(tableNo ? { tableId: tableNo } : {}),
+      ...(orderMode ? { mode: orderMode } : {}),
+      ...(ongkir > 0 ? { ongkir } : {}),
+      ...(customerName ? { customer: customerName } : {}),
+    };
+    recordSale(input);
+    try {
+      await saveSale(input);
+    } catch {
+      /* DB gagal — kasir tetap jalan, push via antrean */
+    }
+    navigation?.navigate('Success', {
+      total: payable, method, cash, change, orderNo,
+      items: route?.params?.items, discount: voucherApplied,
+      ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
+      ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+      ...(saleMemberId ? { memberId: saleMemberId } : {}),
+      ...(ongkir > 0 ? { ongkir } : {}),
+      ...(orderMode ? { mode: orderMode } : {}),
+      ...(tableNo ? { table: tableNo } : {}),
+      ...(customerName ? { customer: customerName } : {}),
     });
-    navigation?.navigate('Success', { total: payable, method, cash, change });
   };
 
   // ---- Tunai actions ----
   const onCashTambah = () => {
     if (tendered <= 0) return;
-    addSplit('Tunai', Math.min(tendered, remaining));
+    addSplit('Tunai', Math.min(tendered, remaining), 'cash');
     setCashSel(null);
     setCustomMode(false);
     setCustomAmt('');
@@ -178,7 +267,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const onCashLanjut = () => {
     const grand = paid + tendered;
     if (grand < payable || payable <= 0) return;
-    goSuccess('cash', grand, Math.max(0, grand - payable));
+    void goSuccess('cash', grand, Math.max(0, grand - payable));
   };
 
   // ---- Non-tunai actions ----
@@ -187,9 +276,9 @@ export default function PayScreen({ navigation, route }: Props) {
     const amt = remaining > 0 ? remaining : payable;
     const grand = paid + amt;
     if (grand >= payable) {
-      goSuccess(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
+      void goSuccess(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
     } else {
-      addSplit(CARDS.find((c) => c.id === card)?.name ?? 'Non Tunai', amt);
+      addSplit(CARDS.find((c) => c.id === card)?.name ?? 'Non Tunai', amt, card);
       setEdcCode('');
     }
   };
@@ -199,11 +288,21 @@ export default function PayScreen({ navigation, route }: Props) {
   const onOnlineLanjut = () => {
     if (!wallet || payable <= 0 || !ovoPhoneOk) return;
     if (wallet === 'qris') {
-      navigation?.navigate('Qris', { total: remaining > 0 ? remaining : payable });
+      navigation?.navigate('Qris', {
+        total: remaining > 0 ? remaining : payable,
+        items: route?.params?.items,
+        discount: voucherApplied,
+        ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
+        ...(orderMode ? { mode: orderMode } : {}),
+        ...(tableNo ? { table: tableNo } : {}),
+        ...(ongkir > 0 ? { ongkir } : {}),
+        ...(customerName ? { customer: customerName } : {}),
+        ...(memberIdParam ? { memberId: memberIdParam } : {}),
+      });
       return;
     }
     const grand = paid + (remaining > 0 ? remaining : payable);
-    goSuccess(wallet, grand, 0);
+    void goSuccess(wallet, grand, 0);
   };
 
   // ---- Deposit member actions ----
@@ -219,27 +318,57 @@ export default function PayScreen({ navigation, route }: Props) {
     const pakai = Math.min(memberPicked.saldo, remaining > 0 ? remaining : payable);
     const grand = paid + pakai;
     if (grand >= payable) {
-      goSuccess('deposit', grand, 0);
+      void goSuccess('deposit', grand, 0, { memberId: memberPicked.id });
     } else {
-      addSplit(`Deposit ${memberPicked.nama}`, pakai);
+      addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit');
       setMemberSel(null);
     }
   };
 
   // ---- Pluxee / Ultra / lainnya ----
   const tenderNum = Number(tenderAmt.replace(/[^0-9]/g, '')) || 0;
-  const tenderReady = tenderCode.trim().length >= 3 && tenderNum > 0;
-  const onTenderTambah = () => {
+  const tenderReady = tenderCode.trim().length >= 3 && tenderNum > 0 && !tenderBusy;
+  /**
+   * Validasi kode tender ke server sebelum diterima (PAY-09): kode asal
+   * tidak bisa dipakai. Berhasil = approvalCode = kode tervalidasi.
+   */
+  const checkTender = async (): Promise<boolean> => {
+    const code = tenderCode.trim().toUpperCase();
+    if (code.length < 3 || tenderNum <= 0) return false;
+    setTenderBusy(true);
+    setTenderMsg(t('pay_tender_checking'));
+    try {
+      const v = await validateVoucherCode(code, payable);
+      if (!v.ok || (v.minSpend > 0 && payable < v.minSpend)) {
+        setTenderMsg(t('pay_tender_invalid').replace('{m}', rp(v.minSpend)));
+        return false;
+      }
+      setTenderMsg('');
+      return true;
+    } catch {
+      setTenderMsg(t('pay_tender_invalid').replace('{m}', rp(0)));
+      return false;
+    } finally {
+      setTenderBusy(false);
+    }
+  };
+  const onTenderTambah = async () => {
     if (!tenderReady) return;
-    addSplit(`${tenderKind} ${tenderCode.trim().toUpperCase()}`, Math.min(tenderNum, remaining));
+    if (!(await checkTender())) return;
+    addSplit(`${tenderKind} ${tenderCode.trim().toUpperCase()}`, Math.min(tenderNum, remaining), tenderKind.toLowerCase());
     setTenderCode('');
     setTenderAmt('');
   };
-  const onTenderLunas = () => {
+  const onTenderLunas = async () => {
     if (!tenderReady || payable <= 0) return;
+    if (!(await checkTender())) return;
     const grand = paid + Math.min(tenderNum, remaining);
-    if (grand >= payable) goSuccess(tenderKind.toLowerCase(), grand, 0);
-    else onTenderTambah();
+    if (grand >= payable) void goSuccess(tenderKind.toLowerCase(), grand, 0, { approvalCode: tenderCode.trim().toUpperCase() });
+    else {
+      addSplit(`${tenderKind} ${tenderCode.trim().toUpperCase()}`, Math.min(tenderNum, remaining), tenderKind.toLowerCase());
+      setTenderCode('');
+      setTenderAmt('');
+    }
   };
 
   const cashTambahReady = tendered > 0;
@@ -247,31 +376,33 @@ export default function PayScreen({ navigation, route }: Props) {
   const cashChange = Math.max(0, paid + tendered - payable);
   const cashPayLabel =
     tendered > 0 && cashLanjutReady
-      ? `Bayar ${rp(tendered)} ›`
+      ? `${t('pay_cash_pay').replace('{t}', rp(tendered))} ›`
       : tendered > 0
-        ? `Kurang ${rp(Math.max(0, payable - paid - tendered))}`
-        : `Lanjut Pembayaran • ${rp(payable)}`;
+        ? t('pay_cash_short').replace('{k}', rp(Math.max(0, payable - paid - tendered)))
+        : t('pay_cash_go').replace('{t}', rp(payable));
+
+  const sideText = (id: Tab): { title: string; sub: string } => {
+    switch (id) {
+      case 'tunai': return { title: t('pay_side_cash'), sub: t('pay_side_cash_sub') };
+      case 'nontunai': return { title: t('pay_side_card'), sub: t('pay_side_card_sub') };
+      case 'online': return { title: t('pay_side_online'), sub: t('pay_side_online_sub') };
+      case 'member': return { title: t('pay_side_dep'), sub: t('pay_side_dep_sub') };
+      default: return { title: t('pay_side_tender'), sub: t('pay_side_tender_sub') };
+    }
+  };
 
   const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={() => navigation?.goBack()}>
-          <Text style={styles.back}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Metode Pembayaran</Text>
-      </View>
-      <View style={styles.headerRight}>
-        {isTablet && (
-          <View style={styles.dateChip}>
-            <Text style={styles.dateChipText}>◷  {todayStr}</Text>
-          </View>
-        )}
+    <ScreenHeader
+      title={t('pay_title')}
+      sub={isTablet ? todayStr : undefined}
+      onBack={() => navigation?.goBack()}
+      right={
         <View style={styles.onlineBadge}>
           <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>Online</Text>
+          <Text style={styles.onlineText}>{t('pay_online')}</Text>
         </View>
-      </View>
-    </View>
+      }
+    />
   );
 
   const renderBanner = () => (
@@ -285,18 +416,27 @@ export default function PayScreen({ navigation, route }: Props) {
               styles.voucherBarTabletText,
               voucherApplied > 0 && styles.voucherBarTabletTextActive,
             ]}>
-            {voucherApplied > 0 ? `◈  Voucher Terpasang • -${rp(voucherApplied)}  ✕` : '◈  Tambah Voucher'}
+            {voucherApplied > 0 ? `◈  ${t('pay_voucher_on').replace('{d}', rp(voucherApplied))}  ✕` : `◈  ${t('pay_voucher_add')}`}
           </Text>
         </TouchableOpacity>
       )}
       <View style={isTablet ? styles.bannerTablet : styles.banner}>
         <View style={styles.bannerCol}>
-          <Text style={styles.bannerLabel}>Total</Text>
+          <Text style={styles.bannerLabel}>{t('c_total')}</Text>
           <Text style={styles.bannerValue}>{rp(total)}</Text>
         </View>
         <View style={styles.bannerDivider} />
+        {ongkir > 0 && (
+          <>
+            <View style={styles.bannerCol}>
+              <Text style={styles.bannerLabel}>{t('ongkir')}</Text>
+              <Text style={styles.bannerValue}>{rp(ongkir)}</Text>
+            </View>
+            <View style={styles.bannerDivider} />
+          </>
+        )}
         <View style={styles.bannerCol}>
-          <Text style={styles.bannerLabel}>Belum Terbayar</Text>
+          <Text style={styles.bannerLabel}>{t('pay_remaining')}</Text>
           <Text style={[styles.bannerValue, styles.bannerRemaining]}>{rp(remaining)}</Text>
         </View>
       </View>
@@ -306,8 +446,8 @@ export default function PayScreen({ navigation, route }: Props) {
           onPress={() => (voucherApplied > 0 ? removeVoucher() : setVoucherOpen((v) => !v))}>
           <Text style={[styles.voucherBarText, voucherApplied > 0 && styles.voucherBarTextActive]}>
             {voucherApplied > 0
-              ? `◈  Voucher Terpasang • -${rp(voucherApplied)}  ✕`
-              : '◈  Tambah Voucher'}
+              ? `◈  ${t('pay_voucher_on').replace('{d}', rp(voucherApplied))}  ✕`
+              : `◈  ${t('pay_voucher_add')}`}
           </Text>
         </TouchableOpacity>
       )}
@@ -315,14 +455,14 @@ export default function PayScreen({ navigation, route }: Props) {
         <View style={styles.voucherRow}>
           <TextInput
             style={styles.input}
-            placeholder="Kode voucher"
+            placeholder={t('pay_voucher_ph')}
             placeholderTextColor={colors.faint}
             value={voucherCode}
             onChangeText={setVoucherCode}
             autoCapitalize="characters"
           />
-          <TouchableOpacity style={styles.voucherBtn} onPress={applyVoucher}>
-            <Text style={styles.voucherBtnText}>Pakai</Text>
+          <TouchableOpacity style={[styles.voucherBtn, voucherBusy && styles.btnDisabled]} disabled={voucherBusy} onPress={() => void applyVoucher()}>
+            <Text style={styles.voucherBtnText}>{voucherBusy ? '…' : t('pay_voucher_use')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.voucherBtn}
@@ -330,24 +470,30 @@ export default function PayScreen({ navigation, route }: Props) {
               setVoucherOpen(false);
               navigation?.navigate('Voucher');
             }}>
-            <Text style={styles.voucherBtnText}>Pilih ›</Text>
+            <Text style={styles.voucherBtnText}>{t('pay_voucher_pick')} ›</Text>
           </TouchableOpacity>
         </View>
       )}
+      {voucherMsg ? <Text style={styles.ctaHint}>{voucherMsg}</Text> : null}
     </View>
   );
 
   const renderTabs = () => {
     if (isTablet) return null;
     const tabs: { id: Tab; label: string }[] = [
-      { id: 'tunai', label: 'Tunai' },
-      { id: 'nontunai', label: 'Non-Tunai' },
-      { id: 'online', label: 'Online' },
-      { id: 'member', label: 'Deposit' },
-      { id: 'lainnya', label: 'Pluxee/Ultra' },
+      { id: 'tunai', label: t('pay_tab_cash') },
+      { id: 'nontunai', label: t('pay_tab_card') },
+      { id: 'online', label: t('pay_tab_online') },
+      { id: 'member', label: t('pay_tab_deposit') },
+      { id: 'lainnya', label: t('pay_tab_tender') },
     ];
     return (
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        persistentScrollbar
+        contentContainerStyle={styles.tabsContent}
+        style={styles.tabsScroll}>
         <View style={styles.tabs}>
           {tabs.map((t) => (
             <TouchableOpacity
@@ -381,7 +527,7 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const renderTunai = () => (
     <View>
-      <Text style={styles.panelTitle}>Pembayaran tunai</Text>
+      <Text style={styles.panelTitle}>{t('pay_cash_title')}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.subTabs}>
         {CASH_DRAWERS.map((d) => (
           <TouchableOpacity
@@ -404,7 +550,7 @@ export default function PayScreen({ navigation, route }: Props) {
             setCustomMode(false);
             setCashSel(remaining);
           }}>
-          <Text style={styles.gridText}>Uang Pas</Text>
+          <Text style={styles.gridText}>{t('pay_exact')}</Text>
           <Text style={styles.gridSub}>{rp(remaining)}</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -413,7 +559,7 @@ export default function PayScreen({ navigation, route }: Props) {
             setCustomMode(true);
             setCashSel(null);
           }}>
-          <Text style={styles.gridText}>Jumlah lain ›</Text>
+          <Text style={styles.gridText}>{t('pay_other')} ›</Text>
         </TouchableOpacity>
         {nominals.map((v) => (
           <TouchableOpacity
@@ -430,7 +576,7 @@ export default function PayScreen({ navigation, route }: Props) {
 
       {customMode && (
         <View style={styles.customRow}>
-          <Text style={styles.fieldLabel}>Pembayaran jumlah lain</Text>
+          <Text style={styles.fieldLabel}>{t('pay_other_label')}</Text>
           <TextInput
             style={styles.input}
             keyboardType="numeric"
@@ -446,13 +592,16 @@ export default function PayScreen({ navigation, route }: Props) {
         <View style={styles.changeBox}>
           <Text style={styles.changeText}>
             {cashLanjutReady
-              ? `Kembalian ${rp(cashChange)} • Diterima ${rp(tendered)}`
-              : `Kurang ${rp(Math.max(0, payable - paid - tendered))} • Diterima ${rp(tendered)}`}
+              ? t('pay_change_is').replace('{c}', rp(cashChange)).replace('{t}', rp(tendered))
+              : t('pay_short_is').replace('{k}', rp(Math.max(0, payable - paid - tendered))).replace('{t}', rp(tendered))}
           </Text>
         </View>
       )}
+      {tendered > remaining && remaining > 0 && (
+        <Text style={styles.clampNote}>{t('pay_clamped').replace('{s}', rp(remaining))}</Text>
+      )}
       {!cashLanjutReady && tendered === 0 && (
-        <Text style={styles.ctaHint}>Pilih nominal di atas untuk melanjutkan pembayaran.</Text>
+        <Text style={styles.ctaHint}>{t('pay_pick_nominal')}</Text>
       )}
       {renderSplits()}
 
@@ -467,7 +616,7 @@ export default function PayScreen({ navigation, route }: Props) {
           style={[styles.tambahBtn, !cashTambahReady && styles.tambahBtnDisabled]}
           disabled={!cashTambahReady}
           onPress={onCashTambah}>
-          <Text style={styles.tambahText}>+ Tambah</Text>
+          <Text style={styles.tambahText}>{t('pay_add')}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -477,7 +626,7 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const renderNonTunai = () => (
     <View>
-      <Text style={styles.panelTitle}>Kartu debit/kredit via mesin EDC</Text>
+      <Text style={styles.panelTitle}>{t('pay_card_title')}</Text>
       <View style={styles.pills} accessibilityRole="radiogroup">
         {CARDS.map((c) => {
           const active = card === c.id;
@@ -498,23 +647,23 @@ export default function PayScreen({ navigation, route }: Props) {
       </View>
 
       <View style={styles.edcInfo}>
-        <Text style={styles.edcInfoTitle}>{cardName} • {rp(remaining)}</Text>
+        <Text style={styles.edcInfoTitle}>{cardName} - {rp(remaining)}</Text>
         <Text style={styles.edcInfoSub}>
-          Gesek/tap kartu di mesin EDC, lalu masukkan 6 digit kode persetujuan dari struk EDC di bawah.
+          {t('pay_card_info')}
         </Text>
       </View>
 
-      <Text style={styles.fieldLabel}>Nominal terkunci ({rp(remaining)})</Text>
+      <Text style={styles.fieldLabel}>{t('pay_locked').replace('{t}', rp(remaining))}</Text>
       <View style={styles.lockedAmount}>
         <Text style={styles.lockedAmountText}>{rp(remaining)}</Text>
-        <Text style={styles.lockedBadge}>Terkunci</Text>
+        <Text style={styles.lockedBadge}>{t('pay_locked_badge')}</Text>
       </View>
 
-      <Text style={styles.fieldLabel}>Kode persetujuan EDC (6 digit) *</Text>
+      <Text style={styles.fieldLabel}>{t('pay_approval')}</Text>
       <TextInput
         style={styles.input}
         keyboardType="numeric"
-        placeholder="Contoh: 482913"
+        placeholder={t('pay_approval_ph')}
         placeholderTextColor={colors.faint}
         value={edcCode}
         onChangeText={(t) => setEdcCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
@@ -528,23 +677,33 @@ export default function PayScreen({ navigation, route }: Props) {
           style={[styles.lanjutBtn, styles.lanjutBtnPrimary, edcCode.length !== 6 && styles.btnDisabled]}
           disabled={edcCode.length !== 6}
           onPress={onCardLanjut}>
-          <Text style={styles.lanjutTextPrimary}>Bayar {rp(remaining)} ›</Text>
+          <Text style={styles.lanjutTextPrimary}>{t('pay_cash_pay').replace('{t}', rp(remaining))} ›</Text>
         </TouchableOpacity>
       </View>
       {edcCode.length !== 6 && (
-        <Text style={styles.ctaHint}>Masukkan 6 digit kode dari struk EDC untuk mengaktifkan tombol bayar.</Text>
+        <Text style={styles.ctaHint}>{t('pay_need_approval')}</Text>
       )}
       <TouchableOpacity
         style={styles.edcLink}
-        onPress={() => navigation?.navigate('Edc', { total: remaining > 0 ? remaining : payable })}>
-        <Text style={styles.edcLinkText}>Buka panduan mesin EDC ›</Text>
+        onPress={() => navigation?.navigate('Edc', {
+          total: remaining > 0 ? remaining : payable,
+          items: route?.params?.items,
+          discount: voucherApplied,
+          ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
+          ...(orderMode ? { mode: orderMode } : {}),
+          ...(tableNo ? { table: tableNo } : {}),
+          ...(ongkir > 0 ? { ongkir } : {}),
+          ...(customerName ? { customer: customerName } : {}),
+          ...(memberIdParam ? { memberId: memberIdParam } : {}),
+        })}>
+        <Text style={styles.edcLinkText}>{t('pay_edc_guide')} ›</Text>
       </TouchableOpacity>
     </View>
   );
 
   const renderOnline = () => (
     <View>
-      <Text style={styles.panelTitle}>Dompet digital & QRIS</Text>
+      <Text style={styles.panelTitle}>{t('pay_online_title')}</Text>
       <View style={styles.grid}>
         {WALLETS.map((w) => {
           const active = wallet === w.id;
@@ -567,21 +726,21 @@ export default function PayScreen({ navigation, route }: Props) {
         })}
       </View>
       {!wallet && (
-        <Text style={styles.ctaHint}>Pilih salah satu dompet digital di atas untuk melanjutkan.</Text>
+        <Text style={styles.ctaHint}>{t('pay_pick_wallet')}</Text>
       )}
 
       {wallet === 'ovo' && (
         <View style={styles.customRow}>
-          <Text style={styles.fieldLabel}>Nomor OVO pelanggan *</Text>
+          <Text style={styles.fieldLabel}>{t('pay_ovo_label')}</Text>
           <TextInput
             style={styles.input}
             keyboardType="phone-pad"
-            placeholder="Contoh: 0812xxxxxxx"
+            placeholder={t('pay_ovo_ph')}
             placeholderTextColor={colors.faint}
             value={ovoPhone}
             onChangeText={(t) => setOvoPhone(t.replace(/[^0-9]/g, '').slice(0, 14))}
           />
-          <Text style={styles.ctaHint}>Notifikasi tagihan dikirim ke nomor ini — pelanggan setujui di aplikasi OVO.</Text>
+          <Text style={styles.ctaHint}>{t('pay_ovo_hint')}</Text>
         </View>
       )}
 
@@ -593,7 +752,7 @@ export default function PayScreen({ navigation, route }: Props) {
           disabled={!wallet || !ovoPhoneOk}
           onPress={onOnlineLanjut}>
           <Text style={styles.lanjutTextPrimary}>
-            {wallet ? `Bayar ${rp(remaining)} via ${WALLET_LABEL[wallet] ?? wallet} ›` : `Pilih metode • ${rp(remaining)}`}
+            {wallet ? `${t('pay_via').replace('{t}', rp(remaining)).replace('{w}', WALLET_LABEL[wallet] ?? wallet)} ›` : t('pay_pick_method').replace('{t}', rp(remaining))}
           </Text>
         </TouchableOpacity>
       </View>
@@ -602,10 +761,10 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const renderMember = () => (
     <View>
-      <Text style={styles.panelTitle}>Potong saldo deposit member</Text>
+      <Text style={styles.panelTitle}>{t('pay_dep_title')}</Text>
       <TextInput
         style={styles.input}
-        placeholder="Cari nama / ID member"
+        placeholder={t('pay_dep_search')}
         placeholderTextColor={colors.faint}
         value={memberQ}
         onChangeText={setMemberQ}
@@ -629,13 +788,13 @@ export default function PayScreen({ navigation, route }: Props) {
           );
         })}
         {memberHits.length === 0 && (
-          <Text style={styles.ctaHint}>Member tidak ditemukan — tambah via layar Member.</Text>
+          <Text style={styles.ctaHint}>{t('pay_dep_empty')}</Text>
         )}
       </View>
       <TouchableOpacity
         style={styles.memberLink}
         onPress={() => navigation?.navigate('Member')}>
-        <Text style={styles.edcLinkText}>Cari / tambah member ›</Text>
+        <Text style={styles.edcLinkText}>{t('pay_dep_find')} ›</Text>
       </TouchableOpacity>
       {renderSplits()}
       <View style={styles.footerSingle}>
@@ -645,20 +804,20 @@ export default function PayScreen({ navigation, route }: Props) {
           onPress={onDepositLanjut}>
           <Text style={styles.lanjutTextPrimary}>
             {memberPicked
-              ? `Potong ${rp(Math.min(memberPicked.saldo, remaining))} dari ${memberPicked.nama} ›`
-              : `Pilih member • ${rp(remaining)}`}
+              ? `${t('pay_dep_use').replace('{t}', rp(Math.min(memberPicked.saldo, remaining))).replace('{n}', memberPicked.nama)} ›`
+              : t('pay_dep_pick').replace('{t}', rp(remaining))}
           </Text>
         </TouchableOpacity>
       </View>
       {memberPicked && memberPicked.saldo < remaining && (
-        <Text style={styles.ctaHint}>Saldo kurang — sisanya bisa dibayar tunai/non-tunai (split).</Text>
+        <Text style={styles.ctaHint}>{t('pay_dep_short')}</Text>
       )}
     </View>
   );
 
   const renderLainnya = () => (
     <View>
-      <Text style={styles.panelTitle}>Pluxee, Ultra voucher & tender lainnya</Text>
+      <Text style={styles.panelTitle}>{t('pay_tender_title')}</Text>
       <View style={styles.pills}>
         {(['Pluxee', 'Ultra', 'Lainnya'] as const).map((k) => (
           <TouchableOpacity
@@ -669,16 +828,16 @@ export default function PayScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.fieldLabel}>Kode voucher {tenderKind} *</Text>
+      <Text style={styles.fieldLabel}>{t('pay_tender_code').replace('{k}', tenderKind)} *</Text>
       <TextInput
         style={styles.input}
-        placeholder="Contoh: PLX-882031"
+        placeholder={t('pay_tender_code_ph')}
         placeholderTextColor={colors.faint}
         value={tenderCode}
         onChangeText={(t) => setTenderCode(t.toUpperCase())}
         autoCapitalize="characters"
       />
-      <Text style={styles.fieldLabel}>Nominal dipakai *</Text>
+      <Text style={styles.fieldLabel}>{t('pay_tender_amt')}</Text>
       <TextInput
         style={styles.input}
         keyboardType="numeric"
@@ -688,21 +847,25 @@ export default function PayScreen({ navigation, route }: Props) {
         onChangeText={setTenderAmt}
       />
       {renderSplits()}
+      {tenderMsg ? <Text style={styles.ctaHint}>{tenderMsg}</Text> : null}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.lanjutBtn, styles.lanjutBtnPrimary, !tenderReady && styles.btnDisabled]}
           disabled={!tenderReady}
-          onPress={onTenderLunas}>
-          <Text style={styles.lanjutTextPrimary}>Bayar {rp(Math.min(tenderNum, remaining))} ›</Text>
+          onPress={() => void onTenderLunas()}>
+          <Text style={styles.lanjutTextPrimary}>{tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tambahBtn, !tenderReady && styles.tambahBtnDisabled]}
           disabled={!tenderReady}
-          onPress={onTenderTambah}>
-          <Text style={styles.tambahText}>+ Tambah</Text>
+          onPress={() => void onTenderTambah()}>
+          <Text style={styles.tambahText}>{t('pay_add')}</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.ctaHint}>Kode dikunci saat dipakai dan dibakar (burn) setelah lunas.</Text>
+      <Text style={styles.ctaHint}>{t('pay_tender_burn')}</Text>
+      {tenderNum > remaining && remaining > 0 && (
+        <Text style={styles.clampNote}>{t('pay_clamped').replace('{s}', rp(remaining))}</Text>
+      )}
     </View>
   );
 
@@ -722,13 +885,14 @@ export default function PayScreen({ navigation, route }: Props) {
     return (
       <View style={styles.tabletSplit}>
         <View style={styles.sidebar}>
-          {SIDEBAR.map((s) => {
-            const active = tab === s.id;
+          {SIDEBAR_IDS.map((id) => {
+            const active = tab === id;
+            const s = sideText(id);
             return (
               <TouchableOpacity
-                key={s.id}
+                key={id}
                 style={[styles.sideBtn, active && styles.sideBtnActive]}
-                onPress={() => setTab(s.id)}
+                onPress={() => setTab(id)}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: active }}>
                 <Text style={[styles.sideTitle, active && styles.sideTitleActive]}>{s.title}</Text>
@@ -754,7 +918,7 @@ export default function PayScreen({ navigation, route }: Props) {
       <ScrollView contentContainerStyle={styles.body}>
         {renderBanner()}
         {renderBody()}
-        <ExtraPaySection onDone={(label) => goSuccess(label, payable, 0)} />
+        <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
       </ScrollView>
     </View>
   );
@@ -762,28 +926,6 @@ export default function PayScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  back: { color: colors.white, fontFamily: fonts.medium, fontSize: 22, marginRight: 10 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerTitle: { color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
-  dateChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  dateChipText: { color: colors.white, fontFamily: fonts.medium, fontSize: 12 },
   onlineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -867,6 +1009,7 @@ const styles = StyleSheet.create({
   },
   voucherBtnText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.white },
   tabsScroll: { marginTop: 12 },
+  tabsContent: { paddingRight: 16, flexGrow: 0 },
   tabs: { flexDirection: 'row', gap: 8, paddingRight: 12 },
   tab: {
     backgroundColor: colors.card,
@@ -877,6 +1020,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   tabActive: { backgroundColor: colors.orange, borderColor: colors.orange },
   tabText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.muted, textAlign: 'center' },
@@ -902,7 +1046,8 @@ const styles = StyleSheet.create({
   gridText: { fontFamily: fonts.medium, fontSize: 14, color: colors.muted },
   gridSub: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 2 },
   customRow: { marginTop: 10 },
-  fieldLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginBottom: 5 },
+  fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: 5 },
+  clampNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.amberDark, marginTop: 6, textAlign: 'center' },
   changeBox: {
     backgroundColor: colors.paleGreen,
     borderWidth: 1,
@@ -993,7 +1138,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.card,
   },
-  checkActive: { borderColor: colors.white, backgroundColor: 'rgba(255,255,255,0.25)' },
+  checkActive: { borderColor: colors.white, backgroundColor: colors.orangeDark },
   checkMark: { color: colors.white, fontSize: 10, fontFamily: fonts.bold, lineHeight: 12 },
   pillText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted },
   pillTextActive: { color: colors.white },
@@ -1037,7 +1182,7 @@ const styles = StyleSheet.create({
   tabletSplit: { flexDirection: 'row', gap: 12, marginTop: 12, alignItems: 'flex-start' },
   sidebar: { width: 220, backgroundColor: colors.navy, borderRadius: 12, padding: 10, gap: 10 },
   sideBtn: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.navyDark,
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 12,
@@ -1049,7 +1194,7 @@ const styles = StyleSheet.create({
   sideSub: {
     fontFamily: fonts.regular,
     fontSize: 10,
-    color: 'rgba(255,255,255,0.75)',
+    color: colors.navyTint,
     textAlign: 'center',
     marginTop: 4,
   },

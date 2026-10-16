@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { fonts, wideCenterSm } from '../../theme';
+import { useLang } from '../../lib/i18n';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -16,13 +17,14 @@ const GREY = '#757575';
 const DIVIDER = '#D8D8D8';
 
 /**
- * Layar "Cara mendapatkan QR" — panduan 4 langkah + banner + thumbnail video
+ * Layar "Cara mendapatkan QR" - panduan 4 langkah + banner + thumbnail video
  * sesuai capture asli login-qr-how(1-4).png. Video belum bisa diputar offline
  * (butuh stream dari backend), jadi thumbnail tampil statis + penanda jelas.
  */
 export default function QrHowScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
 
   const goBack = () => {
     if (navigation?.goBack) navigation.goBack();
@@ -34,7 +36,7 @@ export default function QrHowScreen({ navigation }: Props) {
         <TouchableOpacity onPress={goBack} hitSlop={12}>
           <Text style={styles.headerBack}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Cara mendapatkan QR</Text>
+        <Text style={styles.headerTitle}>{t('g_qrhow_title')}</Text>
         <View style={styles.headerSpacer} />
       </View>
       <ScrollView
@@ -54,13 +56,13 @@ export default function QrHowScreen({ navigation }: Props) {
           body={(
             <>
               <Text style={styles.stepLead}>
-                Silakan kunjungi website ESB Core <Text style={styles.link}>erp.esb.co.id</Text>
+                {t('g_qrhow_visit')} <Text style={styles.link}>erp.esb.co.id</Text>
               </Text>
               <Bullet>
-                <Text style={styles.stepText}>Masukkan <Text style={styles.em}>Username</Text> dan <Text style={styles.em}>Password</Text> Anda,</Text>
+                <Text style={styles.stepText}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text> {t('g_qrhow_and')} <Text style={styles.em}>{t('g_qrhow_password')}</Text> {t('g_qrhow_yours')}</Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>Dan klik <Text style={styles.em}>Sign In</Text></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_then_click')} <Text style={styles.em}>{t('g_qrhow_signin')}</Text></Text>
               </Bullet>
             </>
           )}
@@ -71,12 +73,12 @@ export default function QrHowScreen({ navigation }: Props) {
           thumb={require('../../../assets/images/get_qr_thumbnail_2.webp')}
           body={(
             <>
-              <Text style={styles.stepLead}>Setelah masuk halaman akun :</Text>
+              <Text style={styles.stepLead}>{t('g_qrhow_s2_lead')}</Text>
               <Bullet>
-                <Text style={styles.stepText}>Klik <Text style={styles.em}>Menu Burger</Text> <BurgerGlyph /></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_burger')}</Text> <BurgerGlyph /></Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>Klik menu <Text style={styles.em}>Master</Text></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_tap_menu')} <Text style={styles.em}>{t('g_qrhow_master')}</Text></Text>
               </Bullet>
             </>
           )}
@@ -87,12 +89,12 @@ export default function QrHowScreen({ navigation }: Props) {
           thumb={require('../../../assets/images/get_qr_thumbnail_3.webp')}
           body={(
             <>
-              <Text style={styles.stepLead}>Akan muncul halaman Master Data</Text>
+              <Text style={styles.stepLead}>{t('g_qrhow_s3_lead')}</Text>
               <Bullet>
-                <Text style={styles.stepText}>Klik <Text style={styles.em}>Master Branch</Text></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
               </Bullet>
               <View style={styles.masterPill}>
-                <Text style={styles.masterPillT}>Master Branch</Text>
+                <Text style={styles.masterPillT}>{t('g_qrhow_master_branch')}</Text>
               </View>
             </>
           )}
@@ -104,12 +106,12 @@ export default function QrHowScreen({ navigation }: Props) {
           last
           body={(
             <>
-              <Text style={styles.stepLead}>Dihalaman <Text style={styles.em}>Master Branch</Text></Text>
+              <Text style={styles.stepLead}>{t('g_qrhow_at_page')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
               <Bullet>
-                <Text style={styles.stepText}>Pilih <Text style={styles.em}>cabang/outlet</Text></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_choose')} <Text style={styles.em}>{t('g_qrhow_branch')}</Text></Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>Klik <Text style={styles.em}>icon QR</Text></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_qr_icon')}</Text></Text>
               </Bullet>
             </>
           )}

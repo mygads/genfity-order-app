@@ -1,42 +1,68 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
+import type { SaleItemIn } from '../../lib/payments';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav; route?: { params?: Record<string, any> } };
-
-const ITEMS = [
-  { name: 'Sudirman Coffee + Creamy Pandan', qty: 1, price: 19900 },
-  { name: 'Lele goreng kremes + Ekstra Sambel', qty: 1, price: 19000 },
-  { name: 'Es Teh Manis', qty: 2, price: 16000 },
-  { name: 'Menu Custom (Nasi + Ayam)', qty: 1, price: 8900 },
-];
-
-const SUBTOTAL = ITEMS.reduce((s, i) => s + i.qty * i.price, 0); // 79800
-const DISCOUNT = 5000;
-const SERVICE = Math.round((SUBTOTAL - DISCOUNT) * 0.05); // 3740
-const TAX_INCL = Math.round(((SUBTOTAL - DISCOUNT) * 10) / 110); // 6800, informatif (sudah termasuk)
-const TOTAL = SUBTOTAL - DISCOUNT + SERVICE; // 78540
+type OrderItemParam = {
+  id?: string; name: string; qty: number;
+  basePrice?: number; price?: number;
+  modifiers?: { name: string; price: number }[]; discount?: number;
+};
+type Props = {
+  navigation?: Nav;
+  route?: {
+    params?: {
+      items?: OrderItemParam[];
+      total?: number; subtotal?: number; discount?: number;
+      voucher?: string | { code: string; amount: number };
+      voucherCode?: string;
+      service?: number; serviceTotal?: number;
+      tax?: number; vatTotal?: number;
+      mode?: string; table?: string; ongkir?: number;
+      customer?: string; memberId?: string;
+    };
+  };
+};
 
 type Mode = 'none' | 'rata' | 'item' | 'nominal';
 
-export default function BillPreviewScreen({ navigation }: Props) {
+const unitPrice = (it: OrderItemParam): number => it.basePrice ?? it.price ?? 0;
+const lineAmount = (it: OrderItemParam): number =>
+  it.qty * unitPrice(it) +
+  (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) -
+  (it.discount ?? 0);
+
+export default function BillPreviewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
+  // Order asli dari params kasir (bukan konstanta hardcode).
+  const p = route?.params ?? {};
+  const orderItems = p.items ?? [];
+  const voucherCode =
+    p.voucherCode ?? (typeof p.voucher === 'string' ? p.voucher : p.voucher?.code) ?? '';
+  const discountVal = p.discount ?? (typeof p.voucher === 'object' ? p.voucher.amount : 0) ?? 0;
+  const ongkirVal = p.ongkir ?? 0;
+  const serviceVal = p.service ?? p.serviceTotal ?? 0;
+  const taxVal = p.tax ?? p.vatTotal ?? 0;
+  const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
+  const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
   const [mode, setMode] = useState<Mode>('none');
   const [splits, setSplitsRaw] = useState(3);
   const [paid, setPaid] = useState<boolean[]>([false, false, false]);
   const [assign, setAssign] = useState<Record<string, number>>(() =>
-    Object.fromEntries(ITEMS.map((it, i) => [it.name, i % 3])),
+    Object.fromEntries(orderItems.map((it, i) => [it.name, i % 3])),
   );
   const [nominals, setNominals] = useState<string[]>(['', '', '']);
-  const total = TOTAL;
 
   const resetSplits = (n: number) => {
     setSplitsRaw(n);
     setPaid(Array(n).fill(false));
     setNominals(Array(n).fill(''));
-    setAssign(Object.fromEntries(ITEMS.map((it, i) => [it.name, i % n])));
+    setAssign(Object.fromEntries(orderItems.map((it, i) => [it.name, i % n])));
   };
 
   const togglePaid = (i: number) => setPaid((p) => p.map((v, j) => (j === i ? !v : v)));
@@ -44,60 +70,101 @@ export default function BillPreviewScreen({ navigation }: Props) {
     setAssign((a) => ({ ...a, [name]: ((a[name] ?? 0) + 1) % splits }));
 
   const splitNames = ['QoQi', 'Bimo', 'Sinta', 'Guest'];
-  const splitVal = Math.round(total / splits);
+  // Bagi rata: sisa rupiah didistribusikan satu per satu ke split awal - jumlah split pas = total.
+  const splitBase = Math.floor(total / splits);
+  const splitRem = total - splitBase * splits;
+  const splitVal = (i: number) => splitBase + (i < splitRem ? 1 : 0);
   const itemTotals = Array(splits).fill(0) as number[];
-  ITEMS.forEach((it) => {
-    itemTotals[assign[it.name] ?? 0] += it.qty * it.price;
+  orderItems.forEach((it) => {
+    itemTotals[assign[it.name] ?? 0] += lineAmount(it);
   });
   const nominalNums = nominals.map((s) => Number(s.replace(/[^0-9]/g, '')) || 0);
   const nominalSum = nominalNums.reduce((s, v) => s + v, 0);
+  const nominalPas = nominalSum === total;
+  const nominalGateOk = (m: Mode) => m !== 'nominal' || nominalPas;
   const paidCount = paid.filter(Boolean).length;
+  // Item siap diteruskan ke rantai Pay > Success > Receipt (bentuk SaleItemIn).
+  const saleItems: SaleItemIn[] = orderItems.map((it) => ({
+    id: it.id ?? it.name,
+    name: it.name,
+    basePrice: unitPrice(it),
+    qty: it.qty,
+    ...(it.modifiers ? { modifiers: it.modifiers } : {}),
+    ...(it.discount ? { discount: it.discount } : {}),
+  }));
+  // Konteks order agar tidak hilang di rantai (Pay teruskan ke Success > Receipt).
+  const orderCtx = {
+    ...(p.mode ? { mode: p.mode } : {}),
+    ...(p.table ? { table: p.table } : {}),
+    ...(ongkirVal > 0 ? { ongkir: ongkirVal } : {}),
+    ...(p.customer ? { customer: p.customer } : {}),
+    ...(p.memberId ? { memberId: p.memberId } : {}),
+  };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <Text style={styles.meta}>TRX hari ini · A-03 · QoQi</Text>
+    <View style={styles.root}>
+      <ScreenHeader
+        title={t('bill_title')}
+        onBack={() => navigation?.goBack()}
+      />
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+        <Text style={styles.meta}>TRX hari ini · A-03 · QoQi</Text>
       <View style={styles.bill}>
         <Text style={styles.shop}>ESB CABANG PORIS</Text>
         <Text style={styles.addr}>Jl. Poris Indah No. 88 · 021-5566-7788</Text>
         <Text style={styles.trx}>TRX-047 · A-03 · Kasir Gista · 12:41</Text>
-        {ITEMS.map((i) => (
+        {orderItems.map((i) => (
           <View key={i.name} style={styles.row}>
             <Text style={styles.item}>{i.qty}× {i.name}</Text>
-            <Text style={styles.price}>{rp(i.qty * i.price)}</Text>
+            <Text style={styles.price}>{rp(lineAmount(i))}</Text>
           </View>
         ))}
-        <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.price}>{rp(SUBTOTAL)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Diskon (QOQI10)</Text><Text style={styles.disc}>-{rp(DISCOUNT)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Pajak PB1 10% (termasuk)</Text><Text style={styles.price}>{rp(TAX_INCL)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Service 5%</Text><Text style={styles.price}>{rp(SERVICE)}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.price}>{rp(subtotalVal)}</Text></View>
+        {discountVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>Diskon{voucherCode ? ` (${voucherCode})` : ''}</Text><Text style={styles.disc}>-{rp(discountVal)}</Text></View>
+        )}
+        {taxVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>Pajak PB1 10% (termasuk)</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
+        )}
+        {serviceVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+        )}
         <View style={styles.totalRow}><Text style={styles.totalL}>TOTAL</Text><Text style={styles.totalV}>{rp(total)}</Text></View>
         <Text style={styles.member}>Member QoQi · GOLD · +79 poin</Text>
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Receipt', {})}>
-          <Text style={styles.ghostT}>Cetak Struk</Text>
+        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Receipt', {
+          total, items: saleItems, discount: discountVal,
+          ...(voucherCode ? { voucherCode } : {}),
+          ...orderCtx,
+        })}>
+          <Text style={styles.ghostT}>{t('ok_print')}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', { total })}>
-          <Text style={styles.primaryT}>Bayar ›</Text>
+        <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', {
+          total, items: saleItems, discount: discountVal,
+          ...(voucherCode ? { voucher: voucherCode } : {}),
+          ...orderCtx,
+        })}>
+          <Text style={styles.primaryT}>{t('bill_pay')} ›</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.sec}>Bagi Bill (Split Bill)</Text>
-      <Text style={styles.hint}>Bagi rata atau per item — tiap split bisa bayar terpisah.</Text>
-      <Text style={styles.label}>Mode bagi</Text>
+      <Text style={styles.sec}>{t('bill_split_sec')}</Text>
+      <Text style={styles.hint}>{t('bill_split_hint')}</Text>
+      <Text style={styles.label}>{t('bill_mode')}</Text>
       <View style={styles.chips}>
-        {([['rata', 'Rata (÷3)'], ['item', 'Per Item'], ['nominal', 'Nominal']] as [Mode, string][]).map(([m, l]) => (
+        {([['rata', t('bill_mode_even').replace('{n}', String(splits))], ['item', t('bill_mode_item')], ['nominal', t('bill_mode_nominal')]] as [Mode, string][]).map(([m, l]) => (
           <TouchableOpacity key={m} style={[styles.chip, mode === m && styles.chipOn]} onPress={() => setMode(mode === m ? 'none' : m)}>
             <Text style={[styles.chipT, mode === m && styles.chipTOn]}>{l}</Text>
           </TouchableOpacity>
         ))}
       </View>
       {mode === 'none' ? (
-        <Text style={styles.empty}>Belum ada split — pilih mode bagi di atas.</Text>
+        <Text style={styles.empty}>{t('bill_nosplit')}</Text>
       ) : (
         <View style={styles.card}>
-          <Text style={styles.label}>Jumlah split</Text>
+          <Text style={styles.label}>{t('bill_count')}</Text>
           <View style={styles.chips}>
             {[2, 3, 4].map((n) => (
               <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn]} onPress={() => resetSplits(n)}>
@@ -106,13 +173,13 @@ export default function BillPreviewScreen({ navigation }: Props) {
             ))}
           </View>
           <Text style={styles.paidBanner}>
-            {paidCount}/{splits} split lunas
+            {t('bill_paid').replace('{p}', String(paidCount)).replace('{s}', String(splits))}
           </Text>
 
           {mode === 'item' && (
             <>
-              <Text style={styles.hint}>Ketuk item untuk memindahkan ke split berikut.</Text>
-              {ITEMS.map((it) => (
+              <Text style={styles.hint}>{t('bill_item_hint')}</Text>
+              {orderItems.map((it) => (
                 <TouchableOpacity key={it.name} style={styles.row} onPress={() => cycleAssign(it.name)}>
                   <Text style={styles.item}>{it.qty}× {it.name}</Text>
                   <Text style={styles.splitBadge}>Split #{(assign[it.name] ?? 0) + 1} ›</Text>
@@ -123,69 +190,80 @@ export default function BillPreviewScreen({ navigation }: Props) {
 
           {mode === 'nominal' && (
             <>
-              <Text style={styles.hint}>Isi nominal tiap split — total harus pas {rp(total)}.</Text>
+              <Text style={styles.hint}>{t('bill_nom_hint').replace('{t}', rp(total))}</Text>
               {splitNames.slice(0, splits).map((n, i) => (
                 <View key={n} style={styles.nomRow}>
-                  <Text style={styles.item}>Split #{i + 1} · {n}</Text>
+                  <Text style={styles.item}>{t('bill_split_of').replace('{i}', String(i + 1)).replace('{n}', n)}</Text>
                   <TextInput
                     style={styles.nomInput}
                     value={nominals[i]}
                     onChangeText={(v) =>
                       setNominals((arr) => arr.map((x, j) => (j === i ? v : x)))
                     }
-                    placeholder="Rp 0"
+                    placeholder={rp(0)}
                     placeholderTextColor={colors.faint}
                     keyboardType="numeric"
                   />
                 </View>
               ))}
               <View style={styles.row}>
-                <Text style={styles.item}>Sisa belum dibagi</Text>
-                <Text style={[styles.price, nominalSum > total && styles.over]}>
-                  {rp(total - nominalSum)}
+                <Text style={styles.item}>{t('bill_remain')}</Text>
+                <Text style={[styles.price, !nominalPas && styles.over]}>
+                  {nominalPas
+                    ? t('bill_pas')
+                    : nominalSum > total
+                      ? t('bill_over').replace('{k}', rp(nominalSum - total))
+                      : t('bill_short').replace('{k}', rp(total - nominalSum))}
                 </Text>
               </View>
+              {mode === 'nominal' && !nominalPas && (
+                <Text style={styles.gateMsg}>{t('bill_gate')}</Text>
+              )}
             </>
           )}
 
           {splitNames.slice(0, splits).map((n, i) => {
-            const val = mode === 'item' ? itemTotals[i] : mode === 'nominal' ? nominalNums[i] : splitVal;
+            const val = mode === 'item' ? itemTotals[i] : mode === 'nominal' ? nominalNums[i] : splitVal(i);
             return (
               <View key={n} style={styles.splitRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.item}>Split #{i + 1} · {n}</Text>
-                  <Text style={paid[i] ? styles.lunas : styles.price}>{paid[i] ? '✓ Lunas' : rp(val)}</Text>
+                  <Text style={styles.item}>{t('bill_split_of').replace('{i}', String(i + 1)).replace('{n}', n)}</Text>
+                  <Text style={paid[i] ? styles.lunas : styles.price}>{paid[i] ? t('bill_lunas') : rp(val)}</Text>
                 </View>
                 {!paid[i] && (
                   <TouchableOpacity
-                    style={styles.payBtn}
-                    disabled={val <= 0}
-                    onPress={() => navigation?.navigate('Pay', { total: val })}>
-                    <Text style={styles.payBtnT}>Bayar ›</Text>
+                    style={[styles.payBtn, !nominalGateOk(mode) && styles.payBtnOff]}
+                    disabled={val <= 0 || !nominalGateOk(mode)}
+                    // Split parsial: total split sudah neto (termasuk diskon),
+                    // jadi teruskan konteks tanpa diskon/voucher ganda.
+                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx })}>
+                    <Text style={styles.payBtnT}>{t('bill_pay')} ›</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity onPress={() => togglePaid(i)} hitSlop={10} style={styles.lunasBtn}>
-                  <Text style={styles.lunasT}>{paid[i] ? 'Batalkan' : 'Tandai Lunas'}</Text>
+                  <Text style={styles.lunasT}>{paid[i] ? t('bill_unmark') : t('bill_mark')}</Text>
                 </TouchableOpacity>
               </View>
             );
           })}
           <TouchableOpacity style={styles.ghost} onPress={() => setMode('none')}>
-            <Text style={styles.ghostT}>Batalkan Split</Text>
+            <Text style={styles.ghostT}>{t('bill_cancel_split')}</Text>
           </TouchableOpacity>
         </View>
       )}
 
       <View style={styles.links}>
-        <TouchableOpacity onPress={() => navigation?.navigate('Cancel')}><Text style={styles.link}>Butuh void? → Pembatalan</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>Pelanggan</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Cancel')}><Text style={styles.link}>{t('bill_void')}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>{t('bill_customer')}</Text></TouchableOpacity>
       </View>
     </ScrollView>
+  </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 16, paddingBottom: 40 },
   meta: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   bill: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginTop: 10, borderWidth: 1, borderColor: colors.line },
@@ -207,7 +285,7 @@ const styles = StyleSheet.create({
   ghostT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
   sec: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginTop: 20 },
   hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
-  label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 10, marginBottom: 6 },
+  label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 6 },
   chips: { flexDirection: 'row', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
@@ -226,7 +304,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   payBtn: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  payBtnOff: { opacity: 0.45 },
   payBtnT: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },
   lunasBtn: { paddingVertical: 8, paddingLeft: 4 },
   lunasT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
   lunas: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },
@@ -237,7 +317,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 8,
-    padding: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.text,

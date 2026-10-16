@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Image,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,9 +12,18 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import DrawerMenu from '../../components/DrawerMenu';
+import { ApiPath, apiPost } from '../../config/server';
+import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useLang } from '../../lib/i18n';
+import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
+type Props = {
+  navigation?: Nav;
+  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number } };
+};
 
 type Member = {
   id: string;
@@ -24,7 +34,7 @@ type Member = {
   poin: number;
 };
 
-type Riwayat = { id: string; tanggal: string; keterangan: string; nominal: string };
+type Riwayat = { id: string; tanggal: string; keterangan: string; nominal?: number; poin?: number };
 
 const DUMMY: Member[] = [
   { id: 'M001', nama: 'Budi Santoso', noHp: '081234567890', tipe: 'Regular', saldo: 150000, poin: 120 },
@@ -32,38 +42,105 @@ const DUMMY: Member[] = [
   { id: 'M003', nama: 'Andi Pratama', noHp: '082112233445', tipe: 'Regular', saldo: 0, poin: 30 },
 ];
 
-/** Riwayat mock per member: deposit, transaksi, tukar poin. */
-const RIWAYAT: Record<string, Riwayat[]> = {
+/** Riwayat awal per member: nominal angka (rp()) bukan string hardcode. */
+const SEED_RIWAYAT: Record<string, Riwayat[]> = {
   M001: [
-    { id: 'r1', tanggal: '14 Okt 2026', keterangan: 'Top up deposit (Tunai)', nominal: '+Rp 100.000' },
-    { id: 'r2', tanggal: '12 Okt 2026', keterangan: 'Bayar TRX-041 (Deposit)', nominal: '−Rp 86.400' },
-    { id: 'r3', tanggal: '10 Okt 2026', keterangan: 'Poin dari TRX-038', nominal: '+86 poin' },
+    { id: 'r1', tanggal: '14 Okt 2026', keterangan: 'Top up deposit (Tunai)', nominal: 100000 },
+    { id: 'r2', tanggal: '12 Okt 2026', keterangan: 'Bayar TRX-041 (Deposit)', nominal: -86400 },
+    { id: 'r3', tanggal: '10 Okt 2026', keterangan: 'Poin dari TRX-038', poin: 86 },
   ],
   M002: [
-    { id: 'r1', tanggal: '15 Okt 2026', keterangan: 'Top up deposit (QRIS)', nominal: '+Rp 500.000' },
-    { id: 'r2', tanggal: '13 Okt 2026', keterangan: 'Bayar TRX-040 (Deposit)', nominal: '−Rp 124.000' },
+    { id: 'r1', tanggal: '15 Okt 2026', keterangan: 'Top up deposit (QRIS)', nominal: 500000 },
+    { id: 'r2', tanggal: '13 Okt 2026', keterangan: 'Bayar TRX-040 (Deposit)', nominal: -124000 },
   ],
   M003: [
-    { id: 'r1', tanggal: '11 Okt 2026', keterangan: 'Poin dari TRX-035', nominal: '+30 poin' },
+    { id: 'r1', tanggal: '11 Okt 2026', keterangan: 'Poin dari TRX-035', poin: 30 },
   ],
 };
 
-/** Samarkan nomor HP di daftar: 0812•••7890 (privasi kasir). */
+/** Deposit cepat minimal Rp 10.000 - sama dengan layar Top Up Deposit. */
+const MIN_TOPUP = 10000;
+
+/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
+const RP_PREFIX = rp(0).replace(/\d/g, '').trim();
+
+function todayStr(): string {
+  try {
+    return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+/** Samarkan nomor HP di daftar: 0812---7890 (privasi kasir). */
 function maskHp(hp: string): string {
   const d = hp.replace(/[^0-9]/g, '');
   if (d.length < 7) return hp;
-  return `${d.slice(0, 4)}•••${d.slice(-4)}`;
+  return `${d.slice(0, 4)}---${d.slice(-4)}`;
 }
 
-export default function MemberScreen({ navigation }: Props) {
+/** Deposit member: coba server dulu, selalu catat ke outbox + antrean sync. */
+async function persistDeposit(memberId: string, amount: number, via: string): Promise<void> {
+  try {
+    await enqueueOutbox('ms_member', memberId, 'update');
+  } catch {
+    /* abaikan */
+  }
+  try {
+    enqueueSync('other', { kind: 'member-deposit', memberId, amount, via });
+  } catch {
+    /* abaikan */
+  }
+  try {
+    await apiPost(ApiPath.depositInquiry, { memberId, amount, via });
+  } catch {
+    /* offline - terkirim via push berikutnya */
+  }
+}
+
+export default function MemberScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { lang, setLang, t } = useLang();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [members, setMembers] = useState<Member[]>(DUMMY);
+  const [riwayat, setRiwayat] = useState<Record<string, Riwayat[]>>(SEED_RIWAYAT);
   const [selected, setSelected] = useState<Member | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [depositVisible, setDepositVisible] = useState(false);
   const [depositNominal, setDepositNominal] = useState('');
+  const [depositErr, setDepositErr] = useState('');
+
+  // Riwayat member diambil dari server - guard online; offline tampilkan cache lokal.
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    if (!selected) return;
+    let live = true;
+    Network.getNetworkStateAsync()
+      .then((ns) => { if (live) setOnline(ns.isConnected ?? true); })
+      .catch(() => { if (live) setOnline(true); });
+    return () => { live = false; };
+  }, [selected]);
+
+  /** Terima saldo baru dari layar Top Up Deposit: saldo + riwayat ikut bertambah. */
+  useEffect(() => {
+    const mid = route?.params?.memberId;
+    const baru = route?.params?.saldoBaru;
+    const topup = route?.params?.topupNominal;
+    if (!mid || typeof baru !== 'number') return;
+    setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, saldo: baru } : m)));
+    setSelected((sb) => (sb && sb.id === mid ? { ...sb, saldo: baru } : sb));
+    setRiwayat((rw) => ({
+      ...rw,
+      [mid]: [
+        // Riwayat mencatat nominal top up-nya, bukan saldo akhir.
+        { id: `r-${Date.now()}`, tanggal: todayStr(), keterangan: 'Top up deposit (Top Up)', nominal: typeof topup === 'number' ? topup : baru },
+        ...(rw[mid] ?? []),
+      ],
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Form tambah member
   const [nama, setNama] = useState('');
@@ -84,6 +161,7 @@ export default function MemberScreen({ navigation }: Props) {
     if (nama.trim() && noHp.trim()) {
       const id = `M${String(members.length + 1).padStart(3, '0')}`;
       setMembers((ms) => [...ms, { id, nama: nama.trim(), noHp: noHp.trim(), tipe: 'Regular', saldo: 0, poin: 0 }]);
+      setRiwayat((rw) => ({ ...rw, [id]: [] }));
     }
     setAddVisible(false);
     setNama('');
@@ -93,17 +171,35 @@ export default function MemberScreen({ navigation }: Props) {
 
   const saveDeposit = () => {
     const n = Number(depositNominal) || 0;
-    if (selected && n > 0) {
-      const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
-      setMembers((ms) =>
-        ms.map((m) =>
-          m.id === selected.id ? { ...m, saldo: m.saldo + n, poin: m.poin + poin } : m,
-        ),
-      );
-      setSelected((s) =>
-        s ? { ...s, saldo: s.saldo + n, poin: s.poin + poin } : s,
-      );
+    if (!selected) {
+      setDepositVisible(false);
+      setDepositNominal('');
+      setDepositErr('');
+      return;
     }
+    // Deposit cepat menolak nominal di bawah MIN_TOPUP dengan pesan.
+    if (n < MIN_TOPUP) {
+      setDepositErr(t('top_hint'));
+      return;
+    }
+    setDepositErr('');
+    const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
+    void persistDeposit(selected.id, n, 'cepat');
+    setMembers((ms) =>
+      ms.map((m) =>
+        m.id === selected.id ? { ...m, saldo: m.saldo + n, poin: m.poin + poin } : m,
+      ),
+    );
+    setSelected((sb) =>
+      sb ? { ...sb, saldo: sb.saldo + n, poin: sb.poin + poin } : sb,
+    );
+    setRiwayat((rw) => ({
+      ...rw,
+      [selected.id]: [
+        { id: `r-${Date.now()}`, tanggal: todayStr(), keterangan: 'Top up deposit (Cepat)', nominal: n },
+        ...(rw[selected.id] ?? []),
+      ],
+    }));
     setDepositVisible(false);
     setDepositNominal('');
   };
@@ -111,21 +207,28 @@ export default function MemberScreen({ navigation }: Props) {
   const goTopup = () => {
     if (!selected) return;
     setDepositVisible(false);
+    setDepositErr('');
     navigation?.navigate('TopupDeposit', { memberId: selected.id, nama: selected.nama, saldo: selected.saldo });
+  };
+
+  /** Terapkan member ke pembayaran: agen Pay membaca params opsional memberId. */
+  const applyMember = () => {
+    if (!selected) return;
+    navigation?.navigate('Pay', { memberId: selected.id });
   };
 
   const list = (
     <ScrollView contentContainerStyle={s.body}>
       <Text style={s.count}>
-        {hasil.length} member terdaftar{q.trim() ? ` · hasil “${q.trim()}”` : ''}
+        {hasil.length} {t('mem_registered')}{q.trim() ? ` - hasil "${q.trim()}"` : ''}
       </Text>
       {hasil.length === 0 ? (
         <View style={s.empty}>
           <Image source={require('../../../assets/images/member_not_found.webp')} style={s.emptyImg} resizeMode="contain" />
-          <Text style={s.emptyTitle}>Maaf, Member Tidak Terdeteksi</Text>
-          <Text style={s.emptySub}>Coba kata kunci lain atau tambah member baru</Text>
+          <Text style={s.emptyTitle}>{t('mem_not_found')}</Text>
+          <Text style={s.emptySub}>{t('mem_not_found_sub')}</Text>
           <TouchableOpacity style={s.primaryBtn} onPress={() => setAddVisible(true)}>
-            <Text style={s.primaryTxt}>Tambah Member Baru</Text>
+            <Text style={s.primaryTxt}>{t('mem_add_new')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -141,14 +244,14 @@ export default function MemberScreen({ navigation }: Props) {
               <View style={s.cardInfo}>
                 <Text style={s.cardName}>{m.nama}</Text>
                 <Text style={s.cardMeta}>
-                  {m.id} • {maskHp(m.noHp)}
+                  {m.id} - {maskHp(m.noHp)}
                 </Text>
                 <Text style={[s.cardTipe, m.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>{m.tipe} Member{m.tipe === 'Gold' ? ' ★' : ''}</Text>
               </View>
             </View>
             <View style={s.cardBottom}>
-              <Text style={s.saldoTxt}>Saldo {rp(m.saldo)}</Text>
-              <Text style={s.poinTxt}>{m.poin} poin</Text>
+              <Text style={s.saldoTxt}>{t('mem_balance')} {rp(m.saldo)}</Text>
+              <Text style={s.poinTxt}>{m.poin} {t('mem_points')}</Text>
             </View>
           </TouchableOpacity>
         ))
@@ -164,52 +267,59 @@ export default function MemberScreen({ navigation }: Props) {
             <Image source={require('../../../assets/images/member_card.webp')} style={s.memberCardImg} resizeMode="cover" />
             <View style={s.memberCardOverlay}>
               <Text style={s.memberCardName}>{selected.nama}</Text>
-              <Text style={s.memberCardId}>{selected.id} • {selected.tipe}</Text>
+              <Text style={s.memberCardId}>{selected.id} - {selected.tipe}</Text>
               <Text style={s.memberCardSaldo}>{rp(selected.saldo)}</Text>
-              <Text style={s.memberCardPoin}>{selected.poin} poin</Text>
+              <Text style={s.memberCardPoin}>{selected.poin} {t('mem_points')}</Text>
             </View>
           </View>
           <Text style={s.detailMeta}>
-            {selected.id} • {maskHp(selected.noHp)}
+            {selected.id} - {maskHp(selected.noHp)}
           </Text>
           <View style={s.detailStats}>
             <View style={s.detailStat}>
-              <Text style={s.detailStatLabel}>Saldo Deposit</Text>
+              <Text style={s.detailStatLabel}>{t('mem_balance')}</Text>
               <Text style={s.detailStatValue}>{rp(selected.saldo)}</Text>
             </View>
             <View style={s.detailStat}>
-              <Text style={s.detailStatLabel}>Poin</Text>
-              <Text style={s.detailStatValue}>{selected.poin} poin</Text>
+              <Text style={s.detailStatLabel}>{t('mem_points')}</Text>
+              <Text style={s.detailStatValue}>{selected.poin} {t('mem_points')}</Text>
             </View>
           </View>
-          <Text style={s.riwayatTitle}>Riwayat Member</Text>
-          {(RIWAYAT[selected.id] ?? []).map((r) => (
+          <Text style={s.riwayatTitle}>{t('mem_history')}</Text>
+          {!online && (
+            <Text style={s.offlineNote}>Offline - riwayat dari cache lokal, disinkron saat online.</Text>
+          )}
+          {(riwayat[selected.id] ?? []).map((r) => (
             <View key={r.id} style={s.riwayatRow}>
               <View style={{ flex: 1 }}>
                 <Text style={s.riwayatKet}>{r.keterangan}</Text>
                 <Text style={s.riwayatTgl}>{r.tanggal}</Text>
               </View>
-              <Text style={s.riwayatNominal}>{r.nominal}</Text>
+              <Text style={s.riwayatNominal}>
+                {r.nominal != null
+                  ? `${r.nominal < 0 ? '-' : '+'}${rp(Math.abs(r.nominal))}`
+                  : `+${r.poin} poin`}
+              </Text>
             </View>
           ))}
-          {(RIWAYAT[selected.id] ?? []).length === 0 && (
-            <Text style={s.emptySub}>Belum ada riwayat transaksi member ini.</Text>
+          {(riwayat[selected.id] ?? []).length === 0 && (
+            <Text style={s.emptySub}>{t('mem_no_history')}</Text>
           )}
           <TouchableOpacity
             style={s.ghostBtnFull}
-            onPress={goTopup}>
-            <Text style={s.ghostTxt}>Deposit / Top Up</Text>
+            onPress={() => setDepositVisible(true)}>
+            <Text style={s.ghostTxt}>{t('mem_deposit')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.applyBtnFull}
-            onPress={() => navigation?.goBack?.()}>
-            <Text style={s.applyTxt}>Terapkan Member</Text>
+            onPress={applyMember}>
+            <Text style={s.applyTxt}>{t('mem_apply')}</Text>
           </TouchableOpacity>
         </ScrollView>
       ) : (
         <View style={s.detailEmpty}>
-          <Text style={s.emptyTitle}>Pilih member</Text>
-          <Text style={s.emptySub}>Ketuk salah satu member di daftar untuk melihat kartu, saldo & riwayat</Text>
+          <Text style={s.emptyTitle}>{t('mem_pick')}</Text>
+          <Text style={s.emptySub}>{t('mem_pick_sub')}</Text>
         </View>
       )}
     </View>
@@ -217,30 +327,45 @@ export default function MemberScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Member</Text>
-        <TouchableOpacity onPress={() => setAddVisible(true)}>
-          <Text style={s.headerAction}>+ Baru</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title={t('mem_title')}
+        sub={`${members.length} ${t('mem_registered')}`}
+        onBack={() => navigation?.goBack?.()}
+        right={
+          <View style={s.headRight}>
+            <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+              <Text style={s.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text>
+            </Pressable>
+            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
+              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+            </Pressable>
+          </View>
+        }
+      />
+      <DrawerMenu
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        navigate={(r) => navigation?.navigate(r)}
+      />
 
       <View style={s.searchWrap}>
+        <Text style={s.label}>{t('mem_search_label')}</Text>
         <TextInput
           style={s.search}
-          placeholder="Masukkan Member ID / Nama / No. HP"
+          placeholder={t('mem_search_ph')}
           placeholderTextColor={colors.faint}
           value={q}
           onChangeText={setQ}
         />
         <View style={s.searchLinks}>
+          <TouchableOpacity onPress={() => setAddVisible(true)}>
+            <Text style={s.searchLink}>{t('mem_add_new')} ›</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('QrScan')}>
-            <Text style={s.searchLink}>Pindai QR ›</Text>
+            <Text style={s.searchLink}>{t('mem_scan')} ›</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Voucher')}>
-            <Text style={s.searchLink}>Voucher ›</Text>
+            <Text style={s.searchLink}>{t('mem_voucher')} ›</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -257,13 +382,13 @@ export default function MemberScreen({ navigation }: Props) {
             <View style={s.footer}>
               <TouchableOpacity
                 style={s.ghostBtn}
-                onPress={goTopup}>
-                <Text style={s.ghostTxt}>Deposit / Top Up</Text>
+                onPress={() => setDepositVisible(true)}>
+                <Text style={s.ghostTxt}>{t('mem_deposit')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={s.applyBtn}
-                onPress={() => navigation?.goBack?.()}>
-                <Text style={s.applyTxt}>Terapkan Member</Text>
+                onPress={applyMember}>
+                <Text style={s.applyTxt}>{t('mem_apply')}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
@@ -274,36 +399,39 @@ export default function MemberScreen({ navigation }: Props) {
       <Modal visible={addVisible} transparent animationType="slide">
         <View style={s.modalBg}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Tambah Member Baru</Text>
+            <Text style={s.modalTitle}>{t('mem_add_new')}</Text>
+            <Text style={s.label}>{t('mem_name_label')}</Text>
             <TextInput
               style={s.input}
-              placeholder="Nama Member*"
+              placeholder={t('mem_name_ph')}
               placeholderTextColor={colors.faint}
               value={nama}
               onChangeText={setNama}
             />
+            <Text style={s.label}>{t('mem_phone_label')}</Text>
             <TextInput
               style={s.input}
-              placeholder="No. HP*"
+              placeholder={t('mem_phone_ph')}
               placeholderTextColor={colors.faint}
               keyboardType="phone-pad"
               value={noHp}
               onChangeText={setNoHp}
             />
+            <Text style={s.label}>{t('mem_dob_label')}</Text>
             <TextInput
               style={s.input}
-              placeholder="Tanggal lahir (DD-MM-YYYY)"
+              placeholder={t('mem_dob_ph')}
               placeholderTextColor={colors.faint}
               value={tglLahir}
               onChangeText={setTglLahir}
             />
             <TouchableOpacity style={s.primaryBtn} onPress={saveMember}>
-              <Text style={s.primaryTxt}>Simpan Member</Text>
+              <Text style={s.primaryTxt}>{t('mem_save')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setAddVisible(false)}>
-              <Text style={s.cancelTxt}>Batal Menambahkan Member</Text>
+              <Text style={s.cancelTxt}>{t('mem_cancel_add')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -313,14 +441,15 @@ export default function MemberScreen({ navigation }: Props) {
       <Modal visible={depositVisible} transparent animationType="slide">
         <View style={s.modalBg}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Member Deposit</Text>
+            <Text style={s.modalTitle}>{t('mem_quick_title')}</Text>
             {selected ? (
               <Text style={s.modalHint}>
-                {selected.nama} • Saldo {rp(selected.saldo)}
+                {selected.nama} - {t('mem_balance')} {rp(selected.saldo)}
               </Text>
             ) : null}
+            <Text style={s.label}>{t('mem_nominal_label')}</Text>
             <View style={s.amountBox}>
-              <Text style={s.rpPrefix}>Rp</Text>
+              <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
               <TextInput
                 style={s.amountInput}
                 keyboardType="number-pad"
@@ -331,7 +460,10 @@ export default function MemberScreen({ navigation }: Props) {
                     ? rpNum(Number(depositNominal))
                     : ''
                 }
-                onChangeText={(t) => setDepositNominal(t.replace(/\D/g, ''))}
+                onChangeText={(txt) => {
+                  setDepositNominal(txt.replace(/\D/g, ''));
+                  setDepositErr('');
+                }}
               />
             </View>
             <View style={s.chips}>
@@ -339,25 +471,30 @@ export default function MemberScreen({ navigation }: Props) {
                 <TouchableOpacity
                   key={n}
                   style={s.chip}
-                  onPress={() =>
+                  onPress={() => {
                     setDepositNominal(
                       String((Number(depositNominal) || 0) + n),
-                    )
-                  }>
+                    );
+                    setDepositErr('');
+                  }}>
                   <Text style={s.chipTxt}>+{rpNum(n)}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {depositErr ? <Text style={s.minErr}>{depositErr}</Text> : null}
             <TouchableOpacity style={s.primaryBtn} onPress={saveDeposit}>
-              <Text style={s.primaryTxt}>Deposit Cepat</Text>
+              <Text style={s.primaryTxt}>{t('mem_quick_btn')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.primaryBtnOutline} onPress={goTopup}>
-              <Text style={s.primaryOutlineTxt}>Form Top Up Lengkap ›</Text>
+              <Text style={s.primaryOutlineTxt}>{t('mem_full_form')} ›</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={s.cancelBtn}
-              onPress={() => setDepositVisible(false)}>
-              <Text style={s.cancelTxt}>Batal</Text>
+              onPress={() => {
+                setDepositVisible(false);
+                setDepositErr('');
+              }}>
+              <Text style={s.cancelTxt}>{t('c_cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -368,26 +505,20 @@ export default function MemberScreen({ navigation }: Props) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 17, fontFamily: fonts.bold },
-  headerAction: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
+  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
+  burger: { width: 22, height: 22 },
   searchWrap: { backgroundColor: colors.white, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
   searchLinks: { flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 8 },
   searchLink: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
+  label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 2 },
   search: {
     backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
     borderRadius: 10,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 14,
     fontFamily: fonts.regular,
     color: colors.text,
@@ -416,6 +547,7 @@ const s = StyleSheet.create({
   detailStatLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
   detailStatValue: { fontSize: 16, fontFamily: fonts.bold, color: colors.navy, marginTop: 4 },
   riwayatTitle: { fontSize: 14, fontFamily: fonts.bold, color: colors.text, alignSelf: 'flex-start', marginTop: 12, marginBottom: 6 },
+  offlineNote: { fontSize: 12, fontFamily: fonts.medium, color: colors.amberDark, alignSelf: 'flex-start', marginBottom: 6 },
   riwayatRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, padding: 10, marginTop: 6, width: '100%' },
   riwayatKet: { fontSize: 13, fontFamily: fonts.medium, color: colors.text },
   riwayatTgl: { fontSize: 11, fontFamily: fonts.regular, color: colors.faint, marginTop: 2 },
@@ -444,7 +576,7 @@ const s = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
     borderWidth: 1.5,
-    borderColor: 'transparent',
+    borderColor: colors.line,
   },
   cardActive: { borderColor: colors.orange },
   cardTop: { flexDirection: 'row', alignItems: 'center' },
@@ -557,8 +689,9 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 10,
-    padding: 12,
-    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 4,
     fontSize: 14,
     fontFamily: fonts.regular,
     color: colors.text,
@@ -572,7 +705,7 @@ const s = StyleSheet.create({
     borderColor: colors.orange,
     borderRadius: 10,
     paddingHorizontal: 14,
-    marginTop: 14,
+    marginTop: 4,
     backgroundColor: colors.paleOrange,
   },
   rpPrefix: { fontSize: 18, fontFamily: fonts.bold, color: colors.orange },
@@ -586,6 +719,7 @@ const s = StyleSheet.create({
     textAlign: 'right',
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
+  minErr: { fontSize: 12, fontFamily: fonts.medium, color: colors.red, marginTop: 8 },
   chip: {
     borderWidth: 1,
     borderColor: colors.line,

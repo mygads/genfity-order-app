@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Image,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +12,12 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import DrawerMenu from '../../components/DrawerMenu';
+import { ApiPath, apiPost } from '../../config/server';
+import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useLang } from '../../lib/i18n';
+import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -27,23 +35,66 @@ type Voucher = {
   status: VoucherStatus;
 };
 
+/** Tanggal seed dari objek Date (format id-ID) agar tidak hardcode string tampilan. */
+function seedDate(y: number, m: number, d: number): string {
+  try {
+    return new Date(y, m - 1, d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
 const SEED: Voucher[] = [
-  { id: '1', kode: 'HEMAT20', nama: 'Diskon 20rb', jenis: 'Diskon (Rp)', nilai: 20000, minBelanja: 100000, berlakuHingga: '31 Des 2026', status: 'tersedia' },
-  { id: '2', kode: 'GIFT50', nama: 'Gift Voucher 50rb', jenis: 'Gift Voucher', nilai: 50000, minBelanja: 0, berlakuHingga: '31 Jan 2027', status: 'tersedia' },
-  { id: '3', kode: 'ULTRA10', nama: 'Ultra Voucher 10%', jenis: 'Diskon (%)', nilai: 10, minBelanja: 50000, berlakuHingga: '15 Nov 2026', status: 'terkunci' },
-  { id: '4', kode: 'LAMA5', nama: 'Voucher Lama', jenis: 'Diskon (Rp)', nilai: 5000, minBelanja: 0, berlakuHingga: '1 Jan 2026', status: 'kadaluwarsa' },
+  { id: '1', kode: 'HEMAT20', nama: 'Diskon 20rb', jenis: 'Diskon (Rp)', nilai: 20000, minBelanja: 100000, berlakuHingga: seedDate(2026, 12, 31), status: 'tersedia' },
+  { id: '2', kode: 'GIFT50', nama: 'Gift Voucher 50rb', jenis: 'Gift Voucher (Rp)', nilai: 50000, minBelanja: 0, berlakuHingga: seedDate(2027, 1, 31), status: 'tersedia' },
+  { id: '3', kode: 'ULTRA10', nama: 'Ultra Voucher 10%', jenis: 'Diskon (%)', nilai: 10, minBelanja: 50000, berlakuHingga: seedDate(2026, 11, 15), status: 'terkunci' },
+  { id: '4', kode: 'LAMA5', nama: 'Voucher Lama', jenis: 'Diskon (Rp)', nilai: 5000, minBelanja: 0, berlakuHingga: seedDate(2026, 1, 1), status: 'kadaluwarsa' },
 ];
 
-const STATUS_TXT: Record<VoucherStatus, string> = {
-  tersedia: 'Voucher dapat dipakai',
-  terkunci: 'Terkunci — dipakai transaksi berjalan',
-  terpakai: 'Voucher sudah terpakai (burn)',
-  kadaluwarsa: 'Voucher telah kadaluarsa',
-};
+/**
+ * Operasi voucher ke server ikut kontrak docs/API-CONTRACT.md §5.3:
+ * validate {code, grandTotal}, lock/unlock/burn {code, salesNum}.
+ * Selalu catat ke outbox + antrean sync agar aman saat offline.
+ */
+async function persistVoucherOp(
+  op: 'lock' | 'unlock' | 'validate' | 'burn',
+  v: Voucher,
+  opts?: { salesNum?: string; grandTotal?: number },
+): Promise<void> {
+  const path =
+    op === 'lock'
+      ? ApiPath.voucherLock
+      : op === 'unlock'
+        ? ApiPath.voucherUnlock
+        : op === 'burn'
+          ? ApiPath.voucherBurn
+          : ApiPath.voucherValidate;
+  try {
+    await enqueueOutbox('ms_voucher', v.id, 'update');
+  } catch {
+    /* abaikan */
+  }
+  try {
+    enqueueSync('other', { kind: `voucher-${op}`, id: v.id, kode: v.kode });
+  } catch {
+    /* abaikan */
+  }
+  try {
+    const body =
+      op === 'validate'
+        ? { code: v.kode, grandTotal: opts?.grandTotal ?? 0 }
+        : { code: v.kode, salesNum: opts?.salesNum ?? '' };
+    await apiPost(path, body);
+  } catch {
+    /* offline - terkirim via push berikutnya */
+  }
+}
 
 export default function VoucherScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { lang, setLang, t } = useLang();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | VoucherStatus>('semua');
   const [kodeManual, setKodeManual] = useState('');
@@ -52,6 +103,23 @@ export default function VoucherScreen({ navigation }: Props) {
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+
+  // Guard online seperti Member: offline tampilkan banner, operasi antre via outbox.
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    let live = true;
+    Network.getNetworkStateAsync()
+      .then((ns) => { if (live) setOnline(ns.isConnected ?? true); })
+      .catch(() => { if (live) setOnline(true); });
+    return () => { live = false; };
+  }, []);
+
+  const STATUS_TXT: Record<VoucherStatus, string> = {
+    tersedia: t('vou_st_available'),
+    terkunci: t('vou_st_locked'),
+    terpakai: t('vou_st_used'),
+    kadaluwarsa: t('vou_st_expired'),
+  };
 
   const hasil = items.filter(
     (v) =>
@@ -64,92 +132,146 @@ export default function VoucherScreen({ navigation }: Props) {
   const setStatus = (id: string, status: VoucherStatus) =>
     setItems((list) => list.map((v) => (v.id === id ? { ...v, status } : v)));
 
-  /** Validasi kode manual (mock validate). */
+  /** Validasi kode manual: cek server, fallback ke data lokal + antrean. */
   const validate = () => {
     const kode = kodeManual.trim().toUpperCase();
     if (kode.length < 3) {
-      setMsg('Masukkan minimal 3 karakter kode voucher.');
+      setMsg(t('vou_short'));
       return;
     }
     const found = items.find((v) => v.kode === kode);
     if (!found) {
-      setMsg(`Kode ${kode} tidak valid / tidak dikenal.`);
+      setMsg(`Kode ${kode} ${t('vou_unknown')}`);
       return;
     }
     if (found.status === 'kadaluwarsa') {
-      setMsg(`Kode ${kode} sudah kadaluarsa.`);
+      setMsg(`Kode ${kode} ${t('vou_is_expired')}`);
       return;
     }
     if (found.status === 'terpakai') {
-      setMsg(`Kode ${kode} sudah terpakai (burn).`);
+      setMsg(`Kode ${kode} ${t('vou_is_used')}`);
       return;
     }
+    void persistVoucherOp('validate', found);
     setQ(kode);
-    setMsg(`Kode ${kode} valid — ${found.nama}. Kunci sebelum dipakai.`);
+    setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
   };
 
-  /** Kunci voucher agar tidak dipakai transaksi lain (mock lock). */
+  /** Kunci voucher agar tidak dipakai transaksi lain. */
   const lock = (v: Voucher) => {
     if (v.status !== 'tersedia' || busy) return;
     setBusy(v.id);
-    setTimeout(() => {
+    void persistVoucherOp('lock', v).finally(() => {
       setStatus(v.id, 'terkunci');
       setBusy(null);
-    }, 800);
+    });
   };
 
-  /** Buka kunci (mock unlock). */
-  const unlock = (v: Voucher) => {
+  /** Buka kunci voucher. */
+  const unlock = (v: Voucher, done?: () => void) => {
     if (v.status !== 'terkunci' || busy) return;
     setBusy(v.id);
-    setTimeout(() => {
+    void persistVoucherOp('unlock', v).finally(() => {
       setStatus(v.id, 'tersedia');
       setBusy(null);
-    }, 800);
+      done?.();
+    });
   };
 
-  /** Terapkan = bakar voucher (mock burn) lalu kembali. */
+  /** Terapkan = bakar voucher; banner applied tetap tampil, tidak langsung goBack. */
   const burn = (v: Voucher) => {
     if (v.status !== 'terkunci' || busy) return;
     setBusy(v.id);
-    setTimeout(() => {
+    void persistVoucherOp('burn', v).finally(() => {
       setStatus(v.id, 'terpakai');
       setBusy(null);
-      setApplied(v);
-      navigation?.goBack?.();
-    }, 800);
+      setApplied({ ...v, status: 'terpakai' });
+    });
   };
+
+  /** Batalkan promo: unlock di server + antrean, lalu lepas applied. */
+  const cancelPromo = () => {
+    if (applied) {
+      const v = items.find((i) => i.id === applied.id);
+      if (v && v.status === 'terkunci') {
+        unlock({ ...v }, () => {
+          setApplied(null);
+          setCancelVisible(false);
+        });
+        return;
+      }
+      // Sudah burn: kembalikan ke terkunci agar kasir bisa putuskan ulang.
+      void persistVoucherOp('unlock', applied).finally(() => {
+        setStatus(applied.id, 'terkunci');
+        setApplied(null);
+        setCancelVisible(false);
+      });
+      return;
+    }
+    setCancelVisible(false);
+  };
+
+  const backToCashier = () => {
+    if (!applied) {
+      navigation?.goBack?.();
+      return;
+    }
+    navigation?.navigate('Cashier', {
+      voucher: { code: applied.kode, amount: applied.nilai, kind: applied.jenis },
+    });
+  };
+
+  const filterLabel = (f: 'semua' | VoucherStatus) =>
+    f === 'semua' ? t('c_all') : f === 'tersedia' ? t('vou_available') : f === 'terkunci' ? t('vou_locked') : f === 'terpakai' ? t('vou_used') : t('vou_expired');
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Voucher / Promo</Text>
-        <View style={s.backBtn} />
-      </View>
+      <ScreenHeader
+        title={t('vou_title')}
+        sub={applied ? `${applied.kode} - ${applied.nama}` : `${hasil.length} promo`}
+        onBack={() => navigation?.goBack?.()}
+        right={
+          <View style={s.headRight}>
+            <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+              <Text style={s.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text>
+            </Pressable>
+            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
+              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+            </Pressable>
+          </View>
+        }
+      />
+      <DrawerMenu
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        navigate={(r) => navigation?.navigate(r)}
+      />
 
       <View style={s.searchWrap}>
+        <Text style={s.label}>{t('vou_search_label')}</Text>
         <View style={s.manualRow}>
           <TextInput
             style={[s.search, s.manualInput]}
-            placeholder="Isi Kode Voucher / Cari promo"
+            placeholder={t('vou_search_ph')}
             placeholderTextColor={colors.faint}
             autoCapitalize="characters"
             value={kodeManual}
-            onChangeText={(t) => {
-              setKodeManual(t);
-              setQ(t);
+            onChangeText={(txt) => {
+              setKodeManual(txt);
+              setQ(txt);
               setMsg('');
             }}
           />
           <TouchableOpacity style={s.checkBtn} onPress={validate}>
-            <Text style={s.checkTxt}>Cek</Text>
+            <Text style={s.checkTxt}>{t('vou_check')}</Text>
           </TouchableOpacity>
         </View>
         {msg ? <Text style={s.msg}>{msg}</Text> : null}
       </View>
+
+      {!online && (
+        <Text style={s.offlineBanner}>Offline - data dari cache lokal, perubahan disinkron saat online.</Text>
+      )}
 
       <View style={s.filters}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
@@ -158,19 +280,19 @@ export default function VoucherScreen({ navigation }: Props) {
             style={[s.filterChip, filter === f && s.filterActive]}
             onPress={() => setFilter(f)}>
             <Text style={[s.filterTxt, filter === f && s.filterTxtActive]}>
-              {f === 'semua' ? 'Semua' : f === 'tersedia' ? 'Tersedia' : f === 'terkunci' ? 'Terkunci' : f === 'terpakai' ? 'Terpakai' : 'Kadaluwarsa'}
+              {filterLabel(f)}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <Text style={s.sectionTitle}>Promo Tersedia</Text>
+      <Text style={s.sectionTitle}>{t('vou_promo_list')}</Text>
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         {hasil.length === 0 ? (
           <View style={s.empty}>
-            <Text style={s.emptyTitle}>Voucher yang Anda cari tidak ditemukan</Text>
-            <Text style={s.emptySub}>Periksa kode voucher atau coba kata kunci lain</Text>
+            <Text style={s.emptyTitle}>{t('vou_empty')}</Text>
+            <Text style={s.emptySub}>{t('vou_empty_sub')}</Text>
           </View>
         ) : (
           hasil.map((v) => {
@@ -192,21 +314,21 @@ export default function VoucherScreen({ navigation }: Props) {
                 <Text style={s.voucherName}>{v.nama}</Text>
                 <Text style={s.voucherJenis}>{v.jenis}</Text>
                 <Text style={s.voucherNilai}>
-                  Nilai Voucher (Rp):{' '}
+                  {t('vou_value')}:{' '}
                   {v.jenis.includes('%') ? `${v.nilai}%` : rp(v.nilai)}
                 </Text>
                 {v.minBelanja > 0 ? (
                   <Text style={s.voucherMeta}>
-                    Min. belanja {rp(v.minBelanja)}
+                    {t('vou_min')} {rp(v.minBelanja)}
                   </Text>
                 ) : null}
-                <Text style={s.voucherMeta}>Berlaku hingga {v.berlakuHingga}</Text>
+                <Text style={s.voucherMeta}>{t('vou_valid_until')} {v.berlakuHingga}</Text>
                 {v.status === 'tersedia' && (
                   <TouchableOpacity
                     style={[s.applyBtn, loading && s.applyDisabled]}
                     disabled={loading}
                     onPress={() => lock(v)}>
-                    <Text style={s.applyTxt}>{loading ? 'Mengunci…' : 'Kunci & Pakai'}</Text>
+                    <Text style={s.applyTxt}>{loading ? t('vou_locking') : t('vou_lock_use')}</Text>
                   </TouchableOpacity>
                 )}
                 {v.status === 'terkunci' && (
@@ -215,19 +337,19 @@ export default function VoucherScreen({ navigation }: Props) {
                       style={[s.unlockBtn, loading && s.applyDisabled]}
                       disabled={loading}
                       onPress={() => unlock(v)}>
-                      <Text style={s.unlockTxt}>{loading ? '…' : 'Buka Kunci'}</Text>
+                      <Text style={s.unlockTxt}>{loading ? '...' : t('vou_unlock')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[s.burnBtn, loading && s.applyDisabled]}
                       disabled={loading}
                       onPress={() => burn(v)}>
-                      <Text style={s.applyTxt}>{loading ? '…' : 'Terapkan (Burn)'}</Text>
+                      <Text style={s.applyTxt}>{loading ? '...' : t('vou_apply_burn')}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
                 {(v.status === 'terpakai' || v.status === 'kadaluwarsa') && (
                   <View style={[s.applyBtn, s.applyDisabled]}>
-                    <Text style={s.applyTxt}>{v.status === 'terpakai' ? 'Terpakai' : 'Kadaluwarsa'}</Text>
+                    <Text style={s.applyTxt}>{v.status === 'terpakai' ? t('vou_used') : t('vou_expired')}</Text>
                   </View>
                 )}
               </View>
@@ -236,36 +358,36 @@ export default function VoucherScreen({ navigation }: Props) {
         )}
 
         {applied ? (
-          <TouchableOpacity
-            style={s.appliedBox}
-            onPress={() => setCancelVisible(true)}>
-            <Text style={s.appliedTxt}>
-              Voucher {applied.kode} diterapkan — ketuk untuk batalkan
-            </Text>
-          </TouchableOpacity>
+          <View style={s.appliedBox}>
+            <TouchableOpacity onPress={() => setCancelVisible(true)}>
+              <Text style={s.appliedTxt}>
+                Voucher {applied.kode} {t('vou_used').toLowerCase()} - {t('vou_cancel_promo')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.backCashierBtn} onPress={backToCashier}>
+              <Text style={s.backCashierTxt}>{t('vou_back_cashier')} ›</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
       </ScrollView>
 
       <Modal visible={cancelVisible} transparent animationType="fade">
         <View style={s.modalBg}>
           <View style={s.dialog}>
-            <Text style={s.modalTitle}>Batalkan promo pada transaksi?</Text>
+            <Text style={s.modalTitle}>{t('vou_cancel_title')}</Text>
             <Text style={s.modalHint}>
-              Jika dibatalkan, Voucher yang sudah Anda terapkan akan hangus.
+              {applied ? `Voucher ${applied.kode} - ${applied.nama}` : ''}
             </Text>
             <View style={s.dialogRow}>
               <TouchableOpacity
                 style={s.dialogGhost}
                 onPress={() => setCancelVisible(false)}>
-                <Text style={s.dialogGhostTxt}>Tetap Pakai Voucher</Text>
+                <Text style={s.dialogGhostTxt}>{t('vou_keep')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={s.dialogDanger}
-                onPress={() => {
-                  setApplied(null);
-                  setCancelVisible(false);
-                }}>
-                <Text style={s.dialogDangerTxt}>Batalkan</Text>
+                onPress={cancelPromo}>
+                <Text style={s.dialogDangerTxt}>{t('vou_cancel_promo')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -277,28 +399,23 @@ export default function VoucherScreen({ navigation }: Props) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 17, fontFamily: fonts.bold },
+  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
+  burger: { width: 22, height: 22 },
   searchWrap: {
     backgroundColor: colors.white,
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
   },
+  label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: 2 },
   search: {
     backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
     borderRadius: 10,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 14,
     fontFamily: fonts.regular,
     color: colors.text,
@@ -313,6 +430,14 @@ const s = StyleSheet.create({
   },
   checkTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
   msg: { fontSize: 12, fontFamily: fonts.medium, color: colors.navy, marginTop: 8 },
+  offlineBanner: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: colors.amberDark,
+    backgroundColor: colors.paleAmber,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   filters: { flexDirection: 'row', flexWrap: 'wrap', padding: 12 },
   filterChip: {
     borderWidth: 1,
@@ -411,6 +536,14 @@ const s = StyleSheet.create({
     color: colors.green,
     textAlign: 'center',
   },
+  backCashierBtn: {
+    backgroundColor: colors.navy,
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  backCashierTxt: { fontSize: 13, fontFamily: fonts.bold, color: colors.white },
   modalBg: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

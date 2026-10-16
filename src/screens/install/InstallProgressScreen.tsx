@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, wideCenterSm } from '../../theme';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
 type Props = { navigation?: Nav; route?: { params?: { branch?: string } } };
 
-const STEPS = ['Menghubungkan terminal', 'Mengunduh data master (menu, cabang, user)', 'Menyiapkan printer & format struk'];
+const STEP_KEYS = ['g_inst_step1', 'g_inst_step2', 'g_inst_step3'];
 
 export default function InstallProgressScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const branch = route?.params?.branch ?? 'ESB Cabang Poris';
   const [done, setDone] = useState(0);
 
   useEffect(() => {
-    if (done >= STEPS.length) {
+    if (done >= STEP_KEYS.length) {
       const t = setTimeout(() => navigation?.navigate('CreatePin', { branch }), 600);
       return () => clearTimeout(t);
     }
@@ -24,11 +26,11 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
-      <Text style={styles.title}>Menyiapkan Terminal</Text>
-      <Text style={styles.desc}>{branch} · jangan tutup aplikasi selama penyiapan.</Text>
+      <Text style={styles.title}>{t('g_inst_title')}</Text>
+      <Text style={styles.desc}>{branch} · {t('g_inst_dont_close')}</Text>
       <View style={styles.card}>
-        {STEPS.map((s, i) => (
-          <View key={s} style={styles.step}>
+        {STEP_KEYS.map((k, i) => (
+          <View key={k} style={styles.step}>
             {i < done ? (
               <Text style={styles.check}>✓</Text>
             ) : i === done ? (
@@ -36,14 +38,14 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
             ) : (
               <Text style={styles.todo}>○</Text>
             )}
-            <Text style={[styles.stepT, i <= done && styles.stepTOn]}>{s}</Text>
+            <Text style={[styles.stepT, i <= done && styles.stepTOn]}>{t(k)}</Text>
           </View>
         ))}
       </View>
       <View style={styles.bar}>
-        <View style={[styles.fill, { width: `${Math.round((done / STEPS.length) * 100)}%` }]} />
+        <View style={[styles.fill, { width: `${Math.round((done / STEP_KEYS.length) * 100)}%` }]} />
       </View>
-      <Text style={styles.pct}>{Math.round((done / STEPS.length) * 100)}%</Text>
+      <Text style={styles.pct}>{Math.round((done / STEP_KEYS.length) * 100)}%</Text>
     </ScrollView>
   );
 }

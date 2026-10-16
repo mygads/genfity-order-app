@@ -1,42 +1,42 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, wideCenterSm } from '../../theme';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { goBack: () => void };
 
 export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const [username, setUsername] = useState('gista.kasir');
   const [sent, setSent] = useState(false);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Image source={require('../../../assets/images/forget_pin.webp')} style={styles.hero} resizeMode="contain" />
-      <Text style={styles.title}>Lupa PIN?</Text>
+      <Text style={styles.title}>{t('g_forgot_title')}</Text>
       {sent ? (
         <>
           <Text style={styles.desc}>
-            Tautan reset PIN untuk <Text style={styles.bold}>{username || 'kasir'}</Text> telah
-            dikirim ke email supervisor outlet. Ikuti tautan tersebut, lalu masuk
-            dengan PIN baru Anda.
+            {t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}
+            {t('g_forgot_sent_post')}
           </Text>
           <TouchableOpacity style={styles.primary} onPress={() => navigation?.goBack()}>
-            <Text style={styles.primaryT}>Kembali Masuk ›</Text>
+            <Text style={styles.primaryT}>{t('g_forgot_back')}</Text>
           </TouchableOpacity>
         </>
       ) : (
         <>
           <Text style={styles.desc}>
-            Masukkan username kasir. Supervisor outlet akan menerima instruksi
-            reset PIN — PIN lama langsung dinonaktifkan.
+            {t('g_forgot_desc')}
           </Text>
-          <Text style={styles.label}>Username kasir</Text>
+          <Text style={styles.label}>{t('g_forgot_label')}</Text>
           <TextInput
             style={styles.input}
             value={username}
             onChangeText={setUsername}
-            placeholder="cth. gista.kasir"
+            placeholder={t('g_forgot_ph')}
             placeholderTextColor={colors.faint}
             autoCapitalize="none"
           />
@@ -44,7 +44,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
             style={[styles.primary, !username.trim() && styles.disabled]}
             onPress={() => setSent(true)}
             disabled={!username.trim()}>
-            <Text style={styles.primaryT}>Kirim Instruksi Reset</Text>
+            <Text style={styles.primaryT}>{t('g_forgot_send')}</Text>
           </TouchableOpacity>
         </>
       )}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { fonts, wideCenterSm } from '../../theme';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
 
@@ -14,29 +15,30 @@ const DOT_OFF = '#D5D5D5';
 const PAGES = [
   {
     img: require('../../../assets/images/scan_illustration.webp'),
-    title: 'Pembayaran modern',
-    desc: 'Ciptakan pengalaman membayar yang cepat, praktis, dan aman bagi konsumen. Tinggal scan QRIS Dinamis, transaksi berhasil!',
+    titleKey: 'g_intro_p1_title',
+    descKey: 'g_intro_p1_desc',
   },
   {
     img: require('../../../assets/images/application_banner_phone.webp'),
-    title: 'Laporan bisnis yang akurat',
-    desc: 'Kontrol penuh bisnis Anda dengan laporan lengkap yang mudah dipahami dan raih keuntungan semakin besar.',
+    titleKey: 'g_intro_p2_title',
+    descKey: 'g_intro_p2_desc',
   },
   {
     img: require('../../../assets/images/application_banner.webp'),
-    title: 'Kelola pembukuan',
-    desc: 'Kegiatan melacak pemasukan dan pengeluaran bisnis belum pernah semudah ini! Dengan ESB POSLite, pembukuan jadi lebih rapi dan terorganisir.',
+    titleKey: 'g_intro_p3_title',
+    descKey: 'g_intro_p3_desc',
   },
   {
     img: require('../../../assets/images/claim_terminal.webp'),
-    title: 'Toko online ESB Order',
-    desc: 'Jangkau lebih banyak konsumen, tampilkan produk secara menarik, dan tingkatkan efisiensi proses penjualan Anda.',
+    titleKey: 'g_intro_p4_title',
+    descKey: 'g_intro_p4_desc',
   },
 ];
 
 export default function IntroScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const [page, setPage] = useState(0);
   const last = page === PAGES.length - 1;
 
@@ -51,8 +53,8 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
           resizeMode="contain"
         />
         <Image source={PAGES[page].img} style={styles.hero} resizeMode="contain" />
-        <Text style={styles.title}>{PAGES[page].title}</Text>
-        <Text style={styles.desc}>{PAGES[page].desc}</Text>
+        <Text style={styles.title}>{t(PAGES[page].titleKey)}</Text>
+        <Text style={styles.desc}>{t(PAGES[page].descKey)}</Text>
         <View style={styles.spacer} />
         <View style={styles.dots}>
           {PAGES.map((_, i) => (
@@ -68,19 +70,19 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
             <TouchableOpacity
               style={styles.outline}
               onPress={() => navigation?.navigate('Install')}>
-              <Text style={styles.outlineT}>Buat Akun POSLite</Text>
+              <Text style={styles.outlineT}>{t('g_intro_create')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.primary}
               onPress={() => navigation?.navigate('Login')}>
-              <Text style={styles.primaryT}>Masuk ke POS</Text>
+              <Text style={styles.primaryT}>{t('g_intro_login')}</Text>
             </TouchableOpacity>
           </>
         ) : (
           <TouchableOpacity
             style={styles.primary}
             onPress={() => setPage((p) => Math.min(p + 1, PAGES.length - 1))}>
-            <Text style={styles.primaryT}>Lanjutkan  ›</Text>
+            <Text style={styles.primaryT}>{t('g_intro_next')}</Text>
           </TouchableOpacity>
         )}
       </View>

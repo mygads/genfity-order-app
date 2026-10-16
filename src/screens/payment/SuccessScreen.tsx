@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 import { printReceipt } from '../../lib/print';
-import { isValidEmail, recordReceiptEmail } from '../../lib/payments';
+import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -12,7 +14,14 @@ type Nav = {
 type Props = {
   navigation?: Nav;
   route?: {
-    params?: { total?: number; method?: string; cash?: number; change?: number };
+    params?: {
+      total?: number; method?: string; cash?: number; change?: number; orderNo?: string;
+      items?: SaleItemIn[]; discount?: number; ongkir?: number;
+      mode?: string; table?: string; customer?: string;
+      voucherCode?: string; approvalCode?: string; cardLast4?: string;
+      bank?: string; terminal?: string; memberId?: string;
+      tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
+    };
   };
 };
 
@@ -45,12 +54,53 @@ const METHOD_LABEL: Record<string, string> = {
 export default function SuccessScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const total = route?.params?.total ?? 101200;
   const method = route?.params?.method ?? 'cash';
   const cash = route?.params?.cash ?? 0;
   const change = route?.params?.change ?? 0;
-  const orderNo = '#TRX-000123';
-  const receiptParams = { total, method: METHOD_LABEL[method] ?? method, cash, change };
+  // Nomor order: nomor struk asli dari layar bayar (Pay goSuccess kirim L-timestamp,
+  // Qris kirim refCode-nya); fallback format L-timestamp selaras saveSale bila tak dioper.
+  const orderNo = route?.params?.orderNo ?? `L-${Date.now()}`;
+  const ongkir = route?.params?.ongkir ?? 0;
+  const orderMode = route?.params?.mode;
+  const discount = route?.params?.discount ?? 0;
+  const voucherCode = route?.params?.voucherCode;
+  const approvalCode = route?.params?.approvalCode;
+  const cardLast4 = route?.params?.cardLast4;
+  const bank = route?.params?.bank;
+  const terminal = route?.params?.terminal;
+  const tax = route?.params?.tax ?? route?.params?.vatTotal ?? 0;
+  const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
+  // Ringkasan mini: hitung subtotal dari item agar rinciannya ikut tampil (bukan cuma total).
+  const miniItems = route?.params?.items ?? [];
+  const lineTotal = (it: SaleItemIn): number =>
+    it.qty * it.basePrice +
+    (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) -
+    (it.discount ?? 0);
+  const miniSubtotal = miniItems.reduce((s, it) => s + lineTotal(it), 0);
+  const miniShown = miniItems.slice(0, 4);
+  const miniHidden = miniItems.length - miniShown.length;
+  const isCash = method === 'cash' || method.toLowerCase().includes('tunai');
+  const doPrint = () => {
+    // Perintah cetak langsung (jangan cuma navigasi) - lalu tampilkan pratinjau struk.
+    void printReceipt();
+    navigation?.navigate('Receipt', receiptParams);
+  };
+  const receiptParams = {
+    total, method: METHOD_LABEL[method] ?? method, cash, change,
+    no: orderNo, items: route?.params?.items, discount,
+    ...(voucherCode ? { voucherCode } : {}),
+    ...(approvalCode ? { approvalCode } : {}),
+    ...(cardLast4 ? { cardLast4 } : {}),
+    ...(bank ? { bank } : {}),
+    ...(terminal ? { terminal } : {}),
+    ...(route?.params?.memberId ? { memberId: route.params.memberId } : {}),
+    ...(ongkir > 0 ? { ongkir } : {}),
+    ...(orderMode ? { mode: orderMode } : {}),
+    ...(route?.params?.table ? { table: route.params.table } : {}),
+    ...(route?.params?.customer ? { customer: route.params.customer } : {}),
+  };
   const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const now = new Date();
@@ -63,11 +113,11 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
   const sendMail = () => {
     if (!isValidEmail(mailTo)) {
-      setMailMsg('Alamat email tidak valid.');
+      setMailMsg(t('hist_mail_bad'));
       return;
     }
     recordReceiptEmail(mailTo, orderNo, total, method);
-    setMailMsg('Struk masuk antrean kirim — terkirim saat online.');
+    setMailMsg(t('hist_mail_queued'));
   };
 
   const status = (
@@ -75,7 +125,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
       <View style={styles.checkCircle}>
         <Text style={styles.checkMark}>✓</Text>
       </View>
-      <Text style={styles.title}>Pembayaran Berhasil</Text>
+      <Text style={styles.title}>{t('ok_title')}</Text>
       <Text style={styles.orderNo}>{orderNo}</Text>
       <Text style={styles.dateLine}>{todayId} · {timeId}</Text>
     </>
@@ -85,30 +135,87 @@ export default function SuccessScreen({ navigation, route }: Props) {
     <View style={styles.receipt}>
       <ScrollView>
         <Text style={styles.shopName}>ESB Cabang Poris</Text>
-        <Text style={styles.shopSub}>Kasir Gista • Dine In</Text>
+        <Text style={styles.shopSub}>Kasir Gista • {orderMode ?? 'Dine In'}</Text>
         <View style={styles.divider} />
+        {miniShown.map((it) => (
+          <View key={it.id} style={styles.row}>
+            <Text style={styles.label}>{it.qty}x {it.name}</Text>
+            <Text style={styles.value}>{rp(lineTotal(it))}</Text>
+          </View>
+        ))}
+        {miniHidden > 0 && (
+          <Text style={styles.miniMore}>{t('ok_more_items').replace('{n}', String(miniHidden))}</Text>
+        )}
+        {miniItems.length > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('c_subtotal')}</Text>
+            <Text style={styles.value}>{rp(miniSubtotal)}</Text>
+          </View>
+        )}
+        {discount > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('rc_discount')}</Text>
+            <Text style={styles.value}>-{rp(discount)}</Text>
+          </View>
+        )}
+        {voucherCode ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ok_voucher')}</Text>
+            <Text style={styles.value}>{voucherCode}</Text>
+          </View>
+        ) : null}
+        {tax > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ok_tax')}</Text>
+            <Text style={styles.value}>{rp(tax)}</Text>
+          </View>
+        )}
+        {service > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('serviceExcl')}</Text>
+            <Text style={styles.value}>{rp(service)}</Text>
+          </View>
+        )}
         <View style={styles.row}>
-          <Text style={styles.label}>Total</Text>
+          <Text style={styles.label}>{t('c_total')}</Text>
           <Text style={styles.value}>{rp(total)}</Text>
         </View>
+        {ongkir > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ongkir')}</Text>
+            <Text style={styles.value}>{rp(ongkir)}</Text>
+          </View>
+        )}
         <View style={styles.row}>
-          <Text style={styles.label}>Metode</Text>
+          <Text style={styles.label}>{t('ok_method')}</Text>
           <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
         </View>
-        {method === 'cash' && (
+        {approvalCode ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ok_approval')}</Text>
+            <Text style={styles.value}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text>
+          </View>
+        ) : null}
+        {bank || terminal ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ok_terminal')}</Text>
+            <Text style={styles.value}>{[bank, terminal].filter(Boolean).join(' · ')}</Text>
+          </View>
+        ) : null}
+        {isCash && (
           <>
             <View style={styles.row}>
-              <Text style={styles.label}>Tunai Diterima</Text>
+              <Text style={styles.label}>{t('ok_cashin')}</Text>
               <Text style={styles.value}>{rp(cash)}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={styles.label}>Kembalian</Text>
+              <Text style={styles.label}>{t('ok_change')}</Text>
               <Text style={styles.changeValue}>{rp(change)}</Text>
             </View>
           </>
         )}
         <View style={styles.divider} />
-        <Text style={styles.thanks}>Terima kasih atas kunjungan Anda</Text>
+        <Text style={styles.thanks}>{t('ok_thanks')}</Text>
       </ScrollView>
     </View>
   );
@@ -117,13 +224,13 @@ export default function SuccessScreen({ navigation, route }: Props) {
     <Modal visible={mailOpen} animationType="fade" transparent>
       <View style={styles.wrap}>
         <View style={styles.dialog}>
-          <Text style={styles.dTitle}>Kirim Struk via Email</Text>
+          <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
           <Text style={styles.dSub}>Struk {orderNo} • {rp(total)}</Text>
           <TextInput
             style={styles.input}
             value={mailTo}
             onChangeText={setMailTo}
-            placeholder="nama@email.com"
+            placeholder={t('hist_mail_ph')}
             placeholderTextColor={colors.faint}
             keyboardType="email-address"
             autoCapitalize="none"
@@ -131,10 +238,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
             <TouchableOpacity style={styles.ghostBtn} onPress={() => setMailOpen(false)}>
-              <Text style={styles.ghostBtnText}>Tutup</Text>
+              <Text style={styles.ghostBtnText}>{t('c_close')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.sendBtn} onPress={sendMail}>
-              <Text style={styles.sendBtnText}>Kirim</Text>
+              <Text style={styles.sendBtnText}>{t('hist_mail_send')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -145,6 +252,11 @@ export default function SuccessScreen({ navigation, route }: Props) {
   if (isTablet) {
     return (
       <View style={styles.root}>
+        <ScreenHeader
+          title={t('ok_title')}
+          sub={orderNo}
+          onBack={() => navigation?.navigate('Cashier')}
+        />
         <View style={styles.split}>
           <View style={styles.statusSide}>{status}</View>
           <View style={styles.receiptSide}>{receipt}</View>
@@ -153,23 +265,23 @@ export default function SuccessScreen({ navigation, route }: Props) {
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.printBtn}
-            onPress={() => printReceipt()}>
-            <Text style={styles.printBtnText}>Cetak Struk</Text>
+            onPress={doPrint}>
+            <Text style={styles.printBtnText}>{t('ok_print')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.printBtn}
             onPress={() => setMailOpen(true)}>
-            <Text style={styles.printBtnText}>Kirim Email</Text>
+            <Text style={styles.printBtnText}>{t('ok_email_long')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.printBtn}
             onPress={() => navigation?.navigate('History')}>
-            <Text style={styles.printBtnText}>Lihat Riwayat</Text>
+            <Text style={styles.printBtnText}>{t('ok_history_long')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.newOrderBtn}
             onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={styles.newOrderBtnText}>Order Baru</Text>
+            <Text style={styles.newOrderBtnText}>{t('ok_new')}</Text>
           </TouchableOpacity>
         </View>
         {mailModal}
@@ -179,26 +291,36 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.root}>
+      <ScreenHeader
+        title={t('ok_title')}
+        sub={orderNo}
+        onBack={() => navigation?.navigate('Cashier')}
+      />
       <View style={styles.body}>
         {status}
         {receipt}
       </View>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, styles.footerGrid]}>
         <TouchableOpacity
-          style={styles.printBtn}
+          style={styles.footBtn}
           onPress={() => navigation?.navigate('Receipt', receiptParams)}>
-          <Text style={styles.printBtnText}>Cetak Struk</Text>
+          <Text style={styles.printBtnText}>{t('ok_print')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.printBtn}
+          style={styles.footBtn}
           onPress={() => setMailOpen(true)}>
-          <Text style={styles.printBtnText}>Email</Text>
+          <Text style={styles.printBtnText}>{t('ok_email_long')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.newOrderBtn}
+          style={styles.footBtn}
+          onPress={() => navigation?.navigate('History')}>
+          <Text style={styles.printBtnText}>{t('ok_history_long')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.footBtnPrimary}
           onPress={() => navigation?.navigate('Cashier')}>
-          <Text style={styles.newOrderBtnText}>Order Baru</Text>
+          <Text style={styles.newOrderBtnText}>{t('ok_new')}</Text>
         </TouchableOpacity>
       </View>
       {mailModal}
@@ -239,11 +361,32 @@ const styles = StyleSheet.create({
   shopSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 2 },
   divider: { borderTopWidth: 1, borderTopColor: colors.line, borderStyle: 'dashed', marginVertical: 12 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  miniMore: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, marginBottom: 6 },
   label: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   value: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   changeValue: { fontFamily: fonts.bold, fontSize: 14, color: colors.green },
   thanks: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center' },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
+  footerGrid: { flexWrap: 'wrap' },
+  footBtn: {
+    width: '48%',
+    flexGrow: 1,
+    flexShrink: 0,
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 8,
+    alignItems: 'center',
+    paddingVertical: 13,
+  },
+  footBtnPrimary: {
+    width: '48%',
+    flexGrow: 1,
+    flexShrink: 0,
+    backgroundColor: colors.orange,
+    borderRadius: 8,
+    alignItems: 'center',
+    paddingVertical: 13,
+  },
   printBtn: {
     flex: 1,
     borderWidth: 1,
@@ -252,7 +395,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 13,
   },
-  printBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
+  printBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy, textAlign: 'center' },
   newOrderBtn: {
     flex: 2,
     backgroundColor: colors.orange,
@@ -260,7 +403,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 13,
   },
-  newOrderBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
+  newOrderBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white, textAlign: 'center' },
   wrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
   dTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text },

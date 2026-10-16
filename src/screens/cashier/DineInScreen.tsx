@@ -19,11 +19,27 @@ type Props = {
   };
 };
 
+/** Kanonis mengikuti TablesScreen: no tanpa strip + section Dalam/Teras/VIP. */
 const SECTIONS: Record<string, string[]> = {
-  Dalam: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
-  Teras: ['T1', 'T2', 'T3'],
-  VIP: ['VIP-1', 'VIP-2'],
+  Dalam: ['A1', 'A2', 'A3', 'A4'],
+  Teras: ['B1', 'B2', 'B3'],
+  VIP: ['C1', 'C2'],
 };
+/** Kode lama ber-strip ("A-03" → "A3") ke kanonis tanpa strip. */
+function canonTableNo(raw: string): string {
+  const t = (raw || '').trim().toUpperCase();
+  if (t === 'VIP-1' || t === 'VIP1') return 'C1';
+  if (t === 'VIP-2' || t === 'VIP2') return 'C2';
+  const m = t.match(/^([A-Z]+)-?0*(\d+)$/);
+  if (m) return `${m[1]}${m[2]}`;
+  return t.replace(/-/g, '');
+}
+function sectionOf(no: string): string {
+  for (const [sec, list] of Object.entries(SECTIONS)) {
+    if (list.includes(no)) return sec;
+  }
+  return 'Dalam';
+}
 const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
 
 /** Dine In - pilih section + meja, pax, nama tamu, ringkasan bill, Simpan/Cetak/Bayar. */
@@ -31,8 +47,13 @@ export default function DineInScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const { t } = useLang();
-  const [section, setSection] = useState('Dalam');
-  const [table, setTable] = useState(route?.params?.table ?? 'A3');
+  const initTable = (() => {
+    const raw = route?.params?.table ?? 'A3';
+    const code = canonTableNo(raw);
+    return (Object.values(SECTIONS).flat().includes(code) ? code : 'A3');
+  })();
+  const [section, setSection] = useState(() => sectionOf(initTable));
+  const [table, setTable] = useState(initTable);
   const [pax, setPax] = useState('2');
   const [guest, setGuest] = useState(route?.params?.customer ?? '');
   const [mode, setMode] = useState(

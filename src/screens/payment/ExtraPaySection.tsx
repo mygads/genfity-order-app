@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors, fonts } from '../../theme';
+import { useLang } from '../../lib/i18n';
 import { EXTRA_METHODS, type ExtraMethodId } from '../../lib/payments';
 import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
 
@@ -8,15 +9,26 @@ import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
  * non-penjualan. Dua terakhir wajib otorisasi supervisor (fail-closed).
  */
-export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string) => void }) {
+export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string) => void }) {
+  const { t } = useLang();
   const [authFor, setAuthFor] = useState<ExtraMethodId | null>(null);
   const [pin, setPin] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  // Transfer Bank wajib no. referensi/bukti sebelum lunas (jangan langsung onDone).
+  const [refFor, setRefFor] = useState<ExtraMethodId | null>(null);
+  const [refNo, setRefNo] = useState('');
+  const [refMsg, setRefMsg] = useState('');
 
   const tap = (id: ExtraMethodId) => {
     const m = EXTRA_METHODS.find((x) => x.id === id);
     if (!m) return;
+    if (id === 'transfer') {
+      setRefFor(id);
+      setRefNo('');
+      setRefMsg('');
+      return;
+    }
     if (m.needsAuth) {
       setAuthFor(id);
       setPin('');
@@ -26,14 +38,26 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     onDone(m.label);
   };
 
+  const submitRef = () => {
+    const ref = refNo.trim();
+    if (ref.length < 3) {
+      setRefMsg(t('xp_ref_need'));
+      return;
+    }
+    const m = EXTRA_METHODS.find((x) => x.id === refFor);
+    setRefFor(null);
+    if (m) onDone(m.label, ref.toUpperCase());
+  };
+
   const approve = async () => {
     if (!authFor || busy) return;
     setBusy(true);
-    setMsg('Meminta persetujuan…');
+    setMsg(t('xp_requesting'));
     const r = await authorizeSupervisor(pin);
     setBusy(false);
     if (!r.ok) {
-      setMsg(`${r.message} (sisa ${attemptsLeft()}x)`);
+      // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
+      setMsg(r.code === 'locked' ? r.message : `${r.message} (${t('xp_left').replace('{n}', String(attemptsLeft()))})`);
       return;
     }
     const m = EXTRA_METHODS.find((x) => x.id === authFor);
@@ -43,8 +67,8 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
 
   return (
     <View style={styles.box}>
-      <Text style={styles.title}>Metode Lainnya</Text>
-      <Text style={styles.hint}>Transfer dikonfirmasi manual via mutasi bank. Kompliment & Non-Penjualan tercatat atas nama penyetuju.</Text>
+      <Text style={styles.title}>{t('xp_title')}</Text>
+      <Text style={styles.hint}>{t('xp_hint')}</Text>
       <View style={styles.grid}>
         {EXTRA_METHODS.map((m) => (
           <TouchableOpacity key={m.id} style={styles.card} onPress={() => tap(m.id)}>
@@ -57,14 +81,14 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
       <Modal visible={authFor !== null} animationType="fade" transparent>
         <View style={styles.wrap}>
           <View style={[styles.dialog, styles.dialogNarrow]}>
-            <Text style={styles.dTitle}>Persetujuan Supervisor</Text>
-            <Text style={styles.dSub}>Aksi ini dicatat atas nama penyetuju. PIN tidak disimpan di perangkat.</Text>
+            <Text style={styles.dTitle}>{t('xp_auth_title')}</Text>
+            <Text style={styles.dSub}>{t('xp_auth_sub')}</Text>
             <TextInput
               style={styles.input}
               keyboardType="numeric"
               maxLength={6}
               secureTextEntry
-              placeholder="PIN supervisor (6 digit)"
+              placeholder={t('xp_pin_ph')}
               placeholderTextColor={colors.faint}
               value={pin}
               onChangeText={(t) => setPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
@@ -72,13 +96,42 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
             {msg ? <Text style={styles.msg}>{msg}</Text> : null}
             <View style={styles.btns}>
               <TouchableOpacity style={styles.ghost} onPress={() => setAuthFor(null)} disabled={busy}>
-                <Text style={styles.ghostT}>Batal</Text>
+                <Text style={styles.ghostT}>{t('xp_cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.primary, (pin.length !== 6 || busy) && styles.disabled]}
                 disabled={pin.length !== 6 || busy}
                 onPress={() => { void approve(); }}>
-                <Text style={styles.primaryT}>{busy ? 'Memeriksa…' : 'Setujui'}</Text>
+                <Text style={styles.primaryT}>{busy ? t('xp_checking') : t('xp_approve')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={refFor !== null} animationType="fade" transparent>
+        <View style={styles.wrap}>
+          <View style={[styles.dialog, styles.dialogNarrow]}>
+            <Text style={styles.dTitle}>{t('xp_ref_title')}</Text>
+            <Text style={styles.dSub}>{t('xp_ref_sub')}</Text>
+            <TextInput
+              style={styles.input}
+              placeholder={t('xp_ref_ph')}
+              placeholderTextColor={colors.faint}
+              value={refNo}
+              onChangeText={(v) => setRefNo(v.toUpperCase().slice(0, 32))}
+              autoCapitalize="characters"
+            />
+            {refMsg ? <Text style={styles.msg}>{refMsg}</Text> : null}
+            <View style={styles.btns}>
+              <TouchableOpacity style={styles.ghost} onPress={() => setRefFor(null)}>
+                <Text style={styles.ghostT}>{t('xp_cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primary, refNo.trim().length < 3 && styles.disabled]}
+                disabled={refNo.trim().length < 3}
+                onPress={submitRef}>
+                <Text style={styles.primaryT}>{t('xp_ref_done')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -116,7 +169,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontFamily: fonts.bold,
-    fontSize: 16,
+    fontSize: 14,
     color: colors.text,
     marginTop: 12,
     letterSpacing: 4,
