@@ -44,7 +44,9 @@ Printers (Okt 2026: +panel Station kasir/dapur), Settings (Okt 2026: +panel Term
 Intro (4 halaman onboarding APK), Install (klaim terminal + simulasi pindai),
 SelectBranch (3 cabang + radio), InstallProgress (3 langkah auto + %),
 CreatePin (PIN pad 2 fase + mismatch-reset), ForgotPin (reset via supervisor).
-Total route terdaftar: **54** (`src/navigation/types.ts`) - termasuk WebView + 18 route pekerja paralel (SplitBill, MoveItems, MoveTable, PromotionList, MenuPrinting, Stock, TableTimer, Sync, Log, About, Help, MenuManagement, Idle, TopupDeposit, PettyCash/Form/Detail, Expense).
+Total route terdaftar: **55** (`src/navigation/types.ts` - dokumen lama menyebut 54,
+selisih 1 entri `QrHow`) - termasuk WebView + 18 route pekerja paralel (SplitBill, MoveItems, MoveTable, PromotionList, MenuPrinting, Stock, TableTimer, Sync, Log, About, Help, MenuManagement, Idle, TopupDeposit, PettyCash/Form/Detail, Expense).
+56 file layar di `src/screens`.
 
 ### 1c. Bukti screenshot (konvensi tetap - 2 folder saja)
 
@@ -208,6 +210,10 @@ Yang **belum ada di RN** (prioritas):
 | Foto expense cuma galeri | ✅ Okt 2026: `pickPhoto()` kamera dulu (`launchCameraAsync`), galeri sebagai cadangan |
 | Push + realtime WS belum ada | ✅ Okt 2026: `src/lib/realtime.ts` (WS device + self-order, heartbeat 30 dtk, backoff), `src/lib/push.ts` (izin + token Expo + `register-push` + notif lokal NEW_SELF_ORDER → badge EsbOrder); dependensi `expo-notifications`, `expo-camera`, `expo-intent-launcher`, `react-native-tcp-socket` terpasang |
 | Kontrak backend untuk server sendiri | ✅ Okt 2026: `docs/API-CONTRACT.md` v2 - 3 host + loyalty, header + envelope Yii2 + paging + kode error, endpoint install/PIN/pull/push/voucher/OTA/WS/push-register + contoh JSON tempel + checklist minimal BE |
+| Kontrak void/change-payment + supervisor PIN (PAY-03) | ✅ DONE: `history.ts` outbox + `apiFetch` change-payment, dummy `push/auth-supervisor-approve.json`, `supervisor.ts` fail-closed |
+| 5 fix member/voucher/deposit (MEM-08) | ✅ DONE: persist outbox + Terapkan `{memberId, nama}` + Topup `saldoBaru` + Voucher lock/unlock/validate/burn via `ApiPath` + Pay→Member konteks order |
+| Kanonik totals/split/master/header/tablet/realtime/esb/promo/shift (P1 ×11) | ✅ DONE: `lib/totals.ts` + SplitBill rata/nominal + katalog/meja live + header tunggal + Login 2-panel + WS/push-retry + outbox ESB + `FEE_DEFAULTS` + `pushAll`/drain |
+| Komponen/log-tanggal/animasi-dark (P2 ×3) | ✅ DONE: `AppInput`/`AppButton` + `tr_applog`/`fmtDate` + §7.4 |
 
 ---
 
@@ -291,6 +297,48 @@ Minor tak-merusak: kunci `qris_print` di kamus tak terpakai.
 
 BLOKIR B1-B10 (tidak bisa diaudit 1:1 dari artefak statis, jangan dicari lagi)
 dan rumus-BE kanonik + 5 contoh angka: lihat `docs/PARITY.md` §3-§4.
+
+Workflow 4 (2026-10-16, `tsc` EXIT 0) ✅ DONE semua:
+14. PAY-03: kontrak void/change-payment + dummy + supervisor PIN
+    (`history.ts:190,195` outbox + `apiFetch`; dummy
+    `push/auth-supervisor-approve.json`; `supervisor.ts` fail-closed).
+15. MEM-08: 5 fix member/voucher/deposit (persist outbox + Terapkan ke Kasir
+    `{memberId, nama}` + Topup kembalikan `saldoBaru` + Voucher
+    lock/unlock/validate/burn via `ApiPath` + Pay→Member bawa konteks order).
+16. P1-totals: `lib/totals.ts` kanonis (`FEE_DEFAULTS`, voucher PERSEN,
+    pajak setting-driven) dipakai Cashier/CartDetail/SplitBill (+ baris fee
+    Success/Receipt/BillPreview).
+17. P1-split: rata + per-item assign + nominal sisa + Bayar & Lunas per split
+    (BillPreview gate `nominalSum === total`).
+18. P1-master: katalog/meja live SQLite (bill aktif + item per meja) +
+    `salesNum` kanonis `tr_saleshead`.
+19. P1-header: `ScreenHeader` 44 layar (12 rute `headerShown:false`, header
+    tunggal) + burger Tables + nav-ganda tamu/utama + outlet dinamis sesi.
+20. P1-tablet: Login 2-panel (brand navy + form PIN, skor tablet 9, lihat §1a).
+21. P1-realtime: Kitchen station live + CustomerDisplay polling 10 dtk +
+    `push.ts` `retryPendingPushToken` (WS custom-only).
+22. P1-esb: EsbOrder persist outbox + status kanonis + alasan Tolak +
+    pull `main/get-sales` fallback.
+23. P1-promo-fee: promo live (`PromotionList` kind/tag) + `FEE_DEFAULTS`
+    (`platformFee` 5% khusus `esbOrder`).
+24. P1-shift-sync: guard custom-only + anti-ganda open-shift + PIN server
+    (`validateEmployee`) + `pushAll` + drain + `syncWarnLevel` block7 kunci Pay.
+25. P2-components: `AppInput`/`AppButton` + migrasi layar (ganti input/button
+    mentah).
+26. P2-log-date: `tr_applog` (`db.ts:218`) + `fmtDate` (`lib/datefmt.ts`) +
+    LogScreen filter tag + ekspor.
+27. P2-anim-dark: lihat §7.4.
+
+### 7.4 Animasi + dark-mode (P2-anim-dark) ✅ DONE
+
+- DrawerMenu: slide dari kiri 260ms buka / 200ms tutup, cubic,
+  native-driver, `Modal animationType="none"` (satu-clock, tanpa fade ganda).
+- Modal dialog: `animationType` bawaan (`fade`/`slide`); `dialogNarrow`
+  maxWidth 480 tengah di tablet.
+- Loading: `ActivityIndicator` bawaan; tanpa Reanimated/Lottie (nol
+  dependensi animasi di `package.json`).
+- Dark-mode: light-only by-design - palet tunggal `src/theme`, abaikan
+  `Appearance`/`useColorScheme`.
 
 ---
 

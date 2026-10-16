@@ -254,7 +254,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
     <View style={styles.root}>
       <ScreenHeader
         title={t('promoVoucher')}
-        sub={`${shown.length} promo`} /* TODO-i18n:promo_count */
+        sub={t('promo_count').replace('{n}', String(shown.length))}
         onBack={() => navigation?.goBack()}
         right={
           <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
@@ -269,7 +269,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
         {source === 'fallback' ? (
-          <Text style={styles.offline}>Offline - menampilkan promo bawaan.</Text> /* TODO-i18n:promo_offline */
+          <Text style={styles.offline}>{t('promo_offline')}</Text>
         ) : null}
         <AppInput
           boxStyle={styles.searchWrap}

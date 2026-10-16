@@ -1,0 +1,23 @@
+{
+  "request": {
+    "action": "change-payment",
+    "no": "TRX-20261016-014",
+    "salesNum": "TRX-20261016-014",
+    "method": "QRIS"
+  },
+  "response": {
+    "name": "OK",
+    "message": "Metode bayar diperbarui",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "no": "TRX-20261016-014",
+      "salesNum": "TRX-20261016-014",
+      "paymentMethod": "QRIS",
+      "grandTotal": 60400,
+      "receivedAt": "2026-10-16 12:42:20",
+      "syncDate": "2026-10-16 12:42:20"
+    }
+  }
+}

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -25,6 +25,9 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [voidNote, setVoidNote] = useState('');
+  const [voidPin, setVoidPin] = useState('');
+  const [voidAuthMsg, setVoidAuthMsg] = useState('');
+  const [voidConfirming, setVoidConfirming] = useState(false);
   const [voided, setVoided] = useState<string[]>([]);
   const [payModal, setPayModal] = useState(false);
   const [payOver, setPayOver] = useState<Record<string, string>>({});
@@ -71,12 +74,10 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   /** Tandai void di state: baris DB diupdate langsung, baris demo via overlay. */ const markVoided = (id: string) => {
     if (dbTxns) { setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev, ); } else {
-    setVoided((v) => (v.includes(id) ? v : [...v, id])); } }; const doVoid = () => { if (!selected) return; void persistVoid(selected, voidNote.trim()).catch(() => undefined); markVoided(selected.id);
-    setConfirmVoid(false);
-    setVoidNote('');
-  };
+    setVoided((v) => (v.includes(id) ? v : [...v, id])); } }; /** PIN supervisor 6 digit wajib sebelum void (pola authorizeSupervisor ala CancelScreen, fail-closed saat offline). */ const voidPinOk = voidPin.replace(/\D/g, '').length === 6 && !voidConfirming; const runVoidAuthed = (print: boolean) => { if (!selected || !voidPinOk) return; const target = selected; const reason = voidNote.trim(); if (!reason) return; setVoidConfirming(true); setVoidAuthMsg(''); void authorizeSupervisor(voidPin).then((res) => { if (!res.ok) {
+      setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setVoidConfirming(false); return; } void persistVoid(target, reason).catch(() => undefined); markVoided(target.id); setVoidConfirming(false); setConfirmVoid(false); setVoidNote(''); setVoidPin(''); setVoidAuthMsg(''); if (print) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, }); } }); }; const doVoid = () => { runVoidAuthed(false); };
 
-  const doVoidAndPrint = () => { if (!selected) return; const s = selected; void persistVoid(s, voidNote.trim()).catch(() => undefined); markVoided(s.id); setConfirmVoid(false); setVoidNote(''); navigation?.navigate('Receipt', { no: s.no, total: s.total, method: payOf(s, payOver), voidLines: s.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason: voidNote.trim(), }); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
+  const doVoidAndPrint = () => { runVoidAuthed(true); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
       setMailMsg(t('hist_mail_bad'));
@@ -270,6 +271,16 @@ import { useEffect, useMemo, useState } from 'react';import {
               boxStyle={styles.noteBox}
               style={styles.noteField}
             />
+            <AppInput
+              label={t('cx_pin')}
+              placeholder={t('cx_pin_ph')}
+              value={voidPin}
+              onChangeText={(txt) => { setVoidPin(txt.replace(/\D/g, '').slice(0, 6)); setVoidAuthMsg(''); }}
+              keyboardType="numeric"
+              maxLength={6}
+              secureTextEntry
+            />
+            {voidAuthMsg ? <Text style={styles.authErr}>{voidAuthMsg}</Text> : null}
             <View style={styles.dialogBtns}>
               <AppButton
                 title={t('c_cancel')}
@@ -277,20 +288,22 @@ import { useEffect, useMemo, useState } from 'react';import {
                 onPress={() => {
                   setConfirmVoid(false);
                   setVoidNote('');
+                  setVoidPin('');
+                  setVoidAuthMsg('');
                 }}
                 fullWidth={false}
                 style={styles.dialogBtn}
               />
               <AppButton
-                title={t('hist_void_yes')}
+                title={voidConfirming ? '...' : t('hist_void_yes')}
                 variant="danger"
-                disabled={!voidNote.trim()}
+                disabled={!voidNote.trim() || !voidPinOk}
                 onPress={doVoid}
                 fullWidth={false}
                 style={styles.dialogBtn}
               />
             </View>
-          <AppButton title={t('hist_void_print')} disabled={!voidNote.trim()} onPress={doVoidAndPrint} /> </View>
+          <AppButton title={voidConfirming ? '...' : t('hist_void_print')} disabled={!voidNote.trim() || !voidPinOk} onPress={doVoidAndPrint} /> </View>
         </View>
       </Modal>
 
@@ -728,6 +741,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     marginTop: 6,
   },
   mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
+  authErr: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8 },
   dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
   dialogBtn: { flex: 1, marginTop: 0 },
   detailBtn: { flex: 1, minWidth: 100, marginTop: 8 },

@@ -325,10 +325,10 @@ export default function LoginScreen({ navigation }: Props) {
   const infoPanel = (
     <View style={styles.infoSide}>
       <QrTabletArt />
-      <Text style={styles.infoTitle}>Login Kasir ESB {/* TODO-i18n:login_info_title */}</Text>
-      <Text style={styles.infoItem}>Masuk dengan Username dan PIN {/* TODO-i18n:login_info_user */}</Text>
-      <Text style={styles.infoItem}>atau pindai QR dari aplikasi owner {/* TODO-i18n:login_info_qr */}</Text>
-      <Text style={styles.infoHelp}>Butuh bantuan? Hubungi 0822-1066-6969 {/* TODO-i18n:login_info_help */}</Text>
+      <Text style={styles.infoTitle}>{t('login_info_title')}</Text>
+      <Text style={styles.infoItem}>{t('login_info_user')}</Text>
+      <Text style={styles.infoItem}>{t('login_info_qr')}</Text>
+      <Text style={styles.infoHelp}>{t('login_info_help')}</Text>
     </View>
   );
 

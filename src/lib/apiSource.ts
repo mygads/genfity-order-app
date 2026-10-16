@@ -107,6 +107,11 @@ const DUMMY: Record<string, unknown> = {
   'terminal/get-terminal': require('../data/dummy/pull/terminal-get-terminal.json') as unknown,
   'terminal/update': require('../data/dummy/pull/terminal-update.json') as unknown,
   'order/finish': require('../data/dummy/push/order-finish.json') as unknown,
+  // PAY-03: alias varian action-flag POST order/finish (kontrak §5.1.1).
+  // Real Mode tetap POST ke 'order/finish' + body.action; alias ini agar
+  // Dummy Mode bisa melayani tiap varian langsung via apiFetch.
+  'order/void': require('../data/dummy/push/order-void.json') as unknown,
+  'order/change-payment': require('../data/dummy/push/order-change-payment.json') as unknown,
   'order/split-bill': require('../data/dummy/push/order-split-bill.json') as unknown,
   'order/move-items': require('../data/dummy/push/order-move-items.json') as unknown,
   'order/move-table': require('../data/dummy/push/order-move-table.json') as unknown,

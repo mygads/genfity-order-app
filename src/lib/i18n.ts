@@ -209,6 +209,10 @@ const STR: Record<string, Entry> = {
   vou_st_locked: { id: 'Terkunci - dipakai transaksi berjalan', en: 'Locked - used by current transaction' },
   vou_st_used: { id: 'Voucher sudah terpakai (burn)', en: 'Voucher already used (burned)' },
   vou_st_expired: { id: 'Voucher telah kadaluarsa', en: 'Voucher has expired' },
+  vou_kind_discount: { id: 'Diskon (Rp)', en: 'Discount (Rp)' },
+  vou_checking: { id: 'Memeriksa kode ke server...', en: 'Checking code on server...' },
+  vou_server_valid: { id: 'Kode {k} valid - {a}. Min. belanja {m}. {l}', en: 'Code {k} is valid - {a}. Min. spend {m}. {l}' },
+  vou_server_invalid: { id: 'Kode {k} {u} Min. belanja {m}.', en: 'Code {k} {u} Min. spend {m}.' },
 
   // ---- topup ----
   top_title: { id: 'Top Up Deposit', en: 'Deposit Top Up' },
@@ -694,6 +698,8 @@ const STR: Record<string, Entry> = {
   useAction: { id: 'Pakai ›', en: 'Use ›' },
   validUntil: { id: 's/d', en: 'until' },
   promoNotFound: { id: 'Promo tidak ditemukan - coba kata kunci lain.', en: 'No promo found - try another keyword.' },
+  promo_count: { id: '{n} promo', en: '{n} promos' },
+  promo_offline: { id: 'Offline - menampilkan promo bawaan.', en: 'Offline - showing built-in promos.' },
   loadOrderTitle: { id: 'Order Tersimpan', en: 'Saved Orders' },
   loadOrderSec: { id: 'Muat Order', en: 'Load Order' },
   loadOrderHint: { id: 'Order yang disimpan dari kasir dan belum dibayar.', en: 'Orders saved from the cashier and not yet paid.' },
@@ -747,6 +753,8 @@ const STR: Record<string, Entry> = {
   addMenu: { id: 'Tambah Menu', en: 'Add Menu' },
   modeTx: { id: 'Mode Transaksi', en: 'Transaction Mode' },
   saved: { id: 'Tersimpan', en: 'Saved' },
+  // Template format nomor transaksi fallback (bukan teks UI) - output identik TRX-<timestamp>.
+  'saved-fallback-num': { id: 'TRX-{t}', en: 'TRX-{t}' },
   custom: { id: 'Custom', en: 'Custom' },
   ongkir: { id: 'Ongkir', en: 'Delivery Fee' },
   promo: { id: 'Promo', en: 'Promo' },
@@ -1058,6 +1066,12 @@ const STR: Record<string, Entry> = {
   login_verifying: { id: 'Memverifikasi...', en: 'Verifying...' },
   login_fail: { id: 'Username atau PIN salah. Coba lagi atau klaim ulang terminal.', en: 'Wrong username or PIN. Try again or re-claim the terminal.' },
   login_claim: { id: 'Klaim ulang terminal', en: 'Re-claim terminal' },
+
+  // ---- login info panel (LoginScreen infoSide tablet) ----
+  login_info_title: { id: 'Login Kasir ESB', en: 'ESB Cashier Login' },
+  login_info_user: { id: 'Masuk dengan Username dan PIN', en: 'Sign in with Username and PIN' },
+  login_info_qr: { id: 'atau pindai QR dari aplikasi owner', en: 'or scan the QR from the owner app' },
+  login_info_help: { id: 'Butuh bantuan? Hubungi 0822-1066-6969', en: 'Need help? Contact 0822-1066-6969' },
 
   // ---- supervisor (attempt-limit + kunci sementara) ----
   sup_invalid: { id: 'Masukkan 6 digit PIN supervisor.', en: 'Enter the 6-digit supervisor PIN.' },

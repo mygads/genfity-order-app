@@ -250,6 +250,120 @@ yang gagal TETAP `syncDate NULL` (retry berikutnya).
 }
 ```
 
+### 5.1.1 Pola action-flag di `POST order/finish` [KONTRAK]
+
+Satu path `order/finish` melayani mutasi pasca-penjualan selain body penuh
+§5.1. Pembedanya adalah field `action` (string, wajib untuk varian ini);
+server membalas envelope Yii2 §2 yang sama
+(`{name,message,code,status,success,data}`). Setiap varian SELALU dicatat
+ke outbox fisik (`enqueueOutbox('tr_saleshead', no, 'update')`) + antrean
+sync (`enqueueSync('order', {action, ...})`) agar aman offline, lalu
+`apiFetch` ke `ApiPath.pushOrderFinish` bila online (offline: terkirim via
+push berikutnya).
+
+**a) Void — `{action:"void", no, reason}`**
+
+Request (`no` = nomor penjualan; `salesNum` boleh dikirim sebagai alias
+kompatibilitas; `voidLines[]` opsional untuk void parsial per item):
+
+```json
+{
+  "action": "void",
+  "no": "TRX-20261016-014",
+  "salesNum": "TRX-20261016-014",
+  "reason": "Pesanan salah input",
+  "voidLines": [{ "id": "M001", "qty": 1 }]
+}
+```
+
+Respons:
+
+```json
+{
+  "name": "OK",
+  "message": "Order dibatalkan",
+  "code": 0,
+  "status": 200,
+  "success": true,
+  "data": {
+    "no": "TRX-20261016-014",
+    "salesNum": "TRX-20261016-014",
+    "status": "void",
+    "receivedAt": "2026-10-16 12:41:10",
+    "syncDate": "2026-10-16 12:41:10"
+  }
+}
+```
+
+Pemanggil: `persistVoidDb()` (`src/lib/history.ts`, void penuh),
+`persistVoid()` (`src/screens/bill/CancelScreen.tsx`, void parsial +
+otorisasi supervisor via `authorizeSupervisor`), `doVoid`/`doVoidAndPrint`
+(`src/screens/history/HistoryScreen.tsx`, PIN supervisor wajib).
+Dummy: `src/data/dummy/push/order-void.json` (alias katalog `order/void`).
+
+**b) Ganti metode bayar — `{action:"change-payment", no, method}`**
+
+Request (`method` salah satu `Tunai|QRIS|EDC|Debit|Kredit|Transfer`):
+
+```json
+{
+  "action": "change-payment",
+  "no": "TRX-20261016-014",
+  "salesNum": "TRX-20261016-014",
+  "method": "QRIS"
+}
+```
+
+Respons:
+
+```json
+{
+  "name": "OK",
+  "message": "Metode bayar diperbarui",
+  "code": 0,
+  "status": 200,
+  "success": true,
+  "data": {
+    "no": "TRX-20261016-014",
+    "salesNum": "TRX-20261016-014",
+    "paymentMethod": "QRIS",
+    "grandTotal": 60400,
+    "receivedAt": "2026-10-16 12:42:20",
+    "syncDate": "2026-10-16 12:42:20"
+  }
+}
+```
+
+Pemanggil: `persistPayChangeDb()` (`src/lib/history.ts`).
+Dummy: `src/data/dummy/push/order-change-payment.json`
+(alias katalog `order/change-payment`).
+
+**c) Status order ESB — `{action:"esb-accept"|"esb-done"|"esb-reject", no, status}`**
+
+Dipakai `persistEsbStatus()` (`src/screens/history/EsbOrderScreen.tsx`):
+`Diproses → esb-accept`, `Selesai → esb-done`, penolakan → `esb-reject`
+(+ `reason` wajib untuk reject). Body:
+`{action, no, status, ...(reason ? {reason} : {})}`; respons envelope
+`data: {no, status, receivedAt, syncDate}`.
+
+**d) Status tiket dapur — `{action:"kitchen-advance"|"kitchen-status", ...}`**
+
+Kontrak pemajuan tiket (`Baru → Diproses → Selesai`): body
+`{action:"kitchen-advance", ticketNo, status}` atau
+`{action:"kitchen-status", ticketNo, status}`; respons envelope
+`data: {ticketNo, status, receivedAt, syncDate}`. Implementasi kini
+(`persistKitchenStatus` di `src/screens/history/KitchenScreen.tsx`)
+menyimpan lokal + outbox fisik dulu (offline-first); POST action-flag
+menyusul saat wiring online diaktifkan.
+
+**e) Registrasi member — BUKAN `order/finish`**
+
+`member-register` adalah `kind` antrean sync (`enqueueSync('other',
+{kind:'member-register', memberId, nama, noHp})`), sedangkan POST-nya ke
+`erp/member` (`{memberId, name, phone}` → `{memberId, name, ok:true}`,
+lihat §5.5), bukan ke `order/finish`. Pemanggil: `persistMember()`
+(`src/screens/member/MemberScreen.tsx`).
+
 ### 5.2 Endpoint push lain
 
 | Endpoint | Payload inti |
@@ -447,7 +561,10 @@ Satu file per endpoint, tiap file = pasangan `{request, response}`:
   `terminal-update`
 - `src/data/dummy/push/` - `order-finish` (angka persis contoh §5.1:
   subtotal 70000, discount 2500, tax 5698, voucher 10000, rounding 25,
-  grandTotal 60400, paid 100000, change 39600), `order-split-bill`,
+  grandTotal 60400, paid 100000, change 39600), `order-void`
+  (action-flag void §5.1.1a, alias katalog `order/void`),
+  `order-change-payment` (action-flag change-payment §5.1.1b, alias katalog
+  `order/change-payment`), `order-split-bill`,
   `order-move-items`, `order-move-table`, `order-view`,
   `posv1-order-view-by-qr`, `posv1-order-view-quick-service`,
   `posv1-order-pos-error-log`, `v1-push-shift` (satu file untuk

@@ -1,0 +1,23 @@
+{
+  "request": {
+    "action": "void",
+    "no": "TRX-20261016-014",
+    "salesNum": "TRX-20261016-014",
+    "reason": "Pesanan salah input",
+    "voidLines": [{ "id": "M001", "qty": 1 }]
+  },
+  "response": {
+    "name": "OK",
+    "message": "Order dibatalkan",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "no": "TRX-20261016-014",
+      "salesNum": "TRX-20261016-014",
+      "status": "void",
+      "receivedAt": "2026-10-16 12:41:10",
+      "syncDate": "2026-10-16 12:41:10"
+    }
+  }
+}

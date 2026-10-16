@@ -154,7 +154,7 @@ export default function VoucherScreen({ navigation }: Props) {
             id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
             kode,
             nama: String(it.name ?? kode),
-            jenis: 'Diskon (Rp)', /* TODO-i18n:vou_kind_discount */
+            jenis: t('vou_kind_discount'),
             nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
             minBelanja: 0,
             berlakuHingga: hingga,
@@ -216,15 +216,15 @@ export default function VoucherScreen({ navigation }: Props) {
       return;
     }
     // Online: tampilkan valid/amount/minSpend dari server (apiSource.ts:314).
-    setMsg('Memeriksa kode ke server...'); /* TODO-i18n:vou_checking */
+    setMsg(t('vou_checking'));
     try {
       const r = await validateVoucherCode(kode, found.minBelanja);
       void persistVoucherOp('validate', found);
       setQ(kode);
       if (r.ok) {
-        setMsg(`Kode ${kode} valid - ${rp(r.amount)}. Min. belanja ${rp(r.minSpend)}. ${t('vou_lock_first')}`); /* TODO-i18n:vou_server_valid */
+        setMsg(t('vou_server_valid').replace('{k}', kode).replace('{a}', rp(r.amount)).replace('{m}', rp(r.minSpend)).replace('{l}', t('vou_lock_first')));
       } else {
-        setMsg(`Kode ${kode} ${t('vou_unknown')} Min. belanja ${rp(r.minSpend)}.`); /* TODO-i18n:vou_server_invalid */
+        setMsg(t('vou_server_invalid').replace('{k}', kode).replace('{u}', t('vou_unknown')).replace('{m}', rp(r.minSpend)));
       }
     } catch {
       // Server tak terjangkau: fallback SEED lokal + antrean sync.

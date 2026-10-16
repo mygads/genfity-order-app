@@ -624,7 +624,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         try {
           num = await nextSalesNum();
         } catch {
-          num = `TRX-${Date.now()}`; /* TODO-i18n:saved-fallback-num */
+          num = t('saved-fallback-num').replace('{t}', String(Date.now()));
         }
         setSalesNum(num);
       }

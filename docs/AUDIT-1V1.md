@@ -108,7 +108,10 @@ Detail gap per file ada di output workflow; ringkasan jadi TODO bernomor di bawa
 - Panjang PIN 4-vs-6 + attempt-limit T11 (dossier tak tetapkan angka)
 - Navy fix #16215E vs sampling logo runtime (dossier:168 + §9 rebuild boleh beda)
 
-## Wave-3 2026-10-16 (migrasi fondasi — HASIL: nol-edit + konvergensi worker)
+## Wave-4 2026-10-16 (held TERBUKA pasca-merge worker — be7ac7c, tsc EXIT 0, visual 8/8)
+
+Shift/EndShift/Recap: 14 kunci t() baku (status/kasir/rentang/total/transaksi/item/lainnya). Attendance pulih tr_shiftlog saat mount (FIX3-ATT). Recap: seksi custom_menu_sales (FIX3-RECAP, render terverifikasi di shot) + per_payment split tr_salespayment + fallback. Istirahat placeholder disengaja (FIX3-ISTIRAHAT, keputusan produk). Pay/Success tanggal TETAP HELD: kunci date_days/date_months/date_tz tak ada di kamus (spesifikasi untuk pemilik i18n tercatat). SISA lane-saya: `types.ts` (bersih, params sengaja-undefined) + kunci i18n baru (file kamus milik worker).
+Catatan harness: 4 shot tablet tertukar urutan rute (isi semua benar, nol kunci mentah, nol error).
 
 Migrator (2 agen) terap aturan visual-identical ke 12 layar: SEMUA kandidat gagal pemetaan eksak (radius/height/activeOpacity) → skip-and-held by-design, NOL Edit + NOL Write (terbukti `journal.jsonl` wf_aa382984-c08: 0 Edit, 0 Write).
 KONVERGENSI: worker membangun `AppInput`/`AppButton` (alias tipis di atas fondasi `Input`/`Button` wave-2 saya) dan sedang migrasi ~35 layar di WIP mereka (75 file, `tsc` HIJAU EXIT 0 saat ini). Alarm "lane overreach" verifier TERBANTAH jurnal — seluruh diff App* = worker, bukan agen saya.
