@@ -8,6 +8,7 @@ import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
+import { useConnectivity } from '../../hooks/useConnectivity';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -55,6 +56,12 @@ function tableStyle(s: string) {
 export default function DashboardScreen({ navigation }: Props) {
   const s = getSession();
   const { t } = useLang();
+  const { online, wsConnected } = useConnectivity();
+  // Badge koneksi REAL: hijau+Online bila jaringan & WS up, amber+Offline bila
+  // jaringan mati, abu+Local bila jaringan up tapi WS putus (mode lokal).
+  // 'Offline'/'Local' netral EN/ID (i18n.ts beku - tanpa kunci baru).
+  const connLabel = !online ? 'Offline' : wsConnected ? t('badge_online') : 'Local';
+  const connDot = !online ? styles.onlineDotAmber : wsConnected ? undefined : styles.onlineDotGrey;
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const [notice, setNotice] = useState('');
@@ -204,8 +211,8 @@ export default function DashboardScreen({ navigation }: Props) {
   // Baris sinkron: waktu nyata modul sync + jumlah antrean bila ada.
   const syncLine =
     pending > 0
-      ? `${t('dash_sync')} ${lastSync || t('dash_never')} · ${pending} ${t('sync_pending')} · ${t('badge_online')}`
-      : `${t('dash_sync')} ${lastSync || t('dash_never')} · ${t('badge_online')}`;
+      ? `${t('dash_sync')} ${lastSync || t('dash_never')} · ${pending} ${t('sync_pending')} · ${connLabel}`
+      : `${t('dash_sync')} ${lastSync || t('dash_never')} · ${connLabel}`;
 
   return (
     <View style={styles.root}>
@@ -223,8 +230,8 @@ export default function DashboardScreen({ navigation }: Props) {
         }
         right={
           <View style={styles.onlineDark}>
-            <View style={styles.onlineDot} />
-            <Text style={styles.onlineDarkT}>{t('badge_online')}</Text>
+            <View style={[styles.onlineDot, connDot]} />
+            <Text style={styles.onlineDarkT}>{connLabel}</Text>
           </View>
         }
       />
@@ -369,6 +376,8 @@ const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   onlineDark: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.navyDark, borderWidth: 1, borderColor: colors.navyTint, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
+  onlineDotAmber: { backgroundColor: colors.amber },
+  onlineDotGrey: { backgroundColor: colors.stroke },
   onlineDarkT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.white },
   shiftCard: {
     flexDirection: 'row',

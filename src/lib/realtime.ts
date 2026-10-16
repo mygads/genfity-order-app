@@ -30,6 +30,36 @@ const channels: Channel[] = [
   },
 ];
 
+const statusListeners = new Set<(connected: boolean) => void>();
+
+/** True bila minimal satu channel WS sedang OPEN. */
+export function getWsConnected(): boolean {
+  try {
+    return channels.some((ch) => ch.ws !== null && ch.ws.readyState === WebSocket.OPEN);
+  } catch {
+    return false;
+  }
+}
+
+/** Langganan perubahan status koneksi WS. Mengembalikan fungsi unsubscribe. */
+export function subscribeWsStatus(cb: (connected: boolean) => void): () => void {
+  statusListeners.add(cb);
+  return () => {
+    statusListeners.delete(cb);
+  };
+}
+
+function notifyWsStatus(): void {
+  const connected = getWsConnected();
+  statusListeners.forEach((cb) => {
+    try {
+      cb(connected);
+    } catch {
+      /* listener tidak boleh mematikan socket */
+    }
+  });
+}
+
 export function onWsMessage(fn: WsHandler): () => void {
   handlers.add(fn);
   return () => {
@@ -71,6 +101,7 @@ function connect(ch: Channel): void {
         /* abaikan */
       }
     }, HEARTBEAT_MS);
+    notifyWsStatus();
   };
   ch.ws.onmessage = (ev) => {
     try {
@@ -80,7 +111,10 @@ function connect(ch: Channel): void {
       /* abaikan frame non-JSON */
     }
   };
-  ch.ws.onclose = () => schedule(ch);
+  ch.ws.onclose = () => {
+    schedule(ch);
+    notifyWsStatus();
+  };
   ch.ws.onerror = () => {
     try {
       ch.ws?.close();
@@ -124,4 +158,5 @@ export function stopRealtime(): void {
     ch.ws = null;
     ch.retry = 0;
   });
+  notifyWsStatus();
 }
