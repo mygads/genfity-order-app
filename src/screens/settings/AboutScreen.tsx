@@ -8,7 +8,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /> <View style={styles.hero}>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /><View style={styles.hero}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
         <Text style={styles.version}>{t('about.version')}</Text>

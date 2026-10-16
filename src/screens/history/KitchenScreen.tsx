@@ -63,11 +63,11 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
 
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
     <View style={styles.root}>
-      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable> <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable>
+      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable>
       </View>
 
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /> <View style={styles.tabs}>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><View style={styles.tabs}>
         {filters.map((f) => (
           <Pressable key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive]}>
             <Text style={[styles.tabText, filter === f && styles.tabTextActive]}>{filterLabel(f)}</Text>
@@ -142,7 +142,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
                     </View>
                   <Text style={styles.detailPrice}>{rp(priceOf(it.name, livePrice) * it.qty)}</Text> </View>
                 ))}
-                <View style={styles.divider} /> <View style={styles.totalRow}> <Text style={styles.totalLabel}>{t('kit_total')}</Text> <Text style={styles.totalValue}>{rp(ticketTotal(selected, livePrice))}</Text> </View> <View style={styles.sheetBtns}>
+                <View style={styles.divider} /><View style={styles.totalRow}> <Text style={styles.totalLabel}>{t('kit_total')}</Text> <Text style={styles.totalValue}>{rp(ticketTotal(selected, livePrice))}</Text> </View><View style={styles.sheetBtns}>
                   <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} style={styles.sheetBtn} />
                   <AppButton
                     title={t('c_reprint')}

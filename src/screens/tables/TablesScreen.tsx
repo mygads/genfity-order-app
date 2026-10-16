@@ -212,7 +212,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
             <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
           </TouchableOpacity>
         }
-      /> <View style={s.legend}>
+      /><View style={s.legend}>
         {(Object.keys(STATUS_META) as TableStatus[]).map((k) => (
           <View key={k} style={s.legendItem}>
             <View style={[s.legendDot, { backgroundColor: STATUS_META[k].fg }]} />
@@ -425,7 +425,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                 />
               </View>
             </View>
-            {bookingWarn ? <Text style={s.warn}>{bookingWarn}</Text> : null} <AppButton title={t('tbl_save_book')} onPress={saveBooking} />
+            {bookingWarn ? <Text style={s.warn}>{bookingWarn}</Text> : null}<AppButton title={t('tbl_save_book')} onPress={saveBooking} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setBookingVisible(false)}>

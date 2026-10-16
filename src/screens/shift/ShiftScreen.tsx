@@ -133,7 +133,7 @@ const MAX_KAS_AWAL = 10000000;
   return (
     <View style={s.root}>
       <ScreenHeader title={t('shf_open_title')} onBack={() => navigation?.goBack?.()} right={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
         } />
 

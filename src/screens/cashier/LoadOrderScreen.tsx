@@ -50,7 +50,7 @@ import { useEffect, useRef, useState } from 'react';import { Alert, Image, Scrol
   };
 
   return (
-    <View style={styles.root}> <ScreenHeader title={t('loadOrderTitle')} onBack={() => navigation?.goBack()} /> <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}><ScreenHeader title={t('loadOrderTitle')} onBack={() => navigation?.goBack()} /><ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.hint}>{t('loadOrderHint')}</Text>
       <Text style={styles.sec}>{t('loadOrderSec')}</Text>
       <Text style={styles.hint}>{t('loadOrderHint')}</Text>

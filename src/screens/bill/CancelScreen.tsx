@@ -32,13 +32,13 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
  }); }); };
 
   /** Cetak rincian void ke struk dengan data order asal (id/meja/kasir/total). */ const printVoid = () => { navigation?.navigate('Receipt', { no: orderId, table: tableNo, cashier, total: voidTotal, voidLines: picked.map((i) => ({ name: i.name, qty: voidQty[i.id] ?? 0, price: i.price })), reason, }); }; return (
-    <View style={styles.root}> <ScreenHeader title={t('cx_title')} sub={`Order ${orderId} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}> <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable> <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={`Order ${orderId} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}> <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.meta}>Order {orderId} - {tableNo} - {cashier} - {rp(orderTotal)}</Text>
       <Text style={styles.sec}>{t('cx_title')}</Text>
       <Text style={styles.hint}>{t('cx_pick_hint')}</Text>
 
       {items.map((i) => { const q = voidQty[i.id] ?? 0; const on = q > 0; return (
-        <View key={i.id} style={[styles.item, on && styles.itemOn]}> <View style={styles.itemInfo}> <Text style={styles.itemName}>{i.qty}x {i.name}</Text> <Text style={styles.itemPrice}>{rp(i.price)}</Text> </View> <View style={styles.stepper}> <TouchableOpacity style={styles.stepBtn} onPress={() => step(i.id, -1, i.qty)} hitSlop={8}>
+        <View key={i.id} style={[styles.item, on && styles.itemOn]}><View style={styles.itemInfo}> <Text style={styles.itemName}>{i.qty}x {i.name}</Text> <Text style={styles.itemPrice}>{rp(i.price)}</Text> </View><View style={styles.stepper}><TouchableOpacity style={styles.stepBtn} onPress={() => step(i.id, -1, i.qty)} hitSlop={8}>
           <Text style={styles.stepTxt}>-</Text> </TouchableOpacity>
           <Text style={styles.stepVal}>{q}</Text> <TouchableOpacity style={styles.stepBtn} onPress={() => step(i.id, 1, i.qty)} hitSlop={8}>
           <Text style={styles.stepTxt}>+</Text>
@@ -54,7 +54,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
       <AppInput label={t('cx_pin')} value={pin} onChangeText={(txt) => { setPin(txt.replace(/\D/g, '').slice(0, 6)); setAuthMsg(''); }} placeholder={t('cx_pin_ph')} keyboardType="numeric" maxLength={6} secureTextEntry />
 
-      {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null} <View style={styles.summary}>
+      {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null}<View style={styles.summary}>
         <Text style={styles.sumTitle}>{t('cx_confirm_split')}</Text>
         <Text style={styles.sumLine}>{picked.length} item ({rp(voidTotal)}) {t('cx_to_cancel')}</Text>
         <Text style={styles.sumNote}>{t('cx_stock_back')}</Text>
@@ -80,7 +80,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
         <AppButton title={confirming ? '...' : `${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} style={styles.actionBtn} />
       </View>
       {done && <Text style={styles.done}>{t('cx_done')}</Text>} {done && (
-      <AppButton title={t('cx_void_print')} onPress={printVoid} /> )} <TouchableOpacity onPress={() => navigation?.navigate('History')}>
+      <AppButton title={t('cx_void_print')} onPress={printVoid} /> )}<TouchableOpacity onPress={() => navigation?.navigate('History')}>
         <Text style={styles.link}>{t('cx_history')}</Text>
       </TouchableOpacity>
     </ScrollView>

@@ -109,7 +109,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       {routes.map((r) => (
         <View key={r.id} style={styles.card}>

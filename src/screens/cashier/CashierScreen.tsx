@@ -961,7 +961,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.empty}>Menu tidak ditemukan</Text>
         </View>
       }
-      ItemSeparatorComponent={!isWide ? () => <View style={styles.rowSep} /> : undefined}
+      ItemSeparatorComponent={!isWide ? () =><View style={styles.rowSep} /> : undefined}
     />
   );
 
@@ -977,7 +977,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         data={cart}
         keyExtractor={(c) => c.id}
         contentContainerStyle={styles.cartList}
-        ItemSeparatorComponent={() => <View style={styles.cartDivider} />}
+        ItemSeparatorComponent={() =><View style={styles.cartDivider} />}
         renderItem={({ item }) => (
           <View>
             <View style={[styles.cartRow, item.voided && styles.cartRowVoid]}>

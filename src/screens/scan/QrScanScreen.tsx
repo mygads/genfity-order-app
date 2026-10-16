@@ -66,7 +66,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   };
 
   return (
-    <View style={styles.root}> <ScreenHeader title={t('scan_title')} onBack={() => navigation?.goBack()} right={ <TouchableOpacity onPress={() => setLang(lang === 'id' ? 'en' : 'id')} style={styles.langBtn}> <Text style={styles.langT}>{lang === 'id' ? 'EN' : 'ID'}</Text> </TouchableOpacity> } /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <View style={styles.root}><ScreenHeader title={t('scan_title')} onBack={() => navigation?.goBack()} right={ <TouchableOpacity onPress={() => setLang(lang === 'id' ? 'en' : 'id')} style={styles.langBtn}> <Text style={styles.langT}>{lang === 'id' ? 'EN' : 'ID'}</Text> </TouchableOpacity> } /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('scan_camera_manual')}</Text>
       <View style={styles.frame}>
         {scanning ? (

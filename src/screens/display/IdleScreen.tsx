@@ -15,7 +15,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View> <View style={styles.hero}>
+      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View><View style={styles.hero}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.shop, isTablet && styles.shopBig]}>{t('disp_shop')}</Text>
         <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>

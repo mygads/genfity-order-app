@@ -42,7 +42,7 @@ const SEED: Txn[] = [
         <TouchableOpacity onPress={() => navigation?.navigate('PettyCashForm')}>
           <Text style={s.headerAction}>{t('common.add')}</Text>
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         <View style={s.hero}>

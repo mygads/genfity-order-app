@@ -58,8 +58,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable> <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
         <View style={styles.statRow}>
           {(Object.keys(counts) as EsbStatusLocal[]).map((k) => (
             <View key={k} style={styles.stat}>
@@ -70,7 +70,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
         <View style={[styles.stat, styles.statLive]}> <Text style={styles.statNum}>{liveNew}</Text> <Text style={styles.statLabel}>Live</Text> </View>
       </View>
 
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null} <View style={styles.tabs}>
+      {notice ? <Text style={styles.notice}>{notice}</Text> : null}<View style={styles.tabs}>
         {tabs.map((tb) => (
           <Pressable key={tb} onPress={() => setTab(tb)} style={[styles.tab, tab === tb && styles.tabActive]}>
             <Text style={[styles.tabText, tab === tb && styles.tabTextActive]}>
@@ -153,7 +153,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                 </Text>
                 <Text style={styles.detailMeta}>{t('esb_schedule')}: {scheduleOf(selected)}</Text>
                 {selected.note ? <Text style={styles.detailNote}>{t('kit_note')}: {selected.note}</Text> : null}
-                {selected.status === 'Batal' ? ( <Text style={styles.rejectedNote}>{t('esb_rejected_note')}{selected.rejectReason ? ` - ${selected.rejectReason}` : ''}</Text> ) : null} <View style={styles.divider} />
+                {selected.status === 'Batal' ? ( <Text style={styles.rejectedNote}>{t('esb_rejected_note')}{selected.rejectReason ? ` - ${selected.rejectReason}` : ''}</Text> ) : null}<View style={styles.divider} />
                 {selected.items.map((it, idx) => (
                   <View key={idx} style={styles.itemRow}>
                     <View style={styles.itemLeft}>
@@ -164,7 +164,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   </View>
                 ))}
                 <View style={styles.divider} />
-                {(() => { const tt = totalsOf(selected, liveOngkir[selected.id]); return ( <> <View style={styles.row}>
+                {(() => { const tt = totalsOf(selected, liveOngkir[selected.id]); return ( <><View style={styles.row}>
                   <Text style={styles.rowLabel}>{t('c_subtotal')}</Text>
                   <Text style={styles.rowVal}>{rp(tt.sub)}</Text>
                 </View>
@@ -186,7 +186,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   <Text style={styles.rowVal}>{rp(tt.rounding)}</Text>
                 </View>
                 ) : null}
-                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /></View></>) : null} <View style={styles.sheetBtns}>
+                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /></View></>) : null}<View style={styles.sheetBtns}>
                   {selected.status === 'Baru' && (
                     <>
                       <AppButton title={t('esb_reject')} variant="danger" onPress={() => { setRejectText(''); setRejectFor(selected); }} fullWidth={false} style={styles.sheetBtn} />

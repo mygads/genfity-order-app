@@ -18,7 +18,7 @@ import { useState } from 'react';import { Image, Pressable, ScrollView, StyleShe
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
       {FAQS.map((f, i) => {
         const isOpen = open === i;
         return (
