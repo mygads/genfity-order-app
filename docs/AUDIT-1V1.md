@@ -48,10 +48,10 @@ Detail gap per file ada di output workflow; ringkasan jadi TODO bernomor di bawa
 
 | Area | Vonis | Inti sisa |
 |---|---|---|
-| Dashboard + Drawer + ScreenHeader + guard | DONE / PARTIAL (navbar 2 pola, guard T1) | T12 H-1; logout tanpa reset stack; titik shift selalu hijau; Cashier header kustom (S3 by-design) |
+| Dashboard + Drawer + ScreenHeader + guard | DONE / PARTIAL (navbar 2 pola, guard T1) | ✅ H-1 SUDAH ADA (vonis lama "T12 H-1" usang — REA 2026-10-16: DashboardScreen 76,108-117 baseline SQLite). SISA: logout tanpa reset stack; titik shift selalu hijau; Cashier header kustom (S3 by-design); guard per-CTA Transaksi Baru (guard navigator ada); ikon drawer nav_* tak dipasang |
 | Kasir & order | PARTIAL | ✅ Pajak tampil PPN 11/111 + rounding step 100 + baris Rounding di Cashier/CartDetail/DineIn (2026-10-16, tsc hijau); ✅ CustomMenu saveNotes ke item benar + tipe CustomMenu dilebarkan; ✅ SplitBill reaporsi proporsional + oper items/mode/table ke Pay. ✅ HOLD worker SELESAI 2026-10-16: refactor totals+SQLite hijau (`tsc` EXIT:0); konten batch-4 saya terverifikasi selamat semua (marker `bill_qr_after_pay/bok_open_hint/bok_empty/cart_restore/promo_remove/tmr_sub/guestFallback/searchMenu/customer-tamu` utuh) + `Rounding` Cashier ikut `t()`; batch-4 tercommit (`f69662e`). SISA: LoadOrder seed; salesNum bukan TRX-YYYYMMDD-NNN; master.ts 6 domain vs kontrak 11+ grup (file milik worker lain — JANGAN SENTUH) |
 | Pembayaran (Pay/Qris/Edc/Success/Receipt/BillPreview/Cancel) | PARTIAL (T8 ✅, T5 decided) | ✅ Batch-2 2026-10-16: method mentah per-split (bank tak hilang); transfer wajib referensi; approvalCode EDC → Success/Receipt; Success ringkasan mini + cetak langsung; BillPreview tanpa hardcode + teruskan konteks; Receipt baris voucher/approval/terminal + footer cabang + key kamus `xp_ref_*`/`ok_*`/`rc_voucher|approval|terminal`. ✅ Batch-4 T5: TIDAK ada aksi Cetak-QR pra-bayar di BillPreview — diputus tambah teks jujur `bill_qr_after_pay` ("QR struk tercetak setelah pembayaran"); ✅ terverifikasi visual 2026-10-16 (10/10 PNG baru phone+tablet: hint tampil; alarm "hilang di tablet-ID" terbukti PNG basi — shot segar tampilkan hint; NOL kunci mentah bocor). CartDetail/Cashier punya tombol print→Receipt pra-bayar yang ambigu — keputusan produk: gate QR di Receipt (file worker) atau biarkan. SISA: QR dekoratif (butuh merchant ID BE); poll lokal; bank/terminal hardcode; ULTRA10 persen vs Cashier flat; mock display BillPreview (TRX-047/ESB CABANG PORIS/021-5566) butuh profil merchant BE; Pay `?? 266000` + MEMBER_DEPOSIT_DB/CARDS/DRAWERS mock butuh master BE; ✅ tanggal Pay DAYS/MONTHS ikut bahasa (2026-10-16) |
-| Shift/kas (Attendance/Shift/Recap/EndShift) | PARTIAL (milik worker lain - JANGAN SENTUH) | PIN absensi max 4 vs 6; state absensi tak pulih; PIN buka-shift tak verifikasi; tanpa proteksi shift-ganda; promo rekap statis (T6); tanpa cetak shift + FailedPrintLog; fallback kas EndShift cacat saat nol tunai; tr_shiftlogdetail tak terpakai; attempt-limit (T11) |
+| Shift/kas (Attendance/Shift/Recap/EndShift) | PARTIAL (milik worker lain - JANGAN SENTUH) | ✅ REA 2026-10-16: vonis lama "tanpa proteksi shift-ganda / PIN tak verifikasi / promo statis" USANG — guard shift-ganda ADA (ShiftScreen 62-70), PIN via authorizeSupervisor+fallback ADA (75-89), promo rekap agregasi DB ADA (RecapScreen 176-238, seed fallback), tr_shiftlogdetail ditulis saat tutup. SISA NYATA: tanpa cetak shift/rekap + FailedPrintLog; state absensi tak pulih; baris Istirahat placeholder; RANGES + string Shift/EndShift hardcode ID; attempt-limit (T11); kebijakan panjang PIN 4-vs-6 (keputusan produk, dossier tak tetapkan angka) |
 | Meja & booking | PARTIAL | ✅ Batch-2: format kanonis A1-A4/B1-B3/C1-C2 + section di Move/DineIn/Booking/Timer; Booking edit + hapus + oper konteks ke Cashier; timer tick 10 dtk live + autoExtend nyata. ✅ Batch-3+: Cashier terima `customer`/`tamu` dari Booking (nama prefill + "(N tamu)" di kolom info, terus ke CartDetail). SISA: TablesScreen kanonis milik worker (rujukan read-only); denah live ms_table (butuh pull BE) |
 | Member/Voucher/Topup | PARTIAL | ✅ Batch-2: nominal topup benar; guard offline voucher + banner; MIN_TOPUP 10000; prefix Rp via rp(). ✅ Batch-3: tipe Member dilebarkan (`memberId/saldoBaru/topupNominal`, dua-arah terverifikasi). SISA: endpoint voucherBurn/deposit-topup di `server.ts` (milik worker); ULTRA10 persen vs Cashier flat; pesan min_topup pakai ulang key |
 | History/EsbOrder/Kitchen | PARTIAL (milik worker lain - JANGAN SENTUH) | Email antre lokal; nav tanpa items → struk dummy; nomor order inkonsisten; action void/change-payment di luar kontrak; void tanpa supervisor; ESB/Kitchen state lokal tanpa outbox; filter tanggal mock; total ESB tanpa rumus kanonik; tolak tanpa alasan; harga/station fallback; tanpa label station/print retry |
@@ -59,7 +59,59 @@ Detail gap per file ada di output workflow; ringkasan jadi TODO bernomor di bawa
 | Settings/Printers/Menu/Stock/Sync/Log/About/Help | PARTIAL+DONE campur | Tanpa timeout 120 dtk + izin BT; tanpa FailedPrintLog; Menu tanpa tambah/hapus; tanpa layar online-menu-stock (GAP); Log di AsyncStorage bukan tr_applog + tanpa tr_transactionlogapi; escpos tanpa QR raster/pajak/voucher/rounding/footer + tanpa Star/label; autoCut tak persist; T10 fisik luar kode |
 | Display/Idle/QrScan/Install/CreatePin/ForgotPin | PARTIAL | CustomerDisplay hardcode + tanpa Presentation API; Idle statis; QrScan QR-only + kartu hasil prematur; Install klaim simulasi + tanpa no-terminal-code; InstallProgress timer palsu; CreatePin userId hardcode + pesan hardcode; ForgotPin lokal-only + hardcode |
 | Bahasa & konsistensi UI | DONE kamus / PARTIAL cakupan | ✅ Batch-2: 5 layar tamu (Login/QrHow/Intro/ForgotPin/InstallProgress) pakai `useLang()` + 63 key `g_*`; key pay-chain `xp_ref_*`/`ok_*`/`rc_*` ditambah. ✅ Batch-3: Booking form full `t()` + 17 key `bok_*` baru (data tersimpan SENGAJA tetap ID — butuh migrasi data, batch terpisah); NOL literal `768` di 31 file sehat (semua `TABLET_BP`); 9 style input outlier → font 14 kanonis. ✅ Batch-4: 7 key baru (`bill_qr_after_pay/rounding/cart_restore/promo_remove/bok_open_hint/bok_empty/tmr_sub`) di-append ke `src/lib/i18n.ts` (file UNTRACKED milik worker — HELD, jangan commit); kritikus verifikasi rumus/`TABLET_BP`/font-14 NOL temuan di file sehat. SISA: TopupDeposit/Voucher/Booking `undefined` di types (sengaja — tak ada pemanggil kirim params) |
-| Data & API (dummy/server.ts/db.ts/sync/CONTRACT) | PARTIAL | Dummy tax tak cocok rumus; harga menu vs transaksi beda; split-bill tak rekonsiliasi; ApiPath hilang 9 endpoint kontrak; apiPost langsung lewati apiFetch; pushAll kind other→order/finish + tak kuras tr_esoprocessqueue; hardcode ESB-PORIS-01/B001; OTA apkUrl placeholder |
+| Data & API (dummy/server.ts/db.ts/sync/CONTRACT) | PARTIAL | ✅ REA 2026-10-16: 39 ApiPath ↔ DUMMY 1:1 (apiSource katalog) + envelope Yii2 + OTA array via unwrap() + fallback offline→dummy. ✅ Alarm "TAX_DEFAULT=10" SALAH — `src/lib/totals.ts:33` SUDAH 11 (kontrak §10.3, fixtures 66000→6541 cocok). SISA: tr_transactionlogapi hanya CREATE tanpa tulis; logApp() 1 hit (tak pernah dipanggil); B001 fallback hardcode; pull paging lastSyncDate/page tak dipakai pemanggil; ApiPath hilang 9 endpoint kontrak; pushAll kind other→order/finish + tak kuras tr_esoprocessqueue; OTA apkUrl placeholder |
+
+## Verdict REA 2026-10-16 (workflow wf_ba0b1083 — 7 sweep + kritikus, input kritikus TERPOTONG: hanya 2/7 area masuk)
+
+> Kritikus hanya menerima NAV+UI dan DASHBOARD+SHIFT (input harness terpotong di 12000 char). 5 area lain (kasir/pay/member-hist/settings/data) TIDAK sempat divonis — TODO mentah sweep tersimpan, JANGAN dianggap vonis. Fixer 2 agen tak jalan (bug script: `agent()` tanpa await) — harus re-run.
+
+### CONFIRMED DONE (25 item — jangan dicari lagi)
+- Drawer kiri translateX [-drawerW,0] 300/340, 10 item cocok dossier:159-160, anim 260ms cubic-out / 200ms cubic-in
+- ScreenHeader tunggal navy tengah sisi-70; SEMUA Stack.Screen headerShown:false — tak ada tumpuk native
+- burger.webp Dashboard+Cashier; TABLET_BP=768 tunggal (nol literal); wideCenter 880/560/1024
+- HKGrotesk 4 weight (dossier:113); font input 14; modal fade=form / slide=detail; stack anim default platform
+- Dashboard: kartu shift tr_shiftlog, omzet tr_saleshead+demo, H-1 delta SQLite, peta meja, stok menipis qty<=8, grid 11 menu+Absensi/Keluar+sync
+- Shift: cegah-ganda, PIN authorizeSupervisor+fallback, insert tr_shiftlog+outbox+enqueue, kas awal+terbilang+chip+maks 10jt
+- Absensi: clock-in/out+enqueue, ganti PIN hash+updatePinOnServer; Rekap: filter H/Kemarin/7H+hero+seksi SQLite+seed, promo T6 agregasi DB (seed fallback); Tutup: TUNAI murni+rumus+tulis tr_shiftlogdetail+enqueue
+- Guard navigator: shiftlog kosong bebas / ada-riwayat-tanpa-open mulai di Shift+notice
+
+### KILLED STALE (10 item — vonis lama usang, baris tabel di atas SUDAH dikoreksi)
+- "7 hasil sweep" (hanya 2 area teks diterima); "CTA tanpa cek shift" (guard navigator ADA — sisa benar hanya guard per-CTA)
+- AUDIT:51 "T12 H-1" — H-1 ADA (DashboardScreen 76,108-117); AUDIT:54 "tanpa proteksi shift-ganda" / "PIN tak verifikasi" / "promo statis" — SEMUA ADA
+- "ukuran teks 1:1 piksel" (dossier:167-168 strings 100% default, tanpa angka); "samakan transisi" (dossier tak spesifikasi)
+- "tablet-login +header dossier:91" (Login headerShown:false, tanpa visual = UNKNOWN); "samakan PIN 6 (dossier:91)" (dossier hanya sebut pin_code tanpa angka)
+
+### LANE-SAYA (izinkan sentuh — file saya / netral; fixer re-run di sini)
+- Drawer: pasang ikon nav_* (8 file ADA di assets/icons) DrawerMenu.tsx:97-105; logout reset stack (DrawerMenu:120-124 + Dashboard:207-210); titik shift prop kondisional (DrawerMenu:145 vs Cashier:623)
+- Dashboard: badge online statis + kartu shift tanpa dot (233-237,250); guard per-CTA Transaksi Baru (266-268)
+- Shift-i18n: hardcode ID Shift/EndShift/Recap-RANGES → t() (allowlist: file saya bila hijau, koordinasi worker)
+- Absensi: state tak pulih (load tr_shiftlog saat mount); baris Istirahat placeholder
+- Rekap: widget tablet dossier (cancelled, custom_menu_sales, per_menu_category, per_mode, per_payment)
+- Fondasi: ekstrak shared Input (Login h56 r14) + Button + token radius; rapikan komentar usang responsive.ts:3
+
+### LANE-WORKER (JANGAN SENTUH — App.tsx, native/lib, Printers, QrScan, DrawerMenu bila refactor aktif)
+- Cetak shift-open + cetak rekap + FailedPrintLog retry (butuh API print lane worker dulu, dossier:285-292)
+- GIF asli (scan_barcode_animation, install_step_2, edc_bca_qris — dossier:117) di Idle/QrScan/Install
+- Perubahan GuardedStacks/initialRouteName bila guard per-CTA butuh dukung navigator
+
+### BUTUH-BE (out of scope FE — catat kontraknya)
+- Endpoint supervisor-approve + sinkron PIN (§7.1 ApiPath.supervisorApprove; offline fallback jujur)
+- Profil merchant + master (angka hero/seed, merchant-ID, flavor↔URL paralel — dossier:229, API-CONTRACT.md)
+- Endpoint+skema push shift-open/shift-close/attendance/pin-change (lib/sync.ts, Lampiran D)
+
+### KEPUTUSAN-PRODUK (butuh putusan tertulis sebelum kode)
+- Dua pola header: Cashier kustom + QrHow biru vs ScreenHeader — satukan ATAU tetapkan by-design
+- Aturan dialog-tablet per-modal (dossier:162-163 phone=sheets, tablet=dialog+master-detail)
+- Aturan bump teks tablet repo-wide (baru 8/57 layar; tanpa angka asli)
+- Panjang PIN 4-vs-6 + attempt-limit T11 (dossier tak tetapkan angka)
+- Navy fix #16215E vs sampling logo runtime (dossier:168 + §9 rebuild boleh beda)
+
+### TODO MENTAH 5 AREA TAK-TRIASE (sweep-only, belum vonis kritikus — JANGAN kerjakan buta)
+- Kasir: gap esbOrder DineIn, CustomMenu TRX-047/STATIONS, LoadOrder SEED, PROMOS PromotionList, QS mode TablesScreen, header/date Booking, MODES tanpa DELIVERY
+- Pay: master mock, QRIS merchant-ID, bank/terminal master, Success DAYS/MONTHS+shopName
+- Member/hist: validasi, banner offline i18n, voucher pull, ULTRA10, METHODS topup, History void-PIN/email, PLATFORM_FEE/ongkir hardcode, petty/expense approve-PIN/CRUD/audit/foto/CoA
+- Settings: autoCut persist, logout reset, terminal-claim validasi, OTA versi, izin BT, USB/Star VID/PID, test-print mock, bonded mock, FailedPrintLog, menu add/delete+image (tanpa expo-file-system), MenuPrinting grup, Stock flag + layar online-menu-stock-setting HILANG, Sync simulateOld debug, QrScan QR-only+kartu prematur
+- Data: pull paging lastSyncDate/page, ApiPath literal, B001 fallback, tr_transactionlogapi mati, CartDetail 'Simpan' mentah, fixture pajak, LoadOrder persist, logApp tak dipanggil
 
 ## ⛔ BLOCKER 2026-10-16: 28 file rusak oleh tulisan worker lain — SUDAH DIPERBAIKI worker
 
@@ -74,7 +126,8 @@ disentuh worker + jangan commit file campur sebelum merge mereka.
 ## Hasil visual batch-5 (2026-10-16, 10 PNG segar `docs/ss-clone/phone|tablet-{Cashier,CartDetail,BillPreview,Booking,TableTimer}.png`)
 
 Nol error merah/blank; Rounding tampil (tablet-Cashier Rp-20, CartDetail Rp0; phone-Cashier grid-tanpa-total by-design).
-Backlog visual (bukan blocker rilis, butuh keputusan): header ganda bertumpuk (ScreenHeader dalam-layar + header stack — domain `App.tsx` milik worker);
+Backlog visual (bukan blocker rilis, butuh keputusan): KOREKSI 2026-10-16 — semua Stack.Screen `headerShown:false` (App.tsx 150-200, temuan REA), jadi
+tumpuk ganda di shot BUKAN header native; sumber baris kedua di BillPreview/TableTimer perlu selidik (kemungkinan judul dalam-konten);
 tombol campur bahasa (`Cetak Print Receipt`, `Bagi Bill (Split Bill)`); locale phone-vs-tablet tak konsisten (EN vs ID layar sama —
 harness nav tanpa locale, bukan bug kode); teks Booking phone terpotong; kartu TableTimer tablet terpotong; BillPreview tanpa params
 tampil mock Rp0/TRX-047 (butuh profil merchant BE).
