@@ -242,6 +242,12 @@ export default function LoginScreen({ navigation }: Props) {
               </View>
             ) : null}
 
+            <TouchableOpacity
+              style={styles.forgotLink}
+              onPress={() => navigation?.navigate('ForgotPin')}>
+              <Text style={styles.forgotLinkT}>Lupa PIN?</Text>
+            </TouchableOpacity>
+
             <View style={styles.spacer} />
             <TouchableOpacity
               style={[styles.primary, !filled && styles.primaryIdle]}
@@ -373,6 +379,8 @@ const styles = StyleSheet.create({
   errorRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'flex-start' },
   errorGlyph: { fontSize: 16, color: RED, marginTop: 2 },
   errorText: { flex: 1, fontFamily: fonts.medium, fontSize: 13, color: RED, lineHeight: 19 },
+  forgotLink: { alignSelf: 'flex-end', marginTop: 10, paddingVertical: 4 },
+  forgotLinkT: { fontFamily: fonts.semibold, fontSize: 13, color: BLUE },
   spacer: { flex: 1, minHeight: 48 },
   primary: {
     backgroundColor: ORANGE, borderRadius: 16, height: 52,

@@ -44,7 +44,7 @@ Printers (Okt 2026: +panel Station kasir/dapur), Settings (Okt 2026: +panel Term
 Intro (4 halaman onboarding APK), Install (klaim terminal + simulasi pindai),
 SelectBranch (3 cabang + radio), InstallProgress (3 langkah auto + %),
 CreatePin (PIN pad 2 fase + mismatch-reset), ForgotPin (reset via supervisor).
-Total route terdaftar: **55** (`src/navigation/types.ts`) — termasuk WebView + 18 route pekerja paralel (SplitBill, MoveItems, MoveTable, PromotionList, MenuPrinting, Stock, TableTimer, Sync, Log, About, Help, MenuManagement, Idle, TopupDeposit, PettyCash/Form/Detail, Expense).
+Total route terdaftar: **54** (`src/navigation/types.ts`) — termasuk WebView + 18 route pekerja paralel (SplitBill, MoveItems, MoveTable, PromotionList, MenuPrinting, Stock, TableTimer, Sync, Log, About, Help, MenuManagement, Idle, TopupDeposit, PettyCash/Form/Detail, Expense).
 
 ### 1c. Bukti screenshot (konvensi tetap — 2 folder saja)
 
@@ -53,7 +53,7 @@ Total route terdaftar: **55** (`src/navigation/types.ts`) — termasuk WebView +
   `login*.png`, `apk-*.png` (10 bukti emulator: intro, registrasi, web-login).
 - `docs/ss-clone/` — screenshot **hasil clone RN** (driver
   `verify/shot.two.cjs`, `EXPO_PUBLIC_NAV_HOOK=1`): `phone-<Route>.png` +
-  `tablet-<Route>.png`, 55 route × 2. Tepat 110 file + pasangan
+  `tablet-<Route>.png`, 54 route × 2. Tepat 108 file + pasangan
   `phone|tablet-IntroLast.png` (halaman akhir onboarding) — tidak ada nama
   lain; file warisan di luar konvensi (`BillSplit`, `MemberDeposit`,
   `PrintersEsc`, `RecapPhoto`, `TablesMove`) sudah dihapus Okt 2026.
@@ -198,7 +198,7 @@ Yang **belum ada di RN** (prioritas):
 | Tier-penuh order/finish belum terkirim (hanya ringkasan) | ✅ Okt 2026: `buildSalePayload` + rantai Cashier→CartDetail→Pay bawa item; bukti `SALE_OK` (Tunai 66000, 2 item, payments, tanpa data sensitif) via `verify/check.sale.cjs` |
 | Backend milik sendiri belum ada acuannya | ✅ Okt 2026: `docs/API-CONTRACT.md` v1 — konvensi, 11 grup endpoint + WS display + contoh tempel; klien diselaraskan (`apiPost` kirim X-Terminal-Code/X-Branch-Id/Idempotency-Key/Bearer, outbox sertakan `clientId`, supervisor pakai `auth/supervisor-approve`) |
 | Tautan Pratinjau Bill di CartDetail belum terbukti piksel (keranjang kosong di driver) | ✅ Okt 2026: driver `PARAMS.CartDetail` kini kirim 2 item; DOM cek `verify/check.cart.cjs` = item tampil + tautan ada + console 0 error + klik sampai BillPreview; bukti `docs/ss-clone/phone|tablet-CartDetail.png` |
-| 3 route orphan tanpa inbound (CustomMenu, BillPreview, Booking — aturan AGENTS.md #6) | ✅ Okt 2026: tombol Custom di toolbar Kasir → CustomMenu, tautan Pratinjau Bill di CartDetail → BillPreview, kartu Booking di menu Dashboard → Booking; semua 55 route kini terjangkau (Intro via awal, sisanya via navigate/go terverifikasi grep); bukti `docs/ss-clone/phone-{Cashier,Dashboard}.png` + `tablet-{Cashier,Dashboard,Booking,CustomMenu,BillPreview}.png` |
+| 3 route orphan tanpa inbound (CustomMenu, BillPreview, Booking — aturan AGENTS.md #6) | ✅ Okt 2026: tombol Custom di toolbar Kasir → CustomMenu, tautan Pratinjau Bill di CartDetail → BillPreview, kartu Booking di menu Dashboard → Booking; semua 54 route kini terjangkau (Intro via awal, sisanya via navigate/go terverifikasi grep; duplikat `SavedTransactions` — searti `LoadOrder` — dihapus Okt 2026, tautan `Lupa PIN?` di Login → ForgotPin, burger Kasir → Dashboard); bukti `docs/ss-clone/phone-{Cashier,Dashboard}.png` + `tablet-{Cashier,Dashboard,Booking,CustomMenu,BillPreview}.png` |
 | Dialog modal melebar penuh di tablet + modal email History ganda | ✅ Okt 2026: `dialogNarrow` (maxWidth 480, tengah) di dialog Receipt/Settings/ExtraPay; modal email History milik pekerja paralel sudah lengkap — duplikat saya dihapus, tidak ada kode mati; bukti `docs/ss-clone/phone|tablet-History.png` |
 | Konfigurasi terminal/server/sync masih mock | ✅ Okt 2026: `src/config/server.ts` (env prod/dev/staging/custom + terminal + ApiPath fakta REA), `src/lib/sync.ts` (outbox antre/kirim/terakhir), `src/config/device.ts` (station kasir/dapur + notif); Settings ada panel Terminal & Server + Sinkronkan, Printers ada panel Station (tambah/hapus/utama) — bukti `docs/ss-clone/phone|tablet-{Settings,Printers}.png` via `verify/shot.two.cjs` |
 | Kirim cetak cuma pratinjau (LAN/BT/USB/drawer stub) | ✅ Okt 2026: `src/native/printer.ts` — LAN murni JS (`react-native-tcp-socket`), BT SPP + USB serial via modul native `GenfityPrinter` (Kotlin, `modules/genfity-printer/` + config plugin, aktif setelah prebuild + EAS dev-client); PrintersScreen Uji Cetak/Uji Koneksi (probe ESC @)/Pairing BT/Buka Drawer semuanya memanggil lapisan ini, fallback `need-dev-client` + pratinjau di Expo Go/web |

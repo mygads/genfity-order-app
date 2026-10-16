@@ -296,7 +296,9 @@ export default function CashierScreen({ navigation, route }: Props) {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
+        <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')} hitSlop={10}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
+        </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
           <Text style={styles.outletName}>ESB Cabang Poris</Text>
           <View style={styles.shiftRow}>

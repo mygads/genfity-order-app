@@ -120,7 +120,7 @@ Customer display: 2 file (routes + display; sekunder via presentation_displays).
 
 ## 8. Status rebuild (2026-10-16, sesi Gas-2)
 
-- App Expo: 55 route terdaftar (`src/navigation/types.ts`), tsc EXIT 0.
+- App Expo: 54 route terdaftar (`src/navigation/types.ts`), tsc EXIT 0.
 - Lapisan native JS: `src/native/printer.ts` (LAN TCP murni JS; BT SPP + USB
   via modul Kotlin `GenfityPrinter` + config plugin, aktif setelah prebuild +
   EAS dev-client), `src/native/edc.ts` (intent APOS BCA), kamera QR

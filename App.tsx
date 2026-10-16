@@ -121,7 +121,6 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
         options={{ title: 'Berhasil', headerBackVisible: false }}
       />
       <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: 'Absensi' }} />
-      <Stack.Screen name="SavedTransactions" component={HistoryScreen} options={{ title: 'Transaksi Tersimpan' }} />
       <Stack.Screen name="Shift" component={ShiftScreen} options={{ title: 'Shift', headerShown: false }} />
       <Stack.Screen name="Recap" component={RecapScreen} options={{ title: 'Rekap Shift' }} />
       <Stack.Screen name="EndShift" component={EndShiftScreen} options={{ title: 'Tutup Shift', headerShown: false }} />

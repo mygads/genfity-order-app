@@ -25,7 +25,6 @@ export type RootStackParamList = {
   Edc: { total?: number } | undefined;
   Success: { total?: number; method?: string; cash?: number; change?: number } | undefined;
   Attendance: undefined;
-  SavedTransactions: undefined;
   Shift: undefined;
   Recap: undefined;
   EndShift: undefined;
