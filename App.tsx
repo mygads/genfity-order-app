@@ -131,10 +131,10 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Pengaturan' }} />
       <Stack.Screen name="CustomerDisplay" component={CustomerDisplayScreen} options={{ title: 'Tampilan Pelanggan', headerShown: false }} />
       <Stack.Screen name="WebView" component={WebViewScreen} options={{ title: 'Halaman Web', headerShown: false }} />
-      <Stack.Screen name="SplitBill" component={SplitBillScreen} options={{ title: 'Bagi Bill' }} />
-      <Stack.Screen name="MoveItems" component={MoveItemsScreen} options={{ title: 'Pindah Item' }} />
-      <Stack.Screen name="MoveTable" component={MoveTableScreen} options={{ title: 'Pindah Meja' }} />
-      <Stack.Screen name="PromotionList" component={PromotionListScreen} options={{ title: 'Promo' }} />
+      <Stack.Screen name="SplitBill" component={SplitBillScreen} options={{ title: 'Bagi Bill', headerShown: false }} />
+      <Stack.Screen name="MoveItems" component={MoveItemsScreen} options={{ title: 'Pindah Item', headerShown: false }} />
+      <Stack.Screen name="MoveTable" component={MoveTableScreen} options={{ title: 'Pindah Meja', headerShown: false }} />
+      <Stack.Screen name="PromotionList" component={PromotionListScreen} options={{ title: 'Promo', headerShown: false }} />
       <Stack.Screen name="MenuPrinting" component={MenuPrintingScreen} options={{ title: 'Cetakan Menu' }} />
       <Stack.Screen name="Stock" component={StockScreen} options={{ title: 'Stok' }} />
       <Stack.Screen name="TableTimer" component={TableTimerScreen} options={{ title: 'Timer Meja' }} />

@@ -25,6 +25,8 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const [done, setDone] = useState(false);
 
   const src = OCCUPIED.find((o) => o.table === from);
+  /** Kode meja dari label "A-05 (4 kursi)" → "A-05" (dulu split(' ')[0] yang rapuh). */
+  const destCode = to.replace(/\s*\(.*\)\s*$/, '').trim();
 
   const move = () => {
     if (!src) return;
@@ -88,7 +90,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
             <Text style={styles.link}>Lihat Denah Meja ›</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('Cashier', { table: to.split(' ')[0] })}>
+          <TouchableOpacity onPress={() => navigation?.navigate('Cashier', { table: destCode })}>
             <Text style={styles.link}>Buka di Kasir ›</Text>
           </TouchableOpacity>
         </View>

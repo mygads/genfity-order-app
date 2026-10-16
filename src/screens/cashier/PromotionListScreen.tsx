@@ -3,7 +3,7 @@ import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav; route?: { params?: { returnTo?: string } } };
+type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number } } };
 
 type Promo = {
   code: string;
@@ -34,6 +34,8 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('Semua');
   const returnTo = route?.params?.returnTo ?? 'CartDetail';
+  const subtotal = route?.params?.subtotal;
+  const [warn, setWarn] = useState('');
 
   const tags = useMemo(() => ['Semua', ...Array.from(new Set(PROMOS.map((p) => p.tag)))], []);
   const shown = PROMOS.filter((p) => {
@@ -43,8 +45,14 @@ export default function PromotionListScreen({ navigation, route }: Props) {
     return matchQ && matchTag;
   });
 
-  const pakai = (p: Promo) =>
+  const pakai = (p: Promo) => {
+    if (subtotal !== undefined && subtotal < p.minBelanja) {
+      setWarn(`Belanja ${rp(subtotal)} belum mencapai min. ${rp(p.minBelanja)} untuk ${p.code}.`);
+      return;
+    }
+    setWarn('');
     navigation?.navigate(returnTo, { voucher: { code: p.code, amount: p.amount } });
+  };
 
   return (
     <View style={styles.root}>
@@ -72,6 +80,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           ))}
         </View>
+        {warn ? <Text style={styles.warn}>{warn}</Text> : null}
         {shown.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Image
@@ -108,6 +117,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { backgroundColor: colors.navy, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 12 },
+  warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, backgroundColor: colors.paleRed, borderRadius: 8, padding: 10, marginTop: 10 },
   back: { color: colors.white, fontSize: 26, fontFamily: fonts.bold },
   headerTitle: { flex: 1, color: colors.white, fontFamily: fonts.bold, fontSize: 16, textAlign: 'center' },
   body: { padding: 16, paddingBottom: 40 },

@@ -37,8 +37,19 @@ export default function CustomMenuScreen({ navigation }: Props) {
       return;
     }
     setWarn('');
-    setAdded((l) => [...l, `${qtyNum}× ${name.trim()} — ${rp(priceNum * qtyNum)} · ${station}`]);
+    const label = `${qtyNum}× ${name.trim()} — ${rp(priceNum * qtyNum)} · ${station}`;
+    setAdded((l) => [...l, label]);
     setName('');
+    // Teruskan ke cart kasir agar benar-benar masuk order (dulu dead-end lokal).
+    navigation?.navigate('Cashier', {
+      customItem: { name: name.trim(), price: priceNum, qty: qtyNum, note: `${station}` },
+    });
+  };
+
+  const saveNotes = () => {
+    const note = [...notes, free].filter(Boolean).join(' · ');
+    // Tempel notes ke item kasir (dulu hilang tanpa params).
+    navigation?.navigate('Cashier', { itemNote: { id: 'p11', note } });
   };
 
   return (
@@ -104,7 +115,7 @@ export default function CustomMenuScreen({ navigation }: Props) {
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Kitchen')}>
           <Text style={styles.ghostT}>Lihat Dapur</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.primary2} onPress={() => navigation?.navigate('Cashier')}>
+        <TouchableOpacity style={styles.primary2} onPress={saveNotes}>
           <Text style={styles.primaryT}>Simpan Notes ›</Text>
         </TouchableOpacity>
       </View>

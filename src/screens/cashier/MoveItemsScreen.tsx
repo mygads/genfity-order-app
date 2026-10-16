@@ -30,24 +30,53 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const isTablet = width >= 768;
   const tables = useMemo(() => Object.keys(SOURCE), []);
   const [from, setFrom] = useState(route?.params?.from ?? tables[0] ?? 'A-03');
-  const [picked, setPicked] = useState<string[]>([]);
+  // qty yang dipilih untuk dipindah per item (mendukung pindah sebagian, mis. 2× pindah 1).
+  const [pickedQty, setPickedQty] = useState<Record<string, number>>({});
   const [to, setTo] = useState(DESTS[0] as string);
-  const [moved, setMoved] = useState<MoveItem[]>([]);
+  const [movedQty, setMovedQty] = useState<Record<string, number>>({});
   const [doneMsg, setDoneMsg] = useState('');
 
   const sourceItems = SOURCE[from] ?? [];
-  const remaining = sourceItems.filter((it) => !moved.some((m) => m.id === it.id));
-  const pickedItems = remaining.filter((it) => picked.includes(it.id));
-  const pickedTotal = pickedItems.reduce((s, it) => s + it.qty * it.price, 0);
+  const remaining = sourceItems
+    .map((it) => ({ ...it, left: it.qty - (movedQty[it.id] ?? 0) }))
+    .filter((it) => it.left > 0);
+  const pickedItems = remaining
+    .filter((it) => (pickedQty[it.id] ?? 0) > 0)
+    .map((it) => ({ ...it, move: Math.min(pickedQty[it.id] ?? 0, it.left) }));
+  const pickedTotal = pickedItems.reduce((s, it) => s + it.move * it.price, 0);
+  const pickedCount = pickedItems.reduce((s, it) => s + it.move, 0);
 
   const toggle = (id: string) =>
-    setPicked((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+    setPickedQty((m) => {
+      if ((m[id] ?? 0) > 0) {
+        const next = { ...m };
+        delete next[id];
+        return next;
+      }
+      const it = remaining.find((x) => x.id === id);
+      return { ...m, [id]: it?.left ?? 1 };
+    });
+
+  const stepMoveQty = (id: string, d: number) =>
+    setPickedQty((m) => {
+      const it = remaining.find((x) => x.id === id);
+      if (!it) return m;
+      return { ...m, [id]: Math.min(it.left, Math.max(1, (m[id] ?? 1) + d)) };
+    });
+
+  const destOccupied = to.includes('(terisi)');
 
   const move = () => {
     if (pickedItems.length === 0) return;
-    setMoved((l) => [...l, ...pickedItems]);
-    setDoneMsg(`${pickedItems.length} item (${rp(pickedTotal)}) dipindahkan ${from} → ${to}.`);
-    setPicked([]);
+    setMovedQty((m) => {
+      const next = { ...m };
+      for (const it of pickedItems) next[it.id] = (next[it.id] ?? 0) + it.move;
+      return next;
+    });
+    setDoneMsg(
+      `${pickedCount} pcs (${rp(pickedTotal)}) dipindahkan ${from} → ${to}${destOccupied ? ' — digabung ke bill yang sudah ada' : ''}.`,
+    );
+    setPickedQty({});
   };
 
   return (
@@ -66,7 +95,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
             <TouchableOpacity
               key={t}
               style={[styles.chip, from === t && styles.chipOn]}
-              onPress={() => { setFrom(t); setPicked([]); }}>
+              onPress={() => { setFrom(t); setPickedQty({}); }}>
               <Text style={[styles.chipT, from === t && styles.chipTOn]}>{t}</Text>
             </TouchableOpacity>
           ))}
@@ -84,7 +113,8 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           </View>
         ) : (
           remaining.map((it) => {
-            const on = picked.includes(it.id);
+            const sel = pickedQty[it.id] ?? 0;
+            const on = sel > 0;
             return (
               <TouchableOpacity
                 key={it.id}
@@ -94,9 +124,20 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
                   {on && <Text style={styles.checkT}>✓</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.itemName}>{it.qty}× {it.name}</Text>
-                  <Text style={styles.itemPrice}>{rp(it.qty * it.price)}</Text>
+                  <Text style={styles.itemName}>{it.left}× {it.name}</Text>
+                  <Text style={styles.itemPrice}>{rp(it.left * it.price)}</Text>
                 </View>
+                {on && (
+                  <View style={styles.qtyRow}>
+                    <TouchableOpacity style={styles.qtyBtn} onPress={() => stepMoveQty(it.id, -1)}>
+                      <Text style={styles.qtyT}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.qtyN}>{sel}</Text>
+                    <TouchableOpacity style={styles.qtyBtn} onPress={() => stepMoveQty(it.id, 1)}>
+                      <Text style={styles.qtyT}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })
@@ -116,7 +157,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           <Text style={styles.sumLine}>
             {pickedItems.length === 0
               ? 'Belum ada item dipilih.'
-              : `${pickedItems.length} item · ${rp(pickedTotal)} · ${from} → ${to}`}
+              : `${pickedCount} pcs · ${rp(pickedTotal)} · ${from} → ${to}${destOccupied ? ' (gabung)' : ''}`}
           </Text>
           {doneMsg ? <Text style={styles.done}>{doneMsg}</Text> : null}
         </View>
@@ -159,6 +200,10 @@ const styles = StyleSheet.create({
   checkT: { color: colors.white, fontFamily: fonts.bold, fontSize: 14 },
   itemName: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
   itemPrice: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  qtyBtn: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: colors.orange, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white },
+  qtyT: { color: colors.orangeDark, fontFamily: fonts.bold, fontSize: 15 },
+  qtyN: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 20, textAlign: 'center' },
   emptyWrap: { alignItems: 'center', paddingVertical: 20 },
   emptyImg: { width: 110, height: 110 },
   emptyT: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 8 },

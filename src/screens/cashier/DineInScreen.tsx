@@ -22,6 +22,18 @@ export default function DineInScreen({ navigation, route }: Props) {
   const [guest, setGuest] = useState('');
   const [mode, setMode] = useState('DINE IN');
 
+  /** Bill meja ini — dihitung dari state (dulu hardcode tak rekonsiliasi + service Rp 0). */
+  const billItems = [
+    { name: 'Sudirman Coffee + Normal Sugar + Normal Ice', qty: 2, price: 25800 + 7000, discount: 0 },
+    { name: 'Lele goreng kremes + Ekstra Sambel', qty: 1, price: 15000 + 4000, discount: 5000 },
+  ];
+  const gross = billItems.reduce((s, it) => s + it.qty * it.price, 0);
+  const discTotal = billItems.reduce((s, it) => s + it.discount, 0);
+  const net = gross - discTotal;
+  const pb1 = Math.round((net * 10) / 110);
+  const service = Math.round(net * 0.05);
+  const total = net + service;
+
   const seats = SECTIONS[section] ?? [];
 
   return (
@@ -71,24 +83,28 @@ export default function DineInScreen({ navigation, route }: Props) {
 
       <View style={styles.bill}>
         <Text style={styles.billTitle}>{guest.trim() || 'Tamu'} · Meja {table} · {pax} pax</Text>
-        <View style={styles.row}><Text style={styles.item}>2 Sudirman Coffee + Normal Sugar + Normal Ice</Text><Text style={styles.price}>{rp(25800)} + {rp(7000)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>1 Lele goreng kremes + Ekstra Sambel - Diskon (Rp)</Text><Text style={styles.price}>{rp(15000)} + {rp(4000)} - {rp(5000)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.price}>{rp(65900)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Diskon</Text><Text style={styles.disc}>-{rp(5000)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Pajak (PB1 10%, incl.)</Text><Text style={styles.price}>{rp(5536)}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Service (5%)</Text><Text style={styles.price}>{rp(0)}</Text></View>
-        <View style={styles.totalRow}><Text style={styles.totalL}>Total</Text><Text style={styles.totalV}>{rp(60900)}</Text></View>
+        {billItems.map((it) => (
+          <View key={it.name} style={styles.row}>
+            <Text style={styles.item}>{it.qty}× {it.name}</Text>
+            <Text style={styles.price}>{rp(it.qty * it.price)}</Text>
+          </View>
+        ))}
+        <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.price}>{rp(gross)}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Diskon</Text><Text style={styles.disc}>-{rp(discTotal)}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Pajak (PB1 10%, incl.)</Text><Text style={styles.price}>{rp(pb1)}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Service (5%)</Text><Text style={styles.price}>{rp(service)}</Text></View>
+        <View style={styles.totalRow}><Text style={styles.totalL}>Total</Text><Text style={styles.totalV}>{rp(total)}</Text></View>
       </View>
 
       <View style={styles.actions}>
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('LoadOrder')}>
           <Text style={styles.ghostT}>Simpan</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Receipt', { total: 60900 })}>
+        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Receipt', { total })}>
           <Text style={styles.ghostT}>Cetak Struk</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', { total: 60900 })}>
-          <Text style={styles.primaryT}>Bayar | {rp(60900)} ›</Text>
+        <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', { total })}>
+          <Text style={styles.primaryT}>Bayar | {rp(total)} ›</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.links}>

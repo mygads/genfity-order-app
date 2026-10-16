@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -20,7 +20,16 @@ type Nav = {
 
 type Props = {
   navigation?: Nav;
-  route?: { params?: { table?: string; voucher?: { code: string; amount: number } } };
+  route?: {
+    params?: {
+      table?: string;
+      mode?: string;
+      voucher?: { code: string; amount: number };
+      customItem?: { name: string; price: number; qty: number; note?: string };
+      itemNote?: { id: string; note: string };
+      loadItems?: CartItem[];
+    };
+  };
 };
 
 export type CartModifier = { name: string; price: number };
@@ -126,7 +135,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [showModes, setShowModes] = useState(false);
   const catScrollRef = useRef<ScrollView>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [table] = useState(route?.params?.table ?? '');
+  const [table, setTable] = useState(route?.params?.table ?? '');
   const [voucher, setVoucher] = useState<{ code: string; amount: number } | null>(
     route?.params?.voucher ?? null,
   );
@@ -149,6 +158,50 @@ export default function CashierScreen({ navigation, route }: Props) {
   // Drawer /home APK asli (order, table, shift, sales-history, detail-recap,
   // esb-order-dashboard, member, expense, petty-cash, settings).
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Guard agar customItem yang sama tidak double-apply saat params di-merge ulang.
+  const appliedCustom = useRef('');
+
+  /** Terima kiriman layar lain: voucher, item custom, notes, hasil muat order, mode. */
+  useEffect(() => {
+    const p = route?.params;
+    if (!p) return;
+    if (p.table !== undefined) setTable(p.table);
+    if (p.voucher) setVoucher(p.voucher);
+    if (p.mode && MODES.includes(p.mode)) {
+      setMode(p.mode);
+      setShowModes(false);
+    }
+    if (p.loadItems && p.loadItems.length > 0) {
+      setCart(
+        p.loadItems.map((c) => ({
+          id: c.id,
+          name: c.name,
+          basePrice: c.basePrice,
+          qty: Math.max(1, c.qty),
+          modifiers: c.modifiers ?? [],
+          discount: c.discount ?? 0,
+          note: c.note,
+        })),
+      );
+    }
+    if (p.itemNote) {
+      const { id, note } = p.itemNote;
+      setCart((prev) => prev.map((c) => (c.id === id ? { ...c, note: note || undefined } : c)));
+    }
+    if (p.customItem) {
+      const key = JSON.stringify(p.customItem);
+      if (appliedCustom.current !== key) {
+        appliedCustom.current = key;
+        const ci = p.customItem;
+        const id = `custom-${Date.now()}`;
+        setCart((prev) => [
+          ...prev,
+          { id, name: ci.name, basePrice: ci.price, qty: Math.max(1, ci.qty), modifiers: [], discount: 0, note: ci.note },
+        ]);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params]);
 
   const subs = useMemo(
     () => CATEGORIES.find((c) => c.name === activeCategory)?.subs ?? [],
@@ -362,13 +415,15 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Image source={require('../../../assets/icons/add_notes_black.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>Custom</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
+      <TouchableOpacity
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        onPress={() => setShowModes(true)}>
         <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>Ongkir</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
-        onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier' })}>
+        onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier', subtotal })}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>
           {voucher ? voucher.code : 'Promo'}

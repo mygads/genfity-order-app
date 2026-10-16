@@ -1,16 +1,36 @@
 import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import type { CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
-interface Saved { id: string; badge: string; mode: string; title: string; detail: string; }
+interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; }
 
 const SEED: Saved[] = [
-  { id: 'o1', badge: 'TA', mode: 'Take Away', title: 'Bawa Pulang · QoQi', detail: '2 item · ' + rp(33900) + ' · 13:10' },
-  { id: 'o2', badge: 'DI', mode: 'Dine In', title: 'Dine In · Meja A5', detail: '4 item · ' + rp(87500) + ' · 12:48' },
-  { id: 'o3', badge: 'OL', mode: 'Online', title: 'Online · GoFood #GO-88213', detail: '2 item · ' + rp(45800) + ' · 13:42' },
+  {
+    id: 'o1', badge: 'TA', mode: 'Take Away', title: 'Bawa Pulang · QoQi', detail: '2 item · ' + rp(33900) + ' · 13:10',
+    items: [
+      { id: 'p11', name: 'Sudirman Coffee', basePrice: 12900, qty: 1, modifiers: [{ name: 'Creamy Pandan', price: 7000 }], discount: 0 },
+      { id: 'p9', name: 'Teh Manis Panas', basePrice: 8000, qty: 2, modifiers: [], discount: 2500 },
+    ],
+  },
+  {
+    id: 'o2', badge: 'DI', mode: 'Dine In', title: 'Dine In · Meja A5', detail: '4 item · ' + rp(87500) + ' · 12:48', table: 'A5',
+    items: [
+      { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 3, modifiers: [], discount: 2500 },
+      { id: 'p7', name: 'Kopi Susu Gula Aren', basePrice: 22000, qty: 1, modifiers: [], discount: 0 },
+      { id: 'p13', name: 'Cheese Cake Slice', basePrice: 32000, qty: 1, modifiers: [], discount: 0 },
+    ],
+  },
+  {
+    id: 'o3', badge: 'OL', mode: 'Online', title: 'Online · GoFood #GO-88213', detail: '2 item · ' + rp(45800) + ' · 13:42',
+    items: [
+      { id: 'p10', name: 'Paket Nasi + Ayam', basePrice: 28000, qty: 1, modifiers: [], discount: 0 },
+      { id: 'p8', name: 'Americano Ice', basePrice: 18000, qty: 1, modifiers: [], discount: 0 },
+    ],
+  },
 ];
 
 const FILTERS = ['Semua', 'Dine In', 'Take Away', 'Online'];
@@ -23,6 +43,22 @@ export default function LoadOrderScreen({ navigation }: Props) {
   const [filter, setFilter] = useState('Semua');
 
   const shown = orders.filter((o) => filter === 'Semua' || o.mode === filter);
+
+  /** Muat order ke kasir — minta konfirmasi dulu sesuai teks hint (dulu langsung tanpa payload). */
+  const muat = (o: Saved) => {
+    Alert.alert('Muat order?', `${o.title}\nIsi cart kasir saat ini akan diganti.`, [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: 'Muat',
+        onPress: () =>
+          navigation?.navigate('Cashier', {
+            loadItems: o.items,
+            ...(o.table ? { table: o.table } : {}),
+            ...(o.mode === 'Dine In' ? { mode: 'DINE IN' } : o.mode === 'Take Away' ? { mode: 'TAKE AWAY' } : {}),
+          }),
+      },
+    ]);
+  };
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
@@ -53,7 +89,7 @@ export default function LoadOrderScreen({ navigation }: Props) {
             <Text style={styles.title}>{o.title}</Text>
             <Text style={styles.detail}>{o.detail}</Text>
           </View>
-          <TouchableOpacity style={styles.load} onPress={() => navigation?.navigate('Cashier')}>
+          <TouchableOpacity style={styles.load} onPress={() => muat(o)}>
             <Text style={styles.loadT}>Muat</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setOrders((l) => l.filter((x) => x.id !== o.id))}>

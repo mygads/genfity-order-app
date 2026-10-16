@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenterLg } from '../../theme';
 import { getSession, logout } from '../../session';
+import DrawerMenu from '../../components/DrawerMenu';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -53,6 +54,8 @@ export default function DashboardScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [notice, setNotice] = useState('');
+  // Drawer /home juga dibuka dari Dashboard (home) — dulu hanya dari Cashier.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const openMenu = (m: MenuItem) => {
     if (!m.route) {
@@ -64,16 +67,26 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.top}>
-        <View>
-          <Text style={styles.branch}>{s?.outlet ?? 'ESB Cabang Poris'}</Text>
-          <Text style={styles.cashier}>Kasir {s?.name ?? 'Gista'} · {s?.shift ?? 'Shift Pagi'}</Text>
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerBranch}>{s?.outlet ?? 'ESB Cabang Poris'}</Text>
+          <Text style={styles.headerSub}>Kasir {s?.name ?? 'Gista'} · {s?.shift ?? 'Shift Pagi'}</Text>
         </View>
-        <View style={styles.online}>
-          <Text style={styles.onlineText}>Online</Text>
+        <View style={styles.onlineDark}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.onlineDarkT}>Online</Text>
         </View>
       </View>
+      <DrawerMenu
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        navigate={(r) => navigation?.navigate(r)}
+      />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
 
       <View style={styles.shiftCard}>
         <View style={styles.shiftLeft}>
@@ -164,18 +177,21 @@ export default function DashboardScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
       <Text style={styles.sync}>Sinkron terakhir 5 mnt lalu · Online</Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 16, paddingBottom: 40 },
-  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  branch: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
-  cashier: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted, marginTop: 2 },
-  online: { backgroundColor: colors.paleGreen, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
-  onlineText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.greenDark },
+  header: { backgroundColor: colors.navy, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 12 },
+  burger: { width: 22, height: 22 },
+  headerBranch: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
+  headerSub: { fontFamily: fonts.medium, fontSize: 12, color: colors.navyTint, marginTop: 2 },
+  onlineDark: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
+  onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
+  onlineDarkT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.white },
   shiftCard: {
     flexDirection: 'row',
     alignItems: 'center',

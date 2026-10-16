@@ -7,7 +7,16 @@ export type RootStackParamList = {
   ForgotPin: undefined;
   Login: undefined;
   Dashboard: undefined;
-  Cashier: undefined;
+  Cashier:
+    | {
+        table?: string;
+        mode?: string;
+        voucher?: { code: string; amount: number };
+        customItem?: { name: string; price: number; qty: number; note?: string };
+        itemNote?: { id: string; note: string };
+        loadItems?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[];
+      }
+    | undefined;
   CartDetail: { items?: unknown; total?: number } | undefined;
   DineIn: { table?: string } | undefined;
   CustomMenu: undefined;
@@ -16,11 +25,11 @@ export type RootStackParamList = {
   Tables: undefined;
   Booking: undefined;
   LoadOrder: undefined;
-  Cancel: undefined;
+  Cancel: { orderId?: string } | undefined;
   Member: undefined;
   Voucher: undefined;
   QrScan: undefined;
-  Pay: { total?: number; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
+  Pay: { total?: number; method?: string; voucher?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
   Qris: { total?: number } | undefined;
   Edc: { total?: number } | undefined;
   Success: { total?: number; method?: string; cash?: number; change?: number } | undefined;
@@ -38,7 +47,7 @@ export type RootStackParamList = {
   SplitBill: { items?: unknown; total?: number } | undefined;
   MoveItems: { from?: string } | undefined;
   MoveTable: { from?: string } | undefined;
-  PromotionList: { returnTo?: string } | undefined;
+  PromotionList: { returnTo?: string; subtotal?: number } | undefined;
   MenuPrinting: undefined;
   Stock: undefined;
   TableTimer: undefined;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
@@ -20,6 +20,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const isTablet = width >= 768;
   const [items, setItems] = useState<CartItem[]>(route?.params?.items ?? []);
   const [voucher, setVoucher] = useState<Voucher | null>(route?.params?.voucher ?? null);
+  /** Sinkron ulang saat kembali dari PromotionList (params di-merge ke rute yang sudah ada). */
+  useEffect(() => {
+    if (route?.params?.voucher) setVoucher(route.params.voucher);
+    if (route?.params?.items && route.params.items.length > 0) setItems(route.params.items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params]);
   const routeTotal = route?.params?.total;
   // Editor per item: qty stepper inline, panel harga + catatan
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -71,7 +77,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
 
   const goPay = () =>
     navigation?.navigate('Pay', { total, items, ...(voucher ? { voucher: voucher.code } : {}) });
-  const goPromo = () => navigation?.navigate('PromotionList', { returnTo: 'CartDetail' });
+  const goPromo = () => navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal });
   const goSave = () => {
     setSavedTick(true);
     navigation?.navigate('LoadOrder');
