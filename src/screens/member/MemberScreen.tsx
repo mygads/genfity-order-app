@@ -139,7 +139,7 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
 export default function MemberScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang();
+  const { lang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [members, setMembers] = useState<Member[]>(DUMMY);
@@ -549,9 +549,6 @@ export default function MemberScreen({ navigation, route }: Props) {
         onBack={() => navigation?.goBack?.()}
         right={
           <View style={s.headRight}>
-            <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-              <Text style={s.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text>
-            </Pressable>
             <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
               <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
             </Pressable>

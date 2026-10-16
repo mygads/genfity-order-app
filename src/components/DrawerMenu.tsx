@@ -36,12 +36,10 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // Drawer Android asli meluncur dari KIRI - samakan (sebelumnya panel di kanan).
   // Lebar adaptif: 300 phone, 340 tablet.
   const drawerW = isTablet ? 340 : 300;
-  // Drawer tampil/hilang SEKEtika tanpa animasi apa pun (keputusan produk:
-  // slide + scrim terbaca sebagai dua animasi berurutan di HP).
-  // Modal tetap animationType="none". Buka-tutup dikontrol murni oleh `visible`.
-  if (!visible) return null;
   // Status shift nyata ala CashierScreen (tr_shiftlog): hijau = buka,
   // merah = tutup, kuning = belum termuat/DB kosong. Prop shiftOpen menimpa.
+  // Hooks WAJIB di atas early-return: keluar sebelum hooks membuat React
+  // melempar "Rendered more hooks than during the previous render".
   const [shiftDbOpen, setShiftDbOpen] = useState<boolean | null>(null);
   useEffect(() => {
     if (shiftOpenProp !== undefined || !visible) return;
@@ -63,6 +61,10 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     };
   }, [visible, shiftOpenProp]);
   const shiftOpen = shiftOpenProp ?? shiftDbOpen;
+  // Drawer tampil/hilang SEKEtika tanpa animasi apa pun (keputusan produk:
+  // slide + scrim terbaca sebagai dua animasi berurutan di HP).
+  // Modal tetap animationType="none". Buka-tutup dikontrol murni oleh `visible`.
+  if (!visible) return null;
   // Ikon nav_* bawaan APK: 8 berkas utk 10 item - Tables memakai nav_order
   // (sama-sama permukaan order) dan Expense memakai nav_petty_cash
   // (sama-sama arus kas keluar); Member memakai nav_attendance (direktori orang).

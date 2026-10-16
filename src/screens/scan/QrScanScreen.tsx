@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   voucher: 'VC-XXXX',};export default function QrScanScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang(); const [tab, setTab] = useState<ScanTab>('voucher');
+  const { t } = useLang(); const [tab, setTab] = useState<ScanTab>('voucher');
   const [code, setCode] = useState('VC-DISKON10K');
   const [result, setResult] = useState(true);
   const [msg, setMsg] = useState('');
@@ -81,7 +81,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   };
 
   return (
-    <View style={styles.root}><ScreenHeader title={t('scan_title')} onBack={() => navigation?.goBack()} right={ <TouchableOpacity onPress={() => setLang(lang === 'id' ? 'en' : 'id')} style={styles.langBtn}> <Text style={styles.langT}>{lang === 'id' ? 'EN' : 'ID'}</Text> </TouchableOpacity> } /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <View style={styles.root}><ScreenHeader title={t('scan_title')} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('scan_camera_manual')}</Text>
       <View style={styles.frame}>
         {scanning ? (
@@ -170,4 +170,4 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 12 },
   msg: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8 },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 14, marginBottom: 6 },
-  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.bold, fontSize: 14, color: colors.text },});
+  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.bold, fontSize: 14, color: colors.text, outlineStyle: 'none' as never },});

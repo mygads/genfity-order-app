@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
-  Modal,
+  Image, Modal,
   Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { lang, setLang, t } = useLang(); const [query, setQuery] = useState('');
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState<TxnStatus | null>(null);
   const [fPayment, setFPayment] = useState<string | null>(null);
@@ -103,7 +103,7 @@ import { useEffect, useMemo, useState } from 'react';import {
     setPicker(null);
   };
 
-  const langToggle = (<Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8} accessibilityLabel="Ganti bahasa / Switch language"><Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text></Pressable> ); const detail = selected ? (
+  const detail = selected ? (
     <DetailPanel
       txn={selected}
       payment={payOf(selected, payOver)}
@@ -129,7 +129,10 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}>{langToggle}</View>} />
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+          </Pressable>
+        </View>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
 
       <View style={[styles.searchRow, !isTablet && styles.searchRowPhone]}>
         {isTablet && <Text style={styles.searchIcon}>⌕</Text>}
@@ -209,12 +212,13 @@ import { useEffect, useMemo, useState } from 'react';import {
 
       {!isTablet && (
         <Modal visible={selectedId !== null} animationType="slide" transparent>
-          <View style={styles.sheetWrap}>
-            <View style={styles.sheet}>
+          {/* Ketuk area gelap di luar sheet = tutup. */}
+          <Pressable style={styles.sheetWrap} onPress={() => setSelectedId(null)}>
+            <View style={styles.sheet} onStartShouldSetResponder={() => true}>
               <View style={styles.sheetHandle} />
               <ScrollView>{detail}</ScrollView>
             </View>
-          </View>
+          </Pressable>
         </Modal>
       )}
 
@@ -491,7 +495,9 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
         <AppButton title={t('c_reprint')} variant="secondary" onPress={onPrint} fullWidth={false} style={styles.detailBtn} />
         <AppButton title={t('hist_email')} variant="secondary" onPress={onEmail} fullWidth={false} style={styles.detailBtn} />
         {txn.status === 'Selesai' && (
-          <AppButton title={t('hist_change_pay')} onPress={onChangePay} fullWidth={false} style={styles.detailBtn} />
+          <View style={styles.payCenter}>
+            <AppButton title={t('hist_change_pay')} onPress={onChangePay} fullWidth={false} style={styles.payCenterBtn} />
+          </View>
         )}
         {txn.status === 'Selesai' && (
           <AppButton title={t('hist_void')} variant="danger" onPress={onVoid} fullWidth={false} style={styles.detailBtn} />
@@ -790,5 +796,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
   dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
   dialogBtn: { flex: 1, marginTop: 0 },
   detailBtn: { flex: 1, minWidth: 100, marginTop: 8 },
+  payCenter: { flexBasis: '100%', alignItems: 'center', marginTop: 8 },
+  payCenterBtn: { marginTop: 0, minWidth: 220 },
   noteBox: { minHeight: 72, height: 'auto', alignItems: 'flex-start', paddingVertical: 10 },
   noteField: { textAlignVertical: 'top' },});

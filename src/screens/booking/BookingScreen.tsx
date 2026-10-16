@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
+import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { initDb, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
@@ -70,7 +71,8 @@ const TABLES_FREE = CANON_TABLES.map(tableLabel);
 export default function BookingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang();
+  const { t } = useLang();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [list, setList] = useState<Resv[]>(SEED);
   const [onlyToday, setOnlyToday] = useState(false);
   const [name, setName] = useState('');
@@ -356,8 +358,8 @@ export default function BookingScreen({ navigation }: Props) {
         title={t('title_booking')}
         onBack={() => navigation?.goBack()}
         right={
-          <TouchableOpacity onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-            <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text>
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
+            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </TouchableOpacity>
         }
       />
@@ -376,6 +378,13 @@ export default function BookingScreen({ navigation }: Props) {
           {bookingForm}
         </ScrollView>
       )}
+      <DrawerMenu
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        navigate={(r) => {
+          navigation?.navigate(r);
+        }}
+      />
     </View>
   );
 }
@@ -383,7 +392,6 @@ export default function BookingScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   burger: { width: 22, height: 22 },
-  langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
   body: { padding: 16, paddingBottom: 40 },
   count: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   todayToggle: { marginTop: 6 },
