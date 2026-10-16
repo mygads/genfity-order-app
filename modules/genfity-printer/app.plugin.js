@@ -41,10 +41,12 @@ const JAVA_PKG_DIR = path.join('id', 'genfity', 'posclone');
 
 function withGenfityPrinter(config) {
   config = withAndroidManifest(config, (mod) => {
-    const manifest = mod.modResults.manifest;
+    // ensurePermission menerima dokumen manifest utuh (mod.modResults),
+    // BUKAN mod.modResults.manifest — salah argumen = crash prebuild.
     for (const p of PERMS) {
-      AndroidConfig.Permissions.ensurePermission(manifest, p);
+      AndroidConfig.Permissions.ensurePermission(mod.modResults, p);
     }
+    const manifest = mod.modResults.manifest;
     if (!manifest['uses-feature']) manifest['uses-feature'] = [];
     const hasUsbHost = manifest['uses-feature'].some(
       (f) => f.$?.['android:name'] === 'android.hardware.usb.host',
@@ -84,15 +86,26 @@ function withGenfityPrinter(config) {
         'import com.facebook.react.ReactApplication\nimport id.genfity.posclone.GenfityPrinterPackage',
       );
       if (out !== src) {
-        // Sisip sebelum PackageList(...).packages — pola bawaan template.
-        const withReg = out.replace(
-          /(\bpackages\s*=\s*PackageList[^;]*\.packages)/,
-          '$1.apply { add(GenfityPrinterPackage()) }',
+        // Template Expo modern: PackageList(this).packages.apply { ... }.
+        let withReg = out.replace(
+          /(PackageList\(this\)\.packages\.apply\s*\{)/,
+          '$1\n              add(GenfityPrinterPackage())',
         );
-        out = withReg !== out ? withReg : out.replace(
-          /return packages/,
-          'packages.add(GenfityPrinterPackage())\n        return packages',
-        );
+        if (withReg === out) {
+          // Varian lama: val packages = PackageList(...).packages.
+          withReg = out.replace(
+            /(\bpackages\s*=\s*PackageList[^;]*\.packages)/,
+            '$1.apply { add(GenfityPrinterPackage()) }',
+          );
+        }
+        if (withReg === out) {
+          // Fallback terakhir: sebelum return packages.
+          withReg = out.replace(
+            /return packages/,
+            'packages.add(GenfityPrinterPackage())\n        return packages',
+          );
+        }
+        out = withReg;
       }
       mod.modResults.contents = out;
       return mod;

@@ -25,7 +25,9 @@ require.cache[pluginPath] = {
     withDangerousMod: (c, pair) => { captured.dangerous = pair; return c; },
     AndroidConfig: {
       Permissions: {
-        ensurePermission: (manifest, name) => {
+        // Tiru API asli: terima dokumen utuh ({ manifest: {...} }).
+        ensurePermission: (doc, name) => {
+          const manifest = doc.manifest;
           if (!manifest['uses-permission']) manifest['uses-permission'] = [];
           const has = manifest['uses-permission'].some((e) => e.$?.['android:name'] === name);
           if (!has) manifest['uses-permission'].push({ $: { 'android:name': name } });
@@ -62,15 +64,19 @@ const svc = (manifest.manifest.application[0].service || [])[0]?.$ || {};
 if (svc['android:name'] !== 'id.genfity.posclone.GenfityWsService') fail('service WS tak terdaftar');
 ok('service GenfityWsService');
 
-// 3. MainApplication Kotlin (template Expo SDK 49+: tanpa semicolon).
+// 3. MainApplication Kotlin — tiru template Expo modern ASLI (blok .apply).
 const ktIn = `package com.example
 import android.app.Application
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 class MainApplication : Application(), ReactApplication {
-  override fun getPackages(): List<ReactPackage> {
-    val packages = PackageList(this).packages
-    return packages
+  override val reactHost by lazy {
+    getDefaultReactHost(
+      packageList =
+        PackageList(this).packages.apply {
+          // Packages that cannot be autolinked yet can be added manually here
+        }
+    )
   }
 }`;
 const ktMod = { modResults: { contents: ktIn, path: 'MainApplication.kt' }, modRequest: {} };
