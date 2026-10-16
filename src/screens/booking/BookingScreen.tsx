@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -68,7 +68,7 @@ const TABLES_FREE = CANON_TABLES.map(tableLabel);
 /** Booking / reservasi - form + daftar, tersimpan di perangkat dan sinkron ke denah. */
 export default function BookingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [list, setList] = useState<Resv[]>(SEED);
@@ -117,11 +117,11 @@ export default function BookingScreen({ navigation }: Props) {
 
   const save = () => {
     if (!name.trim()) {
-      setWarn('Isi nama customer dulu.');
+      setWarn(t('bok_warn_name'));
       return;
     }
     if (!time.trim()) {
-      setWarn('Isi jam reservasi dulu.');
+      setWarn(t('bok_warn_time'));
       return;
     }
     setWarn('');
@@ -284,19 +284,17 @@ export default function BookingScreen({ navigation }: Props) {
 
   const bookingForm = (
     <>
-      <Text style={styles.sec}>{editingId ? 'Edit reservasi' : t('bok_new')}</Text>
+      <Text style={styles.sec}>{editingId ? t('bok_edit') : t('bok_new')}</Text>
       <Text style={styles.hint}>
-        {editingId
-          ? 'Ubah detail lalu simpan — atau batalkan edit.'
-          : 'Form pemesanan meja (BookTable). Meja mengikuti denah kanonis.'}
+        {editingId ? t('bok_edit_hint') : t('bok_form_hint')}
       </Text>
-      <Text style={styles.label}>Nama customer</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nama" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>No. HP</Text>
-      <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="08xx" keyboardType="phone-pad" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>Jumlah tamu</Text>
-      <TextInput style={styles.input} value={tamu} onChangeText={setPax} placeholder="2" keyboardType="numeric" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>Meja</Text>
+      <Text style={styles.label}>{t('bok_name_label')}</Text>
+      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder={t('bok_name_ph')} placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('bok_phone_label')}</Text>
+      <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder={t('bok_phone_ph')} keyboardType="phone-pad" placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('bok_pax_label')}</Text>
+      <TextInput style={styles.input} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('c_table')}</Text>
       <View style={styles.chips}>
         {TABLES_FREE.map((tb) => (
           <TouchableOpacity key={tb} style={[styles.chip, table === tb && styles.chipOn]} onPress={() => setTable(tb)}>
@@ -304,28 +302,28 @@ export default function BookingScreen({ navigation }: Props) {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>Tanggal</Text>
+      <Text style={styles.label}>{t('hist_f_date')}</Text>
       <View style={styles.chips}>
         {['Hari ini', 'Besok'].map((d) => (
           <TouchableOpacity key={d} style={[styles.chip, date === d && styles.chipOn]} onPress={() => setDate(d)}>
-            <Text style={[styles.chipT, date === d && styles.chipTOn]}>{d}</Text>
+            <Text style={[styles.chipT, date === d && styles.chipTOn]}>{d === 'Hari ini' ? t('esb_today') : t('bok_tomorrow')}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>Jam</Text>
-      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="12:30" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>Catatan</Text>
-      <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder="Catatan" placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('bok_time_label')}</Text>
+      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder={t('bok_time_ph')} placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('kit_note')}</Text>
+      <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder={t('kit_note')} placeholderTextColor={colors.faint} />
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <TouchableOpacity style={styles.primary} onPress={save}>
-        <Text style={styles.primaryT}>{editingId ? 'Simpan perubahan ›' : `${t('bok_save')} ›`}</Text>
+        <Text style={styles.primaryT}>{editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}</Text>
       </TouchableOpacity>
       {editingId ? (
         <TouchableOpacity style={styles.cancelEdit} onPress={resetForm}>
-          <Text style={styles.cancelEditT}>Batalkan edit</Text>
+          <Text style={styles.cancelEditT}>{t('bok_cancel_edit')}</Text>
         </TouchableOpacity>
       ) : null}
-      <Text style={styles.fine}>Contoh tersimpan: Andini · 4 tamu · {rp(86400)} · meja A2.</Text>
+      <Text style={styles.fine}>{t('bok_example')}: Andini · 4 {t('guests')} · {rp(86400)} · {t('c_table')} A2.</Text>
     </>
   );
 

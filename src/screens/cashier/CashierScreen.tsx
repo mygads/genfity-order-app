@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import DrawerMenu from '../../components/DrawerMenu';
 
@@ -129,7 +129,7 @@ function MenuThumb({ size = 52 }: { size?: number }) {
 
 export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isWide = width >= 768;
+  const isWide = width >= TABLET_BP;
   const { t } = useLang();
   const [activeCategory, setActiveCategory] = useState('Makanan');
   const [activeSub, setActiveSub] = useState<string | null>(null);
@@ -1076,7 +1076,7 @@ const styles = StyleSheet.create({
   customerInput: {
     paddingVertical: 9,
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     outlineStyle: 'none' as never,
   },
@@ -1297,7 +1297,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 9,
     fontFamily: fonts.medium,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     marginTop: 4,
   },
@@ -1470,7 +1470,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 11,
     fontFamily: fonts.medium,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.text,
     marginTop: 12,
     textAlign: 'center',

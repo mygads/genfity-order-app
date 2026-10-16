@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -67,7 +67,7 @@ const DEFAULT_CFG: TimerConfig = { enabled: true, limit: '90', warnBefore: '10',
 /** Timer meja: batas + peringatan tersimpan di perangkat, tick live tiap 10 detik. */
 export default function TableTimerScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [enabled, setEnabled] = useState(DEFAULT_CFG.enabled);
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     backgroundColor: colors.white,
     marginTop: 6,

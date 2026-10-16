@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import type { SaleItemIn } from '../../lib/payments';
@@ -37,7 +37,7 @@ const lineAmount = (it: OrderItemParam): number =>
 
 export default function BillPreviewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   // Order asli dari params kasir (bukan konstanta hardcode).
   const p = route?.params ?? {};
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: fonts.semibold,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     textAlign: 'right',
   },

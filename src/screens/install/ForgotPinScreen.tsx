@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { goBack: () => void };
 
 export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [username, setUsername] = useState('gista.kasir');
   const [sent, setSent] = useState(false);
@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
   label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 16, marginBottom: 6, alignSelf: 'flex-start' },
   input: {
     width: '100%', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
-    borderRadius: 10, padding: 12, fontFamily: fonts.medium, fontSize: 15, color: colors.text,
+    borderRadius: 10, padding: 12, fontFamily: fonts.medium, fontSize: 14, color: colors.text,
   },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 15, alignItems: 'center', marginTop: 16, width: '100%' },
   disabled: { opacity: 0.5 },

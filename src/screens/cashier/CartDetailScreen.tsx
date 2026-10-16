@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
@@ -30,7 +30,7 @@ type Props = {
 
 export default function CartDetailScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [items, setItems] = useState<CartItem[]>(route?.params?.items ?? []);
   const [voucher, setVoucher] = useState<Voucher | null>(route?.params?.voucher ?? null);
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 9,
     fontFamily: fonts.medium,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     marginTop: 4,
   },

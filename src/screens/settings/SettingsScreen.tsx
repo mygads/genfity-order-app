@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenter } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import DrawerMenu from '../../components/DrawerMenu';
+import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
+import { useLang, type Lang } from '../../lib/i18n';
 import { logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
@@ -13,12 +16,13 @@ const ENV_LABEL: Record<ServerEnv, string> = { prod: 'Prod', dev: 'Dev', staging
 
 export default function SettingsScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
+  const { t, lang, setLang } = useLang();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [soundNewOrder, setSoundNewOrder] = useState(() => getNotif().soundNewOrder);
   const [customerDisplay, setCustomerDisplay] = useState(() => getNotif().customerDisplay);
   const [autoPrintKitchen, setAutoPrintKitchen] = useState(() => getNotif().autoPrintKitchen);
   const [autoCut, setAutoCut] = useState(true);
-  const [lang, setLang] = useState<'ID' | 'EN'>('ID');
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
   const [terminal, setTerminalState] = useState(() => getTerminal());
@@ -52,22 +56,27 @@ export default function SettingsScreen({ navigation }: Props) {
     setTerminalOpen(false);
   };
 
+  const pickLang = (l: Lang) => setLang(l);
+
   const terminalSub = terminal.terminalCode
-    ? `${terminal.terminalCode} • ${terminal.branchName || terminal.branchId || '—'}`
-    : 'Belum diklaim — isi kode terminal';
+    ? `${terminal.terminalCode} - ${terminal.branchName || terminal.branchId || '-'}`
+    : t('settings.notClaimed');
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, isTablet && wideCenter]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Pengaturan</Text>
-        <Text style={styles.headerSub}>Toko Maju Jaya • Cabang Pusat</Text>
-      </View>
+      <ScreenHeader
+        title={t('settings.title')}
+        sub={t('settings.sub')}
+        onBack={() => setDrawerOpen(true)}
+        backLabel="☰"
+      />
+      <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
-      <Text style={styles.groupLabel}>Terminal & Server</Text>
-      <MenuRow title="Terminal" sub={terminalSub} onPress={openTerminal} />
+      <Text style={styles.groupLabel}>{t('settings.terminalServer')}</Text>
+      <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={openTerminal} />
       <View style={styles.panel}>
-        <Text style={styles.cardTitle}>Server</Text>
-        <Text style={styles.cardSub}>{getBaseUrl() || 'Belum diisi (mode Custom kosong)'}</Text>
+        <Text style={styles.cardTitle}>{t('settings.server')}</Text>
+        <Text style={styles.cardSub}>{getBaseUrl() || t('settings.noServer')}</Text>
         <View style={styles.envRow}>
           {ENVS.map((e) => (
             <Pressable key={e} onPress={() => pickEnv(e)} style={[styles.envBtn, serverEnv === e && styles.envBtnActive]}>
@@ -86,70 +95,70 @@ export default function SettingsScreen({ navigation }: Props) {
               autoCapitalize="none"
             />
             <Pressable style={styles.saveBtn} onPress={saveCustom}>
-              <Text style={styles.saveBtnText}>Simpan</Text>
+              <Text style={styles.saveBtnText}>{t('common.save')}</Text>
             </Pressable>
           </View>
         )}
       </View>
 
-      <Text style={styles.groupLabel}>Printer & Cetak</Text>
-      <MenuRow title="Koneksi Printer" sub="Station kasir/dapur · BT · LAN · Star" onPress={() => go('Printers')} />
-      <MenuRow title="Pengaturan Cetakan Menu" sub="Routing cetak per menu → station dapur/checker" onPress={() => go('MenuPrinting')} />
-      <MenuRow title="Manajemen Menu" sub="Unduh gambar · tandai habis" onPress={() => go('MenuManagement')} />
+      <Text style={styles.groupLabel}>{t('settings.printerPrint')}</Text>
+      <MenuRow title={t('settings.printConn')} sub={t('settings.printConnSub')} onPress={() => go('Printers')} />
+      <MenuRow title={t('settings.menuPrint')} sub={t('settings.menuPrintSub')} onPress={() => go('MenuPrinting')} />
+      <MenuRow title={t('settings.menuMgmt')} sub={t('settings.menuMgmtSub')} onPress={() => go('MenuManagement')} />
       <MenuRow
-        title="Potong Otomatis"
-        sub="Potong kertas otomatis setelah cetak"
+        title={t('settings.autoCut')}
+        sub={t('settings.autoCutSub')}
         right={
           <Switch value={autoCut} onValueChange={setAutoCut} trackColor={{ true: colors.green, false: colors.stroke }} />
         }
       />
 
-      <Text style={styles.groupLabel}>Operasional</Text>
-      <MenuRow title="Pengaturan Stok" sub="Lacak stok · stok menu online" onPress={() => go('Stock')} />
-      <MenuRow title="Timer Meja" sub="Batas waktu duduk + peringatan" onPress={() => go('TableTimer')} />
-      <MenuRow title="Tiket Dapur" sub="Lihat antrean masak & saji" onPress={() => go('Kitchen')} />
-      <MenuRow title="Pesanan ESB" sub="Pesanan online dari agregator" onPress={() => go('EsbOrder')} />
-      <MenuRow title="Pengaturan Meja" sub="Denah, kapasitas, status" onPress={() => go('Tables')} />
+      <Text style={styles.groupLabel}>{t('settings.operational')}</Text>
+      <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
+      <MenuRow title={t('settings.tableTimer')} sub={t('settings.tableTimerSub')} onPress={() => go('TableTimer')} />
+      <MenuRow title={t('settings.kitchen')} sub={t('settings.kitchenSub')} onPress={() => go('Kitchen')} />
+      <MenuRow title={t('settings.esb')} sub={t('settings.esbSub')} onPress={() => go('EsbOrder')} />
+      <MenuRow title={t('settings.tables')} sub={t('settings.tablesSub')} onPress={() => go('Tables')} />
       <MenuRow
-        title="Bunyi Pesanan Baru"
-        sub="Memberikan info pesanan baru dengan suara"
+        title={t('settings.newOrderSound')}
+        sub={t('settings.newOrderSoundSub')}
         right={
           <Switch value={soundNewOrder} onValueChange={(v) => { setSoundNewOrder(v); setNotif({ soundNewOrder: v }); }} trackColor={{ true: colors.green, false: colors.stroke }} />
         }
       />
       <MenuRow
-        title="Cetak Otomatis Dapur"
-        sub="Kirim tiket ke printer dapur saat bayar"
+        title={t('settings.autoKitchen')}
+        sub={t('settings.autoKitchenSub')}
         right={
           <Switch value={autoPrintKitchen} onValueChange={(v) => { setAutoPrintKitchen(v); setNotif({ autoPrintKitchen: v }); }} trackColor={{ true: colors.green, false: colors.stroke }} />
         }
       />
 
-      <Text style={styles.groupLabel}>Tampilan & Pindai</Text>
-      <MenuRow title="Tampilan Pelanggan" sub="Layar info pesanan untuk pelanggan" onPress={() => go('CustomerDisplay')} right={
+      <Text style={styles.groupLabel}>{t('settings.displayScan')}</Text>
+      <MenuRow title={t('settings.customerDisplay')} sub={t('settings.customerDisplaySub')} onPress={() => go('CustomerDisplay')} right={
         <Switch value={customerDisplay} onValueChange={(v) => { setCustomerDisplay(v); setNotif({ customerDisplay: v }); }} trackColor={{ true: colors.green, false: colors.stroke }} />
       } />
-      <MenuRow title="Layar Idle / Promosi" sub="Tampilan promosi saat tidak dipakai" onPress={() => go('Idle')} />
-      <MenuRow title="Scan QR" sub="Klaim terminal · ESB order · member" onPress={() => go('QrScan')} />
+      <MenuRow title={t('settings.idle')} sub={t('settings.idleSub')} onPress={() => go('Idle')} />
+      <MenuRow title={t('settings.scanQr')} sub={t('settings.scanQrSub')} onPress={() => go('QrScan')} />
 
-      <Text style={styles.groupLabel}>Data & Bantuan</Text>
-      <MenuRow title="Sinkronisasi Data" sub="Push/pull manual · antrean offline" onPress={() => go('Sync')} />
-      <MenuRow title="Log Aplikasi" sub="Riwayat kejadian + detail" onPress={() => go('Log')} />
+      <Text style={styles.groupLabel}>{t('settings.dataHelp')}</Text>
+      <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
+      <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
       <MenuRow
-        title="Bahasa"
-        sub={lang === 'ID' ? 'Indonesia' : 'English'}
+        title={t('settings.language')}
+        sub={lang === 'id' ? 'Indonesia' : 'English'}
         right={
           <View style={styles.langRow}>
-            {(['ID', 'EN'] as const).map((l) => (
-              <Pressable key={l} onPress={() => setLang(l)} style={[styles.lang, lang === l && styles.langActive]}>
-                <Text style={[styles.langText, lang === l && styles.langTextActive]}>{l}</Text>
+            {(['id', 'en'] as const).map((l) => (
+              <Pressable key={l} onPress={() => pickLang(l)} style={[styles.lang, lang === l && styles.langActive]}>
+                <Text style={[styles.langText, lang === l && styles.langTextActive]}>{l.toUpperCase()}</Text>
               </Pressable>
             ))}
           </View>
         }
       />
-      <MenuRow title="Bantuan / FAQ" sub="Panduan & pertanyaan umum" onPress={() => go('Help')} />
-      <MenuRow title="Tentang Aplikasi" sub="Genfity Order v1.0.0" onPress={() => go('About')} />
+      <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
+      <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 
       <Pressable
         style={styles.logout}
@@ -157,27 +166,27 @@ export default function SettingsScreen({ navigation }: Props) {
           logout();
           navigation?.navigate('Login');
         }}>
-        <Text style={styles.logoutText}>Keluar</Text>
+        <Text style={styles.logoutText}>{t('settings.logout')}</Text>
       </Pressable>
-      <Text style={styles.version}>v1.0.0 • genfity-order</Text>
+      <Text style={styles.version}>v1.0.0 - genfity-order</Text>
 
       <Modal visible={terminalOpen} animationType="fade" transparent>
         <View style={styles.centerWrap}>
           <View style={[styles.dialog, styles.dialogNarrow]}>
-            <Text style={styles.dialogTitle}>Klaim Terminal</Text>
-            <Text style={styles.dialogSub}>Samakan dengan data terminal di server Anda.</Text>
-            <Text style={styles.fieldLabel}>Kode Terminal</Text>
+            <Text style={styles.dialogTitle}>{t('settings.claimTerminal')}</Text>
+            <Text style={styles.dialogSub}>{t('settings.claimSub')}</Text>
+            <Text style={styles.fieldLabel}>{t('settings.terminalCode')}</Text>
             <TextInput style={styles.input} value={draftCode} onChangeText={setDraftCode} placeholder="TRM-001" placeholderTextColor={colors.faint} autoCapitalize="characters" />
-            <Text style={styles.fieldLabel}>ID Cabang</Text>
+            <Text style={styles.fieldLabel}>{t('settings.branchId')}</Text>
             <TextInput style={styles.input} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="BR-01" placeholderTextColor={colors.faint} />
-            <Text style={styles.fieldLabel}>Nama Cabang</Text>
+            <Text style={styles.fieldLabel}>{t('settings.branchName')}</Text>
             <TextInput style={styles.input} value={draftBranchName} onChangeText={setDraftBranchName} placeholder="Cabang Poris" placeholderTextColor={colors.faint} />
             <View style={styles.dialogBtns}>
               <Pressable style={styles.btnGhost} onPress={() => setTerminalOpen(false)}>
-                <Text style={styles.btnGhostText}>Batal</Text>
+                <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable style={styles.btnPrimary} onPress={saveTerminal}>
-                <Text style={styles.btnPrimaryText}>Simpan</Text>
+                <Text style={styles.btnPrimaryText}>{t('common.save')}</Text>
               </Pressable>
             </View>
           </View>
@@ -212,9 +221,6 @@ function MenuRow({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { paddingBottom: 32 },
-  header: { backgroundColor: colors.navy, paddingTop: 52, paddingBottom: 18, paddingHorizontal: 16 },
-  headerTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.white },
-  headerSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 4 },
   groupLabel: {
     fontFamily: fonts.bold,
     fontSize: 13,
@@ -279,14 +285,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
     backgroundColor: colors.white,
     marginTop: 6,
   },
   saveBtn: { borderRadius: 10, backgroundColor: colors.navy, paddingHorizontal: 16, justifyContent: 'center', marginTop: 6 },
   saveBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
-  fieldLabel: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted, marginTop: 10 },
+  fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10 },
   centerWrap: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
