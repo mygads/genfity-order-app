@@ -3,6 +3,7 @@ import { Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from '
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import ScreenRoot from '../../components/ScreenRoot';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { goBack: () => void };

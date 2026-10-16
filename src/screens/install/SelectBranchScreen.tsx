@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { checkBranch } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';type Nav = {
+import { useEffect, useState } from 'react';import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { checkBranch } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
+import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';const BRANCHES = [
   { id: 'B001', name: 'ESB Cabang Poris', addr: 'Jl. Poris Raya No. 8, Tangerang', device: 'Terminal 01 · Kasir' },

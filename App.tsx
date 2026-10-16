@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
 import { getSession, loginDemo, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
@@ -392,7 +393,8 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer
+    <SafeAreaProvider>
+      <NavigationContainer
       ref={navRef}
       onReady={() => {
         if (!showNavHook) return;
@@ -428,7 +430,8 @@ export default function App() {
       }}>
       <StatusBar style="light" />
       <GuardedStacks loggedIn={loggedIn} />
-    </NavigationContainer>
+      </NavigationContainer>
+    </SafeAreaProvider>
   );
 }
 

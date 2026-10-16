@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TABLET_BP, colors, fonts } from '../theme';
 
 interface Props {
@@ -37,11 +38,14 @@ export default function ScreenHeader({
   subSize,
 }: Props) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const isTablet = width >= TABLET_BP;
   const tSize = titleSize ?? (isTablet ? 18 : 16);
   const sSize = subSize ?? (isTablet ? 13 : 12);
   return (
-    <View style={styles.bar}>
+    // paddingTop = inset sistem (status bar Android takik/edge-to-edge,
+    // 0 di web) + 12 bawaan agar bilah tak tertutup jam/wifi HP.
+    <View style={[styles.bar, { paddingTop: insets.top + 12 }]}>
       <View style={styles.side}>
         {left ?? (onBack ? (
           <TouchableOpacity onPress={onBack} hitSlop={12}>
@@ -70,13 +74,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingBottom: 12,
     minHeight: 56,
   },
   side: { width: 70, justifyContent: 'center' },
   sideRight: { width: 70, alignItems: 'flex-end', justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center' },
-  back: { color: colors.white, fontFamily: fonts.medium, fontSize: 16 },
+  back: { color: colors.white, fontFamily: fonts.medium, fontSize: 28, lineHeight: 32, paddingRight: 16, paddingVertical: 4 },
   title: { color: colors.white, fontFamily: fonts.bold, textAlign: 'center' },
   sub: { color: colors.navyTint, fontFamily: fonts.regular, marginTop: 2, textAlign: 'center' },
 });

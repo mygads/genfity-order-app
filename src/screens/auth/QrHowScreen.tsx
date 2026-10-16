@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import ScreenRoot from '../../components/ScreenRoot';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;

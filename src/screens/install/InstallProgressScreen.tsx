@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import ScreenRoot from '../../components/ScreenRoot';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
 type Props = { navigation?: Nav; route?: { params?: { branch?: string } } };

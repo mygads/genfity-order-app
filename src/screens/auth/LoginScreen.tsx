@@ -18,6 +18,7 @@ import { validateEmployee } from '../../lib/apiSource';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
+import ScreenRoot from '../../components/ScreenRoot';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;

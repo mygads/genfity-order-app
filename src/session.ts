@@ -43,17 +43,11 @@ function restore(): void {
   if (restored) return;
   restored = true;
   void getItem(LS_SESSION).then((raw) => {
-    // TEMP-DEBUG reload-probe
-    console.log('[sess-restore] raw=', raw === null ? 'NULL' : String(raw).slice(0, 40), 'current=', current ? 'SET' : 'null');
     if (!raw || current) return;
     try {
       current = JSON.parse(raw) as Session;
-      // TEMP-DEBUG reload-probe
-      console.log('[sess-restore] parsed OK, listeners=', listeners.size);
       emit();
-    } catch (e) {
-      // TEMP-DEBUG reload-probe
-      console.log('[sess-restore] PARSE-FAIL len=', raw.length, 'tail=', raw.slice(-40));
+    } catch {
       /* abaikan */
     }
   });
@@ -143,6 +137,18 @@ export function peekPostLoginRoute(): string | null {
 export function subscribeSession(fn: Listener): () => void {
   restore();
   listeners.add(fn);
+  // Sapu langsung: restore async (di web: localStorage resolve dalam
+  // microtask) bisa selesai SEBELUM effect subscribe mount sehingga emit
+  // terlewat dan loggedIn macet false selamanya (reload balik ke Intro,
+  // teramati listeners=0). Menutup kedua urutan balap: sudah-pulih →
+  // beri tahu sekarang; belum-pulih → emit restore nanti yang memberi tahu.
+  if (current !== null) {
+    try {
+      fn();
+    } catch {
+      /* abaikan */
+    }
+  }
   return () => {
     listeners.delete(fn);
   };
