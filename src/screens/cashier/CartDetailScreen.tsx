@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
+import { initDb, run } from '../../lib/db';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -154,15 +155,30 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal, ongkir });
   const goSave = () => {
     setSavedTick(true);
-    navigation?.navigate('LoadOrder', {
-      newOrder: {
-        title: `${modeLabel} · ${customer.trim() || t('guestFallback')}`,
-        mode,
-        ...(table ? { table } : {}),
-        items,
-        ongkir: ongkirNet,
-      },
+    const title = `${modeLabel} · ${customer.trim() || t('guestFallback')}`;
+    const payload = JSON.stringify({
+      title,
+      mode,
+      ...(table ? { table } : {}),
+      items,
+      ongkir: ongkirNet,
+      total,
+      ts: Date.now(),
     });
+    const id = `draft-${Date.now()}`;
+    const now = new Date().toISOString();
+    void (async () => {
+      try {
+        await initDb();
+        await run(
+          'INSERT INTO tr_draftorder (id, payload, createdAt, updatedAt, syncDate) VALUES (?, ?, ?, ?, NULL)',
+          [id, payload, now, now],
+        );
+      } catch {
+        /* offline-first: abaikan gagal tulis, daftar DB tetap tampil */
+      }
+      navigation?.navigate('LoadOrder');
+    })();
   };
 
   return (
@@ -174,7 +190,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         onBack={() => navigation?.goBack()}
       />
 
-      <ScrollView style={styles.list} contentContainerStyle={[styles.listContent, isTablet && wideCenter]}>
+      <ScrollView style={styles.list} contentContainerStyle={[styles.listContent, isTablet && wideCenterLg]}>
+        {/* Tablet: daftar item kiri, promo+total kanan; footer tetap full-width bawah. */}
+        <View style={[isTablet && styles.cols]}>
+        <View style={[isTablet && styles.col]}>
         {items.map((c, idx) => (
           <View key={c.id} style={[styles.row, c.voided && styles.rowVoid]}>
             {/* Lingkaran biru nomor */}
@@ -205,18 +224,18 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 <View style={styles.rowActs}>
                   <View style={styles.stepper}>
                     <TouchableOpacity
-                      style={[styles.stepBtn, c.qty <= 1 && styles.stepOff]}
+                      style={[styles.stepBtn, c.qty <= 1 && styles.stepOff, isTablet && styles.stepBtnBig]}
                       onPress={() => decQty(c.id)}
                       disabled={c.qty <= 1}>
                       <Text style={styles.stepT}>-</Text>
                     </TouchableOpacity>
                     <Text style={styles.stepQty}>{c.qty}</Text>
-                    <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(c.id)}>
+                    <TouchableOpacity style={[styles.stepBtn, isTablet && styles.stepBtnBig]} onPress={() => incQty(c.id)}>
                       <Text style={styles.stepT}>+</Text>
                     </TouchableOpacity>
                   </View>
                   <TouchableOpacity
-                    style={[styles.editBtn, editingId === c.id && styles.editBtnOn]}
+                    style={[styles.editBtn, editingId === c.id && styles.editBtnOn, isTablet && styles.editBtnBig]}
                     hitSlop={8}
                     onPress={() => (editingId === c.id ? setEditingId(null) : openEditor(c))}>
                     <Text style={[styles.editBtnT, editingId === c.id && styles.editBtnTOn]}>
@@ -269,7 +288,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             {/* Harga kanan */}
             <Text style={styles.price}>{rp(itemTotal(c))}</Text>
             {/* X merah */}
-            <TouchableOpacity style={styles.delBtn} onPress={() => removeItem(c.id)} hitSlop={12}>
+            <TouchableOpacity style={[styles.delBtn, isTablet && styles.delBtnBig]} onPress={() => removeItem(c.id)} hitSlop={12}>
               <Text style={styles.delText}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -294,6 +313,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           </View>
         )}
 
+        </View>
+        <View style={[isTablet && styles.col]}>
         {/* Voucher / promo ringkas */}
         {items.length > 0 && (
           <View style={styles.promoCard}>
@@ -430,6 +451,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           </View>
         )}
+        </View>
+        </View>
       </ScrollView>
 
       {/* Dialog ongkir: input nominal biaya antar */}
@@ -547,6 +570,13 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   list: { flex: 1 },
   listContent: { padding: 12, paddingBottom: 24 },
+  /* Kolom tablet: item kiri, promo+total kanan (phone tetap 1 kolom). */
+  cols: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
+  col: { flex: 1, minWidth: 0 },
+  /* Varian tablet: target sentuh min 44-48px (stepper 30 ke 44, hapus 24 ke 40). */
+  stepBtnBig: { width: 44, height: 44, borderRadius: 22 },
+  delBtnBig: { width: 40, height: 40, borderRadius: 20 },
+  editBtnBig: { paddingVertical: 10, minHeight: 44, justifyContent: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import { useLang } from '../../lib/i18n';
-import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { enqueueOutbox } from '../../lib/sync';
 import { getBranchId } from '../../config/server';
@@ -22,16 +21,6 @@ interface MenuEntry {
   soldOut: boolean;
   imageState: 'ok' | 'missing' | 'downloading';
 }
-
-const LS_MENUS = 'genfity.menu.cache';
-
-const DEFAULT_MENUS: MenuEntry[] = [
-  { id: 'm1', name: 'Ayam Geprek Pelakor', group: 'Makanan Utama', price: 45000, soldOut: false, imageState: 'ok' },
-  { id: 'm2', name: 'Es Teh Manis', group: 'Minuman', price: 8000, soldOut: false, imageState: 'ok' },
-  { id: 'm3', name: 'Lele Goreng', group: 'Makanan Utama', price: 22000, soldOut: false, imageState: 'missing' },
-  { id: 'm4', name: 'Kopi Robusta', group: 'Minuman', price: 15000, soldOut: true, imageState: 'ok' },
-  { id: 'm5', name: 'Mie Goreng Jawa', group: 'Makanan Utama', price: 22000, soldOut: true, imageState: 'missing' },
-];
 
 /** Sanitasi qty/harga: bulatkan, tolak NaN/negatif (default 0, bukan -1). */
 function cleanQty(v: unknown, fallback = 0): number {
@@ -56,6 +45,30 @@ async function resolveCategoryId(groupName: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Pastikan nama grup punya baris di ms_category: pakai id existing bila cocok,
+ * else buat kategori baru (sortOrder = max+1) agar categoryId di ms_menu
+ * selalu id valid, bukan nama grup mentah.
+ */
+async function ensureCategoryId(groupName: string): Promise<string> {
+  const name = groupName.trim();
+  const existing = await resolveCategoryId(name);
+  if (existing) return existing;
+  await initDb();
+  const maxRow = await queryFirst<{ m: number | null }>(
+    'SELECT MAX(sortOrder) AS m FROM ms_category',
+  );
+  const sort = (Number(maxRow?.m) || 0) + 1;
+  const id = `c-${Date.now()}`;
+  await run(
+    `INSERT INTO ms_category (id, categoryName, sortOrder, flagActive, syncDate)
+     VALUES (?, ?, ?, 1, NULL)`,
+    [id, name, sort],
+  );
+  await enqueueOutbox('ms_category', id, 'insert');
+  return id;
 }
 
 /** Tulis perubahan menu ke SQLite agar ikut sync master. */
@@ -101,35 +114,41 @@ async function persistMenu(m: MenuEntry): Promise<void> {
     await enqueueOutbox('ms_menu', m.id, 'update');
     await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'update');
   } catch {
-    /* abaikan: cache JSON tetap menyimpan */
+    /* abaikan: state lokal tetap menampilkan nilai sebelum gagal simpan */
   }
 }
 
 export default function MenuManagementScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [menus, setMenus] = useState<MenuEntry[]>(DEFAULT_MENUS);
+  // Offline-first: sumber tunggal = SQLite (ms_menu + ms_branchmenu cabang
+  // aktif). Tanpa seed/cache palsu — DB kosong = empty-state.
+  const [menus, setMenus] = useState<MenuEntry[]>([]);
   const [group, setGroup] = useState<string>('Semua');  const [queryText, setQueryText] = useState('');
   const [msg, setMsg] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftPrice, setDraftPrice] = useState('');
   const [draftGroup, setDraftGroup] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPrice, setNewPrice] = useState('');
+  const [newGroup, setNewGroup] = useState('');
+  const [newStation, setNewStation] = useState('');
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const cached = await getJSON<MenuEntry[]>(LS_MENUS, DEFAULT_MENUS);
       try {
         await initDb();
         const rows = await query<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
-          'SELECT id, menuName, categoryId, price FROM ms_menu',
+          'SELECT id, menuName, categoryId, price FROM ms_menu WHERE COALESCE(flagActive, 1) = 1',
         );
         if (!alive) return;
         if (rows.length === 0) {
-          if (cached.length > 0) setMenus(cached);
+          setMenus([]);
           return;
         }
         const sold = await query<{ menuId: string; flagSoldOut: number | null }>(
@@ -149,30 +168,23 @@ export default function MenuManagementScreen({ navigation }: Props) {
           /* kamus kosong - pakai id apa adanya */
         }
         setMenus(
-          rows.map((r) => {
-            const prev = cached.find((c) => c.id === r.id);
-            return {
-              id: r.id,
-              name: r.menuName ?? prev?.name ?? r.id,
-              group: (r.categoryId ? catName.get(r.categoryId) ?? r.categoryId : null) ?? prev?.group ?? t('menu.otherGroup'),
-              price: Number(r.price ?? prev?.price ?? 0),
-              soldOut: soldMap.get(r.id) ?? prev?.soldOut ?? false,
-              imageState: prev?.imageState ?? 'ok',
-            };
-          }),
+          rows.map((r) => ({
+            id: r.id,
+            name: r.menuName ?? r.id,
+            group: (r.categoryId ? catName.get(r.categoryId) ?? r.categoryId : null) ?? t('menu.otherGroup'),
+            price: Number(r.price ?? 0),
+            soldOut: soldMap.get(r.id) ?? false,
+            imageState: 'ok' as const,
+          })),
         );
       } catch {
-        if (alive && cached.length > 0) setMenus(cached);
+        if (alive) setMenus([]);
       }
     })();
     return () => {
       alive = false;
     };
   }, []);
-
-  useEffect(() => {
-    void setJSON(LS_MENUS, menus);
-  }, [menus]);
 
   const groups = ['Semua', ...Array.from(new Set(menus.map((m) => m.group)))];
 
@@ -245,6 +257,82 @@ export default function MenuManagementScreen({ navigation }: Props) {
     setMsg(t('menu.savedSync'));
   };
 
+  /** Tambah menu baru: upsert ms_menu + ms_branchmenu cabang aktif + outbox. */
+  const addMenu = async () => {
+    const name = newName.trim();
+    const price = Number(newPrice.replace(/\D/g, '')) || 0;
+    const grp = newGroup.trim() || t('menu.otherGroup');
+    const station = newStation.trim() || null;
+    if (name.length < 3 || price <= 0) {
+      setMsg(t('menu.invalidForm'));
+      return;
+    }
+    try {
+      await initDb();
+      const branchId = getBranchId();
+      const catId = await ensureCategoryId(grp);
+      const id = `m-${Date.now()}`;
+      await run(
+        `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate)
+         VALUES (?, ?, ?, ?, NULL, ?, 1, NULL)`,
+        [id, name, catId, cleanQty(price), station],
+      );
+      await run(
+        `INSERT INTO ms_branchmenu (branchId, menuId, qty, stationId, flagSoldOut, flagActive, syncDate)
+         VALUES (?, ?, 0, ?, 0, 1, NULL)`,
+        [branchId, id, station],
+      );
+      await enqueueOutbox('ms_menu', id, 'insert');
+      await enqueueOutbox('ms_branchmenu', `${branchId}:${id}`, 'insert');
+      setMenus((ms) => [...ms, { id, name, group: grp, price, soldOut: false, imageState: 'ok' }]);
+      setNewName('');
+      setNewPrice('');
+      setNewGroup('');
+      setNewStation('');
+      setShowAdd(false);
+      setMsg(t('menu.savedSync'));
+    } catch {
+      setMsg(t('menu.imgFail'));
+    }
+  };
+
+  /** Hapus menu: konfirmasi dulu, lalu flag nonaktif + outbox agar ikut sync. */
+  const confirmDelete = (m: MenuEntry) => {
+    Alert.alert(
+      lang === 'en' ? `Delete "${m.name}"?` : `Hapus "${m.name}"?`,
+      lang === 'en'
+        ? 'The menu will be removed from this branch and queued for sync.'
+        : 'Menu akan dihapus dari cabang ini dan ikut sync.',
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.delete'),
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await initDb();
+                const branchId = getBranchId();
+                await run('UPDATE ms_menu SET flagActive = 0, syncDate = NULL WHERE id = ?', [m.id]);
+                await run(
+                  'UPDATE ms_branchmenu SET flagActive = 0, syncDate = NULL WHERE branchId = ? AND menuId = ?',
+                  [branchId, m.id],
+                );
+                await enqueueOutbox('ms_menu', m.id, 'delete');
+                await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'delete');
+                setMenus((ms) => ms.filter((x) => x.id !== m.id));
+                if (editing === m.id) setEditing(null);
+                setMsg(lang === 'en' ? 'Menu deleted and queued for sync.' : 'Menu dihapus dan ikut sync.');
+              } catch {
+                setMsg(t('menu.imgFail'));
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   const q = queryText.trim().toLowerCase();
   const list = menus.filter(
     (m) => (group === 'Semua' || m.group === group) && (!q || m.name.toLowerCase().includes(q)),
@@ -277,12 +365,38 @@ export default function MenuManagementScreen({ navigation }: Props) {
         <View style={styles.formFlex}>
           <AppInput value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} />
         </View>
+        <AppButton size="sm" title={t('common.add')} onPress={() => setShowAdd((v) => !v)} fullWidth={false} style={styles.navyInline} />
         <AppButton size="sm" title={t('menu.downloadImages')} onPress={downloadAll} fullWidth={false} style={styles.navyInline} />
       </View>
+      {showAdd ? (
+        <View style={styles.addForm}>
+          <AppInput label={t('menu.menuName')} value={newName} onChangeText={setNewName} placeholder={t('menu.menuName')} />
+          <AppInput
+            label={t('menu.price')}
+            value={newPrice ? rpNum(Number(newPrice.replace(/\D/g, '')) || 0) : ''}
+            onChangeText={(v) => setNewPrice(v.replace(/\D/g, '').slice(0, 9))}
+            placeholder="0"
+            keyboardType="number-pad"
+          />
+          <AppInput label={t('menu.group')} value={newGroup} onChangeText={setNewGroup} placeholder={t('menu.group')} />
+          <AppInput
+            label={lang === 'en' ? 'Station (optional)' : 'Station (opsional)'}
+            value={newStation}
+            onChangeText={setNewStation}
+            placeholder={lang === 'en' ? 'Station (optional)' : 'Station (opsional)'}
+          />
+          <View style={styles.editorBtns}>
+            <AppButton title={t('common.cancel')} onPress={() => setShowAdd(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton title={t('common.save')} onPress={addMenu} fullWidth={false} style={styles.navyFlex} />
+          </View>
+        </View>
+      ) : null}
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
+      {/* Tablet: kartu menu 2 kolom; phone tetap 1 kolom (wadah transparan). */}
+      <View style={isTablet ? styles.gridTablet : undefined}>
       {list.map((m) => (
-        <View key={m.id} style={[styles.card, m.soldOut && styles.cardSold]}>
+        <View key={m.id} style={[styles.card, isTablet && styles.cardTablet, m.soldOut && styles.cardSold]}>
           <View style={styles.itemTop}>
             <Image
               source={m.imageState === 'ok'
@@ -326,14 +440,22 @@ export default function MenuManagementScreen({ navigation }: Props) {
               <AppButton size="sm" title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             ) : null}
             <AppButton title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <View style={styles.soldRow}>
+            <AppButton title={t('common.delete')} onPress={() => confirmDelete(m)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <View style={[styles.soldRow, isTablet && styles.soldRowTablet]}>
               <Text style={styles.rowLabel}>{t('menu.markSold')}</Text>
               <Switch value={m.soldOut} onValueChange={(v) => patch(m.id, { soldOut: v })} trackColor={{ true: colors.red, false: colors.stroke }} />
             </View>
           </View>
         </View>
       ))}
-      {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
+      </View>
+      {list.length === 0 ? (
+        <Text style={styles.empty}>
+          {menus.length === 0
+            ? (lang === 'en' ? 'No menus yet. Add your first menu above.' : 'Belum ada menu. Tambahkan menu pertama di atas.')
+            : t('common.noMatch')}
+        </Text>
+      ) : null}
     </ScrollView>
   );
 }
@@ -389,15 +511,28 @@ const styles = StyleSheet.create({
   soldBadge: { backgroundColor: colors.red, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 },
   soldText: { fontFamily: fonts.bold, fontSize: 10, color: colors.white },
   editor: { marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 4 },
+  addForm: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
   editorBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
   btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 10, alignItems: 'center' },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
   btnSave: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 10, alignItems: 'center' },
   btnSaveText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
-  itemBtns: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  itemBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' },
   btnTest: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 10, alignItems: 'center' },
   btnTestText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
   soldRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
+  // Tablet: grid 2 kolom + baris Habis full-baris (phone tak tersentuh).
+  gridTablet: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16 },
+  cardTablet: { flexBasis: '48%', flexGrow: 1, marginHorizontal: 0 },
+  soldRowTablet: { flexBasis: '100%', justifyContent: 'flex-start' },
   rowLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, textAlign: 'center', marginTop: 20 },
 });

@@ -15,16 +15,9 @@ import React, { useEffect, useState } from 'react';import {
   total?: number;
   namaTamu?: string;
   /** Menit sejak tamu duduk - timer durasi meja terisi (dipulihkan dari storage). */
-  seatedMin?: number;};const TABLES: Table[] = [
-  { id: '1', no: 'A1', section: 'Dalam', kapasitas: 2, status: 'kosong' },
-  { id: '2', no: 'A2', section: 'Dalam', kapasitas: 2, status: 'terisi', total: 185000, namaTamu: 'Budi', seatedMin: 25 },
-  { id: '3', no: 'A3', section: 'Dalam', kapasitas: 4, status: 'kosong' },
-  { id: '4', no: 'A4', section: 'Dalam', kapasitas: 4, status: 'dipesan', namaTamu: 'Sinta · 19:00' },
-  { id: '5', no: 'B1', section: 'Teras', kapasitas: 4, status: 'terisi', total: 96000, namaTamu: 'Andi', seatedMin: 48 },
-  { id: '6', no: 'B2', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
-  { id: '7', no: 'B3', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
-  { id: '8', no: 'C1', section: 'VIP', kapasitas: 2, status: 'kosong' },
-  { id: '9', no: 'C2', section: 'VIP', kapasitas: 8, status: 'dipesan', namaTamu: 'Rapat · 20:00' },];const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { bg: string; fg: string }> = {
+  seatedMin?: number;};
+/** Denah dibaca dari ms_table (seed mengisi 9 meja); kosong = empty-state. */
+const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { bg: string; fg: string }> = {
   kosong: { bg: colors.paleGreen, fg: colors.green },
   terisi: { bg: colors.paleRed, fg: colors.red },
   dipesan: { bg: colors.paleOrange, fg: colors.orange },
@@ -60,7 +53,7 @@ async function writeTimerStore(no: string, elapsed: number): Promise<void> {
 catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved/...) ke status denah lokal. */function mapBeStatus(raw: unknown): TableStatus { const v = String(raw ?? '').trim().toLowerCase(); if (v === 'occupied' || v === 'busy' || v === 'terisi' || v === 'isi') return 'terisi'; if (v === 'reserved' || v === 'booked' || v === 'booking' || v === 'res' || v === 'reservasi' || v === 'dipesan') return 'dipesan'; if (v === 'merged' || v === 'merge' || v === 'combined' || v === 'join' || v === 'gabung') return 'gabung'; return 'kosong'; }type MsTableRow = { id: string; tableNo: string | null; sectionId: string | null; capacity: number | null; status: string | null };/** Tulis status balik ke ms_table (best-effort, tak memblokir UI). */function persistTableStatus(tb: { id: string; no: string }, status: TableStatus): void { void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE id = ? OR TRIM(tableNo) = ?', [status, tb.id, tb.no]); } catch { /* master belum tersedia */ } })(); }/** Denah meja - section, status, timer durasi, hold order, transaksi cepat (QS). */export default function TablesScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>(TABLES); const [liveSections, setLiveSections] = useState<string[] | null>(null);
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>([]); const [liveSections, setLiveSections] = useState<string[] | null>(null);
   const [section, setSection] = useState('Semua');
   const [filter, setFilter] = useState<'semua' | TableStatus>('semua');
   const [selected, setSelected] = useState<Table | null>(null);
@@ -78,8 +71,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   // fallback = snapshot lama SEATED_KEY agar durasi lama tak hilang.
   useEffect(() => { let on = true; (async () => { let byNo: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const no = canonTableNo(String(x?.id ?? '')); if (no && Number.isFinite(el) && el >= 0) byNo[no] = el; } } } catch { /* abaikan: pakai fallback */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } if (!on) return; setTables((list) => list.map((tb) => tb.status === 'terisi' || tb.status === 'gabung' ? { ...tb, seatedMin: byNo[normNo(tb.no)] ?? saved[tb.id] ?? tb.seatedMin } : tb, ), ); })().catch(() => undefined); return () => { on = false; }; }, []);
   // Live: denah dari ms_table (id, tableNo, sectionId, capacity, status) pola
-  // MoveTableScreen; TABLES/SECTIONS di atas hanya fallback bila DB kosong.
-  useEffect(() => { let on = true; (async () => { try { await initDb(); const rows = await query<MsTableRow>('SELECT id, tableNo, sectionId, capacity, status FROM ms_table LIMIT 60'); if (!on || rows.length === 0) return; const byNo = new Map(TABLES.map((fb) => [normNo(fb.no), fb])); let byTim: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const k = canonTableNo(String(x?.id ?? '')); if (k && Number.isFinite(el) && el >= 0) byTim[k] = el; } } } catch { /* abaikan */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } const liveTables: Table[] = rows.map((r) => { const no = normNo(String(r.tableNo || r.id || '')); const fb = byNo.get(no); const st = mapBeStatus(r.status); const tb: Table = { id: String(r.id), no, section: String(r.sectionId || fb?.section || ''), kapasitas: Number(r.capacity) || fb?.kapasitas || 0, status: st }; if (st === 'terisi' || st === 'gabung') { const m = byTim[normNo(no)] ?? saved[String(r.id)]; if (m !== undefined) tb.seatedMin = m; } return tb; }); if (!on) return; setTables(liveTables); const secs: string[] = []; for (const tb of liveTables) { if (tb.section && !secs.includes(tb.section)) secs.push(tb.section); } setLiveSections(['Semua', ...secs]); } catch { /* SQLite belum siap - fallback konstanta tetap tampil */ } })().catch(() => undefined); return () => { on = false; }; }, []);
+  // MoveTableScreen; DB kosong = daftar kosong (empty-state di grid).
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const rows = await query<MsTableRow>('SELECT id, tableNo, sectionId, capacity, status FROM ms_table LIMIT 60'); if (!on) return; if (rows.length === 0) { setTables([]); setLiveSections(['Semua']); return; } const byNo = new Map<string, Table>(); let byTim: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const k = canonTableNo(String(x?.id ?? '')); if (k && Number.isFinite(el) && el >= 0) byTim[k] = el; } } } catch { /* abaikan */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } const liveTables: Table[] = rows.map((r) => { const no = normNo(String(r.tableNo || r.id || '')); const fb = byNo.get(no); const st = mapBeStatus(r.status); const tb: Table = { id: String(r.id), no, section: String(r.sectionId || fb?.section || ''), kapasitas: Number(r.capacity) || fb?.kapasitas || 0, status: st }; if (st === 'terisi' || st === 'gabung') { const m = byTim[normNo(no)] ?? saved[String(r.id)]; if (m !== undefined) tb.seatedMin = m; } return tb; }); if (!on) return; setTables(liveTables); const secs: string[] = []; for (const tb of liveTables) { if (tb.section && !secs.includes(tb.section)) secs.push(tb.section); } setLiveSections(['Semua', ...secs]); } catch { /* SQLite belum siap - fallback konstanta tetap tampil */ } })().catch(() => undefined); return () => { on = false; }; }, []);
   // Timer durasi: tiap menit tambah 1 menit utk meja terisi/gabung + simpan snapshot.
   // Cermin ke store TableTimer via max-merge (monoton naik, anti-mundur) agar
   // TableTimerScreen ikut melihat durasi terbaru; best-effort, tak memblokir tick.
@@ -262,13 +255,18 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       </ScrollView>
 
       <ScrollView contentContainerStyle={[s.grid, isTablet && wideCenterLg]}>
+        {shown.length === 0 && (
+          <View style={s.emptyWrap}>
+            <Text style={[s.emptyTxt, isTablet && s.emptyTxtBig]}>Belum ada meja.</Text>
+          </View>
+        )}
         {shown.map((tb) => {
           const meta = STATUS_META[tb.status];
           const isHeld = !!held[tb.id];
           return (
             <TouchableOpacity
               key={tb.id}
-              style={[s.tableCard, { backgroundColor: meta.bg }, isHeld && s.tableHeld]}
+              style={[s.tableCard, isTablet && s.tableCardTablet, { backgroundColor: meta.bg }, isHeld && s.tableHeld]}
               onPress={() => openDetail(tb)}>
               <Text style={[s.tableNo, isTablet && s.tableNoBig]}>{tb.no}</Text>
               <Text style={[s.tableStatus, { color: meta.fg }, isTablet && s.tableStatusBig]}>{t(STATUS_LABEL_KEY[tb.status])}</Text>
@@ -479,6 +477,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     padding: 8,
     paddingBottom: 24,
   },
+  emptyWrap: { width: '100%', alignItems: 'center', paddingVertical: 32 },
+  emptyTxt: { fontSize: 13, fontFamily: fonts.medium, color: colors.faint },
   tableCard: {
     width: '30%',
     margin: '1.66%',
@@ -488,6 +488,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     minHeight: 110,
     justifyContent: 'center',
   },
+  /* Tablet: denah 4 kolom rapat (21.5% + margin = muat 4 per baris). */
+  tableCardTablet: { width: '21.5%', minHeight: 128, padding: 16 },
   tableHeld: { borderWidth: 2, borderColor: colors.amber },
   tableNo: { fontSize: 20, fontFamily: fonts.bold, color: colors.text },
   tableStatus: { fontSize: 12, fontFamily: fonts.bold, marginTop: 2 },
@@ -590,7 +592,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   inputRow: { flexDirection: 'row' },
   inputHalf: { flex: 1, marginHorizontal: 4 },
   inputHalfWrap: { marginTop: 10 },
-  /* Varian tablet (breakpoint 768): teks +1..4pt agar proporsional di layar lebar. */
+  /* Varian tablet (breakpoint TABLET_BP): teks +1..4pt agar proporsional di layar lebar. */
+  emptyTxtBig: { fontSize: 14 },
   legendTxtBig: { fontSize: 13 },
   qsTxtBig: { fontSize: 14 },
   filterTxtBig: { fontSize: 13 },

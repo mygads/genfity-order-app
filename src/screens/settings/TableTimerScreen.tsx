@@ -60,12 +60,7 @@ function fmtLive(elapsedMin: number, u: { min: string; sec: string; hour: string
   return mm === 0 ? `${h} ${u.hour} ${s} ${u.sec}` : `${h} ${u.hour} ${mm} ${u.min}`;
 }
 
-const DEFAULT_TABLES: TableTimer[] = [
-  { id: 'A2', elapsed: 25, limit: 90 },
-  { id: 'B1', elapsed: 48, limit: 90 },
-  { id: 'B2', elapsed: 70, limit: 90 },
-  { id: 'C2', elapsed: 35, limit: 120 },
-];
+/** Tanpa timer awal: daftar mulai kosong, timer dibuat dari aktivitas meja. */
 
 const DEFAULT_CFG: TimerConfig = { enabled: true, limit: '90', warnBefore: '10', startMode: 'duduk', autoExtend: false };
 
@@ -80,7 +75,7 @@ export default function TableTimerScreen({ navigation }: Props) {
   const [warnBefore, setWarnBefore] = useState(DEFAULT_CFG.warnBefore);
   const [startMode, setStartMode] = useState<StartMode>(DEFAULT_CFG.startMode);
   const [autoExtend, setAutoExtend] = useState(DEFAULT_CFG.autoExtend);
-  const [tables, setTables] = useState<TableTimer[]>(DEFAULT_TABLES);
+  const [tables, setTables] = useState<TableTimer[]>([]);
   const [loaded, setLoaded] = useState(false);
   // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
   const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
@@ -91,7 +86,7 @@ export default function TableTimerScreen({ navigation }: Props) {
     (async () => {
       const [cfg, tim, rnd] = await Promise.all([
         getJSON<TimerConfig>(CFG_KEY, DEFAULT_CFG),
-        getJSON<TableTimer[]>(TIM_KEY, DEFAULT_TABLES),
+        getJSON<TableTimer[]>(TIM_KEY, []),
         getRoundingSetting(),
       ]);
       if (!on) return;
@@ -106,7 +101,7 @@ export default function TableTimerScreen({ navigation }: Props) {
         const migrated = tim
           .map((x) => ({ ...x, id: canonTableNo(x.id) }))
           .filter((x) => CANON_IDS.has(x.id) && !seen.has(x.id) && (seen.add(x.id), true));
-        setTables(migrated.length > 0 ? migrated : DEFAULT_TABLES);
+        setTables(migrated);
       }
       setLoaded(true);
     })();

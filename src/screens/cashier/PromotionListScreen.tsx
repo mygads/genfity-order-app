@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -22,18 +22,8 @@ type Promo = {
   tag: string;
 };
 
-/**
- * Fallback offline: dipakai bila SQLite ms_voucher kosong dan API
- * main/get-voucher|get-promotion tak terjangkau. JANGAN dihapus agar kasir
- * tetap jalan tanpa server (pola VoucherScreen SEED).
- */
-const FALLBACK_PROMOS: Promo[] = [
-  { code: 'QOQI10', name: 'Diskon Member 10%', desc: 'Member GOLD, maks. ' + rp(25000), amount: 10000, minBelanja: 50000, sampai: '31 Okt 2026', tag: 'Member' },
-  { code: 'HEMAT5K', name: 'Potongan ' + rp(5000), desc: 'Semua metode bayar', amount: 5000, minBelanja: 30000, sampai: '31 Des 2026', tag: 'Voucher' },
-  { code: 'HEMAT15K', name: 'Potongan ' + rp(15000), desc: 'Min. belanja ' + rp(150000) + ', Dine In', amount: 15000, minBelanja: 150000, sampai: '30 Nov 2026', tag: 'Voucher' },
-  { code: 'KOPIHEMAT', name: 'Kopi Hemat 20%', desc: 'Kategori Minuman, maks. ' + rp(10000), amount: 8000, minBelanja: 25000, sampai: '15 Nov 2026', tag: 'Kategori' },
-  { code: 'GRATISONGKIR', name: 'Gratis Ongkir', desc: 'Take Away & delivery, maks. ' + rp(12000), amount: 12000, minBelanja: 40000, sampai: '31 Des 2026', tag: 'Ongkir' },
-];
+/** Baca live dari SQLite ms_voucher + ms_promotion (offline-first).
+ * Kosong = belum ada promo (pemanggil tampilkan empty-state). */
 
 /** Format tanggal server ('2026-10-31 23:59:59') ala Indonesia ('31 Okt 2026'). */
 function fmtTgl(raw: unknown): string {
@@ -66,28 +56,73 @@ type VoucherRow = {
   status: string | null;
 };
 
-/** Baca live dari SQLite ms_voucher (pola master.ts: pullVoucher → ms_voucher). */
+type PromotionRow = {
+  promoCode: string | null;
+  promoName: string | null;
+  promoType: string | null;
+  value: number | null;
+  maxAmount: number | null;
+  minSpend: number | null;
+  validTo: string | null;
+  flagActive: number | null;
+};
+
+/** Baca live dari SQLite ms_voucher + ms_promotion (pola master.ts:
+ * pullVoucher → ms_voucher, pullPromotion → ms_promotion). */
 async function loadFromSqlite(): Promise<Promo[]> {
   await initDb();
-  const rows = await query<VoucherRow>(
-    'SELECT voucherCode, voucherName, amount, validTo, status FROM ms_voucher',
-  );
   const out: Promo[] = [];
-  for (const r of rows) {
-    const code = (r.voucherCode ?? '').trim().toUpperCase();
-    if (!code) continue;
-    const st = (r.status ?? 'available').toLowerCase();
-    if (st === 'used' || st === 'burned' || st === 'expired') continue;
-    const nama = (r.voucherName ?? '').trim() || code;
-    out.push({
-      code,
-      name: nama,
-      desc: nama,
-      amount: Math.max(0, Math.round(Number(r.amount) || 0)),
-      minBelanja: 0,
-      sampai: fmtTgl(r.validTo) || '-',
-      tag: tagFor(code, ''),
-    });
+  const seen = new Set<string>();
+  try {
+    const rows = await query<VoucherRow>(
+      'SELECT voucherCode, voucherName, amount, validTo, status FROM ms_voucher',
+    );
+    for (const r of rows) {
+      const code = (r.voucherCode ?? '').trim().toUpperCase();
+      if (!code || seen.has(code)) continue;
+      const st = (r.status ?? 'available').toLowerCase();
+      if (st === 'used' || st === 'burned' || st === 'expired') continue;
+      const nama = (r.voucherName ?? '').trim() || code;
+      seen.add(code);
+      out.push({
+        code,
+        name: nama,
+        desc: nama,
+        amount: Math.max(0, Math.round(Number(r.amount) || 0)),
+        minBelanja: 0,
+        sampai: fmtTgl(r.validTo) || '-',
+        tag: tagFor(code, ''),
+      });
+    }
+  } catch {
+    /* ms_voucher boleh kosong */
+  }
+  try {
+    const pros = await query<PromotionRow>(
+      'SELECT promoCode, promoName, promoType, value, maxAmount, minSpend, validTo, flagActive FROM ms_promotion WHERE flagActive = 1',
+    );
+    for (const p of pros) {
+      const code = (p.promoCode ?? '').trim().toUpperCase();
+      if (!code || seen.has(code)) continue;
+      const type = String(p.promoType ?? 'nominal').toLowerCase();
+      const value = Math.max(0, Math.round(Number(p.value) || 0));
+      const maxAmt = Math.max(0, Math.round(Number(p.maxAmount ?? value) || 0));
+      const amount = type === 'percent' ? maxAmt : value;
+      if (amount <= 0) continue;
+      const nama = (p.promoName ?? '').trim() || code;
+      seen.add(code);
+      out.push({
+        code,
+        name: nama,
+        desc: nama,
+        amount,
+        minBelanja: Math.max(0, Math.round(Number(p.minSpend) || 0)),
+        sampai: fmtTgl(p.validTo) || '-',
+        tag: type === 'ongkir' ? 'Ongkir' : type === 'percent' ? 'Member' : 'Voucher',
+      });
+    }
+  } catch {
+    /* ms_promotion boleh kosong */
   }
   return out;
 }
@@ -175,8 +210,8 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   const ongkir = route?.params?.ongkir;
   const [warn, setWarn] = useState('');
 
-  // Katalog live: SQLite ms_voucher dulu (offline-first), lalu API
-  // get-voucher|get-promotion, fallback konstanta bila kosong/offline.
+  // Katalog live: SQLite ms_voucher + ms_promotion dulu (offline-first),
+  // lalu API get-voucher|get-promotion. Kosong = empty-state.
   const [live, setLive] = useState<Promo[] | null>(null);
   const [source, setSource] = useState<'loading' | 'sqlite' | 'api' | 'fallback'>('loading');
   useEffect(() => {
@@ -210,7 +245,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
     };
   }, []);
 
-  const promos = live ?? FALLBACK_PROMOS;
+  const promos = live ?? [];
 
   const tags = useMemo(() => ['Semua', ...Array.from(new Set(promos.map((p) => p.tag)))], [promos]);
   const shown = promos.filter((p) => {
@@ -232,7 +267,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
       navigation?.navigate(returnTo, { voucher: { code: p.code, amount, kind: p.tag }, ...(ongkir !== undefined ? { ongkir } : {}) });
     };
     // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
-    // server menang bila backend asli menjawab; dummy/offline pakai lokal.
+    // server menang bila backend asli menjawab; offline pakai nilai lokal.
     try {
       const r = await validateVoucherCode(p.code, subtotal ?? p.minBelanja);
       if (!r.fromDummy) {
@@ -268,7 +303,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
         onClose={() => setDrawerOpen(false)}
         navigate={(r) => navigation?.navigate(r)}
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {source === 'fallback' ? (
           <Text style={styles.offline}>{t('promo_offline')}</Text>
         ) : null}
@@ -297,8 +332,10 @@ export default function PromotionListScreen({ navigation, route }: Props) {
             <Text style={styles.emptyT}>{t('promoNotFound')}</Text>
           </View>
         ) : (
-          shown.map((p) => (
-            <View key={p.code} style={styles.card}>
+          /* Grid 2 kolom di tablet agar promo memakai lebar landscape. */
+          <View style={[isTablet && styles.grid]}>
+          {shown.map((p) => (
+            <View key={p.code} style={[styles.card, isTablet && styles.cardWide]}>
               <View style={styles.cardHead}>
                 <View style={styles.badge}>
                   <Text style={styles.badgeT}>{p.tag}</Text>
@@ -313,11 +350,12 @@ export default function PromotionListScreen({ navigation, route }: Props) {
                 size="sm"
                 title={t('useAction')}
                 onPress={() => pakai(p)}
-                style={[styles.pakai, { marginTop: 10 }]}
+                style={[styles.pakai, { marginTop: 10 }, isTablet && styles.pakaiBig]}
                 textStyle={styles.pakaiT}
               />
             </View>
-          ))
+          ))}
+          </View>
         )}
       </ScrollView>
     </View>
@@ -341,6 +379,9 @@ const styles = StyleSheet.create({
   emptyImg: { width: 130, height: 130 },
   emptyT: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 10, textAlign: 'center' },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: colors.line },
+  /* Grid tablet: kartu promo 2 kolom berdampingan (phone tetap 1 kolom). */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  cardWide: { flexBasis: '48%', flexGrow: 1, minWidth: 0, marginTop: 0 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   badge: { backgroundColor: colors.paleBlue, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
   badgeT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy },
@@ -351,4 +392,6 @@ const styles = StyleSheet.create({
   min: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   pakai: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, alignItems: 'center', marginTop: 10 },
   pakaiT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
+  /* Varian tablet: tombol Pakai min 48px agar mudah diketuk. */
+  pakaiBig: { minHeight: 48, justifyContent: 'center' },
 });

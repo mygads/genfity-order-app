@@ -387,38 +387,43 @@ interface LocalPosUserRow {
 }
 
 /**
- * Verifikasi login offline ke SQLite lokal (ms_posuser by username +
+ * Cek kredensial ke SQLite lokal (ms_posuser by username COLLATE NOCASE +
  * hash PIN via lib/pin, fallback perbandingan legacy pinHash/password
- * untuk baris hasil pull yang belum punya record). Cocok → EmployeeSession
- * bentuk SAMA seperti jalur online (authKey lokal); tidak cocok → lempar
- * error kredensial E401 (jangan fallback ke dummy).
+ * untuk baris hasil pull yang belum punya record).
+ * - Cocok → EmployeeSession ok:true (bentuk SAMA seperti jalur online).
+ * - Username ada tapi PIN salah → EmployeeSession ok:false (JANGAN throw:
+ *   pemanggil LoginScreen.submit tidak try/catch, hanya cek s.ok/userId).
+ * - Username tidak ada di lokal → null (pemanggil yang memutuskan: Real Mode
+ *   teruskan ke server, Dummy Mode kembalikan gagal).
  */
 async function validateEmployeeLocal(
   username: string,
   pin: string,
-): Promise<EmployeeSession> {
+): Promise<EmployeeSession | null> {
   const uname = (username ?? '').trim();
   await initDb();
   const row = await queryFirst<LocalPosUserRow>(
     'SELECT id, username, pinHash, password, authKey, branchId, role FROM ms_posuser WHERE username = ? COLLATE NOCASE LIMIT 1',
     [uname],
   );
+  if (!row) return null;
   let match = false;
-  if (row) {
-    try {
-      const rec = await loadPinRecord(row.id);
-      if (rec && verifyPinHash(pin, rec)) match = true;
-    } catch {
-      /* lanjut ke fallback legacy di bawah */
-    }
-    if (!match && (row.pinHash === pin || row.password === pin)) match = true;
+  try {
+    const rec = await loadPinRecord(row.id);
+    if (rec && verifyPinHash(pin, rec)) match = true;
+  } catch {
+    /* lanjut ke fallback legacy di bawah */
   }
-  if (!row || !match) {
-    const err = new Error('username atau PIN salah') as Error & {
-      code?: string;
+  if (!match && (row.pinHash === pin || row.password === pin)) match = true;
+  if (!match) {
+    return {
+      ok: false,
+      userId: '',
+      nama: '',
+      authKey: '',
+      role: '',
+      fromDummy: false,
     };
-    err.code = 'E401';
-    throw err;
   }
   return {
     ok: true,
@@ -432,24 +437,49 @@ async function validateEmployeeLocal(
 }
 
 /**
- * Revalidasi PIN ke server (kontrak §3.4 esb/employee/validate).
- * Wajib dipakai untuk verifikasi login - jangan verifikasi PIN lokal saja.
- *
- * Fallback offline (Real Mode tapi fetch gagal/offline): verifikasi ke
- * SQLite lokal via validateEmployeeLocal - TIDAK jatuh ke dummy. Jalur
- * online (backend menjawab) dan Dummy Mode tidak berubah.
+ * Login LOCAL-FIRST di semua mode (kontrak §3.4 esb/employee/validate).
+ * Selalu cek SQLite lokal dulu via validateEmployeeLocal:
+ * - User lokal cocok / PIN salah → kembalikan hasilnya langsung (tidak
+ *   throw; LoginScreen.submit hanya cek s.ok/userId lalu toast login_fail,
+ *   tanpa try/catch di sekeliling await).
+ * - Username tidak ada di lokal DAN Real Mode → teruskan ke server.
+ * - Username tidak ada di lokal DAN Dummy Mode → gagal (jangan dummy Gista).
  */
 export async function validateEmployee(
   username: string,
   pin: string,
 ): Promise<EmployeeSession> {
+  let local: EmployeeSession | null = null;
+  try {
+    local = await validateEmployeeLocal(username, pin);
+  } catch {
+    local = null;
+  }
+  if (local) return local;
+  if (getApiMode() !== 'real') {
+    return {
+      ok: false,
+      userId: '',
+      nama: '',
+      authKey: '',
+      role: '',
+      fromDummy: true,
+    };
+  }
   const r = await apiFetch('esb/employee/validate', {
     body: { username, pin },
   });
-  if (r.fromDummy && getApiMode() === 'real') {
-    // Fetch gagal/offline padahal base URL terisi: verifikasi lokal SQLite
-    // (melempar E401 bila tidak cocok, bukan dummy).
-    return validateEmployeeLocal(username, pin);
+  if (r.fromDummy) {
+    // Fetch gagal/offline padahal base URL terisi, dan user juga tidak ada
+    // di lokal (cek di atas) → gagal, bukan dummy. JANGAN throw.
+    return {
+      ok: false,
+      userId: '',
+      nama: '',
+      authKey: '',
+      role: '',
+      fromDummy: true,
+    };
   }
   const { success, data } = unwrap<Record<string, unknown>>(r.data);
   const d = data as {

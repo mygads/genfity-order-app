@@ -1,37 +1,39 @@
-import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
+import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { all, initDb, run } from '../../lib/db';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
 
-}; };};interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string; }const SEED: Saved[] = [
-  {
-    id: 'o1', badge: 'TA', mode: 'Take Away', title: 'Bawa Pulang · QoQi', detail: '2 item · ' + rp(33900) + ' · 13:10',
-    items: [
-      { id: 'p11', name: 'Sudirman Coffee', basePrice: 12900, qty: 1, modifiers: [{ name: 'Creamy Pandan', price: 7000 }], discount: 0 },
-      { id: 'p9', name: 'Teh Manis Panas', basePrice: 8000, qty: 2, modifiers: [], discount: 2500 },
-    ],
-  },
-  {
-    id: 'o2', badge: 'DI', mode: 'Dine In', title: 'Dine In · Meja A5', detail: '4 item · ' + rp(87500) + ' · 12:48', table: 'A5',
-    items: [
-      { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 3, modifiers: [], discount: 2500 },
-      { id: 'p7', name: 'Kopi Susu Gula Aren', basePrice: 22000, qty: 1, modifiers: [], discount: 0 },
-      { id: 'p13', name: 'Cheese Cake Slice', basePrice: 32000, qty: 1, modifiers: [], discount: 0 },
-    ],
-  },
-  {
-    id: 'o3', badge: 'GF', mode: 'GOFOOD', title: 'GoFood #GO-88213', detail: '2 item · ' + rp(45800) + ' · 13:42',
-    items: [
-      { id: 'p10', name: 'Paket Nasi + Ayam', basePrice: 28000, qty: 1, modifiers: [], discount: 0 },
-      { id: 'p8', name: 'Americano Ice', basePrice: 18000, qty: 1, modifiers: [], discount: 0 },
-    ],
-  },
-{ id: 'o4', badge: 'GF', mode: 'GRABFOOD', title: 'GrabFood #GR-51107', detail: '1 item · ' + rp(22000) + ' · 14:05', items: [ { id: 'p7', name: 'Kopi Susu Gula Aren', basePrice: 22000, qty: 1, modifiers: [], discount: 0 }, ], }, { id: 'o5', badge: 'SF', mode: 'SHOPEEFOOD', title: 'ShopeeFood #SP-30981', detail: '1 item · ' + rp(32000) + ' · 14:20', items: [ { id: 'p13', name: 'Cheese Cake Slice', basePrice: 32000, qty: 1, modifiers: [], discount: 0 }, ], },];const FILTERS = ['Semua', 'Dine In', 'Take Away', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];/** Peta mode simpanan ke mode kasir (dulu GOFOOD/GRABFOOD/SHOPEEFOOD jatuh ke tanpa mode). */const MODE_TO_CASHIER: Record<string, string> = { 'Dine In': 'DINE IN', 'Take Away': 'TAKE AWAY', GOFOOD: 'GOFOOD', GRABFOOD: 'GRABFOOD', SHOPEEFOOD: 'SHOPEEFOOD',};/** Order tersimpan (load_order) - muat kembali order yang disimpan dari kasir. */export default function LoadOrderScreen({ navigation, route }: Props) {
+}; };};interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string; }/** Payload JSON yang disimpan di tr_draftorder.payload. */interface DraftPayload { title?: string; mode?: string; table?: string; items?: CartItem[]; ongkir?: number; salesNum?: string; total?: number; ts?: number; }interface DraftRow { id: string; payload: string; createdAt?: string | null; }const FILTERS = ['Semua', 'Dine In', 'Take Away', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];/** Peta mode simpanan ke mode kasir (dulu GOFOOD/GRABFOOD/SHOPEEFOOD jatuh ke tanpa mode). */const MODE_TO_CASHIER: Record<string, string> = { 'Dine In': 'DINE IN', 'Take Away': 'TAKE AWAY', GOFOOD: 'GOFOOD', GRABFOOD: 'GRABFOOD', SHOPEEFOOD: 'SHOPEEFOOD',};function badgeForMode(mode: string): string { const u = (mode ?? '').toUpperCase(); if (u === 'DINE IN' || u === 'DINE-IN') return 'DI'; if (u === 'TAKE AWAY' || u === 'TAKEAWAY') return 'TA'; if (u === 'GOFOOD' || u === 'GRABFOOD') return 'GF'; if (u === 'SHOPEEFOOD') return 'SF'; return 'OL'; }function labelForMode(mode: string): string { const u = (mode ?? '').toUpperCase(); if (u === 'DINE IN' || u === 'DINE-IN') return 'Dine In'; if (u === 'TAKE AWAY' || u === 'TAKEAWAY') return 'Take Away'; return mode || 'Dine In'; }function formatTs(ts?: number, createdAt?: string | null): string { try { const d = typeof ts === 'number' && ts > 0 ? new Date(ts) : createdAt ? new Date(createdAt) : null; if (!d || Number.isNaN(d.getTime())) return ''; const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); return `${hh}:${mm}`; } catch { return ''; } }function sumItems(items: CartItem[]): number { return (items ?? []).reduce((s, c) => s + (c.basePrice + (c.modifiers ?? []).reduce((m, x) => m + x.price, 0)) * c.qty - (c.discount ?? 0), 0); }function draftToSaved(id: string, p: DraftPayload, createdAt?: string | null): Saved | null { const items = Array.isArray(p.items) ? p.items : []; const mode = p.mode ?? 'DINE IN'; const label = labelForMode(mode); const count = items.reduce((s, c) => s + (c.qty ?? 0), 0); const ongkir = typeof p.ongkir === 'number' ? p.ongkir : 0; const sum = typeof p.total === 'number' ? p.total : sumItems(items) + ongkir; const clock = formatTs(p.ts, createdAt); const title = p.title ?? label; const detail = `${count} item · ${rp(sum)}${clock ? ` · ${clock}` : ''}`; return { id, badge: badgeForMode(mode), mode: label, title, detail, ...(p.table ? { table: p.table } : {}), items, ...(ongkir ? { ongkir } : {}), ...(typeof p.salesNum === 'string' && p.salesNum.trim() ? { salesNum: p.salesNum.trim() } : {}) }; }/** Order tersimpan (load_order) - daftar draft offline dari tr_draftorder. */export default function LoadOrderScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [orders, setOrders] = useState<Saved[]>(SEED);
+  const { t } = useLang(); const [orders, setOrders] = useState<Saved[]>([]);
   const [filter, setFilter] = useState('Semua');
 
   const shown = orders.filter((o) => filter === 'Semua' || o.mode === filter);
 
-  /** Order yang baru disimpan dari kasir/cart langsung masuk daftar (dulu Simpan tanpa payload). */ const appliedRef = useRef(''); useEffect(() => { const n = route?.params?.newOrder; if (!n) return; const key = JSON.stringify(n); if (appliedRef.current === key) return; appliedRef.current = key; const count = n.items.reduce((s, c) => s + c.qty, 0); const sum = n.items.reduce((s, c) => s + (c.basePrice + (c.modifiers ?? []).reduce((m, x) => m + x.price, 0)) * c.qty - (c.discount ?? 0), 0); const badge = n.mode === 'DINE IN' ? 'DI' : n.mode === 'TAKE AWAY' ? 'TA' : n.mode === 'GOFOOD' ? 'GF' : n.mode === 'GRABFOOD' ? 'GF' : n.mode === 'SHOPEEFOOD' ? 'SF' : 'OL'; const label = n.mode === 'DINE IN' ? 'Dine In' : n.mode === 'TAKE AWAY' ? 'Take Away' : n.mode; setOrders((prev) => [ { id: `saved-${Date.now()}`, badge, mode: label, title: n.title, detail: `${count} item · ${rp(sum + (n.ongkir ?? 0))}`, table: n.table, items: n.items, ongkir: n.ongkir, ...(typeof n.salesNum === 'string' && n.salesNum.trim() ? { salesNum: n.salesNum.trim() } : {}) }, ...prev, ]);
+  const refresh = async () => {
+    try {
+      await initDb();
+      const rows = await all<DraftRow>('SELECT id, payload, createdAt FROM tr_draftorder ORDER BY createdAt DESC');
+      const list: Saved[] = [];
+      for (const r of rows) {
+        try {
+          const p = JSON.parse(r.payload) as DraftPayload;
+          const s = draftToSaved(r.id, p, r.createdAt);
+          if (s) list.push(s);
+        } catch {
+          /* baris korup - lewati */
+        }
+      }
+      setOrders(list);
+    } catch {
+      /* DB belum siap - tampilkan kosong */
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Order yang baru disimpan dari kasir/cart: INSERT ke tr_draftorder dulu lalu tampilkan. */ const appliedRef = useRef(''); useEffect(() => { const n = route?.params?.newOrder; if (!n) return; const key = JSON.stringify(n); if (appliedRef.current === key) return; appliedRef.current = key; void (async () => { try { await initDb(); const id = `draft-${Date.now()}`; const now = new Date().toISOString(); const payload = JSON.stringify({ title: n.title, mode: n.mode, ...(n.table ? { table: n.table } : {}), items: n.items, ...(typeof n.ongkir === 'number' ? { ongkir: n.ongkir } : {}), ...(typeof n.salesNum === 'string' && n.salesNum.trim() ? { salesNum: n.salesNum.trim() } : {}), total: sumItems(n.items) + (n.ongkir ?? 0), ts: Date.now() }); await run('INSERT INTO tr_draftorder (id, payload, createdAt, updatedAt, syncDate) VALUES (?, ?, ?, ?, NULL)', [id, payload, now, now]); } catch { /* abaikan gagal tulis */ } await refresh(); })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.newOrder]); /** Muat order ke kasir - sekali ketuk langsung buka kasir
    * (tanpa dialog konfirmasi: Alert.alert no-op di web sehingga tombol mati,
@@ -46,8 +48,18 @@ import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, 
     });
   };
 
+  const hapus = async (id: string) => {
+    setOrders((l) => l.filter((x) => x.id !== id));
+    try {
+      await run('DELETE FROM tr_draftorder WHERE id = ?', [id]);
+      await refresh();
+    } catch {
+      /* hapus optimistis sudah tampil */
+    }
+  };
+
   return (
-    <View style={styles.root}><ScreenHeader title={t('loadOrderTitle')} onBack={() => navigation?.goBack()} /><ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}><ScreenHeader title={t('loadOrderTitle')} onBack={() => navigation?.goBack()} /><ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('loadOrderHint')}</Text>
       <Text style={styles.sec}>{t('loadOrderSec')}</Text>
       <Text style={styles.hint}>{t('loadOrderHint')}</Text>
@@ -68,19 +80,22 @@ import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, 
           <Text style={styles.empty}>{t('emptyLoadOrder')}</Text>
         </View>
       )}
+      {/* Grid 2 kolom di tablet agar daftar draft memakai lebar landscape. */}
+      <View style={[isTablet && styles.grid]}>
       {shown.map((o) => (
-        <View key={o.id} style={styles.card}>
+        <View key={o.id} style={[styles.card, isTablet && styles.cardWide]}>
           <View style={styles.badge}><Text style={styles.badgeT}>{o.badge}</Text></View>
           <View style={styles.info}>
             <Text style={styles.title}>{o.salesNum ? `${o.salesNum} · ${o.title}` : o.title}</Text>
             <Text style={styles.detail}>{o.salesNum ? `${o.salesNum} · ${o.mode} · ${o.detail}` : `${o.mode} · ${o.detail}`}</Text>
           </View>
-          <AppButton size="sm" title={t('loadAction')} onPress={() => muat(o)} fullWidth={false} style={[styles.load, { marginTop: 0 }]} textStyle={styles.loadT} />
-          <TouchableOpacity onPress={() => setOrders((l) => l.filter((x) => x.id !== o.id))}>
-            <Text style={styles.del}>{t('delete')}</Text>
+          <AppButton size="sm" title={t('loadAction')} onPress={() => muat(o)} fullWidth={false} style={[styles.load, { marginTop: 0 }, isTablet && styles.loadBig]} textStyle={styles.loadT} />
+          <TouchableOpacity onPress={() => void hapus(o.id)} style={isTablet && styles.delTouch}>
+            <Text style={[styles.del, isTablet && styles.delBig]}>{t('delete')}</Text>
           </TouchableOpacity>
         </View>
       ))}
+      </View>
       <AppButton size="md" title={t('newTx')} onPress={() => navigation?.navigate('Cashier')} style={[styles.primary, { marginTop: 16, backgroundColor: colors.navy }]} textStyle={styles.primaryT} />
     </ScrollView>
   </View> );}const styles = StyleSheet.create({
@@ -97,6 +112,9 @@ import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, 
   emptyImg: { width: 120, height: 120 },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, backgroundColor: colors.card, borderRadius: 10, padding: 14, marginTop: 8, textAlign: 'center' },
   card: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.card, borderRadius: 12, padding: 12, marginTop: 8, borderWidth: 1, borderColor: colors.line },
+  /* Grid tablet: kartu draft 2 kolom berdampingan (phone tetap 1 kolom). */
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  cardWide: { flexBasis: '48%', flexGrow: 1, minWidth: 0, marginTop: 0 },
   badge: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.paleBlue, alignItems: 'center', justifyContent: 'center' },
   badgeT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
   info: { flex: 1 },
@@ -105,5 +123,9 @@ import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, 
   load: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
   loadT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   del: { fontFamily: fonts.semibold, fontSize: 12, color: colors.faint },
+  /* Varian tablet: tombol Muat min 48px, Hapus diberi area sentuh padding 12. */
+  loadBig: { minHeight: 48, justifyContent: 'center' },
+  delTouch: { padding: 12, justifyContent: 'center' },
+  delBig: { fontSize: 13 },
   primary: { backgroundColor: colors.navy, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 16 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },});

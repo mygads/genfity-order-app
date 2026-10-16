@@ -6,20 +6,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { esbOrders, type EsbOrder, type EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: mock hanya kenal Baru/Diproses/Selesai, penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal (Omit agar status mock yang sempit tertimpa). */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Hari mock per order: esb1-2 hari ini, esb3 kemarin, esb4 dalam 7 hari. */const ORDER_DAY: Record<string, 'today' | 'yesterday' | 'older'> = { esb1: 'today', esb2: 'today', esb3: 'yesterday', esb4: 'older',};/** Jadwal mock per order (waktu diminta pelanggan). */const SCHEDULE: Record<string, string> = {
-  esb1: 'Segera - maks 13:00',
-  esb2: 'Terjadwal - 13:30',
-  esb3: 'Segera - maks 12:15',
-  esb4: 'Selesai 11:05',};const ONGKIR_DIANTAR = 10000;/** Action-flag backend per status (order/finish tak punya endpoint status khusus). */function actionOf(s: EsbStatusLocal): 'esb-accept' | 'esb-done' | 'esb-reject' { if (s === 'Diproses') return 'esb-accept'; if (s === 'Selesai') return 'esb-done'; return 'esb-reject'; }/** Bus status lokal agar dapur/kasir bisa sinkron (pola listener ala session.ts). */export type EsbStatusEvent = { id: string; status: EsbStatusLocal; reason?: string };type EsbStatusListener = (e: EsbStatusEvent) => void;const esbStatusListeners = new Set<EsbStatusListener>();export function onEsbStatusChange(fn: EsbStatusListener): () => void { esbStatusListeners.add(fn); return () => { esbStatusListeners.delete(fn); }; }function emitEsbStatus(id: string, status: EsbStatusLocal, reason?: string): void { esbStatusListeners.forEach((fn) => { try { fn({ id, status, ...(reason ? { reason } : {}) }); } catch { /* abaikan */ } }); }function badgeStyle(s: EsbStatusLocal) {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import type { EsbOrder, EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal. */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Ongkir dari field nyata order bila ada (pull sales), else 0 - tanpa mock. */
+function ongkirOf(o: EsbRow, live?: number): number { if (typeof live === 'number' && Number.isFinite(live)) return live > 0 ? Math.round(live) : 0; const c = o as unknown as Record<string, unknown>; const v = c.ongkirNet ?? c.ongkir ?? c.deliveryFee ?? c.shippingFee ?? 0; const n = Math.round(Number(v) || 0); return n > 0 ? n : 0; }/** Action-flag backend per status (order/finish tak punya endpoint status khusus). */function actionOf(s: EsbStatusLocal): 'esb-accept' | 'esb-done' | 'esb-reject' { if (s === 'Diproses') return 'esb-accept'; if (s === 'Selesai') return 'esb-done'; return 'esb-reject'; }/** Bus status lokal agar dapur/kasir bisa sinkron (pola listener ala session.ts). */export type EsbStatusEvent = { id: string; status: EsbStatusLocal; reason?: string };type EsbStatusListener = (e: EsbStatusEvent) => void;const esbStatusListeners = new Set<EsbStatusListener>();export function onEsbStatusChange(fn: EsbStatusListener): () => void { esbStatusListeners.add(fn); return () => { esbStatusListeners.delete(fn); }; }function emitEsbStatus(id: string, status: EsbStatusLocal, reason?: string): void { esbStatusListeners.forEach((fn) => { try { fn({ id, status, ...(reason ? { reason } : {}) }); } catch { /* abaikan */ } }); }function badgeStyle(s: EsbStatusLocal) {
   if (s === 'Baru') return { bg: colors.paleOrange, fg: colors.orange };
   if (s === 'Diproses') return { bg: colors.paleBlue, fg: colors.navy };
   if (s === 'Batal') return { bg: colors.paleRed, fg: colors.red }; return { bg: colors.paleGreen, fg: colors.green };}function typeStyle(tp: string) {
   return tp === 'Diantar'
     ? { bg: colors.paleBlue, fg: colors.blueDark, label: 'Delivery' }
-    : { bg: colors.paleGreen, fg: colors.greenDark, label: 'Pickup' };}function totalsOf(o: EsbRow, ongkirLive?: number) { const gross = o.items.reduce((a, it) => a + it.qty * it.price, 0); const t = totals({ gross: gross > 0 ? gross : o.total, ongkir: ongkirLive ?? (o.type === 'Diantar' ? ONGKIR_DIANTAR : 0), esbOrder: true, }); return { sub: t.subtotal, fee: t.feeESB, ongkir: t.ongkirNet, grand: t.total, ppnIncl: t.taxIncl, rounding: t.rounding }; }/** Persist aksi Terima/Selesai/Tolak: outbox + sync order + POST action-flag ke order/finish. True bila server OK / dummy / offline-queue; false bila backend menolak (pemanggil rollback). */async function persistEsbStatus(id: string, status: EsbStatusLocal, reason?: string): Promise<boolean> { const action = actionOf(status); const extra = reason ? { reason } : {}; try { await enqueueOutbox('tr_saleshead', id, 'update'); } catch { /* abaikan */ } try { enqueueSync('order', { action, salesNum: id, no: id, status, ...extra }); } catch { /* abaikan */ } try { const res = await apiFetch(ApiPath.pushOrderFinish, { body: { action, no: id, status, ...extra } }); if (!res.ok && !res.fromDummy) return false; return true; } catch { /* offline - terkirim via push berikutnya */ return true; } }/** Paket cetak ulang ESB: bawa items + fee platform + ongkir + mode + customer asli ke Receipt. */function esbReceipt(o: EsbRow, grand: number, ongkirLive?: number, fee?: number) { const ongkir = ongkirLive ?? (o.type === 'Diantar' ? ONGKIR_DIANTAR : 0); return { no: o.code, total: grand, items: o.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}) })), customer: o.customer, mode: o.type === 'Diantar' ? 'Delivery' : 'ESB Order', ongkir, discount: 0, ...(fee && fee > 0 ? { feeESB: fee } : {}) };}/** T9: hari order - mock ikut ORDER_DAY; baris live (id TRX-YYYYMMDD-NNN) * dihitung dari tanggal salesNum agar filter tanggal tetap benar. */function dayOf(o: EsbRow): 'today' | 'yesterday' | 'older' { const known = ORDER_DAY[o.id]; if (known) return known; const m = o.id.match(/TRX-(\d{4})(\d{2})(\d{2})-/); if (m) { const day = `${m[1]}-${m[2]}-${m[3]}`; const d = new Date(); const pad = (n: number) => String(n).padStart(2, '0'); const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; if (day === today) return 'today'; const y = new Date(d.getTime() - 86400000); if (day === `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`) return 'yesterday'; return 'older';
+    : { bg: colors.paleGreen, fg: colors.greenDark, label: 'Pickup' };}function totalsOf(o: EsbRow, ongkirLive?: number) { const gross = o.items.reduce((a, it) => a + it.qty * it.price, 0); const t = totals({ gross: gross > 0 ? gross : o.total, ongkir: ongkirOf(o, ongkirLive), esbOrder: true, }); return { sub: t.subtotal, fee: t.feeESB, ongkir: t.ongkirNet, grand: t.total, ppnIncl: t.taxIncl, rounding: t.rounding }; }/** Persist aksi Terima/Selesai/Tolak: outbox + sync order + POST action-flag ke order/finish. True bila server OK / dummy / offline-queue; false bila backend menolak (pemanggil rollback). */async function persistEsbStatus(id: string, status: EsbStatusLocal, reason?: string): Promise<boolean> { const action = actionOf(status); const extra = reason ? { reason } : {}; try { await enqueueOutbox('tr_saleshead', id, 'update'); } catch { /* abaikan */ } try { enqueueSync('order', { action, salesNum: id, no: id, status, ...extra }); } catch { /* abaikan */ } try { const res = await apiFetch(ApiPath.pushOrderFinish, { body: { action, no: id, status, ...extra } }); if (!res.ok && !res.fromDummy) return false; return true; } catch { /* offline - terkirim via push berikutnya */ return true; } }/** Paket cetak ulang ESB: bawa items + fee platform + ongkir + mode + customer asli ke Receipt. */function esbReceipt(o: EsbRow, grand: number, ongkirLive?: number, fee?: number) { const ongkir = ongkirOf(o, ongkirLive); return { no: o.code, total: grand, items: o.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}) })), customer: o.customer, mode: o.type === 'Diantar' ? 'Delivery' : 'ESB Order', ongkir, discount: 0, ...(fee && fee > 0 ? { feeESB: fee } : {}) };}/** Hari order dihitung dari tanggal salesNum (id TRX-YYYYMMDD-NNN) agar filter tanggal tetap benar. */function dayOf(o: EsbRow): 'today' | 'yesterday' | 'older' { const m = o.id.match(/TRX-(\d{4})(\d{2})(\d{2})-/); if (m) { const day = `${m[1]}-${m[2]}-${m[3]}`; const d = new Date(); const pad = (n: number) => String(n).padStart(2, '0'); const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; if (day === today) return 'today'; const y = new Date(d.getTime() - 86400000); if (day === `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`) return 'yesterday'; return 'older';
 }
 
-return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam salesDate. */function scheduleOf(o: EsbRow): string { const s = SCHEDULE[o.id]; if (s) return s; return o.time && o.time !== '--:--' ? o.time : 'Segera';}interface SalePullItem { name?: unknown; qty?: unknown; unitPrice?: unknown; price?: unknown; note?: unknown;}interface SalePull { salesNum?: unknown; salesDate?: unknown; salesMode?: unknown; tableNo?: unknown; customerName?: unknown; subtotal?: unknown; ongkir?: unknown; ongkirNet?: unknown; items?: SalePullItem[];}export default function EsbOrderScreen({ navigation }: Props) {
+return 'today';}/** Jadwal tampil jam order nyata, else 'Segera'. */function scheduleOf(o: EsbRow): string { return o.time && o.time !== '--:--' ? o.time : 'Segera';}interface SalePullItem { name?: unknown; qty?: unknown; unitPrice?: unknown; price?: unknown; note?: unknown;}interface SalePull { salesNum?: unknown; salesDate?: unknown; salesMode?: unknown; tableNo?: unknown; customerName?: unknown; subtotal?: unknown; ongkir?: unknown; ongkirNet?: unknown; items?: SalePullItem[];}export default function EsbOrderScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tab, setTab] = useState<EsbStatusLocal>('Baru');
@@ -34,8 +31,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
   // offline-first - mock/ESB lokal tetap jalan tanpa server).
   const [dlvMsg, setDlvMsg] = useState(''); const [dlvBusy, setDlvBusy] = useState(false); const queryDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); setDlvMsg(''); try { const term = getTerminal(); const res = await deliveryApi('search-ongoing', { orderNo: orderCode, branchId: term.branchId }); const { data } = unwrap<Record<string, unknown>>(res.data); const info = String((data as { status?: unknown })?.status ?? (data as { state?: unknown })?.state ?? ''); setDlvMsg(info ? `${t('dlv_title')}: ${orderCode} - ${info}` : `${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]); const scheduleDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); try { const term = getTerminal(); await deliveryApi('schedule-order', { orderNo: orderCode, branchId: term.branchId, schedule: scheduleOf({ id: orderCode } as EsbRow) }); setDlvMsg(`${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]);
   // T9: order live dari pull sales (apiSource: backend asli bila env terisi,
-  // dummy lokal saat offline). Null/kosong = fallback mock tetap jalan.
-  const [liveOrders, setLiveOrders] = useState<EsbRow[] | null>(null); const [liveOngkir, setLiveOngkir] = useState<Record<string, number>>({}); const pullLive = useCallback(async () => { try { const res = await apiFetch(ApiPath.pullSales, { method: 'GET' }); const { data } = unwrap<{ items?: SalePull[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; if (items.length === 0) return; const rows: EsbRow[] = []; const ong: Record<string, number> = {}; for (const s of items) { const code = String(s.salesNum ?? '').trim(); if (!code) continue; const mode = String(s.salesMode ?? '').toUpperCase(); const type = mode.includes('DELIVER') || mode.includes('DIANTAR') ? 'Diantar' : 'Ambil Sendiri'; const mapped = (Array.isArray(s.items) ? s.items : []).map((it) => ({ name: String(it.name ?? '-'), qty: Math.max(1, Math.round(Number(it.qty) || 0)), price: Math.round(Number(it.unitPrice ?? it.price) || 0), ...(it.note ? { note: String(it.note) } : {}), })); const sub = Number(s.subtotal); const total = Number.isFinite(sub) && sub > 0 ? Math.round(sub) : mapped.reduce((a, it) => a + it.qty * it.price, 0); const time = String(s.salesDate ?? '').slice(11, 16) || '--:--'; rows.push({ id: code, code, customer: String(s.customerName ?? s.tableNo ?? '-'), phone: '', type, time, items: mapped, total, status: 'Baru', }); const fee = Number(s.ongkirNet ?? s.ongkir); ong[code] = Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0; } if (rows.length === 0) return; setLiveOrders(rows); setLiveOngkir(ong); } catch { /* offline / pull gagal - mock tetap jalan */ } }, []); useEffect(() => { void pullLive(); }, [pullLive]); /** Notifikasi live: channel self-order → banner lokal + badge dalam aplikasi. */ useEffect(() => { try { startRealtime(); } catch { /* abaikan */ } const off = onWsMessage((msg) => { if (!/order|esb|self/i.test(msg.type)) return; const code = String(msg.payload?.code ?? msg.payload?.no ?? ''); setLiveNew((n) => n + 1); void pullLive(); setNotice(code ? `${t('esb_push_title')} ${code}` : t('esb_push_body')); void notifyLocal(t('esb_push_title'), code ? `${code}` : t('esb_push_body'), { code }); }); return off; }, [t, pullLive]); const base = liveOrders ?? esbOrders; const withMoved: EsbRow[] = useMemo(
+  // order online datang dari pull saat backend ada; offline = kosong, bukan palsu.
+  const [liveOrders, setLiveOrders] = useState<EsbRow[] | null>(null); const [liveOngkir, setLiveOngkir] = useState<Record<string, number>>({}); const pullLive = useCallback(async () => { try { const res = await apiFetch(ApiPath.pullSales, { method: 'GET' }); const { data } = unwrap<{ items?: SalePull[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; if (items.length === 0) { setLiveOrders([]); setLiveOngkir({}); return; } const rows: EsbRow[] = []; const ong: Record<string, number> = {}; for (const s of items) { const code = String(s.salesNum ?? '').trim(); if (!code) continue; const mode = String(s.salesMode ?? '').toUpperCase(); const type = mode.includes('DELIVER') || mode.includes('DIANTAR') ? 'Diantar' : 'Ambil Sendiri'; const mapped = (Array.isArray(s.items) ? s.items : []).map((it) => ({ name: String(it.name ?? '-'), qty: Math.max(1, Math.round(Number(it.qty) || 0)), price: Math.round(Number(it.unitPrice ?? it.price) || 0), ...(it.note ? { note: String(it.note) } : {}), })); const sub = Number(s.subtotal); const total = Number.isFinite(sub) && sub > 0 ? Math.round(sub) : mapped.reduce((a, it) => a + it.qty * it.price, 0); const time = String(s.salesDate ?? '').slice(11, 16) || '--:--'; rows.push({ id: code, code, customer: String(s.customerName ?? s.tableNo ?? '-'), phone: '', type, time, items: mapped, total, status: 'Baru', }); const fee = Number(s.ongkirNet ?? s.ongkir); ong[code] = Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0; } if (rows.length === 0) { setLiveOrders([]); setLiveOngkir({}); return; } setLiveOrders(rows); setLiveOngkir(ong); } catch { /* offline / pull gagal - tampil kosong, bukan palsu */ setLiveOrders((prev) => prev ?? []); } }, []); useEffect(() => { void pullLive(); }, [pullLive]); /** Notifikasi live: channel self-order → banner lokal + badge dalam aplikasi. */ useEffect(() => { try { startRealtime(); } catch { /* abaikan */ } const off = onWsMessage((msg) => { if (!/order|esb|self/i.test(msg.type)) return; const code = String(msg.payload?.code ?? msg.payload?.no ?? ''); setLiveNew((n) => n + 1); void pullLive(); setNotice(code ? `${t('esb_push_title')} ${code}` : t('esb_push_body')); void notifyLocal(t('esb_push_title'), code ? `${code}` : t('esb_push_body'), { code }); }); return off; }, [t, pullLive]); const base: EsbRow[] = liveOrders ?? []; const withMoved: EsbRow[] = useMemo(
     () => base.map((o) => ({ ...o, status: moved[o.id] ?? (o.status as EsbStatusLocal), ...(rejectOf[o.id] ? { rejectReason: rejectOf[o.id] } : {}) })),
     [base, moved, rejectOf],
   );
@@ -71,8 +68,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
 
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}<View style={styles.tabs}>
         {tabs.map((tb) => (
-          <Pressable key={tb} onPress={() => setTab(tb)} style={[styles.tab, tab === tb && styles.tabActive]}>
-            <Text style={[styles.tabText, tab === tb && styles.tabTextActive]}>
+          <Pressable key={tb} onPress={() => setTab(tb)} style={[styles.tab, tab === tb && styles.tabActive, isTablet && styles.tabTablet]}>
+            <Text style={[styles.tabText, tab === tb && styles.tabTextActive, isTablet && styles.tabTextBig]}>
               {tabLabel(tb)} ({counts[tb]})
             </Text>
           </Pressable>
@@ -81,8 +78,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
       <View style={styles.filterRow}>
         <View style={styles.typeRow}>
           {typeFilters.map((tf) => (
-            <Pressable key={tf} onPress={() => setTypeFilter(tf)} style={[styles.miniTab, typeFilter === tf && styles.miniTabActive]}>
-              <Text style={[styles.miniText, typeFilter === tf && styles.miniTextActive]}>
+            <Pressable key={tf} onPress={() => setTypeFilter(tf)} style={[styles.miniTab, typeFilter === tf && styles.miniTabActive, isTablet && styles.miniTabTablet]}>
+              <Text style={[styles.miniText, typeFilter === tf && styles.miniTextActive, isTablet && styles.miniTextBig]}>
                 {tf === 'Semua' ? t('esb_all') : tf === 'Diantar' ? t('esb_delivery') : t('esb_pickup')}
               </Text>
             </Pressable>
@@ -90,8 +87,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
         </View>
         <View style={styles.typeRow}>
           {historyKeys.map((h) => (
-            <Pressable key={h} onPress={() => setHistory(h)} style={[styles.miniTab, history === h && styles.miniTabActive]}>
-              <Text style={[styles.miniText, history === h && styles.miniTextActive]}>{histLabel(h)}</Text>
+            <Pressable key={h} onPress={() => setHistory(h)} style={[styles.miniTab, history === h && styles.miniTabActive, isTablet && styles.miniTabTablet]}>
+              <Text style={[styles.miniText, history === h && styles.miniTextActive, isTablet && styles.miniTextBig]}>{histLabel(h)}</Text>
             </Pressable>
           ))}
         </View>
@@ -100,6 +97,9 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
       <FlatList
         data={list}
         keyExtractor={(o) => o.id}
+        key={isTablet ? 't2' : 't1'}
+        numColumns={isTablet ? 2 : 1}
+        columnWrapperStyle={isTablet ? styles.colWrap : undefined}
         contentContainerStyle={[styles.list, isTablet && wideCenterLg]}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -112,7 +112,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
           const b = badgeStyle(item.status);
           const tp = typeStyle(item.type);
           const tt = totalsOf(item, liveOngkir[item.id]); return (
-            <Pressable style={styles.card} onPress={() => setSelected(item)}>
+            <Pressable style={[styles.card, isTablet && styles.cardTablet]} onPress={() => setSelected(item)}>
               <View style={styles.cardTop}>
                 <Text style={styles.cardCode}>{item.code}</Text>
                 <View style={styles.badgeRow}>
@@ -139,8 +139,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
       />
 
       <Modal visible={selected !== null} animationType="slide" transparent>
-        <View style={styles.sheetWrap}>
-          <View style={styles.sheet}>
+        <View style={[styles.sheetWrap, isTablet && styles.sheetWrapTablet]}>
+          <View style={[styles.sheet, isTablet && styles.sheetTablet]}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>{t('esb_detail')}</Text>
             {selected && (
@@ -232,8 +232,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
         </View>
       </Modal>
       <Modal visible={rejectFor !== null} animationType="fade" transparent>
-        <View style={styles.sheetWrap}>
-          <View style={styles.sheet}>
+        <View style={[styles.sheetWrap, isTablet && styles.sheetWrapTablet]}>
+          <View style={[styles.sheet, isTablet && styles.sheetTablet]}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>{t('esb_reject_title')}</Text>
             <Text style={styles.detailMeta}>{rejectFor?.code}</Text>
@@ -260,14 +260,23 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
   tabActive: { backgroundColor: colors.orange, borderColor: colors.orange },
   tabText: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
   tabTextActive: { color: colors.white },
+  /* Tablet: tab status lebih tinggi agar target sentuh >=48px. */
+  tabTablet: { paddingVertical: 14 },
+  tabTextBig: { fontSize: 14 },
   filterRow: { paddingHorizontal: 16, paddingBottom: 4 },
   typeRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
   miniTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line },
   miniTabActive: { backgroundColor: colors.navy, borderColor: colors.navy },
   miniText: { fontFamily: fonts.bold, fontSize: 11, color: colors.muted },
   miniTextActive: { color: colors.white },
+  /* Tablet: chip filter lebih tinggi agar mudah disentuh. */
+  miniTabTablet: { paddingHorizontal: 14, paddingVertical: 10 },
+  miniTextBig: { fontSize: 13 },
   list: { paddingHorizontal: 16, paddingBottom: 24 },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: colors.line },
+  /* Tablet: kartu mengisi setengah baris (daftar 2 kolom). */
+  cardTablet: { flex: 1 },
+  colWrap: { gap: 10 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardCode: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
   badgeRow: { flexDirection: 'row', gap: 6 },
@@ -285,6 +294,9 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
   emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 4 },
   sheetWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '88%' },
+  /* Tablet: sheet jadi kartu dialog tengah, tidak melar selebar layar. */
+  sheetWrapTablet: { justifyContent: 'center', padding: 24 },
+  sheetTablet: { maxWidth: 720, width: '100%', alignSelf: 'center', borderRadius: 20, margin: 24 },
   sheetHandle: { width: 44, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginBottom: 12 },
   sheetTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   detailCode: { fontFamily: fonts.bold, fontSize: 15, color: colors.text, marginTop: 6 },

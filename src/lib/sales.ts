@@ -116,6 +116,14 @@ export async function saveSale(s: SaleInput): Promise<string> {
       [uid('sv'), salesNum, s.voucherCode, voucherAmt],
     );
   }
+  // Tiket dapur lahir dari penjualan nyata: satu baris per order dengan status
+  // awal 'Baru'. Id deterministik agar retry penyimpanan tak bikin ganda.
+  await run(
+    `INSERT INTO tr_kitchenticket (id, ticketNo, salesNum, status, createdAt, updatedAt, syncDate)
+     VALUES (?, ?, ?, 'Baru', ?, ?, NULL)
+     ON CONFLICT (id) DO NOTHING`,
+    [`kt-${salesNum}`, salesNum, salesNum, now, now],
+  );
   return salesNum;
 }
 

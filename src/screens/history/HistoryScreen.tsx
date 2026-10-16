@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -29,20 +29,17 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [voidPin, setVoidPin] = useState('');
   const [voidAuthMsg, setVoidAuthMsg] = useState('');
   const [voidConfirming, setVoidConfirming] = useState(false);
-  const [voided, setVoided] = useState<string[]>([]);
   const [payModal, setPayModal] = useState(false);
   const [payOver, setPayOver] = useState<Record<string, string>>({});
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  /** Baris DB riil; null = belum dimuat / DB kosong → pakai data demo. */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live && rows.length > 0) setDbTxns(rows); }); return () => { live = false; }; }, []); const base = dbTxns ?? transactions; const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
+  /** Baris DB riil; kosong → empty-state (tanpa fallback mock). */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live) setDbTxns(rows); }); return () => { live = false; }; }, []); const base: Transaction[] = dbTxns ?? []; const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
   const payments = useMemo(() => [...new Set(base.map((tr) => tr.payment))], [base]);
 
   const list = useMemo(() => {
-    const rows = base.map((tr) =>
-      voided.includes(tr.id) ? { ...tr, status: 'Void' as TxnStatus } : tr,
-    );
+    const rows = base;
     const q = query.trim().toLowerCase();
     return rows.filter((tr) => {
       if (fDate && tr.date !== fDate) return false;
@@ -60,7 +57,7 @@ import { useEffect, useMemo, useState } from 'react';import {
         return false;
       return true;
     });
-  }, [base, query, fDate, fStatus, fPayment, voided, payOver]);
+  }, [base, query, fDate, fStatus, fPayment, payOver]);
 
   /** Rekap penjualan dari daftar terfilter: omzet lunas + hitung per metode. */ const recap = useMemo(() => { const paid = list.filter((tr) => tr.status === 'Selesai'); const omzet = paid.reduce((s, tr) => s + tr.total, 0); const byPay: Record<string, number> = {}; for (const tr of paid) { const m = payOf(tr, payOver); byPay[m] = (byPay[m] ?? 0) + tr.total; } return { omzet, count: paid.length, byPay }; }, [list, payOver]); const hasFilter = query.trim() !== '' || fDate !== null || fStatus !== null || fPayment !== null;
   const clearAll = () => {
@@ -73,9 +70,8 @@ import { useEffect, useMemo, useState } from 'react';import {
   const selected: Transaction | null =
     list.find((tr) => tr.id === selectedId) ?? list[0] ?? null;
 
-  /** Tandai void di state: baris DB diupdate langsung, baris demo via overlay. */ const markVoided = (id: string) => {
-    if (dbTxns) { setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev, ); } else {
-    setVoided((v) => (v.includes(id) ? v : [...v, id])); } }; /** PIN supervisor 6 digit wajib sebelum void (pola authorizeSupervisor ala CancelScreen, fail-closed saat offline). */ const voidPinOk = voidPin.replace(/\D/g, '').length === 6 && !voidConfirming; const runVoidAuthed = (print: boolean) => { if (!selected || !voidPinOk) return; const target = selected; const reason = voidNote.trim(); if (!reason) return; setVoidConfirming(true); setVoidAuthMsg(''); void authorizeSupervisor(voidPin).then((res) => { if (!res.ok) {
+  /** Tandai void di state DB langsung (tanpa overlay demo); persist via persistVoidDb. */ const markVoided = (id: string) => {
+    setDbTxns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev)); }; /** PIN supervisor 6 digit wajib sebelum void (pola authorizeSupervisor ala CancelScreen, fail-closed saat offline). */ const voidPinOk = voidPin.replace(/\D/g, '').length === 6 && !voidConfirming; const runVoidAuthed = (print: boolean) => { if (!selected || !voidPinOk) return; const target = selected; const reason = voidNote.trim(); if (!reason) return; setVoidConfirming(true); setVoidAuthMsg(''); void authorizeSupervisor(voidPin).then((res) => { if (!res.ok) {
       setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setVoidConfirming(false); return; } void persistVoid(target, reason).catch(() => undefined); markVoided(target.id); setVoidConfirming(false); setConfirmVoid(false); setVoidNote(''); setVoidPin(''); setVoidAuthMsg(''); if (print) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, }); } }); }; const doVoid = () => { runVoidAuthed(false); };
 
   const doVoidAndPrint = () => { runVoidAuthed(true); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
@@ -223,8 +219,8 @@ import { useEffect, useMemo, useState } from 'react';import {
       )}
 
       <Modal visible={picker !== null} animationType="fade" transparent>
-        <View style={styles.centerWrap}>
-          <View style={styles.dialog}>
+        <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>
+          <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
             <Text style={styles.dialogTitle}>
               {picker === 'date' ? t('hist_pick_date') : picker === 'status' ? t('hist_f_status') : t('hist_f_payment')}
             </Text>
@@ -255,8 +251,8 @@ import { useEffect, useMemo, useState } from 'react';import {
       </Modal>
 
       <Modal visible={payModal} animationType="fade" transparent>
-        <View style={styles.centerWrap}>
-          <View style={styles.dialog}>
+        <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>
+          <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
             <Text style={styles.dialogTitle}>{t('hist_change_pay')}</Text>
             <Text style={styles.dialogSub}>{selected?.no}</Text>
             {PAY_OPTIONS.map((o) => (
@@ -274,8 +270,8 @@ import { useEffect, useMemo, useState } from 'react';import {
       </Modal>
 
       <Modal visible={confirmVoid} animationType="fade" transparent>
-        <View style={styles.centerWrap}>
-          <View style={styles.dialog}>
+        <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>
+          <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
             <Text style={styles.dialogTitle}>{t('hist_void_title')}</Text>
             <Text style={styles.dialogSub}>
               {t('hist_void_title')} {selected?.no}
@@ -326,8 +322,8 @@ import { useEffect, useMemo, useState } from 'react';import {
       </Modal>
 
       <Modal visible={mailOpen} animationType="fade" transparent>
-        <View style={styles.centerWrap}>
-          <View style={styles.dialog}>
+        <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>
+          <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
             <Text style={styles.dialogTitle}>{t('hist_mail_title')}</Text>
             <Text style={styles.dialogSub}>{selected?.no} - {selected ? rp(selected.total) : ''}</Text>
             <AppInput
@@ -753,7 +749,10 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
+  /* Tablet: dialog jadi kartu tengah, tidak melar selebar layar. */
+  centerWrapTablet: { padding: 24 },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
+  dialogTablet: { maxWidth: 560, width: '100%', alignSelf: 'center' },
   dialogTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, marginBottom: 6 },
   dialogSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginBottom: 8 },
   optRow: {

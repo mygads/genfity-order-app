@@ -10,13 +10,14 @@ import { logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
-import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
+import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
 const ENVS: ServerEnv[] = ['prod', 'dev', 'staging', 'custom'];
 const ENV_LABEL: Record<ServerEnv, string> = { prod: 'Prod', dev: 'Dev', staging: 'Staging', custom: 'Custom' };
+const AUTOCUT_KEY = 'genfity.settings.autocut';
 
 export default function SettingsScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -27,6 +28,12 @@ export default function SettingsScreen({ navigation }: Props) {
   const [customerDisplay, setCustomerDisplay] = useState(() => getNotif().customerDisplay);
   const [autoPrintKitchen, setAutoPrintKitchen] = useState(() => getNotif().autoPrintKitchen);
   const [autoCut, setAutoCut] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void getJSON<boolean>(AUTOCUT_KEY, true).then((v) => { if (alive) setAutoCut(v); });
+    return () => { alive = false; };
+  }, []);
+  const toggleAutoCut = (v: boolean) => { setAutoCut(v); void setJSON(AUTOCUT_KEY, v); };
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
   const [terminal, setTerminalState] = useState(() => getTerminal());
@@ -141,11 +148,11 @@ export default function SettingsScreen({ navigation }: Props) {
       />
       <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
-      <Text style={styles.groupLabel}>{t('settings.terminalServer')}</Text>
+      <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.terminalServer')}</Text>
       <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={openTerminal} />
       <View style={styles.panel}>
-        <Text style={styles.cardTitle}>{t('settings.server')}</Text>
-        <Text style={styles.cardSub}>{getBaseUrl() || t('settings.noServer')}</Text>
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.server')}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{getBaseUrl() || t('settings.noServer')}</Text>
         <View style={styles.envRow}>
           {ENVS.map((e) => (
             <Pressable key={e} onPress={() => pickEnv(e)} style={[styles.envBtn, serverEnv === e && styles.envBtnActive]}>
@@ -169,21 +176,21 @@ export default function SettingsScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.cardTitle}>{t('sync.title')}</Text>
-        <Text style={styles.cardSub}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('sync.title')}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
         <View style={styles.syncRow}>
           <AppButton size="md" title={syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!syncBusy} fullWidth={false} style={styles.btnFlexNavy} />
           <AppButton size="md" title={syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!syncBusy} variant="secondary" fullWidth={false} style={styles.btnFlex} />
         </View>
         {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
-        {posVer ? <Text style={styles.cardSub}>{t('about.terminal')} - POS {posVer}</Text> : null}
+        {posVer ? <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('about.terminal')} - POS {posVer}</Text> : null}
         <View style={styles.syncRow}>
           <AppButton size="sm" title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.syncBtn} />
         </View>
         {verifyMsg ? <Text style={styles.syncMsg}>{verifyMsg}</Text> : null}
       </View>
 
-      <Text style={styles.groupLabel}>{t('settings.printerPrint')}</Text>
+      <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.printerPrint')}</Text>
       <MenuRow title={t('settings.printConn')} sub={t('settings.printConnSub')} onPress={() => go('Printers')} />
       <MenuRow title={t('settings.menuPrint')} sub={t('settings.menuPrintSub')} onPress={() => go('MenuPrinting')} />
       <MenuRow title={t('settings.menuMgmt')} sub={t('settings.menuMgmtSub')} onPress={() => go('MenuManagement')} />
@@ -191,11 +198,11 @@ export default function SettingsScreen({ navigation }: Props) {
         title={t('settings.autoCut')}
         sub={t('settings.autoCutSub')}
         right={
-          <Switch value={autoCut} onValueChange={setAutoCut} trackColor={{ true: colors.green, false: colors.stroke }} />
+          <Switch value={autoCut} onValueChange={toggleAutoCut} trackColor={{ true: colors.green, false: colors.stroke }} />
         }
       />
 
-      <Text style={styles.groupLabel}>{t('settings.operational')}</Text>
+      <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.operational')}</Text>
       <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
       <MenuRow title={t('settings.tableTimer')} sub={t('settings.tableTimerSub')} onPress={() => go('TableTimer')} />
       <MenuRow title={t('settings.kitchen')} sub={t('settings.kitchenSub')} onPress={() => go('Kitchen')} />
@@ -216,14 +223,14 @@ export default function SettingsScreen({ navigation }: Props) {
         }
       />
 
-      <Text style={styles.groupLabel}>{t('settings.displayScan')}</Text>
+      <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.displayScan')}</Text>
       <MenuRow title={t('settings.customerDisplay')} sub={t('settings.customerDisplaySub')} onPress={() => go('CustomerDisplay')} right={
         <Switch value={customerDisplay} onValueChange={(v) => { setCustomerDisplay(v); setNotif({ customerDisplay: v }); }} trackColor={{ true: colors.green, false: colors.stroke }} />
       } />
       <MenuRow title={t('settings.idle')} sub={t('settings.idleSub')} onPress={() => go('Idle')} />
       <MenuRow title={t('settings.scanQr')} sub={t('settings.scanQrSub')} onPress={() => go('QrScan')} />
 
-      <Text style={styles.groupLabel}>{t('settings.dataHelp')}</Text>
+      <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
       <MenuRow
@@ -285,11 +292,14 @@ function MenuRow({
   onPress?: () => void;
   right?: React.ReactNode;
 }) {
+  // Tablet: skala judul ikut layar induk (komponen baris menu bersama).
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BP;
   return (
     <Pressable style={styles.card} onPress={onPress} disabled={!onPress && !right}>
       <View style={styles.cardLeft}>
-        <Text style={styles.cardTitle}>{title}</Text>
-        <Text style={styles.cardSub}>{sub}</Text>
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{title}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{sub}</Text>
       </View>
       {right ?? (onPress ? <Text style={styles.chev}>›</Text> : null)}
     </Pressable>
@@ -331,6 +341,10 @@ const styles = StyleSheet.create({
   cardLeft: { flex: 1, paddingRight: 10 },
   cardTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
   cardSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  // Tablet: skala tipografi +1-2pt mengikuti pola TableTimerScreen (phone tetap).
+  groupLabelBig: { fontSize: 14 },
+  cardTitleBig: { fontSize: 16 },
+  cardSubBig: { fontSize: 13 },
   chev: { fontSize: 22, color: colors.faint, fontFamily: fonts.bold },
   langRow: { flexDirection: 'row', gap: 6 },
   lang: {

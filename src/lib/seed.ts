@@ -6,6 +6,9 @@
  * isi master minimal + user admin lokal (PIN 1234 via savePinHash),
  * lalu set flag seed=1. Semua INSERT OR IGNORE agar aman jalan ulang.
  *
+ * Pengecualian: 6 CoA expense di ms_coa disisip TANPA gate flag (jalan
+ * tiap panggil) agar DB lama yang sudah flag seed=1 tetap dapat CoA.
+ *
  * Nama kolom diambil verbatim dari SCHEMA di lib/db.ts (ms_posuser tidak
  * punya kolom nama/flagActive; ms_setting memakai value1/value2).
  */
@@ -38,6 +41,26 @@ const SEED_PAYMENTS: Array<{ id: string; name: string; type: string; order: numb
 
 export async function ensureSeeded(): Promise<void> {
   await initDb();
+
+  // 6 CoA expense default (ms_coa: id, coaName, coaType, flagActive,
+  // syncDate). SENGAJA tanpa gate flag seed agar DB lama yang sudah
+  // ter-seed tetap dapat CoA; INSERT OR IGNORE = idempoten, aman jalan
+  // ulang (pull server tetap menang via master.ts bila tersedia).
+  const coa: Array<[string, string]> = [
+    ['coa-operasional', 'Operasional'],
+    ['coa-bahan-baku', 'Bahan Baku'],
+    ['coa-gaji', 'Gaji'],
+    ['coa-utilitas', 'Utilitas'],
+    ['coa-sewa', 'Sewa'],
+    ['coa-lainnya', 'Lainnya'],
+  ];
+  for (const [id, name] of coa) {
+    await run(
+      `INSERT OR IGNORE INTO ms_coa (id, coaName, coaType, flagActive)
+       VALUES (?, ?, 'expense', 1)`,
+      [id, name],
+    );
+  }
 
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,

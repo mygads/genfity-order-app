@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -14,46 +14,7 @@ type Range = 'Hari Ini' | 'Kemarin' | '7 Hari';
 
 const RANGES: Range[] = ['Hari Ini', 'Kemarin', '7 Hari'];
 
-/** Seed tampilan bila SQLite masih kosong (instalasi baru / belum ada penjualan). */
-const BY_MENU = [
-  { nama: 'Es Teh Manis', qty: 42, total: 336000 },
-  { nama: 'Lele goreng kremes', qty: 28, total: 420000 },
-  { nama: 'Sudirman Coffee', qty: 25, total: 322500 },
-  { nama: 'Menu Custom (Nasi + Ayam)', qty: 9, total: 80100 },
-];
-const BY_CATEGORY = [
-  { nama: 'Minuman', qty: 67, total: 658500 },
-  { nama: 'Makanan', qty: 37, total: 500100 },
-];
-const BY_METHOD = [
-  { nama: 'Tunai (18 trx)', total: 486500 },
-  { nama: 'EDC / Kartu (12 trx)', total: 312000 },
-  { nama: 'QRIS / E-Wallet (11 trx)', total: 198400 },
-  { nama: 'Deposit Member (4 trx)', total: 112000 },
-  { nama: 'Order Online (6 trx)', total: 124000 },
-];
-const BY_MODE = [
-  { nama: 'Dine In (21 trx)', total: 512000 },
-  { nama: 'Bawa Pulang (14 trx)', total: 356900 },
-  { nama: 'Online / Delivery (6 trx)', total: 124000 },
-];
-// Seed tampilan hanya bila SQLite masih kosong; agregasi live (BY_USER per kasir
-// + promo/voucher) dihitung dari SQLite di bawah (T6).
-const BY_USER = [
-  { nama: 'Gista', trx: 47, total: 812000 },
-  { nama: 'Rudi', trx: 17, total: 420900 },
-];
-const PROMO = [
-  { nama: 'QOQI10 (Diskon)', pakai: 12, total: -60000 },
-  { nama: 'HEMAT20 (Voucher)', pakai: 5, total: -100000 },
-  { nama: 'GIFT50 (Gift)', pakai: 2, total: -100000 },
-];
-const CANCELLED = [
-  { nama: 'Es Teh Manis', qty: 3, alasan: 'Salah input' },
-  { nama: 'Lele goreng kremes', qty: 1, alasan: 'Stok habis' },
-];
-
-const EXPENSE_TOTAL = 65000;
+/** Tanpa seed demo: agregasi murni dari SQLite; kosong → empty-state/rekap nol. */
 
 interface Row3 { nama: string; qty: number; total: number }
 interface Row2 { nama: string; total: number }
@@ -261,25 +222,21 @@ export default function RecapScreen({ navigation }: Props) {
     };
   }, [range]);
 
-  const fallbackGross = useMemo(() => BY_METHOD.reduce((s, r) => s + r.total, 0), []);
-  const gross = db?.gross ?? fallbackGross;
-  const trxCount = db?.trx ?? 51;
-  // T6: promo dari SQLite bila ada; seed statis hanya fallback saat tabel kosong.
-  const promo = db && db.promo.length > 0 ? db.promo : PROMO;
+  const gross = db?.gross ?? 0;
+  const trxCount = db?.trx ?? 0;
+  const promo = db?.promo ?? [];
   const promoTotal = promo.reduce((s, p) => s + p.total, 0);
-  const byMethod = db?.byMethod ?? BY_METHOD;
-  const byMenu = db?.byMenu ?? BY_MENU;
-  // Seed-fallback pola kode existing: saring entri custom dari BY_MENU saat DB
-  // null; bila DB ada tapi tanpa item custom -> pesan emptyCustom (key existing).
-  const customMenu = db?.customMenu ?? BY_MENU.filter((r) => /custom/i.test(r.nama));
-  const byCat = db?.byCat ?? BY_CATEGORY;
-  const byMode = db?.byMode ?? BY_MODE;
-  const byUser = db?.byUser ?? BY_USER;
-  const cancelled = db?.cancelled ?? CANCELLED;
+  const byMethod = db?.byMethod ?? [];
+  const byMenu = db?.byMenu ?? [];
+  const customMenu = db?.customMenu ?? [];
+  const byCat = db?.byCat ?? [];
+  const byMode = db?.byMode ?? [];
+  const byUser = db?.byUser ?? [];
+  const cancelled = db?.cancelled ?? [];
   const cancelQty = cancelled.reduce((s, c) => s + c.qty, 0);
-  const expenseTotal = db?.expense ?? EXPENSE_TOTAL;
+  const expenseTotal = db?.expense ?? 0;
   const shiftLabel = db?.shiftLabel ?? `${t('fallback_shift')} · ${t('c_cashier')} ${getSession()?.name ?? 'Gista'}`;
-  const hours = db?.hours ?? '08:00 - 15:00';
+  const hours = db?.hours ?? '';
 
   return (
     <View style={styles.root}>
@@ -293,7 +250,7 @@ export default function RecapScreen({ navigation }: Props) {
           </TouchableOpacity>
         }
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <View style={styles.filters}>
           {RANGES.map((r) => (
             <TouchableOpacity
@@ -312,120 +269,148 @@ export default function RecapScreen({ navigation }: Props) {
           <Text style={styles.heroNet}>Kas bersih {rp(gross - expenseTotal)} setelah pengeluaran</Text>
         </View>
 
-        <Text style={styles.sec}>{t('rcp_pay')}</Text>
+        {/* Tablet: seksi berpasangan 2 kolom agar tidak scroll panjang;
+            phone tetap 1 kolom (wrapper tanpa style = netral). */}
+        <View style={isTablet ? styles.pairRow : undefined}>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_pay')}</Text>
         <View style={styles.card}>
           {byMethod.map((r) => (
             <View key={r.nama} style={styles.row}>
-              <Text style={styles.item}>{r.nama}</Text>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {byMethod.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada pembayaran.</Text>}
         </View>
-
-        <Text style={styles.sec}>{t('rcp_menu')}</Text>
+        </View>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_menu')}</Text>
         <View style={styles.card}>
           {byMenu.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.qty} terjual</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} terjual</Text>
               </View>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {byMenu.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+        </View>
+        </View>
         </View>
 
         {/* FIX3-RECAP custom_menu_sales (dossier tablet): agregat item custom
             (menuId 'custom-%'); header + empty-state pakai key existing. */}
-        <Text style={styles.sec}>{t('title_custom')}</Text>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('title_custom')}</Text>
         <View style={styles.card}>
           {customMenu.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.qty} terjual</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} terjual</Text>
               </View>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {customMenu.length === 0 && <Text style={styles.meta}>{t('emptyCustom')}</Text>}
+          {customMenu.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('emptyCustom')}</Text>}
         </View>
 
-        <Text style={styles.sec}>{t('rcp_cat')}</Text>
+        <View style={isTablet ? styles.pairRow : undefined}>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_cat')}</Text>
         <View style={styles.card}>
           {byCat.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.qty} {t('hist_items')}</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} {t('hist_items')}</Text>
               </View>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {byCat.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
         </View>
-
-        <Text style={styles.sec}>{t('rcp_mode')}</Text>
+        </View>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_mode')}</Text>
         <View style={styles.card}>
           {byMode.map((r) => (
             <View key={r.nama} style={styles.row}>
-              <Text style={styles.item}>{r.nama}</Text>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {byMode.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+        </View>
+        </View>
         </View>
 
-        <Text style={styles.sec}>{t('rcp_by_user')}</Text>
+        <View style={isTablet ? styles.pairRow : undefined}>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_by_user')}</Text>
         <View style={styles.card}>
           {byUser.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.trx} {t('unit_trx')}</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.trx} {t('unit_trx')}</Text>
               </View>
-              <Text style={styles.price}>{rp(r.total)}</Text>
+              <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {byUser.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
         </View>
-
-        <Text style={styles.sec}>{t('rcp_promo')}</Text>
+        </View>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_promo')}</Text>
         <View style={styles.card}>
           {promo.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.pakai}x {t('rcp_used')}</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.pakai}x {t('rcp_used')}</Text>
               </View>
-              <Text style={styles.disc}>{rp(r.total)}</Text>
+              <Text style={[styles.disc, isTablet && styles.discTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
+          {promo.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada promo dipakai.</Text>}
           <View style={styles.row}>
-            <Text style={styles.totalL}>Total promo</Text>
-            <Text style={styles.disc}>{rp(promoTotal)}</Text>
+            <Text style={[styles.totalL, isTablet && styles.totalLTablet]}>Total promo</Text>
+            <Text style={[styles.disc, isTablet && styles.discTablet]}>{rp(promoTotal)}</Text>
           </View>
         </View>
+        </View>
+        </View>
 
-        <Text style={styles.sec}>{t('rcp_cancel')} ({cancelQty})</Text>
+        <View style={isTablet ? styles.pairRow : undefined}>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_cancel')} ({cancelQty})</Text>
         <View style={styles.card}>
           {cancelled.map((r) => (
             <View key={`${r.nama}-${r.alasan}`} style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.item}>{r.qty}x {r.nama}</Text>
-                <Text style={styles.meta}>{r.alasan}</Text>
+                <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.qty}x {r.nama}</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.alasan}</Text>
               </View>
             </View>
           ))}
-          {cancelled.length === 0 && <Text style={styles.meta}>Tidak ada item dibatalkan.</Text>}
+          {cancelled.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Tidak ada item dibatalkan.</Text>}
         </View>
-
-        <Text style={styles.sec}>{t('rcp_expense')}</Text>
+        </View>
+        <View style={isTablet ? styles.pairCol : undefined}>
+        <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_expense')}</Text>
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.item}>Total pengeluaran outlet</Text>
-            <Text style={styles.disc}>-{rp(expenseTotal)}</Text>
+            <Text style={[styles.item, isTablet && styles.itemTablet]}>Total pengeluaran outlet</Text>
+            <Text style={[styles.disc, isTablet && styles.discTablet]}>-{rp(expenseTotal)}</Text>
           </View>
           <TouchableOpacity onPress={() => navigation?.navigate('Expense')}>
             <Text style={styles.link}>Kelola pengeluaran cabang ›</Text>
           </TouchableOpacity>
+        </View>
+        </View>
         </View>
 
         <View style={styles.actions}>
@@ -466,13 +451,28 @@ const styles = StyleSheet.create({
   heroSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 4 },
   heroNet: { fontFamily: fonts.semibold, fontSize: 12, color: colors.white, marginTop: 6 },
   sec: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy, marginTop: 18, marginBottom: 8 },
+  // Tablet: judul seksi sedikit lebih besar.
+  secTablet: { fontSize: 16 },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.line },
+  // Tablet: pasangan seksi rekap bersisian 2 kolom.
+  pairRow: { flexDirection: 'row', gap: 12 },
+  pairCol: { flex: 1, minWidth: 0 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, gap: 8 },
   item: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, flex: 1 },
+  // Tablet: isi rekap lebih terbaca.
+  itemTablet: { fontSize: 14 },
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint },
+  // Tablet: meta rekap lebih terbaca.
+  metaTablet: { fontSize: 13 },
   price: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
+  // Tablet: nominal rekap lebih terbaca.
+  priceTablet: { fontSize: 14 },
   disc: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
+  // Tablet: nominal diskon/promo lebih terbaca.
+  discTablet: { fontSize: 14 },
   totalL: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, flex: 1 },
+  // Tablet: label total sedikit lebih besar.
+  totalLTablet: { fontSize: 15 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },

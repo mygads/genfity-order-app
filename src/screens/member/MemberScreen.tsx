@@ -17,6 +17,7 @@ import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
+import { initDb, query, run } from '../../lib/db';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -56,28 +57,113 @@ type Member = {
 
 type Riwayat = { id: string; tanggal: string; keterangan: string; nominal?: number; poin?: number };
 
-const DUMMY: Member[] = [
-  { id: 'M001', nama: 'Budi Santoso', noHp: '081234567890', tipe: 'Regular', saldo: 150000, poin: 120 },
-  { id: 'M002', nama: 'Sinta Dewi', noHp: '081987654321', tipe: 'Gold', saldo: 500000, poin: 450 },
-  { id: 'M003', nama: 'Andi Pratama', noHp: '082112233445', tipe: 'Regular', saldo: 0, poin: 30 },
-];
-
-/** Riwayat awal per member: tanggal lewat fmtDate (ikut locale id/en),
- * nominal angka (rp()) bukan string hardcode. */
-const SEED_RIWAYAT: Record<string, Riwayat[]> = {
-  M001: [
-    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 14)), keterangan: 'Top up deposit (Tunai)', nominal: 100000 },
-    { id: 'r2', tanggal: fmtDate(new Date(2026, 9, 12)), keterangan: 'Bayar TRX-041 (Deposit)', nominal: -86400 },
-    { id: 'r3', tanggal: fmtDate(new Date(2026, 9, 10)), keterangan: 'Poin dari TRX-038', poin: 86 },
-  ],
-  M002: [
-    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 15)), keterangan: 'Top up deposit (QRIS)', nominal: 500000 },
-    { id: 'r2', tanggal: fmtDate(new Date(2026, 9, 13)), keterangan: 'Bayar TRX-040 (Deposit)', nominal: -124000 },
-  ],
-  M003: [
-    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 11)), keterangan: 'Poin dari TRX-035', poin: 30 },
-  ],
+/** Baris ms_member SQLite (skema db.ts): id, memberName, phone,
+ * depositBalance. Tanpa kolom tier/poin - tipe default Regular, poin 0. */
+type MemberRow = {
+  id: string | null;
+  memberName: string | null;
+  phone: string | null;
+  depositBalance: number | null;
 };
+
+/** Baca koleksi nyata dari SQLite ms_member (hasil seed/pull/koleksi kasir).
+ * Kosong = belum ada member (pemanggil tampilkan empty-state). */
+async function loadMembersFromSqlite(): Promise<Member[]> {
+  await initDb();
+  const rows = await query<MemberRow>(
+    'SELECT id, memberName, phone, depositBalance FROM ms_member ORDER BY memberName',
+  );
+  const out: Member[] = [];
+  for (const r of rows) {
+    const id = (r.id ?? '').trim();
+    const nama = (r.memberName ?? '').trim();
+    if (!id || !nama) continue;
+    out.push({
+      id,
+      nama,
+      noHp: (r.phone ?? '').trim(),
+      tipe: 'Regular',
+      saldo: Math.max(0, Math.round(Number(r.depositBalance) || 0)),
+      poin: 0,
+    });
+  }
+  return out;
+}
+
+/** Riwayat nyata per member dari SQLite: deposit/withdraw
+ * (tr_memberdeposit + tr_membertransactionlog) + penjualan yang menyebut
+ * memberId ini (tr_saleshead). Kosong = belum ada transaksi. */
+async function loadMemberHistoryFromSqlite(memberId: string): Promise<Riwayat[]> {
+  await initDb();
+  const out: Riwayat[] = [];
+  try {
+    const deps = await query<{
+      id: string | null; trxType: string | null; amount: number | null;
+      trxDate: string | null;
+    }>(
+      'SELECT id, trxType, amount, trxDate FROM tr_memberdeposit WHERE memberId = ? ORDER BY trxDate DESC LIMIT 50',
+      [memberId],
+    );
+    for (const d of deps) {
+      const amt = Math.round(Number(d.amount) || 0);
+      if (!amt) continue;
+      const tipe = String(d.trxType ?? '').toLowerCase();
+      out.push({
+        id: String(d.id ?? `dep-${out.length}`),
+        tanggal: String(d.trxDate ?? '').slice(0, 10),
+        keterangan: tipe.includes('withdraw') || amt < 0
+          ? 'Bayar (Deposit)'
+          : 'Top up deposit',
+        nominal: amt,
+      });
+    }
+  } catch {
+    /* tabel/log boleh kosong */
+  }
+  try {
+    const logs = await query<{
+      id: string | null; trxType: string | null; amount: number | null;
+      trxDate: string | null;
+    }>(
+      'SELECT id, trxType, amount, trxDate FROM tr_membertransactionlog WHERE memberId = ? ORDER BY trxDate DESC LIMIT 50',
+      [memberId],
+    );
+    for (const l of logs) {
+      const amt = Math.round(Number(l.amount) || 0);
+      if (!amt) continue;
+      out.push({
+        id: String(l.id ?? `log-${out.length}`),
+        tanggal: String(l.trxDate ?? '').slice(0, 10),
+        keterangan: String(l.trxType ?? 'Transaksi member'),
+        nominal: amt,
+      });
+    }
+  } catch {
+    /* abaikan */
+  }
+  try {
+    const sales = await query<{
+      salesNum: string | null; salesDate: string | null;
+      grandTotal: number | null; paymentMethod: string | null;
+    }>(
+      'SELECT salesNum, salesDate, grandTotal, paymentMethod FROM tr_saleshead WHERE memberId = ? ORDER BY salesDate DESC LIMIT 50',
+      [memberId],
+    );
+    for (const sh of sales) {
+      const total = Math.round(Number(sh.grandTotal) || 0);
+      if (total <= 0) continue;
+      out.push({
+        id: String(sh.salesNum ?? `sale-${out.length}`),
+        tanggal: String(sh.salesDate ?? '').slice(0, 10),
+        keterangan: `Bayar ${String(sh.salesNum ?? '')} (${String(sh.paymentMethod ?? '')})`,
+        nominal: -total,
+      });
+    }
+  } catch {
+    /* abaikan */
+  }
+  return out;
+}
 
 /** Deposit cepat minimal 10000 rupiah (lihat MIN_TOPUP) - sama dengan layar Top Up Deposit. */
 const MIN_TOPUP = 10000;
@@ -142,8 +228,8 @@ export default function MemberScreen({ navigation, route }: Props) {
   const { lang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [members, setMembers] = useState<Member[]>(DUMMY);
-  const [riwayat, setRiwayat] = useState<Record<string, Riwayat[]>>(SEED_RIWAYAT);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [riwayat, setRiwayat] = useState<Record<string, Riwayat[]>>({});
   const [selected, setSelected] = useState<Member | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [depositVisible, setDepositVisible] = useState(false);
@@ -168,13 +254,19 @@ export default function MemberScreen({ navigation, route }: Props) {
     return () => { live = false; };
   }, [selected]);
 
-  // Sinkron member dari server (kontrak §4 main/get-member via ApiPath.pullMember
-  // yang ditarik master.ts ke ms_member): tampilkan data sync bila ada, fallback
-  // SEED lokal (DUMMY) bila kosong/offline - fallback JANGAN dihapus agar kasir
-  // tetap jalan tanpa server.
+  // Member dari SQLite ms_member dulu (offline-first: seed/pull/koleksi
+  // nyata), lalu pengayaan dari server bila ada. Kosong = empty-state.
   useEffect(() => {
     let live = true;
     (async () => {
+      try {
+        const local = await loadMembersFromSqlite();
+        if (live && local.length > 0) {
+          setMembers(local);
+        }
+      } catch {
+        /* SQLite belum siap - lanjut API */
+      }
       try {
         const res = await apiFetch(ApiPath.pullMember, { method: 'GET' });
         const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
@@ -199,7 +291,7 @@ export default function MemberScreen({ navigation, route }: Props) {
         setMembers(mapped);
         setSelected((sb) => (sb ? mapped.find((m) => m.id === sb.id) ?? sb : sb));
       } catch {
-        /* offline - fallback SEED lokal tetap dipakai */
+        /* offline - koleksi SQLite tetap dipakai */
       }
     })();
     return () => { live = false; };
@@ -266,13 +358,11 @@ export default function MemberScreen({ navigation, route }: Props) {
     return () => { live = false; };
   }, [selected]);
 
-  // Riwayat deposit server: BE belum menyediakan endpoint riwayat deposit per
-  // member (§5 hanya punya inquiry-deposit + topup), jadi jujur: coba saring
-  // pullSales (main/get-sales) yang menyebut member ini; hasilnya sering kosong
-  // karena sales tak membawa kaitan member - fallback cache lokal `riwayat`
-  // selalu dipakai agar kasir tetap punya data.
+  // Riwayat nyata per member: SQLite dulu (tr_memberdeposit /
+  // tr_membertransactionlog / tr_saleshead), lalu saring pullSales server
+  // bila online. Kosong = belum ada transaksi (empty-state riwayat).
   useEffect(() => {
-    if (!selected || !online) {
+    if (!selected) {
       setServerHistory([]);
       return;
     }
@@ -280,6 +370,18 @@ export default function MemberScreen({ navigation, route }: Props) {
     const mid = selected.id;
     const nama = selected.nama;
     (async () => {
+      try {
+        const local = await loadMemberHistoryFromSqlite(mid);
+        if (live) {
+          setRiwayat((rw) => ({ ...rw, [mid]: local }));
+        }
+      } catch {
+        /* abaikan - lanjut server */
+      }
+      if (!online) {
+        if (live) setServerHistory([]);
+        return;
+      }
       try {
         const res = await apiFetch(ApiPath.pullSales, { method: 'GET' });
         const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
@@ -342,10 +444,22 @@ export default function MemberScreen({ navigation, route }: Props) {
 
   const saveMember = () => {
     if (nama.trim() && noHp.trim()) {
-      const id = `M${String(members.length + 1).padStart(3, '0')}`;
+      const id = `M${String(Date.now()).slice(-6)}`;
       const nm = nama.trim();
       const hp = noHp.trim();
       void persistMember(id, nm, hp);
+      // Simpan koleksi nyata ke SQLite ms_member agar bertahan offline.
+      void (async () => {
+        try {
+          await initDb();
+          await run(
+            'INSERT OR REPLACE INTO ms_member (id, memberName, phone, depositBalance, syncDate) VALUES (?, ?, ?, 0, NULL)',
+            [id, nm, hp],
+          );
+        } catch {
+          /* abaikan - state memori tetap jalan */
+        }
+      })();
       setMembers((ms) => [...ms, { id, nama: nm, noHp: hp, tipe: 'Regular', saldo: 0, poin: 0 }]);
       setRiwayat((rw) => ({ ...rw, [id]: [] }));
     }
@@ -371,6 +485,21 @@ export default function MemberScreen({ navigation, route }: Props) {
     setDepositErr('');
     const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
     void persistDeposit(selected.id, n, 'cepat');
+    const mid = selected.id;
+    const nowIso = new Date().toISOString();
+    // Catat transaksi nyata ke SQLite: saldo member + log deposit.
+    void (async () => {
+      try {
+        await initDb();
+        await run('UPDATE ms_member SET depositBalance = depositBalance + ? WHERE id = ?', [n, mid]);
+        await run(
+          'INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, trxType, amount, balanceAfter, trxDate, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL)',
+          [`dep-${Date.now()}`, mid, 'topup', n, selected.saldo + n, nowIso],
+        );
+      } catch {
+        /* abaikan - state memori tetap jalan */
+      }
+    })();
     setMembers((ms) =>
       ms.map((m) =>
         m.id === selected.id ? { ...m, saldo: m.saldo + n, poin: m.poin + poin } : m,
@@ -463,8 +592,8 @@ export default function MemberScreen({ navigation, route }: Props) {
     </ScrollView>
   );
 
-  // Riwayat tampil: server dulu bila ada, fallback cache lokal (jujur: BE belum
-  // punya endpoint riwayat deposit per member, jadi cache lokal selalu siap).
+  // Riwayat tampil: server dulu bila ada, lalu riwayat nyata SQLite/lokal.
+  // Kosong = belum ada transaksi (empty-state riwayat).
   const historyList = selected
     ? (serverHistory.length > 0 ? serverHistory : (riwayat[selected.id] ?? []))
     : [];
@@ -611,9 +740,9 @@ export default function MemberScreen({ navigation, route }: Props) {
 
       {/* Tambah member */}
       <Modal visible={addVisible} transparent animationType="slide">
-        <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{t('mem_add_new')}</Text>
+        <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('mem_add_new')}</Text>
             <AppInput
               label={t('mem_name_label')}
               placeholder={t('mem_name_ph')}
@@ -645,9 +774,9 @@ export default function MemberScreen({ navigation, route }: Props) {
 
       {/* Deposit cepat */}
       <Modal visible={depositVisible} transparent animationType="slide">
-        <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{t('mem_quick_title')}</Text>
+        <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('mem_quick_title')}</Text>
             {selected ? (
               <Text style={s.modalHint}>
                 {selected.nama} - {t('mem_balance')} {rp(selected.saldo)}
@@ -862,11 +991,20 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
+  // Tablet: sheet bawah jadi dialog tengah yang dibatasi lebarnya.
+  modalBgTablet: { justifyContent: 'center', padding: 24 },
   modalCard: {
     backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
+  },
+  // Tablet: kartu dialog tengah maxWidth 520, bukan selebar layar.
+  modalCardTablet: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    borderRadius: 16,
   },
   modalTitle: {
     fontSize: 17,
@@ -874,6 +1012,8 @@ const s = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
   },
+  // Tablet: judul dialog sedikit lebih besar.
+  modalTitleBig: { fontSize: 19 },
   modalHint: {
     fontSize: 13,
     fontFamily: fonts.regular,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
   id: string;
   nama: string;
@@ -9,12 +9,8 @@ import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyA
   photo?: string;};type ExpenseRow = { id: string;
 coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Sewa', 'Lainnya'];
 
-/** Seed tanggal lewat fmtDate agar ikut locale, bukan string hardcode. */
-const SEED: Expense[] = [
-    { id: 'EX-101', nama: 'Belanja plastik dan tissue', tanggal: fmtDate(new Date(2026, 9, 16)), coa: 'Operasional', jumlah: 45000, disetujui: true },
-    { id: 'EX-102', nama: 'Bensin antar online', tanggal: fmtDate(new Date(2026, 9, 16)), coa: 'Operasional', jumlah: 20000, disetujui: true },
-    { id: 'EX-103', nama: 'Servis kompor dapur', tanggal: fmtDate(new Date(2026, 9, 15)), coa: 'Utilitas', jumlah: 150000, disetujui: false },];interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA expense: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb();
-  const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}function shortDate(iso: string | null, lang: Lang = 'id'): string { if (!iso) return fmtDate(new Date(), lang); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return fmtDate(d, lang); } catch { return iso; }}export default function ExpenseScreen({ navigation }: Props) { const { width } = useWindowDimensions(); const isTablet = width >= TABLET_BP; const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [items, setItems] = useState<Expense[]>(SEED); const [formOpen, setFormOpen] = useState(false);
+/** DB kosong = empty-state (tanpa seed). */interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA expense: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb();
+  const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}function shortDate(iso: string | null, lang: Lang = 'id'): string { if (!iso) return fmtDate(new Date(), lang); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return fmtDate(d, lang); } catch { return iso; }}export default function ExpenseScreen({ navigation }: Props) { const { width } = useWindowDimensions(); const isTablet = width >= TABLET_BP; const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [items, setItems] = useState<Expense[]>([]); const [formOpen, setFormOpen] = useState(false);
   const [nama, setNama] = useState('');
   const [jumlah, setJumlah] = useState('');
   const [coa, setCoa] = useState(FALLBACK_COA[0]);
@@ -22,7 +18,7 @@ const SEED: Expense[] = [
 
   // F7: muat ulang tiap layar jadi fokus agar approve dari daftar lain langsung
   // terlihat (focus-listener; aman: guard addListener + alive).
-  const [saving, setSaving] = useState(false); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' ORDER BY createdAt DESC", ); if (!alive || rows.length === 0) return; setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: tampilkan seed */ } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
+  const [saving, setSaving] = useState(false); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' ORDER BY createdAt DESC", ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: biarkan state apa adanya */ } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = nama.trim().length >= 3 && jumlahNum > 0 && !saving;
 
@@ -75,10 +71,10 @@ const SEED: Expense[] = [
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.hero}>
           <Text style={s.heroLabel}>{t('expense.totalMonth')}</Text>
-          <Text style={s.heroValue}>{rp(totalBulan)}</Text>
+          <Text style={[s.heroValue, isTablet && s.heroValueTablet]}>{rp(totalBulan)}</Text>
           <Text style={s.heroSub}>{items.length} {t('expense.recorded')}</Text>
         </View>
 
@@ -136,12 +132,14 @@ const SEED: Expense[] = [
           </View>
         )}
 
+        {/* Tablet: daftar expense 2 kolom; phone tetap 1 kolom (wrapper tanpa style = netral). */}
+        <View style={isTablet ? s.gridTablet : undefined}>
         {items.map((e) => (
-          <View key={e.id} style={s.card}>
+          <View key={e.id} style={[s.card, isTablet && s.cardTablet]}>
             <View style={s.row}>
               {e.photo ? <Image source={{ uri: e.photo }} style={s.thumb} /> : null}
               <View style={{ flex: 1 }}>
-                <Text style={s.itemName}>{e.nama}</Text>
+                <Text style={[s.itemName, isTablet && s.itemNameTablet]}>{e.nama}</Text>
                 <Text style={s.itemMeta}>
                   {e.id} - {e.tanggal} - {e.coa} -{' '}
                   {e.disetujui ? (
@@ -160,6 +158,7 @@ const SEED: Expense[] = [
             )}
           </View>
         ))}
+        </View>
       </ScrollView>
     </View>
   );}const s = StyleSheet.create({
@@ -171,8 +170,14 @@ const SEED: Expense[] = [
   hero: { backgroundColor: colors.navy, borderRadius: 14, padding: 18 },
   heroLabel: { fontFamily: fonts.medium, fontSize: 13, color: colors.navyTint },
   heroValue: { fontFamily: fonts.bold, fontSize: 28, color: colors.white, marginTop: 6 },
+  // Tablet: nominal hero sedikit lebih besar.
+  heroValueTablet: { fontSize: 32 },
   heroSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 4 },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1, borderColor: colors.line },
+  // Tablet: kartu expense setengah lebar baris grid (2 kolom).
+  cardTablet: { width: '48.5%' },
+  // Tablet: daftar expense 2 kolom bersisian.
+  gridTablet: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   cardTitle: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
   label: { fontSize: 12, fontFamily: fonts.semibold, color: colors.muted, marginTop: 12, marginBottom: 6 },
   input: {
@@ -204,6 +209,8 @@ const SEED: Expense[] = [
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   thumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: colors.line },
   itemName: { fontSize: 14, fontFamily: fonts.bold, color: colors.text },
+  // Tablet: nama expense sedikit lebih besar.
+  itemNameTablet: { fontSize: 15 },
   itemMeta: { fontSize: 12, fontFamily: fonts.regular, color: colors.faint, marginTop: 2 },
   jumlah: { fontSize: 14, fontFamily: fonts.bold, color: colors.red },
   okTxt: { fontFamily: fonts.semibold, color: colors.greenDark },

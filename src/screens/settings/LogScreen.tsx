@@ -3,7 +3,7 @@ import { FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, 
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, run } from '../../lib/db';
@@ -34,21 +34,6 @@ interface AppLog {
 
 const LS_LOGS = 'genfity.applog.items';
 const MAX_LOGS = 200;
-
-/** Seed log terhubung kejadian nyata (sync, cetak, shift, display). Rupiah selalu via rp(). */
-function seedLogs(now: Date, lang: 'id' | 'en'): AppLog[] {
-  const en = lang === 'en';
-  const day = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-  const hm = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  return [
-    { id: 'l1', time: `${day} ${hm}`, level: 'INFO', tag: 'sync', message: en ? 'Menu pull done - 68 items' : 'Pull menu selesai - 68 item', detail: en ? 'pull/menu endpoint: 68 rows, pullDateTime watermark updated. No price conflicts.' : 'Endpoint pull/menu: 68 baris, watermark pullDateTime diperbarui. Tidak ada konflik harga.' },
-    { id: 'l2', time: `${day} ${hm}`, level: 'INFO', tag: 'sales', message: en ? 'TRX queued for sync' : 'TRX tersimpan antre', detail: en ? `Subtotal ${rp(61000)}, service ${rp(3050)}, total ${rp(64050)}, Cash. syncDate NULL: awaiting push.` : `Subtotal ${rp(61000)}, service ${rp(3050)}, total ${rp(64050)}, Tunai. syncDate NULL: menunggu push.` },
-    { id: 'l3', time: `${day} ${hm}`, level: 'WARN', tag: 'printer', message: en ? 'Kitchen printer not responding' : 'Printer Dapur tidak menjawab', detail: en ? 'TCP 192.168.1.50:9100 timed out after 5s sending a ticket. Ticket held in the print queue, retry from Kitchen Tickets.' : 'TCP 192.168.1.50:9100 timeout 5 dtk saat kirim tiket. Tiket ditahan di antrean cetak, coba lagi dari Tiket Dapur.' },
-    { id: 'l4', time: `${day} ${hm}`, level: 'ERROR', tag: 'sync', message: en ? 'Expense push failed (2x)' : 'Push expense gagal (2x)', detail: en ? 'branch-expenses push timed out. Item marked failed, retried on the next push. Local data is safe.' : 'Push branch-expenses timeout. Item ditandai gagal, dicoba pada push berikutnya. Data lokal aman.' },
-    { id: 'l5', time: `${day} ${hm}`, level: 'INFO', tag: 'shift', message: en ? 'Morning shift opened' : 'Shift Pagi dibuka', detail: en ? `Cashier Gista, opening float ${rp(200000)}, terminal TRM-001, branch BR-01.` : `Kasir Gista, kas awal ${rp(200000)}, terminal TRM-001, cabang BR-01.` },
-    { id: 'l6', time: `${day} ${hm}`, level: 'INFO', tag: 'display', message: en ? 'Customer display calling A-03' : 'Display pelanggan memanggil A-03', detail: en ? 'Call event: ticket A-03 moved to Ready for Pickup, broadcast locally + via WS when available.' : 'Event call: tiket A-03 dipindah ke Siap Diambil, disiarkan lokal + WS bila tersedia.' },
-  ];
-}
 
 /** Tulis satu baris log persisten (dual-write AsyncStorage + SQLite tr_applog). Dipakai lintas layar via impor modul ini. */
 export async function logApp(level: LogLevel, tag: string, message: string, detail = ''): Promise<void> {
@@ -98,7 +83,7 @@ function levelStyle(l: LogLevel) {
 export default function LogScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logs, setLogs] = useState<AppLog[]>([]);
   const [level, setLevel] = useState<(typeof levelFilters)[number]>('ALL');
@@ -136,13 +121,7 @@ export default function LogScreen({ navigation }: Props) {
         rows = cached.map((l) => ({ ...l, level: normLevel(l.level) }));
       }
       if (!alive) return;
-      if (rows.length === 0) {
-        const seed = seedLogs(new Date(), lang);
-        setLogs(seed);
-        void setJSON(LS_LOGS, seed);
-      } else {
-        setLogs(rows);
-      }
+      setLogs(rows);
     })();
     return () => {
       alive = false;
@@ -288,7 +267,8 @@ const styles = StyleSheet.create({
   emptyTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, marginTop: 12 },
   emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 4 },
   sheetWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '80%' },
+  // Tablet: sheet detail dibatasi 560 dan tengahkan (phone tetap full-bleed bawah).
+  sheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, maxHeight: '80%', width: '100%', maxWidth: 560, alignSelf: 'center' },
   sheetHandle: { width: 44, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginBottom: 12 },
   sheetTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   detailTime: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, marginTop: 4 },

@@ -4,23 +4,18 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   group: string;
   stock: number;
   online: boolean;
-  track: boolean;}const LS_STOCK = 'genfity.stock.cache';const LS_OPTS = 'genfity.stock.opts';/** Sanitasi qty: bulatkan, tolak NaN/negatif (default 0). */function cleanQty(v: unknown, fallback = 0): number { const n = Number(v); if (!Number.isFinite(n)) return fallback; return Math.max(0, Math.round(n)); }interface StockPersistFlags { track: boolean; trackStock: boolean; allowSellEmpty: boolean; }const DEFAULT_ITEMS: StockItem[] = [
-  { id: 'm1', name: 'Ayam Geprek Pelakor', group: 'Makanan Utama', stock: 24, online: true, track: true },
-  { id: 'm2', name: 'Es Teh Manis', group: 'Minuman', stock: 60, online: true, track: true },
-  { id: 'm3', name: 'Lele Goreng', group: 'Makanan Utama', stock: 2, online: false, track: true },
-  { id: 'm4', name: 'Kopi Robusta', group: 'Minuman', stock: 5, online: true, track: true },
-  { id: 'm5', name: 'Mie Goreng Jawa', group: 'Makanan Utama', stock: 0, online: false, track: true },];interface StockOpts { trackStock: boolean; lowWarn: boolean; lowLimit: string; allowSellEmpty: boolean; onlineSync: boolean;}const DEFAULT_OPTS: StockOpts = { trackStock: true, lowWarn: true, lowLimit: '5', allowSellEmpty: false, onlineSync: true,};/** Tulis stok item ke ms_branchmenu agar ikut sync master. *//* TODO(M9-10): ms_branchmenu tidak punya kolom track/allowSellEmpty per baris (cek skema di lib/db.ts), sehingga flag pelacakan hanya dibaca dari state lokal LS_OPTS dan tidak ikut sync ke server. Jangan tambah kolom tanpa migrasi aman. */async function persistItemStock(id: string, stock: number, online: boolean, flags: StockPersistFlags): Promise<void> { try { await initDb(); const branchId = getBranchId(); const qty = cleanQty(stock, 0); const tracking = flags.trackStock && flags.track; let soldOut: number; if (!tracking) { const cur = await queryFirst<{ flagSoldOut: number | null }>( 'SELECT flagSoldOut FROM ms_branchmenu WHERE branchId = ? AND menuId = ?', [branchId, id], ); soldOut = (cur?.flagSoldOut ?? 0) === 1 ? 1 : 0; } else if (flags.allowSellEmpty) { soldOut = 0; } else { soldOut = qty <= 0 && !online ? 1 : 0; } await run( `INSERT INTO ms_branchmenu (branchId, menuId, qty, flagSoldOut, flagActive, syncDate) VALUES (?, ?, ?, ?, 1, NULL) ON CONFLICT (branchId, menuId) DO UPDATE SET qty = excluded.qty, flagSoldOut = excluded.flagSoldOut, syncDate = NULL`, [branchId, id, qty, soldOut], ); await enqueueOutbox('ms_branchmenu', `${branchId}:${id}`, 'update'); } catch { /* abaikan: cache JSON tetap menyimpan */ }}export default function StockScreen({ navigation }: Props) {
+  track: boolean;}const LS_STOCK = 'genfity.stock.cache';const LS_OPTS = 'genfity.stock.opts';/** Sanitasi qty: bulatkan, tolak NaN/negatif (default 0). */function cleanQty(v: unknown, fallback = 0): number { const n = Number(v); if (!Number.isFinite(n)) return fallback; return Math.max(0, Math.round(n)); }interface StockPersistFlags { track: boolean; trackStock: boolean; allowSellEmpty: boolean; }interface StockOpts { trackStock: boolean; lowWarn: boolean; lowLimit: string; allowSellEmpty: boolean; onlineSync: boolean;}const DEFAULT_OPTS: StockOpts = { trackStock: true, lowWarn: true, lowLimit: '5', allowSellEmpty: false, onlineSync: true,};/** Tulis stok item ke ms_branchmenu agar ikut sync master. *//* TODO(M9-10): ms_branchmenu tidak punya kolom track/allowSellEmpty per baris (cek skema di lib/db.ts), sehingga flag pelacakan hanya dibaca dari state lokal LS_OPTS dan tidak ikut sync ke server. Jangan tambah kolom tanpa migrasi aman. */async function persistItemStock(id: string, stock: number, online: boolean, flags: StockPersistFlags): Promise<void> { try { await initDb(); const branchId = getBranchId(); const qty = cleanQty(stock, 0); const tracking = flags.trackStock && flags.track; let soldOut: number; if (!tracking) { const cur = await queryFirst<{ flagSoldOut: number | null }>( 'SELECT flagSoldOut FROM ms_branchmenu WHERE branchId = ? AND menuId = ?', [branchId, id], ); soldOut = (cur?.flagSoldOut ?? 0) === 1 ? 1 : 0; } else if (flags.allowSellEmpty) { soldOut = 0; } else { soldOut = qty <= 0 && !online ? 1 : 0; } await run( `INSERT INTO ms_branchmenu (branchId, menuId, qty, flagSoldOut, flagActive, syncDate) VALUES (?, ?, ?, ?, 1, NULL) ON CONFLICT (branchId, menuId) DO UPDATE SET qty = excluded.qty, flagSoldOut = excluded.flagSoldOut, syncDate = NULL`, [branchId, id, qty, soldOut], ); await enqueueOutbox('ms_branchmenu', `${branchId}:${id}`, 'update'); } catch { /* abaikan: cache JSON tetap menyimpan */ }}export default function StockScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] =  useState(false);
   const [opts, setOpts] = useState<StockOpts>(DEFAULT_OPTS);
-  const [items, setItems] = useState<StockItem[]>(DEFAULT_ITEMS);
+  const [items, setItems] = useState<StockItem[]>([]);
   const [queryText, setQueryText] = useState('');
   // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
   const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
 
-  useEffect(() => { let alive = true; (async () => { const [cachedItems, cachedOpts, rnd] = await Promise.all([ getJSON<StockItem[]>(LS_STOCK, DEFAULT_ITEMS), getJSON<StockOpts>(LS_OPTS, DEFAULT_OPTS), getRoundingSetting(), ]); if (!alive) return; setOpts({ ...DEFAULT_OPTS, ...cachedOpts }); setRounding(rnd); try { await initDb(); const rows = await query<{ menuId: string; qty: number | null; flagSoldOut: number | null }>( 'SELECT menuId, qty, flagSoldOut FROM ms_branchmenu WHERE branchId = ?', [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems(cachedItems); return; } const byId = new Map(rows.map((r) => [r.menuId, r])); setItems( cachedItems.map((it) => { const r = byId.get(it.id); if (!r) return it; const qty = Number(r.qty ?? it.stock); return { ...it, stock: Number.isFinite(qty) ? Math.max(0, Math.round(qty)) : it.stock }; }), ); } catch { if (alive) setItems(cachedItems); } })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STOCK, items); }, [items]); useEffect(() => { void setJSON(LS_OPTS, opts); }, [opts]); const patch = (id: string, p: Partial<StockItem>) =>
+  useEffect(() => { let alive = true; (async () => { const [cachedItems, cachedOpts, rnd] = await Promise.all([ getJSON<StockItem[]>(LS_STOCK, []), getJSON<StockOpts>(LS_OPTS, DEFAULT_OPTS), getRoundingSetting(), ]); if (!alive) return; setOpts({ ...DEFAULT_OPTS, ...cachedOpts }); setRounding(rnd); try { await initDb(); const branchId = getBranchId(); const rows = await query<{ id: string; menuName: string | null; groupName: string | null; qty: number | null; flagSoldOut: number | null }>( 'SELECT m.id AS id, m.menuName AS menuName, c.categoryName AS groupName, b.qty AS qty, b.flagSoldOut AS flagSoldOut FROM ms_menu m LEFT JOIN ms_branchmenu b ON b.menuId = m.id AND b.branchId = ? LEFT JOIN ms_category c ON c.id = m.categoryId WHERE (m.flagActive IS NULL OR m.flagActive = 1) AND (b.flagActive IS NULL OR b.flagActive = 1) ORDER BY c.sortOrder, m.menuName', [branchId], ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } const cachedById = new Map(cachedItems.map((it) => [it.id, it])); setItems( rows.map((r) => { const cached = cachedById.get(r.id); const soldOut = (r.flagSoldOut ?? 0) === 1; return { id: r.id, name: r.menuName ?? r.id, group: r.groupName ?? '', stock: cleanQty(r.qty, 0), online: cached?.online ?? !soldOut, track: cached?.track ?? true }; }), ); } catch { if (alive) setItems(cachedItems); } })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STOCK, items); }, [items]); useEffect(() => { void setJSON(LS_OPTS, opts); }, [opts]); const patch = (id: string, p: Partial<StockItem>) =>
     { setItems((xs) => { const next = xs.map((x) => (x.id === id ? { ...x, ...p } : x));
 
   const changed = next.find((x) => x.id === id); if (changed) void persistItemStock(changed.id, changed.stock, changed.online, { track: changed.track, trackStock: opts.trackStock, allowSellEmpty: opts.allowSellEmpty }); return next; }); }; const bump = (id: string, d: number) =>
@@ -88,12 +83,12 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
                 </Text>
               </View>
               <View style={styles.stepper}>
-                <Pressable style={styles.stepBtn} onPress={() => bump(x.id, -1)}>
-                  <Text style={styles.stepText}>-</Text>
+                <Pressable style={[styles.stepBtn, isTablet && styles.stepBtnBig]} onPress={() => bump(x.id, -1)}>
+                  <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>-</Text>
                 </Pressable>
                 <Text style={styles.stepVal}>{x.stock}</Text>
-                <Pressable style={styles.stepBtn} onPress={() => bump(x.id, 1)}>
-                  <Text style={styles.stepText}>+</Text>
+                <Pressable style={[styles.stepBtn, isTablet && styles.stepBtnBig]} onPress={() => bump(x.id, 1)}>
+                  <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>+</Text>
                 </Pressable>
               </View>
             </View>
@@ -150,6 +145,9 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   itemMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stepBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  // Tablet: target sentuh stepper 44px (phone tetap 30px).
+  stepBtnBig: { width: 44, height: 44, borderRadius: 10 },
+  stepTextBig: { fontSize: 18 },
   stepText: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy },
   stepVal: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 28, textAlign: 'center' },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, textAlign: 'center', marginTop: 20 },});

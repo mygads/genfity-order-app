@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
@@ -77,11 +77,7 @@ const splitShare = (amount: number, weights: number[], base: number): number[] =
   return out;
 };
 
-const SEED: CartItem[] = [
-  { id: 'p11', name: 'Sudirman Coffee', basePrice: 12900, qty: 1, modifiers: [{ name: 'Creamy Pandan', price: 7000 }], discount: 0 },
-  { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 2, modifiers: [], discount: 0 },
-  { id: 'p9', name: 'Teh Manis Panas', basePrice: 8000, qty: 2, modifiers: [], discount: 0 },
-];
+
 
 const METHODS = ['Tunai', 'QRIS', 'EDC', 'Transfer'];
 const NAMES = ['Bill 1', 'Bill 2', 'Bill 3', 'Bill 4'];
@@ -98,7 +94,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const params = route?.params ?? {};
   const items = useMemo(() => {
     const fromRoute = normalizeItems(params.items).filter((c) => !c.voided);
-    return fromRoute.length > 0 ? fromRoute : SEED;
+    return fromRoute;
   }, [route?.params?.items]);
   const [splits, setSplits] = useState(2);
   /** perItem = perilaku lama (ketuk item pindah bill); default agar UX tak berubah. */
@@ -269,7 +265,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         sub={t('sp_lunas_of').replace('{p}', String(paidCount)).replace('{s}', String(splits))}
         onBack={() => navigation?.goBack()}
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <Text style={styles.hint}>{t('sp_hint')}</Text>
         {(mode || table) && (
           <Text style={styles.ctx}>{[mode, table ? `${t('table')} ${table}` : ''].filter(Boolean).join(' · ')}</Text>
@@ -277,16 +273,16 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         <Text style={styles.label}>{t('sp_count')}</Text>
         <View style={styles.chips}>
           {[2, 3, 4].map((n) => (
-            <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn]} onPress={() => resetSplits(n)}>
-              <Text style={[styles.chipT, splits === n && styles.chipTOn]}>÷{n}</Text>
+            <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn, isTablet && styles.chipBig]} onPress={() => resetSplits(n)}>
+              <Text style={[styles.chipT, splits === n && styles.chipTOn, isTablet && styles.chipTBig]}>÷{n}</Text>
             </TouchableOpacity>
           ))}
         </View>
         <Text style={styles.label}>{t('bill_mode')}</Text>
         <View style={styles.chips}>
           {([['rata', t('bill_mode_even').replace('{n}', String(splits))], ['perItem', t('bill_mode_item')], ['nominal', t('bill_mode_nominal')]] as [SplitMode, string][]).map(([m, l]) => (
-            <TouchableOpacity key={m} style={[styles.chip, splitMode === m && styles.chipOn]} onPress={() => setSplitMode(m)}>
-              <Text style={[styles.chipT, splitMode === m && styles.chipTOn]}>{l}</Text>
+            <TouchableOpacity key={m} style={[styles.chip, splitMode === m && styles.chipOn, isTablet && styles.chipBig]} onPress={() => setSplitMode(m)}>
+              <Text style={[styles.chipT, splitMode === m && styles.chipTOn, isTablet && styles.chipTBig]}>{l}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -368,6 +364,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         )}
 
         <Text style={styles.sec}>{t('sp_perbill')}</Text>
+        {/* Grid 2 kolom di tablet agar kartu tiap bill berdampingan. */}
+        <View style={[isTablet && styles.billGrid]}>
         {splitMode === 'nominal' && (
           <View style={styles.sumCard}>
             {NAMES.slice(0, splits).map((name, i) => (
@@ -401,10 +399,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           const members = splitMode === 'perItem' ? items.filter((it) => (assign[it.id] ?? 0) === i) : items;
           const label = t('sp_name').replace('{n}', String(i + 1));
           return (
-            <View key={name} style={styles.billCard}>
+            <View key={name} style={[styles.billCard, isTablet && styles.billCardWide]}>
               <View style={styles.billHead}>
-                <Text style={styles.billName}>{label}</Text>
-                <Text style={paid[i] ? styles.lunas : styles.billTotal}>
+                <Text style={[styles.billName, isTablet && styles.billNameBig]}>{label}</Text>
+                <Text style={paid[i] ? [styles.lunas, isTablet && styles.lunasBig] : [styles.billTotal, isTablet && styles.billTotalBig]}>
                   {paid[i] ? t('bill_lunas') : rp(val)}
                 </Text>
               </View>
@@ -454,9 +452,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 {METHODS.map((m) => (
                   <TouchableOpacity
                     key={m}
-                    style={[styles.chip, methods[i] === m && styles.chipOn]}
+                    style={[styles.chip, methods[i] === m && styles.chipOn, isTablet && styles.chipBig]}
                     onPress={() => setMethods((arr) => arr.map((x, j) => (j === i ? m : x)))}>
-                    <Text style={[styles.chipT, methods[i] === m && styles.chipTOn]}>{m}</Text>
+                    <Text style={[styles.chipT, methods[i] === m && styles.chipTOn, isTablet && styles.chipTBig]}>{m}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -468,8 +466,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                     onPress={() => payBill(i)}
                     disabled={val <= 0 || nominalBlocked}
                     fullWidth={false}
-                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff, { marginTop: 0 }]}
-                    textStyle={styles.payT}
+                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff, { marginTop: 0 }, isTablet && styles.payBtnBig]}
+                    textStyle={[styles.payT, isTablet && styles.payTBig]}
                   />
                 )}
                 <TouchableOpacity
@@ -481,6 +479,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
             </View>
           );
         })}
+        </View>
         {paidCount === splits && (
           <Text style={styles.done}>{t('sp_allpaid')}</Text>
         )}
@@ -515,6 +514,17 @@ const styles = StyleSheet.create({
   emptyImg: { width: 110, height: 110 },
   emptyT: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 8 },
   billCard: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.line },
+  /* Grid tablet: kartu tiap bill 2 kolom berdampingan (phone tetap 1 kolom). */
+  billGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  billCardWide: { flexBasis: '48%', flexGrow: 1, minWidth: 0, marginBottom: 0 },
+  /* Varian tablet: teks +2pt, chip dan tombol bayar lebih besar. */
+  chipBig: { paddingVertical: 12, minHeight: 44, justifyContent: 'center' },
+  chipTBig: { fontSize: 14 },
+  billNameBig: { fontSize: 17 },
+  billTotalBig: { fontSize: 18 },
+  lunasBig: { fontSize: 16 },
+  payBtnBig: { paddingVertical: 14, minHeight: 48, justifyContent: 'center' },
+  payTBig: { fontSize: 15 },
   billHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   billName: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
   billTotal: { fontFamily: fonts.bold, fontSize: 16, color: colors.orangeDark },

@@ -32,11 +32,7 @@ function statusStyle(status: Status) {
 
 const NEXT: Record<Status, Status | null> = { Terjadwal: 'Datang', Datang: 'Selesai', Selesai: null };
 
-const SEED: Resv[] = [
-  { id: 'r1', name: 'Andini', tamu: 4, table: 'A2', phone: '0812-7788-9900', note: 'dekat jendela', date: 'Hari ini', time: '12:30', status: 'Datang' },
-  { id: 'r2', name: 'Rudi Hartono', tamu: 2, table: 'B1', phone: '0813-2211-4455', note: 'Ulang tahun', date: 'Hari ini', time: '18:00', status: 'Terjadwal' },
-  { id: 'r3', name: 'PT Maju Jaya', tamu: 10, table: 'C2', phone: '021-5566-7788', note: 'Bukber, butuh proyektor', date: 'Besok', time: '19:00', status: 'Terjadwal' },
-];
+/** Daftar reservasi hanya dari perangkat (AsyncStorage); kosong = empty-state. */
 
 /** Daftar reservasi tersimpan di perangkat agar bertahan saat aplikasi dibuka ulang. */
 const BOOK_KEY = 'genfity.booking.list';
@@ -73,7 +69,7 @@ export default function BookingScreen({ navigation }: Props) {
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [list, setList] = useState<Resv[]>(SEED);
+  const [list, setList] = useState<Resv[]>([]);
   const [onlyToday, setOnlyToday] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -88,9 +84,9 @@ export default function BookingScreen({ navigation }: Props) {
 
   useEffect(() => {
     let on = true;
-    void getJSON<Resv[]>(BOOK_KEY, SEED).then((v) => {
+    void getJSON<Resv[]>(BOOK_KEY, []).then((v) => {
       if (!on || !Array.isArray(v)) return;
-      const base = v.length > 0 ? v : SEED;
+      const base = v;
       // Migrasi kode lama ber-strip ke kanonis sekali saat muat.
       const canonSet = new Set(CANON_TABLES.map((tb) => tb.no));
       const migrated = base.map((r) => {
@@ -237,7 +233,7 @@ export default function BookingScreen({ navigation }: Props) {
 
   const reservasiList = (
     <>
-      <Text style={[styles.count, isTablet && styles.countBig]}>ESB Cabang Poris · {shown.length} reservasi aktif</Text>
+      <Text style={[styles.count, isTablet && styles.countBig]}>Genfity Cabang Poris · {shown.length} reservasi aktif</Text>
       <TouchableOpacity onPress={() => setOnlyToday((v) => !v)} style={styles.todayToggle}>
         <Text style={styles.todayToggleT}>{onlyToday ? '☑ Hari ini saja' : '☐ Hari ini saja'}</Text>
       </TouchableOpacity>

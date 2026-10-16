@@ -41,19 +41,10 @@ function mapStatus(raw: string): TableState {
   return 'free';
 }
 
-const TABLES = [
-  { id: 'A-01', s: 'busy' }, { id: 'A-02', s: 'free' }, { id: 'A-03', s: 'res' },
-  { id: 'A-04', s: 'busy' }, { id: 'A-05', s: 'free' }, { id: 'B-01', s: 'res' },
-  { id: 'B-02', s: 'free' }, { id: 'B-03', s: 'busy' }, { id: 'B-04', s: 'free' },
-  { id: 'B-05', s: 'busy' }, { id: 'VIP-1', s: 'res' }, { id: 'VIP-2', s: 'busy' },
-  { id: 'C-01', s: 'free' }, { id: 'C-02', s: 'busy' },
-] as const;
+/** Tanpa seed demo: awal kosong, diisi agregasi live SQLite di bawah. */
+const TABLES: TableMini[] = [];
 
-const LOW_STOCK = [
-  { name: 'Lele goreng', left: 2 },
-  { name: 'Kopi robusta', left: 5 },
-  { name: 'Teh melati', left: 8 },
-];
+const LOW_STOCK: StockMini[] = [];
 
 function tableStyle(s: string) {
   if (s === 'busy') return { bg: colors.paleRed, bd: colors.red, tx: colors.red };
@@ -69,13 +60,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const [notice, setNotice] = useState('');
   // Drawer /home juga dibuka dari Dashboard (home) - dulu hanya dari Cashier.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Angka awal = fallback demo (dipakai di web yang stub DB-nya kosong).
-  // Di native, efek di bawah menimpa dengan hitungan nyata SQLite.
-  const [sales, setSales] = useState({ total: 1284500, trx: 47 });
+  // Nilai awal nol; efek di bawah menimpa dengan hitungan nyata SQLite.
+  const [sales, setSales] = useState({ total: 0, trx: 0 });
   // T12: pembanding H-1 dari SQLite; null = kemarin belum ada data / DB kosong.
   const [yest, setYest] = useState<{ total: number; trx: number } | null>(null);
-  const [tables, setTables] = useState<TableMini[]>(() => TABLES.map((x) => ({ id: x.id, s: x.s })));
-  const [lowStock, setLowStock] = useState<StockMini[]>(() => LOW_STOCK.map((x) => ({ ...x })));
+  const [tables, setTables] = useState<TableMini[]>([]);
+  const [lowStock, setLowStock] = useState<StockMini[]>([]);
   const [shift, setShift] = useState(() => ({
     open: true,
     clockIn: s?.clockIn ?? '08:57',
@@ -83,13 +73,13 @@ export default function DashboardScreen({ navigation }: Props) {
   }));
   const [lastSync, setLastSync] = useState(() => getLastSync());
   const [pending, setPending] = useState(() => pendingCount());
-  // NAV-04/05: hitungan nyata; null = DB kosong → fallback demo.
+  // NAV-04/05: hitungan nyata; null/awal = DB kosong → tampil nol.
   const [esbNew, setEsbNew] = useState<number | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
 
   // Muat angka nyata dari SQLite (tr_saleshead hari ini, ms_table,
-  // ms_branchmenu join ms_menu, tr_shiftlog terakhir). Gagal = fallback
-  // tetap tampil, kasir tidak diblokir.
+  // ms_branchmenu join ms_menu, tr_shiftlog terakhir). Gagal = tetap nol,
+  // kasir tidak diblokir.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -154,7 +144,7 @@ export default function DashboardScreen({ navigation }: Props) {
         );
         if (alive && memRow) setMemberCount(Number(memRow.c) || 0);
       } catch {
-        // DB belum init - fallback demo tetap tampil.
+        // DB belum init - tetap nol.
       }
       if (alive) {
         setLastSync(getLastSync());
@@ -188,8 +178,8 @@ export default function DashboardScreen({ navigation }: Props) {
     { label: t('nav_shift'), sub: t('nav_shift_sub'), route: 'Shift' },
     { label: t('nav_history'), sub: t('nav_history_sub'), route: 'History' },
     { label: t('nav_recap'), sub: t('nav_recap_sub'), route: 'Recap' },
-    { label: t('nav_esb'), sub: `${t('nav_online_orders')} · ${esbNew ?? 2} ${t('unit_new')}`, route: 'EsbOrder' },
-    { label: t('nav_member'), sub: `${memberCount ?? 342} ${t('unit_registered')}`, route: 'Member' },
+    { label: t('nav_esb'), sub: `${t('nav_online_orders')} · ${esbNew ?? 0} ${t('unit_new')}`, route: 'EsbOrder' },
+    { label: t('nav_member'), sub: `${memberCount ?? 0} ${t('unit_registered')}`, route: 'Member' },
     { label: t('nav_expense'), sub: t('nav_expense_sub'), route: 'Expense' },
     { label: t('nav_petty'), sub: t('nav_petty_sub'), route: 'PettyCash' },
     { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings' },
@@ -220,7 +210,7 @@ export default function DashboardScreen({ navigation }: Props) {
   return (
     <View style={styles.root}>
       <ScreenHeader
-        title={s?.outlet ?? 'ESB Cabang Poris'}
+        title={s?.outlet ?? 'Genfity Cabang Poris'}
         sub={`${t('nav_cashier')} ${s?.name ?? 'Gista'} · ${s?.shift ?? t('fallback_shift')}`}
         left={
           <TouchableOpacity
@@ -247,7 +237,9 @@ export default function DashboardScreen({ navigation }: Props) {
       />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
 
-      <View style={styles.shiftCard}>
+      {/* Tablet: kartu shift + omzet bersebelahan, CTA full-width di bawahnya. */}
+      <View style={isTablet ? styles.heroRowTablet : undefined}>
+      <View style={[styles.shiftCard, isTablet && styles.heroCardTablet]}>
         <View style={styles.shiftLeft}>
           <View style={styles.shiftTitleRow}>
             <View style={[styles.shiftDot, !shift.open && styles.shiftDotClosed]} />
@@ -262,10 +254,11 @@ export default function DashboardScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.salesCard}>
+      <View style={[styles.salesCard, isTablet && styles.heroCardTablet]}>
         <Text style={styles.salesLabel}>{t('dash_today')}</Text>
         <Text style={[styles.salesValue, isTablet && styles.salesValueBig]}>{rp(sales.total)}</Text>
         <Text style={[styles.salesSub, isTablet && styles.salesSubBig]}>{sales.trx} {t('unit_trx')} · {t('dash_avg')} {rp(avg)} · {deltaTxt}</Text>
+      </View>
       </View>
 
       <TouchableOpacity style={styles.cta} onPress={() => {
@@ -314,7 +307,7 @@ export default function DashboardScreen({ navigation }: Props) {
           {tables.map((tb) => {
             const c = tableStyle(tb.s);
             return (
-              <View key={tb.id} style={[styles.cell, { backgroundColor: c.bg, borderColor: c.bd }]}>
+              <View key={tb.id} style={[styles.cell, isTablet && styles.cellTablet, { backgroundColor: c.bg, borderColor: c.bd }]}>
                 <Text style={[styles.cellText, isTablet && styles.cellTextBig, { color: c.tx }]}>{tb.id}</Text>
               </View>
             );
@@ -385,6 +378,9 @@ const styles = StyleSheet.create({
     padding: 14,
     marginTop: 12,
   },
+  /* Tablet: shift + omzet bersebelahan agar halaman tidak terlalu panjang. */
+  heroRowTablet: { flexDirection: 'row', gap: 10 },
+  heroCardTablet: { flex: 1, marginTop: 12 },
   shiftLeft: { flex: 1 },
   shiftTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   shiftDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
@@ -426,6 +422,8 @@ const styles = StyleSheet.create({
   legend: { fontFamily: fonts.medium, fontSize: 11, color: colors.muted, marginTop: 2, marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   cell: { width: '22%', borderWidth: 1.5, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  /* Tablet: peta meja 6 kolom dengan sel >=48px agar mudah disentuh. */
+  cellTablet: { width: '14.5%', minHeight: 56, paddingVertical: 14 },
   cellText: { fontFamily: fonts.bold, fontSize: 13 },
   stockRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
   stockName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
@@ -460,7 +458,7 @@ const styles = StyleSheet.create({
   quickSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   quickChev: { fontFamily: fonts.bold, fontSize: 22, color: colors.faint },
   sync: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, marginTop: 14, textAlign: 'center' },
-  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  /* Varian tablet (breakpoint TABLET_BP): teks +1..2pt agar proporsional di layar lebar. */
   shiftTitleBig: { fontSize: 16 },
   shiftSubBig: { fontSize: 13 },
   shiftBtnTextBig: { fontSize: 14 },
@@ -474,7 +472,7 @@ const styles = StyleSheet.create({
   cardSubBig: { fontSize: 13 },
   linkBig: { fontSize: 14 },
   legendBig: { fontSize: 12 },
-  cellTextBig: { fontSize: 14 },
+  cellTextBig: { fontSize: 15 },
   stockNameBig: { fontSize: 15 },
   stockLeftBig: { fontSize: 14 },
   quickLabelBig: { fontSize: 15 },

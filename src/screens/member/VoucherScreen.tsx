@@ -10,7 +10,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { fmtDate } from '../../lib/datefmt';
@@ -18,7 +18,9 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { initDb, query } from '../../lib/db';
 import { useLang } from '../../lib/i18n';
+import type { Lang } from '../../lib/i18n';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -37,17 +39,52 @@ type Voucher = {
   status: VoucherStatus;
 };
 
-/** Tanggal seed lewat fmtDate agar ikut locale (id/en), bukan string hardcode. */
-function seedDate(y: number, m: number, d: number): string {
-  return fmtDate(new Date(y, m - 1, d));
-}
+/** Baca koleksi nyata dari SQLite ms_voucher (hasil pull/koleksi kasir).
+ * Kosong = belum ada voucher (pemanggil tampilkan empty-state). */
+type VoucherRow = {
+  id: string | null;
+  voucherCode: string | null;
+  voucherName: string | null;
+  amount: number | null;
+  validTo: string | null;
+  status: string | null;
+};
 
-const SEED: Voucher[] = [
-  { id: '1', kode: 'HEMAT20', nama: 'Diskon 20rb', jenis: 'Diskon (Rp)', nilai: 20000, minBelanja: 100000, berlakuHingga: seedDate(2026, 12, 31), status: 'tersedia' },
-  { id: '2', kode: 'GIFT50', nama: 'Gift Voucher 50rb', jenis: 'Gift Voucher (Rp)', nilai: 50000, minBelanja: 0, berlakuHingga: seedDate(2027, 1, 31), status: 'tersedia' },
-  { id: '3', kode: 'ULTRA10', nama: 'Ultra Voucher 10%', jenis: 'Diskon (%)', nilai: 10, minBelanja: 50000, berlakuHingga: seedDate(2026, 11, 15), status: 'terkunci' },
-  { id: '4', kode: 'LAMA5', nama: 'Voucher Lama', jenis: 'Diskon (Rp)', nilai: 5000, minBelanja: 0, berlakuHingga: seedDate(2026, 1, 1), status: 'kadaluwarsa' },
-];
+async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
+  await initDb();
+  const rows = await query<VoucherRow>(
+    'SELECT id, voucherCode, voucherName, amount, validTo, status FROM ms_voucher ORDER BY validTo',
+  );
+  const out: Voucher[] = [];
+  for (const [idx, r] of rows.entries()) {
+    const kode = (r.voucherCode ?? '').trim().toUpperCase();
+    if (!kode) continue;
+    const st = (r.status ?? 'available').toLowerCase();
+    const status: VoucherStatus =
+      st === 'available' ? 'tersedia'
+      : st === 'locked' ? 'terkunci'
+      : st === 'used' || st === 'burned' ? 'terpakai'
+      : 'kadaluwarsa';
+    let hingga = String(r.validTo ?? '').slice(0, 10);
+    try {
+      const d = new Date(String(r.validTo ?? ''));
+      if (!Number.isNaN(d.getTime())) hingga = fmtDate(d, lang);
+    } catch {
+      /* pakai potongan tanggal mentah */
+    }
+    out.push({
+      id: String(r.id ?? `V${idx + 1}`),
+      kode,
+      nama: (r.voucherName ?? '').trim() || kode,
+      jenis: 'Diskon (Rp)',
+      nilai: Math.max(0, Math.round(Number(r.amount) || 0)),
+      minBelanja: 0,
+      berlakuHingga: hingga,
+      status,
+    });
+  }
+  return out;
+}
 
 /**
  * Operasi voucher ke server ikut kontrak docs/API-CONTRACT.md §5.3:
@@ -97,7 +134,7 @@ export default function VoucherScreen({ navigation }: Props) {
   const [filter, setFilter] = useState<'semua' | VoucherStatus>('semua');
   const [kodeManual, setKodeManual] = useState('');
   const [msg, setMsg] = useState('');
-  const [items, setItems] = useState<Voucher[]>(SEED);
+  const [items, setItems] = useState<Voucher[]>([]);
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -119,13 +156,17 @@ export default function VoucherScreen({ navigation }: Props) {
     return () => { live = false; };
   }, []);
 
-  // Sinkron voucher dari server (kontrak §4 main/get-voucher via
-  // ApiPath.pullVoucher yang ditarik master.ts ke ms_voucher): tampilkan data
-  // sync bila ada, fallback SEED lokal bila kosong/offline - fallback JANGAN
-  // dihapus agar kasir tetap jalan tanpa server.
+  // Voucher dari SQLite ms_voucher dulu (offline-first: pull/koleksi nyata),
+  // lalu pengayaan dari server bila ada. Kosong = empty-state.
   useEffect(() => {
     let live = true;
     (async () => {
+      try {
+        const local = await loadVouchersFromSqlite(lang);
+        if (live && local.length > 0) setItems(local);
+      } catch {
+        /* SQLite belum siap - lanjut API */
+      }
       try {
         const res = await apiFetch(ApiPath.pullVoucher, { method: 'GET' });
         const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
@@ -163,7 +204,7 @@ export default function VoucherScreen({ navigation }: Props) {
         }
         if (live && mapped.length > 0) setItems(mapped);
       } catch {
-        /* offline - SEED lokal tetap dipakai */
+        /* offline - koleksi SQLite tetap dipakai */
       }
     })();
     return () => { live = false; };
@@ -208,7 +249,7 @@ export default function VoucherScreen({ navigation }: Props) {
       setMsg(`Kode ${kode} ${t('vou_is_used')}`);
       return;
     }
-    // Offline: fallback SEED lokal agar kasir tetap jalan.
+    // Offline: pakai data lokal SQLite agar kasir tetap jalan.
     if (!online) {
       void persistVoucherOp('validate', found);
       setQ(kode);
@@ -227,7 +268,7 @@ export default function VoucherScreen({ navigation }: Props) {
         setMsg(t('vou_server_invalid').replace('{k}', kode).replace('{u}', t('vou_unknown')).replace('{m}', rp(r.minSpend)));
       }
     } catch {
-      // Server tak terjangkau: fallback SEED lokal + antrean sync.
+      // Server tak terjangkau: pakai data lokal + antrean sync.
       void persistVoucherOp('validate', found);
       setQ(kode);
       setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
@@ -454,7 +495,7 @@ export default function VoucherScreen({ navigation }: Props) {
           </View>
         </View>
       ) : (
-      <>
+      <View style={s.tabletPanels}>
       <View style={s.searchWrap}>
         <Text style={s.label}>{t('vou_search_label')}</Text>
         <View style={s.manualRow}>
@@ -556,14 +597,10 @@ export default function VoucherScreen({ navigation }: Props) {
         </View>
         {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
       </View>
-      </>
+      </View>
       )}
 
-      {isTablet && !online && (
-        <Text style={s.offlineBanner}>Offline - data dari cache lokal, perubahan disinkron saat online.</Text>
-      )}
-
-      <View style={s.filters}>
+      <View style={[s.filters, isTablet && s.filtersTablet]}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
           <TouchableOpacity
             key={f}
@@ -576,19 +613,20 @@ export default function VoucherScreen({ navigation }: Props) {
         ))}
       </View>
 
-      <Text style={s.sectionTitle}>{t('vou_promo_list')}</Text>
+      <Text style={[s.sectionTitle, isTablet && s.sectionTitleTablet]}>{t('vou_promo_list')}</Text>
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         {hasil.length === 0 ? (
           <View style={s.empty}>
             <Text style={s.emptyTitle}>{t('vou_empty')}</Text>
             <Text style={s.emptySub}>{t('vou_empty_sub')}</Text>
           </View>
         ) : (
-          hasil.map((v) => {
+          <View style={isTablet ? s.gridTablet : undefined}>
+          {hasil.map((v) => {
             const loading = busy === v.id;
             return (
-              <View key={v.id} style={[s.card, v.status !== 'tersedia' && v.status !== 'terkunci' && s.cardDim]}>
+              <View key={v.id} style={[s.card, v.status !== 'tersedia' && v.status !== 'terkunci' && s.cardDim, isTablet && s.cardTablet]}>
                 <View style={s.cardTop}>
                   <View style={s.voucherBadge}>
                     <Text style={s.voucherKode}>{v.kode}</Text>
@@ -650,7 +688,8 @@ export default function VoucherScreen({ navigation }: Props) {
                 )}
               </View>
             );
-          })
+          })}
+          </View>
         )}
 
         {applied ? (
@@ -672,7 +711,7 @@ export default function VoucherScreen({ navigation }: Props) {
 
       <Modal visible={cancelVisible} transparent animationType="fade">
         <View style={s.modalBg}>
-          <View style={s.dialog}>
+          <View style={[s.dialog, isTablet && s.dialogTablet]}>
             <Text style={s.modalTitle}>{t('vou_cancel_title')}</Text>
             <Text style={s.modalHint}>
               {applied ? `Voucher ${applied.kode} - ${applied.nama}` : ''}
@@ -711,6 +750,8 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
   },
+  // Tablet: panel cek manual/online/eksternal dibatasi lebar + tengah.
+  tabletPanels: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: 2 },
   search: {
     backgroundColor: colors.bg,
@@ -757,6 +798,8 @@ const s = StyleSheet.create({
     paddingVertical: 8,
   },
   filters: { flexDirection: 'row', flexWrap: 'wrap', padding: 12 },
+  // Tablet: filter ikut batas lebar konten daftar.
+  filtersTablet: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
   filterChip: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -777,7 +820,11 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 4,
   },
+  // Tablet: judul seksi ikut batas lebar konten daftar.
+  sectionTitleTablet: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
   body: { padding: 16, paddingTop: 8, paddingBottom: 24 },
+  // Tablet: daftar voucher 2 kolom, bukan 1 kolom penuh.
+  gridTablet: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   card: {
     backgroundColor: colors.white,
     borderRadius: 12,
@@ -787,6 +834,8 @@ const s = StyleSheet.create({
     borderLeftColor: colors.orange,
   },
   cardDim: { opacity: 0.6, borderLeftColor: colors.faint },
+  // Tablet: kartu voucher setengah lebar baris grid.
+  cardTablet: { width: '48.5%' },
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -869,6 +918,8 @@ const s = StyleSheet.create({
     padding: 24,
   },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 24 },
+  // Tablet: dialog batal-promo dibatasi lebarnya + tengah.
+  dialogTablet: { width: '100%', maxWidth: 480, alignSelf: 'center' },
   modalTitle: {
     fontSize: 16,
     fontFamily: fonts.bold,
