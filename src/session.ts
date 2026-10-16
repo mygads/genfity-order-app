@@ -43,11 +43,17 @@ function restore(): void {
   if (restored) return;
   restored = true;
   void getItem(LS_SESSION).then((raw) => {
+    // TEMP-DEBUG reload-probe
+    console.log('[sess-restore] raw=', raw === null ? 'NULL' : String(raw).slice(0, 40), 'current=', current ? 'SET' : 'null');
     if (!raw || current) return;
     try {
       current = JSON.parse(raw) as Session;
+      // TEMP-DEBUG reload-probe
+      console.log('[sess-restore] parsed OK, listeners=', listeners.size);
       emit();
-    } catch {
+    } catch (e) {
+      // TEMP-DEBUG reload-probe
+      console.log('[sess-restore] PARSE-FAIL len=', raw.length, 'tail=', raw.slice(-40));
       /* abaikan */
     }
   });
