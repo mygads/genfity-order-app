@@ -20,6 +20,40 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
     return () => clearInterval(timer);
   }, []);
 
+  // FIX3-ATT: pulihkan state absensi dari tr_shiftlog saat mount agar tahan reload.
+  // Pola query sama dengan DashboardScreen/CashierScreen (initDb + queryFirst +
+  // fallback diam); hanya baris status 'absen' milik user sesi + hanya hari yang
+  // sama yang dipulihkan. Logika clock-in/out di bawah tidak diubah.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const nm = getSession()?.name ?? 'Kasir';
+        const row = await queryFirst<{ clockIn: string | null; clockOut: string | null }>(
+          `SELECT clockIn, clockOut FROM tr_shiftlog WHERE status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`,
+          [nm, nm],
+        );
+        if (!alive || !row?.clockIn) return;
+        const d = new Date(row.clockIn);
+        if (Number.isNaN(d.getTime())) return;
+        const nowD = new Date();
+        const sameDay = d.getFullYear() === nowD.getFullYear() && d.getMonth() === nowD.getMonth() && d.getDate() === nowD.getDate();
+        if (!sameDay) return;
+        setInTime(fmtClock(d).slice(0, 5));
+        if (row.clockOut) {
+          const o = new Date(row.clockOut);
+          if (!Number.isNaN(o.getTime())) setOutTime(fmtClock(o).slice(0, 5));
+        }
+      } catch {
+        // DB belum siap - tampilan kosong tetap tampil, kasir tidak diblokir.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const press = (k: string) => {
     setError('');
     if (k === 'C') setPin('');
@@ -76,6 +110,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
       <Text style={styles.sec}>{t('att_list')}</Text>
       <View style={styles.card}>
         <View style={styles.row}><Text style={styles.item}>{t('att_in')}</Text><Text style={styles.item}>{inTime ?? '-- : --'}</Text></View>
+        {/* FIX3-ISTIRAHAT: placeholder disengaja — tak ada sumber break di tr_shiftlog/payload sync; tampil '--:--' agar layout visual tetap identik. Keputusan produk (sembunyikan vs lacak istirahat) lihat held/notes. */}
         <View style={styles.row}><Text style={styles.item}>{t('att_break')}</Text><Text style={styles.item}>-- : --</Text></View>
         <View style={styles.row}><Text style={styles.item}>{t('att_out')}</Text><Text style={styles.item}>{outTime ?? '-- : --'}</Text></View>
       </View>

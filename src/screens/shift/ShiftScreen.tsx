@@ -33,7 +33,7 @@ const MAX_KAS_AWAL = 10000000;
 
   const [lastShift, setLastShift] = useState<LastShift | null>(null);
   // Shift terakhir dari SQLite (tr_shiftlog), bukan hardcoded.
-  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1'); if (on && row) { setLastShift({ status: row.status === 'open' ? 'Shift berjalan' : 'Tidak ada shift aktif', cashier: row.cashierName || row.userId || 'Kasir Utama', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1'); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || 'Kasir Utama', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
 
   const openPin = () => {
     if (kasAwalNum <= 0) {
@@ -142,11 +142,11 @@ const MAX_KAS_AWAL = 10000000;
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_last')}</Text>
           <View style={s.shiftRow}>
-            <Text style={s.shiftLabel}>Status</Text>
+            <Text style={s.shiftLabel}>{t('c_status')}</Text>
             <Text style={s.shiftValue}>{lastShift ? lastShift.status : t('shf_no_history')}</Text>
           </View>
           <View style={s.shiftRow}>
-            <Text style={s.shiftLabel}>Kasir</Text>
+            <Text style={s.shiftLabel}>{t('c_cashier')}</Text>
             <Text style={s.shiftValue}>{lastShift ? lastShift.cashier : '-'}</Text>
           </View>
           <View style={s.shiftRow}>

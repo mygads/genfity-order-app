@@ -48,7 +48,7 @@ import React, { useEffect, useState } from 'react';import {
     // authorizeSupervisor (tepat 6 digit); PIN lokal (lib/pin.ts) hanya fallback
     // saat server tak terjangkau (offline/unconfigured), bukan satu-satunya cek.
     if (pin.length < 6) {
-      setError('Masukkan PIN supervisor (6 digit)');
+      setError(t('sup_invalid'));
       return;
     }
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
@@ -100,7 +100,7 @@ import React, { useEffect, useState } from 'react';import {
           <Text style={s.cardTitle}>{t('end_summary')}</Text>
           <Row label="Modal Awal (Kas Awal)" value={rp(modalAwal)} />
           <Row label="Penjualan Tunai" value={rp(penjualanTunai)} />
-          <Row label="Pengeluaran" value={'- ' + rp(pengeluaran)} negative />
+          <Row label={t('title_expense')} value={'- ' + rp(pengeluaran)} negative />
           <View style={s.divider} />
           <View style={s.totalRow}>
             <Text style={s.totalLabel}>Kas Seharusnya</Text>

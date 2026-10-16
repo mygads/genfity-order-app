@@ -63,6 +63,7 @@ interface RowCancel { nama: string; qty: number; alasan: string }
 
 interface RecapData {
   byMenu: Row3[];
+  customMenu: Row3[];
   byCat: Row3[];
   byMethod: Row2[];
   byMode: Row2[];
@@ -101,6 +102,7 @@ export default function RecapScreen({ navigation }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [range, setRange] = useState<Range>('Hari Ini');
   const [db, setDb] = useState<RecapData | null>(null);
+  const rangeLabel = (v: Range): string => (v === 'Hari Ini' ? t('esb_today') : v === 'Kemarin' ? t('esb_yesterday') : t('esb_7days'));
 
   useEffect(() => {
     let on = true;
@@ -125,12 +127,12 @@ export default function RecapScreen({ navigation }: Props) {
         const methodMap = new Map<string, { n: number; total: number }>();
         const userMap = new Map<string, { n: number; total: number }>();
         for (const h of heads) {
-          const m = (h.paymentMethod || 'Lainnya').trim() || 'Lainnya';
+          const m = (h.paymentMethod || t('sync_kind_other')).trim() || t('sync_kind_other');
           const mm = methodMap.get(m) ?? { n: 0, total: 0 };
           mm.n += 1;
           mm.total += num(h.grandTotal);
           methodMap.set(m, mm);
-          const u = (h.cashierName || h.userId || 'Kasir').trim() || 'Kasir';
+          const u = (h.cashierName || h.userId || t('c_cashier')).trim() || t('c_cashier');
           const uu = userMap.get(u) ?? { n: 0, total: 0 };
           uu.n += 1;
           uu.total += num(h.grandTotal);
@@ -155,6 +157,27 @@ export default function RecapScreen({ navigation }: Props) {
         const modes = await query<{ salesMode: string | null; n: number; total: number }>(
           `SELECT salesMode, COUNT(*) AS n, SUM(grandTotal) AS total FROM tr_saleshead
            WHERE status = 'paid' AND salesDate >= ? AND salesDate < ? GROUP BY salesMode`,
+          [since, until],
+        );
+        // FIX3-RECAP custom_menu_sales (dossier tablet): item custom = menuId
+        // 'custom-%' (CustomMenuScreen -> Cashier cart id 'custom-<ts>' -> sales.ts
+        // simpan menuId = it.id). Sumber sama (tr_salesmenu join head + rentang).
+        const customMenus = await query<{ nama: string; qty: number; total: number }>(
+          `SELECT m.menuName AS nama, SUM(m.qty) AS qty, SUM(m.subtotal) AS total
+           FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
+           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+             AND m.menuId LIKE 'custom-%'
+           GROUP BY m.menuName ORDER BY total DESC`,
+          [since, until],
+        );
+        // FIX3-RECAP per_payment (dossier tablet): rincian split-payment nyata
+        // dari tr_salespayment (satu bill bisa multi-metode); fallback ke agregat
+        // head (byMethod) bila tabel masih kosong.
+        const paySplit = await query<{ nama: string | null; n: number; total: number }>(
+          `SELECT p.paymentMethod AS nama, COUNT(DISTINCT p.salesNum) AS n, SUM(p.amount) AS total
+           FROM tr_salespayment p INNER JOIN tr_saleshead h ON h.salesNum = p.salesNum
+           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           GROUP BY p.paymentMethod`,
           [since, until],
         );
         const exp = await queryFirst<{ total: number }>(
@@ -206,10 +229,15 @@ export default function RecapScreen({ navigation }: Props) {
         );
         if (!on) return;
         const nm = getSession()?.name ?? 'Gista';
+        const splitRows = paySplit
+          .filter((r) => (r.nama || '').trim() && num(r.total) > 0)
+          .map((r) => ({ nama: `${(r.nama || t('sync_kind_other')).trim()} (${num(r.n)} trx)`, total: Math.round(num(r.total)) }));
+        const headMethodRows = [...methodMap.entries()].map(([nama, v]) => ({ nama: `${nama} (${v.n} trx)`, total: Math.round(v.total) }));
         setDb({
           byMenu: menus.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
+          customMenu: customMenus.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
           byCat: cats.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
-          byMethod: [...methodMap.entries()].map(([nama, v]) => ({ nama: `${nama} (${v.n} trx)`, total: Math.round(v.total) })),
+          byMethod: splitRows.length > 0 ? splitRows : headMethodRows,
           byMode: modes.map((r) => ({
             nama: `${(r.salesMode || 'DINE_IN').split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')} (${r.n} trx)`,
             total: Math.round(num(r.total)),
@@ -221,7 +249,7 @@ export default function RecapScreen({ navigation }: Props) {
           trx: heads.length,
           expense: Math.round(num(exp?.total)),
           hours: shift?.clockIn ? `${shift.clockIn.slice(11, 16)} - ${shift.clockOut ? shift.clockOut.slice(11, 16) : '... '}` : '',
-          shiftLabel: `${shift?.shiftName ?? 'Shift'} · Kasir ${shift?.cashierName || shift?.userId || nm}`,
+          shiftLabel: `${shift?.shiftName ?? t('title_shift')} · ${t('c_cashier')} ${shift?.cashierName || shift?.userId || nm}`,
           fromDb: true,
         });
       } catch {
@@ -241,13 +269,16 @@ export default function RecapScreen({ navigation }: Props) {
   const promoTotal = promo.reduce((s, p) => s + p.total, 0);
   const byMethod = db?.byMethod ?? BY_METHOD;
   const byMenu = db?.byMenu ?? BY_MENU;
+  // Seed-fallback pola kode existing: saring entri custom dari BY_MENU saat DB
+  // null; bila DB ada tapi tanpa item custom -> pesan emptyCustom (key existing).
+  const customMenu = db?.customMenu ?? BY_MENU.filter((r) => /custom/i.test(r.nama));
   const byCat = db?.byCat ?? BY_CATEGORY;
   const byMode = db?.byMode ?? BY_MODE;
   const byUser = db?.byUser ?? BY_USER;
   const cancelled = db?.cancelled ?? CANCELLED;
   const cancelQty = cancelled.reduce((s, c) => s + c.qty, 0);
   const expenseTotal = db?.expense ?? EXPENSE_TOTAL;
-  const shiftLabel = db?.shiftLabel ?? `Shift Pagi · Kasir ${getSession()?.name ?? 'Gista'}`;
+  const shiftLabel = db?.shiftLabel ?? `${t('fallback_shift')} · ${t('c_cashier')} ${getSession()?.name ?? 'Gista'}`;
   const hours = db?.hours ?? '08:00 - 15:00';
 
   return (
@@ -269,15 +300,15 @@ export default function RecapScreen({ navigation }: Props) {
               key={r}
               style={[styles.filterChip, range === r && styles.filterActive]}
               onPress={() => setRange(r)}>
-              <Text style={[styles.filterTxt, range === r && styles.filterTxtActive]}>{r}</Text>
+              <Text style={[styles.filterTxt, range === r && styles.filterTxtActive]}>{rangeLabel(r)}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         <View style={styles.hero}>
-          <Text style={styles.heroLabel}>Total Penjualan · {range}</Text>
+          <Text style={styles.heroLabel}>{t('hist_col_total')} · {rangeLabel(range)}</Text>
           <Text style={styles.heroValue}>{rp(gross)}</Text>
-          <Text style={styles.heroSub}>{trxCount} transaksi · {hours}</Text>
+          <Text style={styles.heroSub}>{trxCount} {t('unit_trx')} · {hours}</Text>
           <Text style={styles.heroNet}>Kas bersih {rp(gross - expenseTotal)} setelah pengeluaran</Text>
         </View>
 
@@ -304,13 +335,29 @@ export default function RecapScreen({ navigation }: Props) {
           ))}
         </View>
 
+        {/* FIX3-RECAP custom_menu_sales (dossier tablet): agregat item custom
+            (menuId 'custom-%'); header + empty-state pakai key existing. */}
+        <Text style={styles.sec}>{t('title_custom')}</Text>
+        <View style={styles.card}>
+          {customMenu.map((r) => (
+            <View key={r.nama} style={styles.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.item}>{r.nama}</Text>
+                <Text style={styles.meta}>{r.qty} terjual</Text>
+              </View>
+              <Text style={styles.price}>{rp(r.total)}</Text>
+            </View>
+          ))}
+          {customMenu.length === 0 && <Text style={styles.meta}>{t('emptyCustom')}</Text>}
+        </View>
+
         <Text style={styles.sec}>{t('rcp_cat')}</Text>
         <View style={styles.card}>
           {byCat.map((r) => (
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.qty} item</Text>
+                <Text style={styles.meta}>{r.qty} {t('hist_items')}</Text>
               </View>
               <Text style={styles.price}>{rp(r.total)}</Text>
             </View>
@@ -333,7 +380,7 @@ export default function RecapScreen({ navigation }: Props) {
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.item}>{r.nama}</Text>
-                <Text style={styles.meta}>{r.trx} transaksi</Text>
+                <Text style={styles.meta}>{r.trx} {t('unit_trx')}</Text>
               </View>
               <Text style={styles.price}>{rp(r.total)}</Text>
             </View>
