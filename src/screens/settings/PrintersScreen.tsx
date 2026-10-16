@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toBase64, toHex, type EscMonoImage } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -238,10 +238,27 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     );
   };
 
+  /** Logo dummy untuk uji cetak: bingkai + garis diagonal (bukti raster jalan). */
+  const dummyLogo = (): EscMonoImage => {
+    const w = 120;
+    const h = 48;
+    const rb = Math.ceil(w / 8);
+    const px = new Uint8Array(rb * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const border = y < 3 || y >= h - 3 || x < 3 || x >= w - 3;
+        const stripe = (x + y) % 12 < 2;
+        if (border || stripe) px[y * rb + (x >> 3)] |= 0x80 >> (x & 7);
+      }
+    }
+    return { widthPx: w, heightPx: h, base64: toBase64(px) };
+  };
+
   /** Test print per station: pratinjau struk + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
     const bytes = buildReceiptBytes({
       cols: s.cpl,
+      logo: dummyLogo(),
       shop: 'ESB CABANG PORIS',
       addr: `${t('printers.receiptTest')} - ${s.name}`,
       trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
@@ -253,6 +270,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
       service: 3050,
       total: 64050,
       method: t('pay_tab_cash'),
+      qr: 'DUMMY-TRX-001',
     });
     setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint'), { test: t('printers.receiptTest'), role: roleLabel(s.role), cols: t('printers.receiptCols').replace('{n}', String(s.cpl)), cut: s.autocut ? t('printers.receiptCut') : t('printers.receiptNoCut'), total: t('c_total') }), hex: toHex(bytes).slice(0, 240) + '...' });
     const res = await printBytes(stationTarget(s), bytes);
