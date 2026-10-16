@@ -1,4 +1,5 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '../theme';
 import { logout } from '../session';
 
@@ -33,15 +34,22 @@ interface Props {
 }
 
 export default function DrawerMenu({ visible, onClose, navigate, outlet, user }: Props) {
+  // Drawer Android asli meluncur dari KIRI — samakan (sebelumnya panel di kanan).
+  const slide = useRef(new Animated.Value(-320)).current;
+  useEffect(() => {
+    if (visible) {
+      slide.setValue(-320);
+      Animated.timing(slide, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+    }
+  }, [visible, slide]);
   const go = (route: string) => {
     onClose();
     navigate(route);
   };
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
-        <Pressable style={styles.scrim} onPress={onClose} />
-        <View style={styles.panel}>
+        <Animated.View style={[styles.panel, { transform: [{ translateX: slide }] }]}>
           <View style={styles.head}>
             <Text style={styles.outlet}>{outlet ?? 'ESB Cabang Poris'}</Text>
             <View style={styles.shiftRow}>
@@ -67,7 +75,8 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user }:
             }}>
             <Text style={styles.logoutText}>Keluar</Text>
           </Pressable>
-        </View>
+        </Animated.View>
+        <Pressable style={styles.scrim} onPress={onClose} />
       </View>
     </Modal>
   );
