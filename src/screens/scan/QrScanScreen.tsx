@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
+import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
   claim: '', esb: 'ESB-88121', member: 'MBR-QOQI-342', voucher: 'VC-DISKON10K',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
   claim: 'TRM-XXXX-XXXX',
   esb: 'ESB-XXXXX',
@@ -12,6 +12,21 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const [msg, setMsg] = useState('');
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  // Auto-start kamera saat mount (parity POSLite: izin -> kamera langsung buka; web tetap manual).
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (autoStarted.current) return;
+    autoStarted.current = true;
+    (async () => {
+      if (permission?.granted) { setMsg(''); setScanning(true); return; }
+      try {
+        const res = await requestPermission();
+        if (res.granted) { setMsg(''); setScanning(true); }
+        else setMsg(t('scan_denied'));
+      } catch { setMsg(t('scan_denied')); }
+    })();
+  }, []);
 
   const tabLabel = (x: ScanTab) => x === 'claim' ? t('scan_tab_claim') : x === 'esb' ? t('scan_tab_esb') : x === 'member' ? t('scan_tab_member') : t('scan_tab_voucher'); const tabHint = (x: ScanTab) => x === 'claim' ? t('scan_hint_claim') : x === 'esb' ? t('scan_hint_esb') : x === 'member' ? t('scan_hint_member') : t('scan_hint_voucher'); const toggleScan = async () => {
     if (scanning) {

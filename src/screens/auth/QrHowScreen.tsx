@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 
@@ -122,9 +122,22 @@ export default function QrHowScreen({ navigation }: Props) {
 }
 
 function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: ReactNode; last?: boolean }) {
+  const { t } = useLang();
   return (
     <View>
-      <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => {
+          // fallback jujur sampai URL video disediakan BE/produk.
+          Alert.alert(t('g_qrhow_title'), 'Video tutorial ' + t('dash_not_available'));
+        }}>
+        <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
+        <View style={styles.playWrap} pointerEvents="none">
+          <View style={styles.playCircle}>
+            <Text style={styles.playGlyph}>▶</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
       <View style={styles.stepRow}>
         <View style={styles.badge}>
           <Text style={styles.badgeT}>{n}</Text>
@@ -167,6 +180,16 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
   banner: { width: '100%', height: 150, borderRadius: 16 },
   thumb: { width: '100%', height: 200, borderRadius: 16, marginTop: 20 },
+  playWrap: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  playCircle: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  playGlyph: { fontSize: 22, color: BLUE, fontFamily: fonts.bold },
   stepRow: { flexDirection: 'row', marginTop: 16, gap: 12 },
   badge: {
     width: 44, height: 44, borderRadius: 10, backgroundColor: BLUE,

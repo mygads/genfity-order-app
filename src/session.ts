@@ -129,6 +129,11 @@ export function takePostLoginRoute(): string | null {
   return r;
 }
 
+/** Intip tanpa mengonsumsi (untuk jaring pengaman rute agar tak berebut target). */
+export function peekPostLoginRoute(): string | null {
+  return postLoginRoute;
+}
+
 export function subscribeSession(fn: Listener): () => void {
   restore();
   listeners.add(fn);

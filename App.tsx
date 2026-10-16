@@ -7,7 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, loginDemo, logout, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, loginDemo, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
@@ -75,6 +75,12 @@ void SplashScreen.preventAutoHideAsync();
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+/** Rute cabang tamu - dipakai jaring pengaman logout (di luarnya = stale authed). */
+const GUEST_ROUTES = new Set([
+  'Intro', 'Install', 'SelectBranch', 'InstallProgress', 'CreatePin',
+  'ForgotPin', 'Login', 'QrHow', 'WebView',
+]);
+
 // Judul header native selalu tengah di Android (DineIn, CustomMenu, dsb).
 const screenOptions = {
   headerStyle: { backgroundColor: colors.navy },
@@ -131,9 +137,59 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       alive = false;
     };
   }, [loggedIn]);
+  /** Jaring pengaman rute awal per flip login/logout. Teramati di web+HP:
+   * state navigator kadang dipakai ulang lintas cabang tamu/authed sehingga
+   * mendarat di Login authed bertumpuk-1 padahal initialRoute=Dashboard
+   * (form tampak kereset, Sign In berikutnya diam). Koreksi sekali per flip;
+   * no-op bila rute sudah benar. Pendorong Login yang disengaja (aliran
+   * CreatePin) menaruh Dashboard/Shift di dasar tumpukan sehingga lolos. */
+  useEffect(() => {
+    type NavCtl = {
+      getState?: () => { routes?: { name?: string }[]; index?: number };
+      reset?: (s: { index: number; routes: { name: string }[] }) => void;
+    };
+    const n = nav as unknown as NavCtl;
+    const curName = (): string | undefined => {
+      try {
+        const st = n.getState?.();
+        if (!st || !Array.isArray(st.routes) || typeof st.index !== 'number') return undefined;
+        return st.routes[st.index]?.name;
+      } catch {
+        return undefined;
+      }
+    };
+    if (!loggedIn) {
+      // Arah logout: tumpukan bekas-authed bisa menunjuk rute authed-only
+      // (blank di cabang tamu) → kembalikan ke Intro.
+      const timer = setTimeout(() => {
+        try {
+          const cur = curName();
+          if (cur && !GUEST_ROUTES.has(cur)) n.reset?.({ index: 0, routes: [{ name: 'Intro' }] });
+        } catch { /* abaikan */ }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+    // Target sekali-pakai (QrScan) dimiliki efek pending di atas.
+    if (peekPostLoginRoute()) return;
+    const timer = setTimeout(() => {
+      try {
+        const st = n.getState?.();
+        const routes = st && Array.isArray(st.routes) ? st.routes : [];
+        const cur = routes.length > 0 && typeof st?.index === 'number' ? routes[st.index]?.name : undefined;
+        const bottom = routes.length > 0 ? routes[0]?.name : undefined;
+        const home = shiftClosed ? 'Shift' : 'Dashboard';
+        if (cur === 'Login' && bottom !== 'Dashboard' && bottom !== 'Shift') {
+          n.reset?.({ index: 0, routes: [{ name: home }] });
+        }
+      } catch { /* abaikan */ }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [loggedIn, nav, shiftClosed]);
   if (!loggedIn) {
     return (
-      <Stack.Navigator initialRouteName="Intro" screenOptions={screenOptions}>
+      // key eksplisit: tanpa ini React me-reuse state navigator tamu saat
+      // bertukar ke stack authed (initialRoute diabaikan, terjebak di Login).
+      <Stack.Navigator key="guest" initialRouteName="Intro" screenOptions={screenOptions}>
         <Stack.Screen name="Intro" component={IntroScreen} options={{ title: t('title_welcome'), headerShown: false }} />
         <Stack.Screen name="Install" component={InstallScreen} options={{ title: t('title_claim') }} />
         <Stack.Screen name="SelectBranch" component={SelectBranchScreen} options={{ title: t('title_branch'), headerShown: false }} />
@@ -342,8 +398,7 @@ export default function App() {
         if (!showNavHook) return;
         // Hook verifikasi visual (dev only, aktif bila EXPO_PUBLIC_NAV_HOOK=1)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (globalThis as any).__NAV__ = {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__NAV__ = {          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           go: (name: string, params?: any) => {
             if (getSession() === null) {
               loginDemo();

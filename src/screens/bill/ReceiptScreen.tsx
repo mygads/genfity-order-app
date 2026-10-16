@@ -169,7 +169,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
   voidTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.red, marginTop: 4 }, voidItem: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 3, textDecorationLine: 'line-through' }, thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 12 },
   footerNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   actionsStack: { flexDirection: 'column' },
-  actionCol: { flex: 0, width: '100%' },
+  actionCol: { width: '100%' },
   actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, actionBtn: { marginTop: 0 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
   paperSide: { flex: 1.2 },
   summarySide: { flex: 1, backgroundColor: colors.card, borderLeftWidth: 1, borderLeftColor: colors.line }, summarySideBody: { padding: 20, paddingBottom: 32 },

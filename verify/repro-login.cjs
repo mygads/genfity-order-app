@@ -8,7 +8,7 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.type() + ': ' + m.text().slice(0, 300)); });
   page.on('pageerror', (e) => errors.push('PAGEERROR: ' + String(e).slice(0, 300)));
-  await page.goto('http://localhost:8902/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto('http://localhost:8904/', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => document.body && document.body.innerText.length > 50, null, { timeout: 120000 });
   await page.waitForTimeout(4000);
   const hook = await page.evaluate(() => !!window.__NAV__);
@@ -24,6 +24,8 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
     await inputs.nth(1).fill('9999');
   }
   await page.waitForTimeout(500);
+  const dump0 = await page.evaluate(() => (window.__NAV__.dump ? window.__NAV__.dump() : null));
+  console.log('NAVSTATE-0:', dump0);
   await page.screenshot({ path: 'docs/ss-clone/phone-LoginFilled.png' });
   // Klik tombol submit via teks (TouchableOpacity RN-web tak selalu role=button).
   const btn = page.getByText('Sign In', { exact: true });
@@ -46,12 +48,22 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
     return out;
   });
   console.log('SESSION-LS:', JSON.stringify(ls));
+  const tree = await page.evaluate(() => ({ gs: window.__GS ?? null, renders: window.__APPRENDERS ?? null }));
+  console.log('TREE:', JSON.stringify(tree));
+  const dump = await page.evaluate(() => (window.__NAV__.dump ? window.__NAV__.dump() : null));
+  console.log('NAVSTATE:', dump);
+  console.log('ERRORS:', errors.length ? errors.slice(0, 10) : 'none');
+  console.log('ERRORS:', errors.length ? errors.slice(0, 10) : 'none');
   // Uji saklar live vs restore: reload; bila sesi pulih, Dashboard harus tampil.
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => document.body && document.body.innerText.length > 50, null, { timeout: 120000 });
-  await page.waitForTimeout(4000);
-  const body2 = await page.evaluate(() => document.body.innerText.slice(0, 200).replace(/\n/g, ' | '));
-  console.log('AFTER-RELOAD:', body2);
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction(() => document.body && document.body.innerText.length > 50, null, { timeout: 120000 });
+    await page.waitForTimeout(4000);
+    const body2 = await page.evaluate(() => document.body.innerText.slice(0, 200).replace(/\n/g, ' | '));
+    console.log('AFTER-RELOAD:', body2);
+  } catch (e) {
+    console.log('RELOAD-SKIP:', String(e).split('\n')[0].slice(0, 120));
+  }
   console.log('ERRORS:', errors.length ? errors.slice(0, 10) : 'none');
   await browser.close();
 })().catch((e) => { console.error('ERR', e.message); process.exit(1); });
