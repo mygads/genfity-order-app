@@ -97,8 +97,13 @@ export default function CartDetailScreen({ navigation, route }: Props) {
 
   const incQty = (id: string) =>
     setItems((prev) => prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1 } : c)));
+  /** Kurangi qty; di 1 -> item dihapus (tanpa dialog, alasan sama dgn kasir). */
   const decQty = (id: string) =>
-    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, qty: Math.max(1, c.qty - 1) } : c)));
+    setItems((prev) => {
+      const cur = prev.find((c) => c.id === id);
+      if (cur && cur.qty <= 1) return prev.filter((c) => c.id !== id);
+      return prev.map((c) => (c.id === id ? { ...c, qty: c.qty - 1 } : c));
+    });
   const removeItem = (id: string) => setItems((prev) => prev.filter((c) => c.id !== id));
   const voidItem = (id: string) => {
     setItems((prev) => prev.map((c) => (c.id === id ? { ...c, voided: true } : c)));
@@ -224,9 +229,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 <View style={styles.rowActs}>
                   <View style={styles.stepper}>
                     <TouchableOpacity
-                      style={[styles.stepBtn, c.qty <= 1 && styles.stepOff, isTablet && styles.stepBtnBig]}
-                      onPress={() => decQty(c.id)}
-                      disabled={c.qty <= 1}>
+                      style={[styles.stepBtn, isTablet && styles.stepBtnBig]}
+                      onPress={() => decQty(c.id)}>
                       <Text style={styles.stepT}>-</Text>
                     </TouchableOpacity>
                     <Text style={styles.stepQty}>{c.qty}</Text>

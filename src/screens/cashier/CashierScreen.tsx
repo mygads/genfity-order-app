@@ -509,8 +509,15 @@ export default function CashierScreen({ navigation, route }: Props) {
   const incQty = (id: string) =>
     setCart((prev) => prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1 } : c)));
 
+  /** Kurangi qty; di 1 -> item dihapus (kasir cepat, tanpa dialog:
+   * Alert.alert no-op di web dan butuh dua ketukan di HP). Item void
+   * tidak ikut hapus agar tetap bisa di-restore. */
   const decQty = (id: string) =>
-    setCart((prev) => prev.map((c) => (c.id === id ? { ...c, qty: Math.max(1, c.qty - 1) } : c)));
+    setCart((prev) => {
+      const cur = prev.find((c) => c.id === id);
+      if (cur && cur.qty <= 1 && !cur.voided) return prev.filter((c) => c.id !== id);
+      return prev.map((c) => (c.id === id ? { ...c, qty: Math.max(1, c.qty - 1) } : c));
+    });
 
   const removeItem = (id: string) => setCart((prev) => prev.filter((c) => c.id !== id));
 
@@ -1017,10 +1024,10 @@ export default function CashierScreen({ navigation, route }: Props) {
             <View style={[styles.cartRow, item.voided && styles.cartRowVoid]}>
               <View style={styles.stepper}>
                 <TouchableOpacity
-                  style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled, isWide && styles.stepBtnBig]}
+                  style={[styles.stepBtn, item.voided && styles.stepBtnDisabled, isWide && styles.stepBtnBig]}
                   onPress={() => decQty(item.id)}
-                  disabled={item.qty <= 1}>
-                  <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>-</Text>
+                  disabled={item.voided}>
+                  <Text style={[styles.stepTxt, item.voided && styles.stepTxtDisabled]}>-</Text>
                 </TouchableOpacity>
                 <Text style={styles.stepQty}>{item.qty}</Text>
                 <TouchableOpacity style={[styles.stepBtn, isWide && styles.stepBtnBig]} onPress={() => incQty(item.id)}>
