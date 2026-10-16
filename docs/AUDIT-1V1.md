@@ -108,6 +108,13 @@ Detail gap per file ada di output workflow; ringkasan jadi TODO bernomor di bawa
 - Panjang PIN 4-vs-6 + attempt-limit T11 (dossier tak tetapkan angka)
 - Navy fix #16215E vs sampling logo runtime (dossier:168 + §9 rebuild boleh beda)
 
+## Wave-3 2026-10-16 (migrasi fondasi — HASIL: nol-edit + konvergensi worker)
+
+Migrator (2 agen) terap aturan visual-identical ke 12 layar: SEMUA kandidat gagal pemetaan eksak (radius/height/activeOpacity) → skip-and-held by-design, NOL Edit + NOL Write (terbukti `journal.jsonl` wf_aa382984-c08: 0 Edit, 0 Write).
+KONVERGENSI: worker membangun `AppInput`/`AppButton` (alias tipis di atas fondasi `Input`/`Button` wave-2 saya) dan sedang migrasi ~35 layar di WIP mereka (75 file, `tsc` HIJAU EXIT 0 saat ini). Alarm "lane overreach" verifier TERBANTAH jurnal — seluruh diff App* = worker, bukan agen saya.
+Held migrasi (butuh keputusan fondasi ATAU biarkan pass worker): Button tanpa prop `activeOpacity` (0.2 vs 0.8), tanpa varian ukuran (Intro h52/r26 vs h56/r28), tanpa varian navy; QrHow statis; chip/link kecil custom.
+SISA lane-saya (file masih WIP worker): Shift-i18n, state absensi, Istirahat, widget rekap, fix tanggal Pay, `types.ts`/`i18n.ts`.
+
 ### TODO MENTAH 5 AREA TAK-TRIASE (sweep-only, belum vonis kritikus — JANGAN kerjakan buta)
 - Kasir: gap esbOrder DineIn, CustomMenu TRX-047/STATIONS, LoadOrder SEED, PROMOS PromotionList, QS mode TablesScreen, header/date Booking, MODES tanpa DELIVERY
 - Pay: master mock, QRIS merchant-ID, bank/terminal master, Success DAYS/MONTHS+shopName
