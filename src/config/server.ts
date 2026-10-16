@@ -52,6 +52,9 @@ export const ApiPath = {
   // [FAKTA] APK: v1/pull/expense-chart-of-accounts (REA-18).
   pullExpenseCoa: 'v1/pull/expense-chart-of-accounts',
   pullUser: 'main/get-user',
+  // [asumsi-clean-room] TIDAK ADA di APK (REA-18): hak akses per user untuk
+  // RBAC lokal (dipetakan ke ms_posuseraccess via master.ts 'useraccess').
+  pullUserAccess: 'main/get-user-access',
   pullTable: 'main/get-table',
   pullPromotion: 'main/get-promotion',
   pullMember: 'main/get-member',

@@ -62,6 +62,53 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
+  // RBAC fondasi (ms_posuserrole + ms_posuseraccess). SENGAJA tanpa gate
+  // flag seed (seperti CoA di atas) agar DB lama yang sudah flag seed=1
+  // tetap dapat role/akses; INSERT OR IGNORE = idempoten, aman jalan ulang
+  // (pull server via master.ts domain 'useraccess' tetap menang untuk baris
+  // per-user karena INSERT OR REPLACE).
+  const roles: Array<[string, string]> = [
+    ['admin', 'admin'],
+    ['kasir', 'kasir'],
+    ['supervisor', 'supervisor'],
+  ];
+  for (const [id, name] of roles) {
+    await run(
+      `INSERT OR IGNORE INTO ms_posuserrole (id, roleName, flagActive)
+       VALUES (?, ?, 1)`,
+      [id, name],
+    );
+  }
+
+  // Admin lokal: satu baris wildcard allow-all (dibaca access.ts hasAccess).
+  await run(
+    `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
+     VALUES ('u-admin', '*', 1)`,
+  );
+
+  // Kunci aksi sensitif yang deny-nya dimiliki peran kasir dan allow-nya
+  // dimiliki peran supervisor (PIN-override). Baris peran (userId = nama
+  // peran) adalah template default offline: access.ts jatuh kembali dari
+  // userId ke peran bila user tak punya baris sendiri.
+  const sensitiveKeys = ['order.void', 'order.cancel', 'sale.refund', 'settings.edit'];
+  for (const k of sensitiveKeys) {
+    await run(
+      `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
+       VALUES ('kasir', ?, 0)`,
+      [k],
+    );
+  }
+  for (const k of sensitiveKeys) {
+    await run(
+      `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
+       VALUES ('supervisor', ?, 1)`,
+      [k],
+    );
+  }
+
+  // Pastikan baris admin lokal ber-role admin (DB lama mungkin berbeda).
+  await run(`UPDATE ms_posuser SET role = 'admin' WHERE id = 'u-admin'`);
+
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
   );

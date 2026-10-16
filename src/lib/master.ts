@@ -84,6 +84,18 @@ const DOMAINS: Domain[] = [
     upsert: 'ON CONFLICT(id) DO UPDATE SET username = excluded.username, branchId = excluded.branchId, role = excluded.role, syncDate = excluded.syncDate',
   },
   {
+    // RBAC: hak akses per user dari server (kontrak clean-room
+    // main/get-user-access). Server menang (INSERT OR REPLACE default);
+    // baris template peran lokal ('kasir'/'supervisor' dari seed) aman
+    // karena server hanya mengirim userId asli.
+    key: 'useraccess',
+    path: ApiPath.pullUserAccess,
+    table: 'ms_posuseraccess',
+    cols: ['userId', 'accessKey', 'flagAllow'],
+    map: (r) => [str(r.userId) ?? '', str(r.accessKey ?? r.key), flag(r.flagAllow, 1)],
+    requireFirst: true,
+  },
+  {
     key: 'table',
     path: ApiPath.pullTable,
     table: 'ms_table',
