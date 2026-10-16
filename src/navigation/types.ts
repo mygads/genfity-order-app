@@ -20,7 +20,7 @@ export type RootStackParamList = {
   Member: undefined;
   Voucher: undefined;
   QrScan: undefined;
-  Pay: { total?: number } | undefined;
+  Pay: { total?: number; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
   Qris: { total?: number } | undefined;
   Edc: { total?: number } | undefined;
   Success: { total?: number; method?: string; cash?: number; change?: number } | undefined;

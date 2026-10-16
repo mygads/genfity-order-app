@@ -30,7 +30,7 @@ async function shot(device, vp, screens, port) {
     const fn = GUEST.has(s) ? 'goGuest' : 'go';
     await page.evaluate(new Function(`window.__NAV__ && window.__NAV__.${fn}(${JSON.stringify(s)}, ${p})`));
     await page.waitForTimeout(1800);
-    const f = `docs/shots/${device}-${s}.png`;
+    const f = `docs/ss-clone/${device}-${s}.png`;
     await page.screenshot({ path: f });
     console.log('OK', f);
   }

@@ -49,8 +49,8 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 20, paddingTop: 48, paddingBottom: 40 },
+  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  body: { paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 6, marginBottom: 16 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 16 },

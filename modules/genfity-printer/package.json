@@ -1,0 +1,6 @@
+{
+  "name": "genfity-printer",
+  "version": "1.0.0",
+  "description": "Modul native Genfity POS: printer BT SPP + USB serial + foreground WS service",
+  "main": "index.js"
+}

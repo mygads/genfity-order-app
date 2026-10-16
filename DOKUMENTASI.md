@@ -40,19 +40,23 @@ fragmen/variabel lalu disusun ulang di cabang `isTablet`, phone tidak berubah.
 
 DineIn, CustomMenu, LoadOrder, Cancel/void, BillPreview, CartDetail, QrScan,
 Qris, Edc, Attendance, Shift, Recap, EndShift, EsbOrder, Kitchen, Voucher,
-Printers, Settings. **Alur install/klaim tamu (6 route baru, Okt 2026)**:
+Printers (Okt 2026: +panel Station kasir/dapur), Settings (Okt 2026: +panel Terminal & Server + Sinkronisasi outbox). **Alur install/klaim tamu (6 route baru, Okt 2026)**:
 Intro (4 halaman onboarding APK), Install (klaim terminal + simulasi pindai),
 SelectBranch (3 cabang + radio), InstallProgress (3 langkah auto + %),
 CreatePin (PIN pad 2 fase + mismatch-reset), ForgotPin (reset via supervisor).
-Total route terdaftar: **36** (`src/navigation/types.ts`).
+Total route terdaftar: **55** (`src/navigation/types.ts`) — termasuk WebView + 18 route pekerja paralel (SplitBill, MoveItems, MoveTable, PromotionList, MenuPrinting, Stock, TableTimer, Sync, Log, About, Help, MenuManagement, Idle, TopupDeposit, PettyCash/Form/Detail, Expense).
 
-### 1c. Bukti screenshot
+### 1c. Bukti screenshot (konvensi tetap — 2 folder saja)
 
-- `docs/shots/` — 98 file: 44 phone + 44 tablet RN (`phone-*`, `tablet-*`,
-  driver `verify/shot.win.cjs` + `shot.fix.cjs` + `shot.2panel.cjs` +
-  `shot.gas.cjs` + `shot.recap.cjs` + `shot.gas2.cjs`) + 10 bukti
-  APK asli `apk-*` dari emulator (intro 1–4, chrome-welcome, registrasi,
-  web-login). Detail pemetaan APK→RN: `PETA-REA.md`.
+- `docs/ss-poslite/` — screenshot **APK asli** (referensi, jangan diubah):
+  `01-intro-*.png` (onboarding 1–4), `install-*.png`, `01-pilih-cabang.png`,
+  `login*.png`, `apk-*.png` (10 bukti emulator: intro, registrasi, web-login).
+- `docs/ss-clone/` — screenshot **hasil clone RN** (driver
+  `verify/shot.two.cjs`, `EXPO_PUBLIC_NAV_HOOK=1`): `phone-<Route>.png` +
+  `tablet-<Route>.png`, 55 route × 2.
+- Folder lama `docs/ss-clone/` (nama `01-34`, `apk-*` campur) sudah dihapus —
+  duplikatnya (`09-booking`=`11-booking-fix`, `07-history`=`12-history-fix`)
+  juga dibuang. Jangan bikin folder screenshot baru.
 - `verify/final/` — 19 screenshot final phone+tablet (cashier, dashboard,
   history, pay-tunai, login, booking, member, receipt, success, tables).
 
@@ -62,7 +66,7 @@ Total route terdaftar: **36** (`src/navigation/types.ts`).
 
 Guard: belum login → stack tamu (`Intro` awal; Intro→Install→SelectBranch→
 InstallProgress→CreatePin→Login, +ForgotPin dari Login). Sesudah `loginDemo()`
-→ 35 route. Hook nav `__NAV__.goGuest` (EXPO_PUBLIC_NAV_HOOK=1) untuk alur tamu.
+→ 48 route utama (8 route tamu). Hook nav `__NAV__.goGuest` (EXPO_PUBLIC_NAV_HOOK=1) untuk alur tamu.
 
 ```
 Login → Dashboard → Cashier → CartDetail → Pay → Success → Cashier (Order Baru)
@@ -141,7 +145,7 @@ Yang **belum ada di RN** (prioritas):
   ESO `eso-api.esb.co.id`, WS `wss://ws-poslite.esb.co.id/ws`.
   Pull master `main/get-*` + `pull/*`; push `order/finish`, voucher
   `{lock,unlock,validate,burn}`, attendance `{clock-in,clock-out}`.
-  Field JSON camelCase tak terekstrak dari strings — butuh mitmproxy/dekompilasi.
+  Field JSON camelCase tak terekstrak dari strings. Cek Okt 2026: tanpa pinning di strings (tanpa okhttp/CertificatePinner/sha256-pin; hanya callback TLS generik Dart VM) — mitmproxy + CA test-device layak jalan; tanpa UUID SPP/GATT & byte ESC/POS di strings (hanya path `bluetooth_connection.dart` + `printImageBytes`). Blocker konkret: (1) kredensial merchant + sesi login untuk capture JSON; (2) log HCI-snoop saat cetak nyata / Ghidra atas `.so` printer untuk wire byte. Sementara itu kontrak SISI KITA sudah final di `src/lib/sync.ts` + `src/lib/payments.ts` — server Anda ikut itu.
 - **SQLite (~93 tabel):** `ms_menu`/`ms_branchmenu`, cart `tr_salesmenutemp`,
   transaksi `tr_saleshead`/`tr_salesmenu`/`tr_salespayment`, shift
   `tr_shiftlog`, expense, deposit, antrean sync, `ms_posuser(username PK,
@@ -157,10 +161,11 @@ Yang **belum ada di RN** (prioritas):
 ## 5. Metode verifikasi
 
 1. `npx expo start` (atau `npm run web`), set `EXPO_PUBLIC_NAV_HOOK=1`.
-2. Driver Playwright di `verify/` (`shot.cjs`, `shot8903/04/05.cjs`,
-   `shots-driver*.js`) membuka tiap route via `__NAV__.go(name)`,
-   screenshot viewport phone (±390) & tablet (±820).
-3. Hasil: `/shots` → disalin ke `docs/shots/`; final ke `verify/final/`.
+2. Driver Playwright `verify/shot.two.cjs`
+   (`node verify/shot.two.cjs phone|tablet <port> <Route...>` — bisa per layar)
+   membuka tiap route via `__NAV__.go(name)` / `goGuest(name)` untuk alur tamu,
+   screenshot viewport phone (390×844) & tablet (1024×768).
+3. Hasil: langsung ke `docs/ss-clone/phone|tablet-<Route>.png`.
 4. Penilaian: bandingkan dengan ref `refs/` (9 PNG) + screenshot APK.
 
 ---
@@ -183,6 +188,20 @@ Yang **belum ada di RN** (prioritas):
 | 5 rute orphan dari UI (DineIn, Voucher, QrScan, EsbOrder, Settings) | ✅ terhubung Okt 2026: DineIn←Cashier:527,572; Voucher←Pay:261/Member:98; QrScan←Member:95; EsbOrder←Settings:83 (reroute, bukan orphan) |
 | `EdcScreen` vs form EDC inline di Pay | ✅ koeksis by-design Okt 2026: Edc←Pay:480, mirroring APK (BCA EDC-01 app-switch, approval 6 digit) |
 | 5 layar tablet masih kolom phone (login, receipt, success, member, booking) | ✅ 2-panel Okt 2026 (skor tablet 9; pola ekstrak-fragmen, phone tak berubah) |
+| `tsc --noEmit` gagal karena folder tooling tak-terlacak (`rea-tool/`, `reap/`, `emu/`, `stub/`) ikut dikompilasi | ✅ Okt 2026: `tsconfig.json` exclude 4 folder tsb (file tetap ada, tak dihapus); tsc EXIT 0 |
+| Lint (baru dipasang via `npx expo lint`): timer EDC/QRIS set-state sinkron di effect | ✅ Okt 2026: pola timeout-callback di `EdcScreen` + `QrisScreen`; lint 0 error (9 warning unused-var lama) |
+| Payment lanjutan + web-view + display sync belum ada | ✅ Okt 2026 (gabungan dua pekerja paralel): `src/lib/payments.ts` (transfer/deposit/kompliment/nonsales + outbox + email-validation), `src/lib/supervisor.ts` (otorisasi server, fail-closed offline, tanpa simpan PIN), `ExtraPaySection` di Pay + tab Pluxee/Ultra, tombol Email di Receipt + History (`sales/receipt-email` via outbox), route `WebView` (registrasi web dari Install), `src/lib/display.ts` (bus lokal + WS best-effort) dipakai CustomerDisplay; bukti `docs/ss-clone/phone|tablet-{Pay,Receipt,CustomerDisplay,Install,WebView}.png` |
+| Backend milik sendiri belum ada acuannya | ✅ Okt 2026: `docs/API-CONTRACT.md` v1 — konvensi, 11 grup endpoint + WS display + contoh tempel; klien diselaraskan (`apiPost` kirim X-Terminal-Code/X-Branch-Id/Idempotency-Key/Bearer, outbox sertakan `clientId`, supervisor pakai `auth/supervisor-approve`) |
+| Tautan Pratinjau Bill di CartDetail belum terbukti piksel (keranjang kosong di driver) | ✅ Okt 2026: driver `PARAMS.CartDetail` kini kirim 2 item; DOM cek `verify/check.cart.cjs` = item tampil + tautan ada + console 0 error + klik sampai BillPreview; bukti `docs/ss-clone/phone|tablet-CartDetail.png` |
+| 3 route orphan tanpa inbound (CustomMenu, BillPreview, Booking — aturan AGENTS.md #6) | ✅ Okt 2026: tombol Custom di toolbar Kasir → CustomMenu, tautan Pratinjau Bill di CartDetail → BillPreview, kartu Booking di menu Dashboard → Booking; semua 55 route kini terjangkau (Intro via awal, sisanya via navigate/go terverifikasi grep); bukti `docs/ss-clone/phone-{Cashier,Dashboard}.png` + `tablet-{Cashier,Dashboard,Booking,CustomMenu,BillPreview}.png` |
+| Dialog modal melebar penuh di tablet + modal email History ganda | ✅ Okt 2026: `dialogNarrow` (maxWidth 480, tengah) di dialog Receipt/Settings/ExtraPay; modal email History milik pekerja paralel sudah lengkap — duplikat saya dihapus, tidak ada kode mati; bukti `docs/ss-clone/phone|tablet-History.png` |
+| Konfigurasi terminal/server/sync masih mock | ✅ Okt 2026: `src/config/server.ts` (env prod/dev/staging/custom + terminal + ApiPath fakta REA), `src/lib/sync.ts` (outbox antre/kirim/terakhir), `src/config/device.ts` (station kasir/dapur + notif); Settings ada panel Terminal & Server + Sinkronkan, Printers ada panel Station (tambah/hapus/utama) — bukti `docs/ss-clone/phone|tablet-{Settings,Printers}.png` via `verify/shot.two.cjs` |
+| Kirim cetak cuma pratinjau (LAN/BT/USB/drawer stub) | ✅ Okt 2026: `src/native/printer.ts` — LAN murni JS (`react-native-tcp-socket`), BT SPP + USB serial via modul native `GenfityPrinter` (Kotlin, `modules/genfity-printer/` + config plugin, aktif setelah prebuild + EAS dev-client); PrintersScreen Uji Cetak/Uji Koneksi (probe ESC @)/Pairing BT/Buka Drawer semuanya memanggil lapisan ini, fallback `need-dev-client` + pratinjau di Expo Go/web |
+| EDC cuma timer + approval manual | ✅ Okt 2026: `src/native/edc.ts` — `startEdcPayment()` lempar intent ke APOS BCA saat layar EDC dibuka (Android dev-client); approval 6 digit tetap manual sesuai alur APK; Expo Go/web no-op |
+| QR scan cuma gambar + input manual | ✅ Okt 2026: QrScanScreen pakai `CameraView` expo-camera (barcode `qr`) + tombol Aktifkan/Matikan Kamera; hasil scan masuk ke `code` seperti input manual; bukti `docs/ss-clone/phone|tablet-QrScan.png` di-shoot ulang |
+| Foto expense cuma galeri | ✅ Okt 2026: `pickPhoto()` kamera dulu (`launchCameraAsync`), galeri sebagai cadangan |
+| Push + realtime WS belum ada | ✅ Okt 2026: `src/lib/realtime.ts` (WS device + self-order, heartbeat 30 dtk, backoff), `src/lib/push.ts` (izin + token Expo + `register-push` + notif lokal NEW_SELF_ORDER → badge EsbOrder); dependensi `expo-notifications`, `expo-camera`, `expo-intent-launcher`, `react-native-tcp-socket` terpasang |
+| Kontrak backend untuk server sendiri | ✅ Okt 2026: `docs/API-CONTRACT.md` v2 — 3 host + loyalty, header + envelope Yii2 + paging + kode error, endpoint install/PIN/pull/push/voucher/OTA/WS/push-register + contoh JSON tempel + checklist minimal BE |
 
 ---
 
@@ -194,7 +213,8 @@ Yang **belum ada di RN** (prioritas):
 2. ~~Samakan label `Order Fee`/`Ongkir` + sisa bahasa Inggris~~ ✅ selesai Okt 2026 (Cashier selalu "Ongkir", BillPreview/Dashboard labels ID).
 3. ~~Putuskan orphan routes + `EdcScreen` vs inline~~ ✅ diputuskan Okt 2026 (semua terhubung; Edc koeksis dgn inline, cerminkan APK).
 4. ~~Gap APK (§3): install/klaim → split-bill → recap/expense → printer → deposit~~ ✅ selesai Okt 2026: +split per-item/nominal+lunas, pindah/gabung/batal meja, ESC/POS nyata (Salin/Unduh/BT), foto expense, CustomerDisplay. Sisa butuh backend/native: revalidasi PIN server, SPP klasik/USB/LAN + drawer, payment lanjutan, WS display.
-5. ~~Cetak nyata (ganti no-op) + `logout()` di semua titik keluar~~ ✅ selesai Okt 2026: Receipt Cetak→`printReceipt()` (window.print di web) + Bagikan→`shareReceipt()`; sweep logout bersih (hanya 2 `logout()`, keduanya di Dashboard + Settings).
+5. ~~Cetak nyata (ganti no-op) + `logout()` di semua titik keluar~~ ✅ selesai Okt 2026: Receipt Cetak→`printReceipt()` (window.print di web) + Bagikan→`shareReceipt()`; PrintersScreen kirim nyata via `src/native/printer.ts` (LAN langsung, BT/USB perlu dev-client); sweep logout bersih (hanya 2 `logout()`, keduanya di Dashboard + Settings).
+6. ~~Modul native + push + kontrak BE~~ ✅ selesai sisi JS Okt 2026: printer LAN/BT/USB + drawer, intent EDC APOS, kamera QR, realtime WS + push, `docs/API-CONTRACT.md` v2. Sisa butuh aksi di luar kode: `npx expo prebuild` + `eas build --profile development`, daftar Expo Push, dan bangun BE ikut kontrak.
 
 ### 7.2 Cara delegasi (Claude Code)
 
@@ -220,5 +240,5 @@ Prompt serah-terima (tempel ke Claude Code):
 
 - Remote: `https://github.com/mygads/genfity-order-app.git` (branch `main`).
 - `node_modules/` (385 MB), `.expo/`, PNG nyasar root (`f-cashier.png`,
-  `rn-cashier*.png`, `v-*.png`) tidak ikut push; `docs/shots/` (37 bukti)
-  + `verify/` + `refs/` ikut. `docs/shots/` kini 88 bukti (lihat §1c).
+  `rn-cashier*.png`, `v-*.png`) tidak ikut push; `docs/ss-clone/` (37 bukti)
+  + `verify/` + `refs/` ikut. `docs/ss-clone/` kini 88 bukti (lihat §1c).

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
 import ExtraPaySection from './ExtraPaySection';
-import { recordSale } from '../../lib/payments';
+import { recordSale, type SaleItemIn } from '../../lib/payments';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -20,7 +20,7 @@ type Nav = {
 
 type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number } };
+  route?: { params?: { total?: number; items?: SaleItemIn[] } };
 };
 
 type Tab = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
@@ -148,8 +148,21 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
 
-  const goSuccess = (method: string, cash: number, change: number) => {
-    recordSale(method, payable, { cash, change });
+  const goSuccess = (method: string, cash: number, change: number, detail?: { approvalCode?: string }) => {
+    recordSale({
+      method,
+      grandTotal: payable,
+      discountTotal: voucherApplied,
+      cash,
+      change,
+      items: route?.params?.items,
+      payments: [
+        ...splits.map((s) => ({ method: s.label, amount: s.amount })),
+        { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
+      ],
+      ...(voucherCode.trim() ? { voucherCode: voucherCode.trim() } : {}),
+      ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+    });
     navigation?.navigate('Success', { total: payable, method, cash, change });
   };
 
@@ -174,7 +187,7 @@ export default function PayScreen({ navigation, route }: Props) {
     const amt = remaining > 0 ? remaining : payable;
     const grand = paid + amt;
     if (grand >= payable) {
-      goSuccess(card, grand, Math.max(0, grand - payable));
+      goSuccess(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
     } else {
       addSplit(CARDS.find((c) => c.id === card)?.name ?? 'Non Tunai', amt);
       setEdcCode('');

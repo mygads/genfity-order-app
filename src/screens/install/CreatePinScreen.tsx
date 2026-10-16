@@ -84,8 +84,8 @@ export default function CreatePinScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 20, paddingBottom: 40, alignItems: 'center' },
+  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  body: { paddingHorizontal: 24, paddingBottom: 32, alignItems: 'center' },
   hero: { width: 160, height: 160, marginTop: 48 },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 16, textAlign: 'center' },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
@@ -99,7 +99,7 @@ const styles = StyleSheet.create({
   keyT: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   keyUtil: { backgroundColor: colors.bg },
   keyUtilT: { color: colors.red },
-  primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 15, alignItems: 'center', marginTop: 20, width: '100%' },
+  primary: { backgroundColor: colors.orange, borderRadius: 14, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20, width: '100%' },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
   foot: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 16 },
 });

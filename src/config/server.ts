@@ -53,6 +53,8 @@ export const ApiPath = {
   voucherUnlock: 'posv1/esb-voucher/unlock',
   voucherValidate: 'posv1/esb-voucher/validate',
   clockIn: 'employee-attendance/clock-in',
+  supervisorApprove: 'auth/supervisor-approve',
+  cashierLogin: 'auth/cashier-login',
   clockOut: 'employee-attendance/clock-out',
   depositInquiry: 'member-deposit-withdrawal/inquiry-deposit',
 } as const;
@@ -172,10 +174,20 @@ export function setTerminal(next: TerminalInfo): void {
   void setItem(LS_TERMINAL, JSON.stringify(terminal));
 }
 
-export async function apiPost(path: string, body: unknown): Promise<Response> {
+export async function apiPost(
+  path: string,
+  body: unknown,
+  opts?: { idempotencyKey?: string; token?: string },
+): Promise<Response> {
+  const t = getTerminal();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+  if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  if (opts?.token) headers['Authorization'] = `Bearer ${opts.token}`;
   return fetch(apiUrl(path), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
 }

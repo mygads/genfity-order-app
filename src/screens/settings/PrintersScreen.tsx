@@ -16,6 +16,7 @@ import { colors, fonts, wideCenter } from '../../theme';
 import { printers, type PrinterDevice } from '../../data/mock';
 import { buildReceiptBytes, toHex } from '../../lib/escpos';
 import { shareReceipt } from '../../lib/print';
+import { listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -132,33 +133,79 @@ export default function PrintersScreen(_props: Props) {
     setStName('');
   };
 
-  /** Pairing BT (stub): daftar bonded + status butuh dev-client. */
-  const startPairing = () => {
+  /** Pairing BT: daftar bonded nyata via modul native (dev-client), kosong di Expo Go/web. */
+/** Bangun target kirim dari konfigurasi stasiun. */
+function stationTarget(s: Station): PrinterTarget {
+  if (s.conn === 'LAN') {
+    const [host, portRaw] = s.address.split(':');
+    return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
+  }
+  if (s.conn === 'Star') {
+    const m = s.address.match(/(\d+)\s*\/\s*(\d+)/);
+    return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 };
+  }
+  return { transport: 'bt', address: s.address.trim() };
+}
+
+  const startPairing = async () => {
     setPairing(true);
-    setTimeout(() => setPairing(false), 1800);
+    try {
+      // Daftar BT bonded nyata — perlu dev-client + izin; di Expo Go/web: kosong.
+      const found = await listBondedBtPrinters();
+      if (found.length > 0) {
+        setBonded((bb) => [
+          ...bb,
+          ...found
+            .filter((f) => !bb.some((b) => b.mac === f.mac))
+            .map((f, i) => ({ id: `bt-live-${i}`, name: f.name, mac: f.mac, paired: true })),
+        ]);
+        setStatusMsg(`${found.length} printer BT bonded terdeteksi.`);
+      } else {
+        setStatusMsg('Tak ada printer BT bonded terdeteksi — perlu dev-client + izin Bluetooth.');
+      }
+    } finally {
+      setPairing(false);
+    }
   };
 
   const togglePair = (id: string) =>
     setBonded((bb) => bb.map((b) => (b.id === id ? { ...b, paired: !b.paired } : b)));
 
-  /** Uji koneksi LAN (stub): validasi IP:port + status butuh dev-client. */
-  const testLan = () => {
+  /** Uji koneksi LAN: kirim ESC @ (init, aman) via TCP port 9100. */
+  const testLan = async () => {
     const ipOk = /^\d{1,3}(\.\d{1,3}){3}$/.test(lanIp.trim());
     const port = Number(lanPort);
     if (!ipOk || !Number.isInteger(port) || port < 1 || port > 65535) {
       setLanMsg('IP/port tidak valid — contoh 192.168.1.50:9100.');
       return;
     }
-    setLanMsg(`Socket TCP ke ${lanIp.trim()}:${port} butuh dev-client — pratinjau dibuat.`);
+    setLanMsg(`Menghubungi ${lanIp.trim()}:${port}…`);
+    // ESC @ = reset printer, aman dikirim sebagai probe koneksi.
+    const res = await printBytes(
+      { transport: 'lan', host: lanIp.trim(), port },
+      new Uint8Array([0x1b, 0x40]),
+    );
+    setLanMsg(
+      res.ok
+        ? `Terhubung — printer menjawab (${res.bytes} byte terkirim).`
+        : res.reason === 'connect-failed'
+          ? `Koneksi gagal: ${res.detail ?? 'pastikan satu jaringan Wi-Fi'}.`
+          : 'Kirim butuh dev-client / modul TCP.',
+    );
   };
 
-  /** Buka drawer kas (stub): perintah ESC/POS drawer + status butuh dev-client. */
-  const openDrawer = (s: Station) => {
-    setStatusMsg(`Perintah buka drawer dikirim ke ${s.name} (butuh dev-client).`);
+  /** Buka drawer kas: pulse ESC/POS via printer kasir. */
+  const openDrawer = async (s: Station) => {
+    const ok = await openCashDrawer(stationTarget(s));
+    setStatusMsg(
+      ok
+        ? `Perintah buka drawer dikirim ke ${s.name}.`
+        : `Gagal buka drawer ${s.name} — perlu dev-client (modul native).`,
+    );
   };
 
-  /** Test print per station: pratinjau struk + hex ESC/POS. */
-  const testPrintStation = (s: Station) => {
+  /** Test print per station: pratinjau struk + hex ESC/POS, lalu kirim nyata bila bisa. */
+  const testPrintStation = async (s: Station) => {
     const bytes = buildReceiptBytes({
       shop: 'ESB CABANG PORIS',
       addr: `Uji cetak · ${s.name}`,
@@ -173,7 +220,17 @@ export default function PrintersScreen(_props: Props) {
       method: 'Tunai',
     });
     setPreview({ station: s.name, text: previewText(s), hex: toHex(bytes).slice(0, 240) + '…' });
-    setStatusMsg(`Pratinjau uji cetak ${s.name} siap (${bytes.length} byte). Kirim nyata butuh dev-client.`);
+    const res = await printBytes(stationTarget(s), bytes);
+    setStatusMsg(
+      res.ok
+        ? `Uji cetak ${s.name} terkirim (${res.bytes} byte).`
+        : res.reason === 'need-dev-client'
+          ? `Pratinjau uji cetak ${s.name} siap (${bytes.length} byte). Kirim nyata butuh dev-client.`
+          : `Kirim ke ${s.name} gagal: ${res.detail ?? res.reason}.`,
+    );
+    if (res.ok) {
+      setStations((ss) => ss.map((x) => (x.id === s.id ? { ...x, connected: true } : x)));
+    }
   };
 
   const togglePrinter = (p: PrinterDevice) => {

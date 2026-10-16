@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, fonts, rp, wideCenterSm } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -28,6 +29,24 @@ export default function QrScanScreen({ navigation }: Props) {
   const [code, setCode] = useState('VC-DISKON10K');
   const [result, setResult] = useState(true);
   const [msg, setMsg] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+
+  const toggleScan = async () => {
+    if (scanning) {
+      setScanning(false);
+      return;
+    }
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        setMsg('Izin kamera ditolak — pakai input manual di bawah.');
+        return;
+      }
+    }
+    setMsg('');
+    setScanning(true);
+  };
 
   const pickTab = (t: Tab) => {
     setTab(t);
@@ -67,12 +86,28 @@ export default function QrScanScreen({ navigation }: Props) {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
-      <Text style={styles.hint}>Kamera + input manual (pindai nyata butuh dev-client)</Text>
+      <Text style={styles.hint}>Kamera + input manual</Text>
       <View style={styles.frame}>
-        <Image source={require('../../../assets/images/invalid_qr.webp')} style={styles.frameImg} resizeMode="contain" />
+        {scanning ? (
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => {
+              setCode(String(data));
+              setResult(true);
+              setMsg('');
+              setScanning(false);
+            }}
+          />
+        ) : (
+          <Image source={require('../../../assets/images/invalid_qr.webp')} style={styles.frameImg} resizeMode="contain" />
+        )}
         <Text style={styles.frameT}>Pindai Kode QR</Text>
         <Text style={styles.frameS}>{TAB_HINT[tab]}</Text>
-        <Text style={styles.frameNote}>Pratinjau kamera aktif setelah modul scan dipasang via dev-client.</Text>
+        <TouchableOpacity style={styles.scanBtn} onPress={toggleScan}>
+          <Text style={styles.scanBtnT}>{scanning ? 'Matikan Kamera' : 'Aktifkan Kamera'}</Text>
+        </TouchableOpacity>
       </View>
       <View style={styles.tabs}>
         {(['Klaim', 'ESB Order', 'Member', 'Voucher'] as Tab[]).map((t) => (
@@ -120,6 +155,9 @@ const styles = StyleSheet.create({
   hint: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   frame: { backgroundColor: colors.navy, borderRadius: 14, padding: 22, alignItems: 'center', marginTop: 12 },
   frameImg: { width: 120, height: 90 },
+  camera: { width: 220, height: 160, borderRadius: 10, overflow: 'hidden' },
+  scanBtn: { marginTop: 10, borderWidth: 1, borderColor: colors.navyTint, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 9 },
+  scanBtnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   frameT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white, marginTop: 8 },
   frameS: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, textAlign: 'center', marginTop: 4 },
   frameNote: { fontFamily: fonts.regular, fontSize: 11, color: colors.navyTint, textAlign: 'center', marginTop: 6, opacity: 0.8 },

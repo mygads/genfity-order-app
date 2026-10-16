@@ -9,7 +9,9 @@ import { colors } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
 import { getSession, loginDemo, logout, subscribeSession } from './src/session';
 import { initDb } from './src/lib/db';
-import { loadServerState } from './src/config/server';
+import { loadServerState, getTerminal } from './src/config/server';
+import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
+import { registerPushToken, notifyLocal } from './src/lib/push';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
@@ -172,7 +174,30 @@ export default function App() {
   useEffect(() => {
     loadServerState().catch(() => {});
     initDb().catch(() => {});
+    // WS self-order baru → notifikasi lokal + arahkan badge ESB Order.
+    const off = onWsMessage((msg) => {
+      if (msg.type === 'NEW_SELF_ORDER') {
+        const p = msg.payload as { orderId?: string; tableNo?: string };
+        void notifyLocal(
+          'Order online baru',
+          `Meja ${String(p.tableNo ?? '-')} · ${String(p.orderId ?? '')}`,
+          { route: 'EsbOrder' },
+        );
+      }
+      if (msg.type === 'FORCE_PULL') setLoggedIn(getSession() !== null);
+    });
+    return off;
   }, []);
+
+  useEffect(() => {
+    if (loggedIn) {
+      startRealtime();
+      const s = getSession();
+      if (s) void registerPushToken(s.username, getTerminal().terminalCode);
+    } else {
+      stopRealtime();
+    }
+  }, [loggedIn]);
 
   if (!loaded) {
     return (

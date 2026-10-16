@@ -126,7 +126,7 @@ export async function pushAll(): Promise<PushResult> {
   for (const item of next) {
     if (item.status === 'terkirim') continue;
     try {
-      const res = await apiPost(pathFor(item.kind), item.payload);
+      const res = await apiPost(pathFor(item.kind), { ...item.payload, clientId: item.id }, { idempotencyKey: item.id });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       item.status = 'terkirim';
       item.note = '';

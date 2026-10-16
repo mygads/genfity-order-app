@@ -24,7 +24,10 @@
     "plugins": [
       "expo-splash-screen",
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-camera",
+      "./modules/genfity-printer/app.plugin.js"
     ]
   }
 }

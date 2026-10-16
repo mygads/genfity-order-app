@@ -34,7 +34,7 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     return { ok: false, message: 'Server belum diatur — otorisasi ditolak.' };
   }
   try {
-    const res = await apiPost(ApiPath.clockIn, { role: 'supervisor', pin: clean });
+    const res = await apiPost(ApiPath.supervisorApprove, { pin: clean });
     if (!res.ok) {
       attempts += 1;
       return { ok: false, message: `Otorisasi ditolak server (${sisa()} percobaan lagi).` };

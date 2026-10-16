@@ -70,7 +70,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   };
 
   const goPay = () =>
-    navigation?.navigate('Pay', { total, ...(voucher ? { voucher: voucher.code } : {}) });
+    navigation?.navigate('Pay', { total, items, ...(voucher ? { voucher: voucher.code } : {}) });
   const goPromo = () => navigation?.navigate('PromotionList', { returnTo: 'CartDetail' });
   const goSave = () => {
     setSavedTick(true);

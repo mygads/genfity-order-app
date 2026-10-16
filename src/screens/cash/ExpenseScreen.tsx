@@ -38,6 +38,16 @@ export default function ExpenseScreen({ navigation }: Props) {
   const ready = nama.trim().length >= 3 && jumlahNum > 0;
 
   const pickPhoto = async () => {
+    // Kamera dulu (alurs POSLite: foto struk langsung), galeri sebagai cadangan.
+    try {
+      const cam = await ImagePicker.launchCameraAsync({ quality: 0.5 });
+      if (!cam.canceled && cam.assets?.[0]?.uri) {
+        setPhoto(cam.assets[0].uri);
+        return;
+      }
+    } catch {
+      /* kamera tak tersedia — lanjut ke galeri */
+    }
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,

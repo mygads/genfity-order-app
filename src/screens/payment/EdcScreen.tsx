@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import { startEdcPayment } from '../../native/edc';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { total?: number } } };
@@ -20,6 +21,18 @@ export default function EdcScreen({ navigation, route }: Props) {
   const [bank, setBank] = useState(BANKS[0]);
   const [terminal, setTerminal] = useState(TERMINALS[0]);
   const [cardNo, setCardNo] = useState('');
+
+  useEffect(() => {
+    // Lempar nominal ke aplikasi APOS (pola POSLite). Di Expo Go/web: no-op.
+    // Kasir tetap input kode persetujuan 6 digit dari struk EDC secara manual.
+    void startEdcPayment(total, `EDC-${Date.now()}`).then((r) => {
+      if (r.ok && r.approvalCode) {
+        setApproval(r.approvalCode.replace(/\D/g, '').slice(0, 6));
+        if (r.cardNo) setCardNo(r.cardNo.replace(/\D/g, '').slice(-4));
+        setPhase('approval');
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (phase !== 'waiting') return;
