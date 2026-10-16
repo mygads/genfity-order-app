@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -22,7 +22,9 @@ import { useEffect, useMemo, useState } from 'react';import {
   id: string;
   name: string;
   mac: string;
-  paired: boolean;}const LS_STATIONS = 'genfity.printer.stations';const DEFAULT_STATIONS: Station[] = [
+  paired: boolean;
+  /** true = hasil pindai BLE (mac diawali `BLE:`), bisa langsung dipakai. */
+  ble?: boolean;}const LS_STATIONS = 'genfity.printer.stations';const DEFAULT_STATIONS: Station[] = [
   { id: 'st-kasir', name: 'Printer Kasir', role: 'Kasir', conn: 'Bluetooth', address: '00:11:22:33:44:55', cpl: 32, autocut: true, isDefault: true, connected: true },
   { id: 'st-dapur', name: 'Printer Dapur', role: 'Dapur', conn: 'LAN', address: '192.168.1.50:9100', cpl: 32, autocut: false, isDefault: false, connected: false },
   { id: 'st-checker', name: 'Printer Checker', role: 'Checker', conn: 'LAN', address: '192.168.1.51:9100', cpl: 48, autocut: false, isDefault: false, connected: false },
@@ -51,13 +53,16 @@ function previewText(s: Station, hint: string | null, L: { test: string; role: s
   ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. */function stationTarget(s: Station): PrinterTarget { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
 }
 
-if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } return { transport: 'bt', address: s.address.trim() };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master. */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT OR REPLACE INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, 'receipt', ?, ?, 1, ?, NULL)`, [s.id, s.name, s.name, s.address, s.conn, s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
+if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } const addr = s.address.trim(); if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (mac) return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master. */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT OR REPLACE INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, 'receipt', ?, ?, 1, ?, NULL)`, [s.id, s.name, s.name, s.address, s.conn, s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<(typeof typeFilters)[number]>('Semua');
   const [stations, setStations] = useState<Station[]>(DEFAULT_STATIONS);
   const [bonded, setBonded] = useState<Bonded[]>(DEFAULT_BONDED);
   const [pairing, setPairing] = useState(false);
+  const [bleScanning, setBleScanning] = useState(false);
+  const [usbScanning, setUsbScanning] = useState(false);
+  const [usbList, setUsbList] = useState<UsbDeviceInfo[]>([]);
   const [lanIp, setLanIp] = useState('192.168.1.50');
   const [lanPort, setLanPort] = useState('9100');
   const [lanMsg, setLanMsg] = useState('');
@@ -145,6 +150,58 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     }
   };
 
+  /** Pindai BLE ±8 detik: hasil masuk daftar bonded (mac `BLE:`), siap dipakai. */
+  const startBleScan = async () => {
+    setBleScanning(true);
+    try {
+      const found = await listBlePrinters();
+      if (found.length > 0) {
+        setBonded((bb) => [
+          ...bb,
+          ...found
+            .filter((f) => !bb.some((b) => b.mac === `BLE:${f.mac}`))
+            .map((f, i) => ({ id: `ble-live-${Date.now()}-${i}`, name: f.name, mac: `BLE:${f.mac}`, paired: true, ble: true })),
+        ]);
+        setStatusMsg(t('printers.bleFound').replace('{n}', String(found.length)));
+      } else {
+        setStatusMsg(t('printers.bleNone'));
+      }
+    } finally {
+      setBleScanning(false);
+    }
+  };
+
+  /** Pakai perangkat hasil pindai (BLE/USB) ke printer utama. */
+  const useOnPrimary = (patch: Partial<Station>, msg: string) => {
+    setStations((ss) => {
+      const next = ss.map((x) => (x.isDefault ? { ...x, ...patch } : x));
+      const d = next.find((x) => x.isDefault);
+      if (d) void persistStation(d);
+      return next;
+    });
+    setStatusMsg(msg);
+  };
+  const useBleDevice = (b: Bonded) =>
+    useOnPrimary({ conn: 'Bluetooth', address: b.mac }, t('printers.bleApplied').replace('{x}', b.name));
+
+  /** Pindai USB OTG: tanpa hafal VID/PID. */
+  const scanUsb = async () => {
+    setUsbScanning(true);
+    try {
+      const found = await listUsbDevices();
+      setUsbList(found);
+      setStatusMsg(
+        found.length > 0
+          ? t('printers.usbFound').replace('{n}', String(found.length))
+          : t('printers.usbNone'),
+      );
+    } finally {
+      setUsbScanning(false);
+    }
+  };
+  const useUsbDevice = (v: UsbDeviceInfo) =>
+    useOnPrimary({ conn: 'Star', address: `${v.vendorId}/${v.productId}` }, t('printers.usbApplied').replace('{x}', v.name));
+
   const togglePair = (id: string) =>
     setBonded((bb) => bb.map((b) => (b.id === id ? { ...b, paired: !b.paired } : b)));
 
@@ -184,6 +241,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   /** Test print per station: pratinjau struk + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
     const bytes = buildReceiptBytes({
+      cols: s.cpl,
       shop: 'ESB CABANG PORIS',
       addr: `${t('printers.receiptTest')} - ${s.name}`,
       trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
@@ -242,6 +300,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.roleText}>{roleLabel(s.role)}</Text>
             </View>
           </View>
+          <AppInput key={`${s.id}-${s.address}`} defaultValue={s.address} onEndEditing={(e) => patchStation(s.id, { address: e.nativeEvent.text.trim() })} placeholder={t('printers.addrPh')} autoCapitalize="none" />
           <View style={styles.chipRow}>
             {(['Kasir', 'Dapur', 'Checker', 'Label'] as StationRole[]).map((r) => (
               <Pressable key={r} onPress={() => patchStation(s.id, { role: r })} style={[styles.chip, s.role === r && styles.chipActive]}>
@@ -318,14 +377,17 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.stName}>{b.name}</Text>
               <Text style={styles.stMeta}>{b.mac} - {b.paired ? t('printers.paired') : t('printers.notPaired')}</Text>
             </View>
-            {b.paired ? (
+            {b.ble ? (
+              <AppButton title={t('printers.useDevice')} onPress={() => useBleDevice(b)} fullWidth={false} style={styles.btnInline} />
+            ) : b.paired ? (
               <AppButton title={t('printers.forget')} onPress={() => togglePair(b.id)} variant="danger" fullWidth={false} style={styles.btnInlinePale} textStyle={styles.redText} />
             ) : (
               <AppButton title={t('printers.pair')} onPress={() => togglePair(b.id)} variant="secondary" fullWidth={false} style={styles.btnInline} />
             )}
           </View>
         ))}
-        <AppButton title={pairing ? t('printers.scanning') : t('printers.scanBt')} onPress={startPairing} disabled={pairing} style={styles.navyBlock} />
+        <AppButton title={pairing ? t('printers.scanning') : t('printers.scanBt')} onPress={startPairing} disabled={pairing || bleScanning} style={styles.navyBlock} />
+        <AppButton title={bleScanning ? t('printers.scanningBle') : t('printers.scanBle')} onPress={startBleScan} disabled={bleScanning || pairing} variant="secondary" style={styles.blockGap} />
       </View>
 
       <Text style={styles.groupLabel}>{t('printers.lan')}</Text>
@@ -342,6 +404,22 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
         </View>
         <AppButton title={t('printers.testLan')} onPress={testLan} variant="secondary" style={styles.blockGap} />
         {lanMsg ? <Text style={styles.statusMsg}>{lanMsg}</Text> : null}
+      </View>
+
+      <Text style={styles.groupLabel}>USB</Text>
+      <View style={styles.panel}>
+        <Text style={styles.cardTitle}>{t('printers.usbTitle')}</Text>
+        <Text style={styles.cardSub}>{t('printers.usbSub')}</Text>
+        {usbList.map((u) => (
+          <View key={`${u.vendorId}-${u.productId}`} style={styles.btRow}>
+            <View style={styles.stLeft}>
+              <Text style={styles.stName}>{u.name}</Text>
+              <Text style={styles.stMeta}>{u.vendorId}/{u.productId}</Text>
+            </View>
+            <AppButton title={t('printers.useDevice')} onPress={() => useUsbDevice(u)} fullWidth={false} style={styles.btnInline} />
+          </View>
+        ))}
+        <AppButton title={usbScanning ? t('printers.scanning') : t('printers.usbScan')} onPress={scanUsb} disabled={usbScanning} variant="secondary" style={styles.blockGap} />
       </View>
 
       <Text style={styles.groupLabel}>{t('printers.detected')}</Text>

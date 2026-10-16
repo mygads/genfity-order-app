@@ -13,13 +13,18 @@ interface StoredStation {
   role: string;
   conn: 'Bluetooth' | 'LAN' | 'Star';
   address: string;
+  /** Lebar kertas station (32/48) — diteruskan ke builder ESC/POS. */
+  cpl?: 32 | 48;
   isDefault?: boolean;
   connected?: boolean;
 }
 
 const LS_STATIONS = 'genfity.printer.stations';
 
-/** Petakan satu station tersimpan ke target kirim (BT MAC / LAN IP:port / USB VID/PID). */
+/**
+ * Petakan satu station tersimpan ke target kirim (BT MAC / BLE `BLE:MAC` /
+ * LAN IP:port / USB VID/PID).
+ */
 function targetOf(d: StoredStation): PrinterTarget | null {
   if (d.conn === 'LAN') {
     const [host, portRaw] = d.address.split(':');
@@ -35,12 +40,19 @@ function targetOf(d: StoredStation): PrinterTarget | null {
       productId: m ? Number(m[2]) : 0,
     };
   }
-  if (!d.address.trim()) return null;
-  return { transport: 'bt', address: d.address.trim() };
+  const addr = d.address.trim();
+  if (!addr) return null;
+  // Konvensi UI: alamat diawali `BLE:` = printer thermal BLE (Nordic UART).
+  if (addr.toUpperCase().startsWith('BLE:')) {
+    const mac = addr.slice(4).trim();
+    if (!mac) return null;
+    return { transport: 'ble', address: mac };
+  }
+  return { transport: 'bt', address: addr };
 }
 
 /** Target kirim dari stasiun default (kasir) yang tersimpan di pengaturan. */
-async function defaultStation(): Promise<{ target: PrinterTarget; name: string } | null> {
+async function defaultStation(): Promise<{ target: PrinterTarget; name: string; cols: 32 | 48 } | null> {
   try {
     const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
     const d =
@@ -51,7 +63,7 @@ async function defaultStation(): Promise<{ target: PrinterTarget; name: string }
     if (!d) return null;
     const target = targetOf(d);
     if (!target) return null;
-    return { target, name: d.name };
+    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32 };
   } catch {
     return null;
   }
@@ -61,7 +73,7 @@ async function defaultStation(): Promise<{ target: PrinterTarget; name: string }
  * Cari station dapur/checker: cocokkan id kanonis (ST-DAPUR/st-dapur/…)
  * atau peran, tanpa peduli huruf. Kembalikan target + nama bila alamat ada.
  */
-async function kitchenStation(want: string): Promise<{ target: PrinterTarget; name: string } | null> {
+async function kitchenStation(want: string): Promise<{ target: PrinterTarget; name: string; cols: 32 | 48 } | null> {
   try {
     const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
     const key = want.trim().toLowerCase();
@@ -74,7 +86,7 @@ async function kitchenStation(want: string): Promise<{ target: PrinterTarget; na
     if (!d) return null;
     const target = targetOf(d);
     if (!target) return null;
-    return { target, name: d.name };
+    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32 };
   } catch {
     return null;
   }
@@ -95,7 +107,6 @@ export async function printReceiptData(r: EscReceipt): Promise<PrintOutcome> {
     window.print();
     return { ok: true, bytes: 0, printer: 'OS print' };
   }
-  const bytes = buildReceiptBytes(r);
   const d = await defaultStation();
   if (!d) {
     Alert.alert(
@@ -104,6 +115,9 @@ export async function printReceiptData(r: EscReceipt): Promise<PrintOutcome> {
     );
     return { ok: false, reason: 'no-printer' };
   }
+  // Lebar kertas ikut station (chip 32/48 di Pengaturan Printer) kecuali
+  // pemanggil sudah menentukan sendiri.
+  const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? d.cols });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     Alert.alert(
@@ -126,7 +140,6 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
     window.print();
     return { ok: true, bytes: 0, printer: 'OS print' };
   }
-  const bytes = buildKitchenTicketBytes({ ...t, station });
   const d = await kitchenStation(station);
   if (!d) {
     Alert.alert(
@@ -135,6 +148,8 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
     );
     return { ok: false, reason: 'no-printer' };
   }
+  // Lebar kertas ikut station dapur kecuali pemanggil menentukan sendiri.
+  const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     Alert.alert(

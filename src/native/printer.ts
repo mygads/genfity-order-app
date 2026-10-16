@@ -1,19 +1,20 @@
 /**
- * Lapisan printer: SATU interface untuk 3 transport.
+ * Lapisan printer: SATU interface untuk 4 transport.
  *
  * - LAN (Wi-Fi/Ethernet, IP+port): murni JS via react-native-tcp-socket - JALAN.
- * - BT SPP klasik (MAC bonded): modul native `GenfityPrinter` (Kotlin,
- *   modules/genfity-printer) - aktif setelah `npx expo prebuild` + EAS build.
+ * - BT SPP klasik (MAC bonded): modul native `GenfityPrinter`
+ *   (modules/genfity-printer) - aktif setelah `npx expo prebuild` + EAS build.
+ * - BLE thermal (Nordic UART, MAC `BLE:`): modul native yang sama (GATT).
  * - USB serial (VID/PID): modul native yang sama via UsbManager bulk-transfer.
  *
  * Di Expo Go / web (modul native tak ada): kirim ditolak halus dengan
  * status `need-dev-client`, dan panggil `onPreview` agar layar tetap bisa
  * menampilkan pratinjau struk. Byte ESC/POS dirakit di src/lib/escpos.ts.
  */
-import { Platform } from 'react-native';
-import GenfityPrinterSpec from '../specs/GenfityPrinter';
+import { PermissionsAndroid, Platform } from 'react-native';
+import GenfityPrinterSpec, { type UsbDeviceInfo } from '../specs/GenfityPrinter';
 
-export type PrinterTransport = 'lan' | 'bt' | 'usb';
+export type PrinterTransport = 'lan' | 'bt' | 'ble' | 'usb';
 export type PrintResult =
   | { ok: true; bytes: number }
   | { ok: false; reason: 'need-dev-client' | 'connect-failed' | 'send-failed'; detail?: string };
@@ -29,9 +30,12 @@ export interface PrinterTarget {
 
 interface NativePrinter {
   printBt?: (mac: string, base64: string) => Promise<number>;
+  printBle?: (mac: string, base64: string) => Promise<number>;
   printUsb?: (vid: number, pid: number, base64: string) => Promise<number>;
   requestUsbPermission?: (vid: number, pid: number) => Promise<boolean>;
   listBondedBt?: () => Promise<Array<{ name: string; mac: string }>>;
+  listUsbDevices?: () => Promise<UsbDeviceInfo[]>;
+  scanBlePrinters?: () => Promise<Array<{ name: string; mac: string }>>;
   openDrawer?: (target: string) => Promise<boolean>;
   startWsService?: () => Promise<boolean>;
   stopWsService?: () => Promise<boolean>;
@@ -91,6 +95,52 @@ export async function listBondedBtPrinters(): Promise<Array<{ name: string; mac:
   }
 }
 
+/** Daftar device USB tersambung (butuh dev-client; Expo Go → list kosong). */
+export async function listUsbDevices(): Promise<UsbDeviceInfo[]> {
+  const n = native();
+  if (!n?.listUsbDevices) return [];
+  try {
+    return await n.listUsbDevices();
+  } catch {
+    return [];
+  }
+}
+
+/** Minta izin pindai BT bila perlu (Android 12+; Android lama: lokasi). */
+async function ensureBleScanPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const api = Number(Platform.Version);
+    const perms =
+      api >= 31
+        ? [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN, PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]
+        : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+    for (const p of perms) {
+      const res = await PermissionsAndroid.request(p);
+      if (res !== PermissionsAndroid.RESULTS.GRANTED) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pindai printer BLE ±8 detik (butuh dev-client + izin; Expo Go → kosong).
+ * false = izin ditolak / tanpa modul.
+ */
+export async function listBlePrinters(): Promise<Array<{ name: string; mac: string }>> {
+  if (Platform.OS === 'web') return [];
+  const n = native();
+  if (!n?.scanBlePrinters) return [];
+  if (!(await ensureBleScanPermission())) return [];
+  try {
+    return await n.scanBlePrinters();
+  } catch {
+    return [];
+  }
+}
+
 /** Kirim byte ESC/POS ke target. */
 export async function printBytes(target: PrinterTarget, data: Uint8Array): Promise<PrintResult> {
   if (target.transport === 'lan' && target.host) {
@@ -102,6 +152,10 @@ export async function printBytes(target: PrinterTarget, data: Uint8Array): Promi
     const b64 = toBase64(data);
     if (target.transport === 'bt' && target.address && n.printBt) {
       const bytes = await n.printBt(target.address, b64);
+      return { ok: true, bytes };
+    }
+    if (target.transport === 'ble' && target.address && n.printBle) {
+      const bytes = await n.printBle(target.address, b64);
       return { ok: true, bytes };
     }
     if (target.transport === 'usb' && n.printUsb) {

@@ -16,11 +16,23 @@ export interface BondedBtDevice {
   mac: string;
 }
 
+export interface UsbDeviceInfo {
+  name: string;
+  vendorId: number;
+  productId: number;
+}
+
 export interface GenfityPrinterSpec {
   listBondedBt: () => Promise<BondedBtDevice[]>;
   printBt: (mac: string, base64: string) => Promise<number>;
   printUsb: (vendorId: number, productId: number, base64: string) => Promise<number>;
   requestUsbPermission: (vendorId: number, productId: number) => Promise<boolean>;
+  /** Daftar device USB tersambung (tanpa hafal VID/PID). */
+  listUsbDevices: () => Promise<UsbDeviceInfo[]>;
+  /** Pindai printer BLE ±8 detik. */
+  scanBlePrinters: () => Promise<BondedBtDevice[]>;
+  /** Cetak ke printer thermal BLE (Nordic UART). */
+  printBle: (mac: string, base64: string) => Promise<number>;
   openDrawer: (targetJson: string) => Promise<boolean>;
   startWsService: () => Promise<boolean>;
   stopWsService: () => Promise<boolean>;

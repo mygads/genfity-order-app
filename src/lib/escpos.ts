@@ -30,6 +30,12 @@ export interface EscReceipt {
   ongkir?: number;
   /** Pembulatan ke Rp 100 (bisa negatif). */
   rounding?: number;
+  /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
+  cols?: 32 | 48;
+  /** Logo header monokrom (dibuat via scripts/png2mono.cjs). */
+  logo?: EscMonoImage;
+  /** Data QR yang dicetak di bawah struk (mis. nomor transaksi). */
+  qr?: string;
   total: number;
   method?: string;
   /** Tunai diterima (Rp). */
@@ -43,6 +49,19 @@ const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
 export const ESC_COLS = 32;
+/** 80mm ≈ 48 kolom font A. */
+export const ESC_COLS_WIDE = 48;
+
+/**
+ * Bitmap monokrom untuk logo header: 1 bit/piksel, bit-1 = titik hitam,
+ * MSB dulu per baris. Lihat scripts/png2mono.cjs untuk konverter PNG.
+ */
+export interface EscMonoImage {
+  widthPx: number;
+  heightPx: number;
+  /** Byte bitmap, panjang = ceil(widthPx/8) * heightPx, dikode base64. */
+  base64: string;
+}
 
 function ascii(s: string): number[] {
   // ESC/POS klasik = 1 byte/karakter; transliterasi sederhana ke ASCII.
@@ -86,10 +105,79 @@ function row2(out: number[], left: string, right: string, cols = ESC_COLS) {
   text(out, `${l}${' '.repeat(space)}${r}`);
 }
 
+/** Decode base64 → byte (tanpa atob agar jalan di semua runtime). */
+export function fromBase64(b64: string): Uint8Array {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '');
+  const out: number[] = [];
+  for (let i = 0; i + 3 < clean.length + 3 && i < clean.length; i += 4) {
+    const v = (c: string) => (c === '=' || c === undefined ? 0 : abc.indexOf(c));
+    const n =
+      (v(clean[i] as string) << 18) |
+      (v(clean[i + 1] as string) << 12) |
+      (v(clean[i + 2] as string) << 6) |
+      v(clean[i + 3] as string);
+    out.push((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
+  }
+  const pad = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  return Uint8Array.from(out.slice(0, out.length - pad));
+}
+
+/**
+ * Perintah cetak bitmap `GS v 0` (raster normal), rata tengah.
+ * Lebar dipotong ke 384 dot (58mm) / 576 dot (80mm) bila kelebihan.
+ */
+export function buildRasterImageBytes(img: EscMonoImage, cols: number): Uint8Array {
+  const maxDots = cols >= 48 ? 576 : 384;
+  const w = Math.min(Math.max(8, Math.floor(img.widthPx)), maxDots);
+  const h = Math.max(1, Math.floor(img.heightPx));
+  const rowBytes = Math.ceil(w / 8);
+  const src = fromBase64(img.base64);
+  const srcRow = Math.max(1, Math.ceil(img.widthPx / 8));
+  const out: number[] = [];
+  push(out, ESC, 0x61, 1); // rata tengah
+  push(out, GS, 0x76, 0x30, 0x00, rowBytes & 0xff, (rowBytes >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < rowBytes; x++) {
+      const sx = y * srcRow + x;
+      out.push(sx < src.length ? (src[sx] as number) : 0);
+    }
+  }
+  push(out, LF);
+  return Uint8Array.from(out);
+}
+
+/**
+ * Perintah QR Model 2 (`GS ( k`): pilih model → ukuran modul → koreksi
+ * error M → simpan data → cetak. Data dibatasi 512 byte agar muat di
+ * memori printer. Rata tengah.
+ */
+export function buildQrBytes(data: string): Uint8Array {
+  const raw = ascii(data).slice(0, 512);
+  const out: number[] = [];
+  const fn = (f: number, payload: number[]) => {
+    const len = payload.length + 2;
+    push(out, GS, 0x28, 0x6b, len & 0xff, (len >> 8) & 0xff, 0x31, f, ...payload);
+  };
+  push(out, ESC, 0x61, 1);
+  fn(0x41, [0x32, 0x00]); // model 2
+  fn(0x43, [0x06]); // modul 6 dot (terbaca di 58mm maupun 80mm)
+  fn(0x45, [0x31]); // koreksi error M (15%)
+  push(out, GS, 0x28, 0x6b, (raw.length + 3) & 0xff, ((raw.length + 3) >> 8) & 0xff, 0x31, 0x50, 0x30, ...raw);
+  fn(0x51, [0x30]); // cetak
+  push(out, LF);
+  return Uint8Array.from(out);
+}
+
 /** Susun byte ESC/POS lengkap (termasuk inisialisasi + potong kertas). */
 export function buildReceiptBytes(r: EscReceipt): Uint8Array {
+  const cols = r.cols === 48 ? ESC_COLS_WIDE : ESC_COLS;
   const out: number[] = [];
   push(out, ESC, 0x40); // init
+  if (r.logo) {
+    // Logo header monokrom di paling atas (builder sudah rata tengah).
+    for (const b of buildRasterImageBytes(r.logo, cols)) out.push(b);
+  }
   push(out, ESC, 0x61, 1); // rata tengah
   push(out, GS, 0x21, 0x11); // judul 2x
   text(out, r.shop);
@@ -99,28 +187,32 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.cashier) text(out, r.cashier);
   if (r.datetime) text(out, r.datetime);
   push(out, ESC, 0x61, 0); // rata kiri
-  text(out, '-'.repeat(ESC_COLS));
+  text(out, '-'.repeat(cols));
   for (const i of r.items) {
-    row2(out, `${i.qty}x ${i.name}`, escRp(i.qty * i.price));
+    row2(out, `${i.qty}x ${i.name}`, escRp(i.qty * i.price), cols);
   }
-  text(out, '-'.repeat(ESC_COLS));
+  text(out, '-'.repeat(cols));
   // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
   // eksklusif → PPN info-only → feeESB → voucher → ongkir → rounding → total.
-  row2(out, 'Subtotal', escRp(r.subtotal));
-  if (r.discount) row2(out, 'Diskon', `-${escRp(r.discount)}`);
-  if (r.service) row2(out, 'Service 5%', escRp(r.service));
-  if (r.tax) row2(out, 'PPN (Inkl.)', escRp(r.tax));
-  if (r.feeESB) row2(out, 'Fee Layanan', escRp(r.feeESB));
+  row2(out, 'Subtotal', escRp(r.subtotal), cols);
+  if (r.discount) row2(out, 'Diskon', `-${escRp(r.discount)}`, cols);
+  if (r.service) row2(out, 'Service 5%', escRp(r.service), cols);
+  if (r.tax) row2(out, 'PPN (Inkl.)', escRp(r.tax), cols);
+  if (r.feeESB) row2(out, 'Fee Layanan', escRp(r.feeESB), cols);
   if (r.voucherCode || r.voucherAmount) {
-    row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${escRp(r.voucherAmount)}` : '-');
+    row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${escRp(r.voucherAmount)}` : '-', cols);
   }
-  if (r.ongkir) row2(out, 'Ongkir', escRp(r.ongkir));
-  if (r.rounding) row2(out, 'Pembulatan', escRp(r.rounding));
+  if (r.ongkir) row2(out, 'Ongkir', escRp(r.ongkir), cols);
+  if (r.rounding) row2(out, 'Pembulatan', escRp(r.rounding), cols);
   push(out, ESC, 0x45, 1); // tebal
-  row2(out, 'TOTAL', escRp(r.total));
+  row2(out, 'TOTAL', escRp(r.total), cols);
   push(out, ESC, 0x45, 0);
-  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${escRp(r.paid)}` : r.method);
-  if (r.change) row2(out, 'Kembali', escRp(r.change));
+  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${escRp(r.paid)}` : r.method, cols);
+  if (r.change) row2(out, 'Kembali', escRp(r.change), cols);
+  if (r.qr) {
+    // QR di bawah rincian bayar, sebelum footer (ala POSLite).
+    for (const b of buildQrBytes(r.qr)) out.push(b);
+  }
   push(out, ESC, 0x61, 1);
   text(out, r.footer ?? 'Terima kasih');
   push(out, LF, LF, LF, LF);
@@ -131,6 +223,8 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
 export interface EscKitchenTicket {
   station: string;
   no: string;
+  /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
+  cols?: 32 | 48;
   table?: string;
   mode?: string;
   time?: string;
@@ -140,6 +234,7 @@ export interface EscKitchenTicket {
 
 /** Tiket dapur/checker: tanpa harga (opsional total estimasi), tanpa potong? tetap potong. */
 export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
+  const cols = t.cols === 48 ? ESC_COLS_WIDE : ESC_COLS;
   const out: number[] = [];
   push(out, ESC, 0x40);
   push(out, ESC, 0x61, 1);
@@ -154,14 +249,14 @@ export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
   if (t.time) text(out, t.time);
   if (t.cashier) text(out, t.cashier);
   push(out, ESC, 0x61, 0);
-  text(out, '-'.repeat(ESC_COLS));
+  text(out, '-'.repeat(cols));
   for (const i of t.items) {
     push(out, ESC, 0x45, 1);
     text(out, `${i.qty}x ${i.name}`);
     push(out, ESC, 0x45, 0);
     if (i.note) text(out, `  * ${i.note}`);
   }
-  text(out, '-'.repeat(ESC_COLS));
+  text(out, '-'.repeat(cols));
   push(out, LF, LF, LF, LF);
   push(out, GS, 0x56, 0x00);
   return Uint8Array.from(out);
