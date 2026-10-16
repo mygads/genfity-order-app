@@ -8,6 +8,9 @@ import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
+import { getSession } from '../../session';
+import { requireAccess } from '../../lib/access';
+import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -71,6 +74,11 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [priceDraft, setPriceDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [savedTick, setSavedTick] = useState(false);
+  /** Eskalasi void: gate RBAC order.void, deny -> PIN supervisor (fail-closed offline). */
+  const [voidPin, setVoidPin] = useState('');
+  const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
+  const [voidAuthMsg, setVoidAuthMsg] = useState('');
+  const [voidConfirming, setVoidConfirming] = useState(false);
 
   const active = useMemo(() => items.filter((c) => !c.voided), [items]);
   const subtotalGross = useMemo(
@@ -105,12 +113,52 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       return prev.map((c) => (c.id === id ? { ...c, qty: c.qty - 1 } : c));
     });
   const removeItem = (id: string) => setItems((prev) => prev.filter((c) => c.id !== id));
-  const voidItem = (id: string) => {
-    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, voided: true } : c)));
-    setEditingId(null);
+  /** Terapkan void/unvoid langsung (dipakai gate-ok dan sesudah PIN supervisor ok). */
+  const applyVoid = (id: string, wantVoid: boolean) => {
+    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, voided: wantVoid } : c)));
+    if (wantVoid) setEditingId(null);
   };
-  const unvoidItem = (id: string) =>
-    setItems((prev) => prev.map((c) => (c.id === id ? { ...c, voided: false } : c)));
+  /** Gate RBAC order.void: allow/db-unready langsung terap; deny eskalasi ke PIN supervisor. */
+  const requestVoid = async (id: string, wantVoid: boolean) => {
+    try {
+      const s = getSession();
+      const gate = await requireAccess(s?.userId || s?.username || '', 'order.void');
+      if (gate.ok) {
+        applyVoid(id, wantVoid);
+        return;
+      }
+      setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+    } catch {
+      applyVoid(id, wantVoid);
+      return;
+    }
+    setVoidPin('');
+    setVoidTarget({ id, wantVoid });
+  };
+  const voidItem = (id: string) => {
+    void requestVoid(id, true);
+  };
+  const unvoidItem = (id: string) => {
+    void requestVoid(id, false);
+  };
+  /** Konfirmasi PIN supervisor untuk target void yang tertunda (fail-closed saat offline). */
+  const confirmVoidPin = () => {
+    if (!voidTarget || voidPin.replace(/\D/g, '').length !== 6 || voidConfirming) return;
+    setVoidConfirming(true);
+    void authorizeSupervisor(voidPin).then((res) => {
+      if (!res.ok) {
+        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} remaining)`);
+        setVoidConfirming(false);
+        return;
+      }
+      const target = voidTarget;
+      applyVoid(target.id, target.wantVoid);
+      setVoidConfirming(false);
+      setVoidTarget(null);
+      setVoidPin('');
+      setVoidAuthMsg('');
+    });
+  };
 
   const openEditor = (c: CartItem) => {
     setEditingId(c.id);
@@ -487,6 +535,48 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 size="sm"
                 title={t('save')}
                 onPress={saveOngkir}
+                fullWidth={false}
+                style={[styles.modalPrimary, { marginTop: 0, backgroundColor: colors.navy }]}
+                textStyle={styles.modalPrimaryT}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Dialog PIN supervisor untuk void yang terdeny gate RBAC (tanpa kunci i18n baru). */}
+      <Modal visible={voidTarget !== null} transparent animationType="fade" onRequestClose={() => setVoidTarget(null)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>Supervisor PIN</Text>
+            <Text style={styles.modalLabel}>Perlu persetujuan supervisor / Supervisor approval required</Text>
+            <AppInput
+              boxStyle={styles.modalInput}
+              style={styles.fieldText}
+              value={voidPin}
+              onChangeText={(v) => { setVoidPin(v.replace(/[^0-9]/g, '').slice(0, 6)); }}
+              keyboardType="numeric"
+              maxLength={6}
+              secureTextEntry
+              placeholder="6-digit PIN"
+            />
+            {voidAuthMsg ? <Text style={[styles.modalLabel, { color: colors.red }]}>{voidAuthMsg}</Text> : null}
+            <View style={styles.modalRow}>
+              <AppButton
+                size="sm"
+                variant="secondary"
+                title="Batal / Cancel"
+                onPress={() => { setVoidTarget(null); setVoidPin(''); setVoidAuthMsg(''); }}
+                disabled={voidConfirming}
+                fullWidth={false}
+                style={[styles.modalGhost, { marginTop: 0 }]}
+                textStyle={styles.modalGhostT}
+              />
+              <AppButton
+                size="sm"
+                title={voidConfirming ? '...' : 'Setujui / Approve'}
+                onPress={confirmVoidPin}
+                disabled={voidPin.replace(/\D/g, '').length !== 6 || voidConfirming}
                 fullWidth={false}
                 style={[styles.modalPrimary, { marginTop: 0, backgroundColor: colors.navy }]}
                 textStyle={styles.modalPrimaryT}
