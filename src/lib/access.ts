@@ -5,11 +5,16 @@
  * 1. baris eksak (userId, accessKey) - menang mutlak;
  * 2. baris wildcard (userId, '*') - allow-all (dipakai admin seed u-admin);
  * 3. template peran: peran dibaca dari ms_posuser.role via id ATAU username
- *    (dinormalisasi lowercase+trim), lalu baris (role, accessKey) dan
- *    (role, '*') - mis. template 'kasir' berisi deny eksplisit untuk aksi
- *    sensitif, template 'supervisor' berisi allow;
+ *    (dinormalisasi via normalizeRole), lalu baris (role, accessKey) dan
+ *    (role, '*') - mis. template 'Merchant Staff' berisi deny eksplisit untuk
+ *    aksi sensitif, template 'Merchant Owner' berisi allow-all wildcard;
  * 4. tanpa baris apa pun = fail-open allow (kompatibilitas kasir offline),
  *    KECUALI ada deny eksplisit di tingkat di atas.
+ *
+ * Model peran hanya ada 2: Merchant Owner (akses penuh) dan Merchant Staff
+ * (dibatasi: deny order.void/order.cancel/sale.refund/settings.edit, lalu
+ * eskalasi PIN Owner). Nilai peran legacy (admin/supervisor/kasir/...) dari
+ * server dipetakan ke kanonis via normalizeRole agar template terbaca.
  *
  * Fail-open juga berlaku saat DB belum siap (catch -> allow, reason
  * 'db-unready'); tiap jalur fail-open memancarkan console.warn sekali
@@ -20,6 +25,40 @@ import { queryFirst } from './db';
 
 /** Wildcard allow-all di kolom accessKey. */
 export const ACCESS_WILDCARD = '*';
+
+/** Nama peran kanonis: pemilik merchant (akses penuh). */
+export const ROLE_OWNER = 'Merchant Owner';
+
+/** Nama peran kanonis: staf merchant (dibatasi + eskalasi PIN Owner). */
+export const ROLE_STAFF = 'Merchant Staff';
+
+/**
+ * Normalisasi peran mentah ke nama kanonis (ROLE_OWNER/ROLE_STAFF).
+ * Trim + lowercase; legacy admin/owner/supervisor/spv -> Owner,
+ * kasir/cashier/staff -> Staff; tak dikenal -> '' (fail-open default lestari).
+ */
+export function normalizeRole(raw: unknown): string {
+  const key = String(raw ?? '').trim().toLowerCase();
+  if (!key) return '';
+  if (
+    key === ROLE_OWNER.toLowerCase() ||
+    key === 'owner' ||
+    key === 'admin' ||
+    key === 'supervisor' ||
+    key === 'spv'
+  ) {
+    return ROLE_OWNER;
+  }
+  if (
+    key === ROLE_STAFF.toLowerCase() ||
+    key === 'staff' ||
+    key === 'kasir' ||
+    key === 'cashier'
+  ) {
+    return ROLE_STAFF;
+  }
+  return '';
+}
 
 /** Kunci akses yang dikenal (didokumentasikan untuk pemilik layar). */
 export const ACCESS_KEYS = [
@@ -33,10 +72,10 @@ export type AccessKey = (typeof ACCESS_KEYS)[number] | string;
 
 /** Deskripsi tiap kunci untuk dokumentasi pemilik layar. */
 export const ACCESS_KEY_DESCRIPTIONS: Record<string, string> = {
-  'order.void': 'Void item/pesanan di kasir (perlu supervisor bila kasir di-deny)',
-  'order.cancel': 'Batalkan pesanan (perlu supervisor bila kasir di-deny)',
-  'sale.refund': 'Refund penjualan (perlu supervisor bila kasir di-deny)',
-  'settings.edit': 'Ubah pengaturan (khusus admin/supervisor)',
+  'order.void': 'Void item/pesanan di kasir (perlu Owner bila Staff di-deny)',
+  'order.cancel': 'Batalkan pesanan (perlu Owner bila Staff di-deny)',
+  'sale.refund': 'Refund penjualan (perlu Owner bila Staff di-deny)',
+  'settings.edit': 'Ubah pengaturan (khusus Owner)',
 };
 
 /** Daftar kunci akses yang dikenal (wildcard '*' tidak termasuk). */
@@ -84,14 +123,15 @@ async function decide(userId: string, accessKey: string): Promise<AccessDecision
       : { ok: false, reason: 'wildcard-deny' };
   }
 
-  // 3. Template peran (userId = nama peran): baris eksak lalu wildcard.
+  // 3. Template peran (userId = nama peran kanonis): baris eksak lalu wildcard.
   // Cari peran via id ATAU username (kunci sesi bisa berupa salah satunya);
-  // normalisasi lowercase+trim karena server bisa kirim Admin/SUPERVISOR.
+  // normalisasi via normalizeRole karena server bisa kirim Admin/SUPERVISOR/
+  // kasir legacy - semuanya dipetakan ke Merchant Owner / Merchant Staff.
   const urow = await queryFirst<{ role: string | null }>(
     `SELECT role FROM ms_posuser WHERE id = ? OR username = ? LIMIT 1`,
     [userId, userId],
   );
-  const role = (urow?.role ?? '').trim().toLowerCase();
+  const role = normalizeRole(urow?.role ?? '');
   if (role) {
     const roleExact = await findAllow(role, accessKey);
     if (roleExact !== null) {

@@ -11,9 +11,9 @@
       "pageCount": 1,
       "page": 1,
       "items": [
-        { "userId": "U07", "username": "gista.kasir", "nama": "Gista", "role": "kasir", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
-        { "userId": "U08", "username": "sinta.kasir", "nama": "Sinta", "role": "kasir", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
-        { "userId": "U01", "username": "budi.spv", "nama": "Budi", "role": "supervisor", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+        { "userId": "U07", "username": "gista.kasir", "nama": "Gista", "role": "Merchant Staff", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "userId": "U08", "username": "sinta.kasir", "nama": "Sinta", "role": "Merchant Staff", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "userId": "U01", "username": "budi.spv", "nama": "Budi", "role": "Merchant Owner", "branchId": "B001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
       ]
     }
   }

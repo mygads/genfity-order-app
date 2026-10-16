@@ -76,6 +76,7 @@ const CATEGORIES: { name: string; subs: string[] }[] = [
   { name: 'Cake', subs: ['Slice', 'Whole'] },
 ];
 
+/** Last-resort absolut bila query DB melempar; array kosong DB tetap tampil empty-state. */
 const PRODUCTS: Product[] = [
   { id: 'p1', name: 'Ayam Geprek Pelakor', price: 45000, category: 'Makanan', tags: ['Makanan Cepat'], fav: true },
   { id: 'p2', name: 'Ayam Goreng Dada', price: 15000, category: 'Makanan', tags: ['Makanan Cepat'] },
@@ -255,9 +256,11 @@ export default function CashierScreen({ navigation, route }: Props) {
   // Guard agar customItem yang sama tidak double-apply saat params di-merge ulang.
   const appliedCustom = useRef('');
 
-  /** Katalog dari SQLite (ms_menu + ms_branchmenu.flagSoldOut cabang aktif).
-   * null = DB kosong (offline awal) -> fallback ke PRODUCTS hardcoded. */
+  /** Katalog live dari SQLite (ms_menu + ms_branchmenu.flagSoldOut cabang aktif).
+   * null = belum dimuat; [] = DB kosong (seed+pull kosong) -> empty-state menu;
+   * PRODUCTS const hanya last-resort bila query DB sendiri melempar. */
   const [dbProducts, setDbProducts] = useState<Product[] | null>(null);
+  const [dbFailed, setDbFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -328,7 +331,8 @@ export default function CashierScreen({ navigation, route }: Props) {
             [branchId],
           );
         }
-        if (!alive || rows.length === 0) return;
+        if (!alive) return;
+        if (rows.length === 0) { if (alive) setDbProducts([]); return; }
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
         // Kamus id -> nama kategori (pola MenuManagementScreen) agar chip/label
         // memakai nama ramah; jatuh ke id mentah bila kamus kosong.
@@ -352,7 +356,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           })),
         );
       } catch {
-        /* DB belum siap - fallback PRODUCTS */
+        /* Query DB melempar - PRODUCTS const sebagai last resort absolut. */
+        if (alive) setDbFailed(true);
       }
     })();
     return () => {
@@ -360,8 +365,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     };
   }, []);
 
-  /** Katalog aktif: SQLite bila ada, PRODUCTS const sebagai FALLBACK bila DB kosong. */
-  const catalog = dbProducts ?? PRODUCTS;
+  /** Katalog aktif: live SQLite; [] saat DB kosong (empty-state grid); PRODUCTS hanya bila query melempar. */
+  const catalog = dbProducts ?? (dbFailed ? PRODUCTS : []);
 
   /** Chip kategori diderivasi dari baris live (distinct category); CATEGORIES
    * const hanya sebagai FALLBACK bila rows kosong. Subs live kosong (tags []). */

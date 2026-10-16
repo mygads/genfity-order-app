@@ -67,10 +67,13 @@ export async function ensureSeeded(): Promise<void> {
   // tetap dapat role/akses; INSERT OR IGNORE = idempoten, aman jalan ulang
   // (pull server via master.ts domain 'useraccess' tetap menang untuk baris
   // per-user karena INSERT OR REPLACE).
+  //
+  // Model peran hanya 2 (kanonis, sama dengan ROLE_OWNER/ROLE_STAFF di
+  // lib/access.ts): 'Merchant Owner' (akses penuh) dan 'Merchant Staff'
+  // (dibatasi + eskalasi PIN Owner).
   const roles: Array<[string, string]> = [
-    ['admin', 'admin'],
-    ['kasir', 'kasir'],
-    ['supervisor', 'supervisor'],
+    ['Merchant Owner', 'Merchant Owner'],
+    ['Merchant Staff', 'Merchant Staff'],
   ];
   for (const [id, name] of roles) {
     await run(
@@ -80,35 +83,37 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  // Admin lokal: satu baris wildcard allow-all (dibaca access.ts hasAccess).
+  // Admin lokal: satu baris wildcard allow-all per user (dibaca access.ts
+  // hasAccess sebagai wildcard-allow; bertahan walau baris user hilang).
   await run(
     `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
      VALUES ('u-admin', '*', 1)`,
   );
 
-  // Kunci aksi sensitif yang deny-nya dimiliki peran kasir dan allow-nya
-  // dimiliki peran supervisor (PIN-override). Baris peran (userId = nama
-  // peran) adalah template default offline: access.ts jatuh kembali dari
-  // userId ke peran bila user tak punya baris sendiri.
+  // Merchant Owner: satu baris wildcard allow-all (dibaca access.ts
+  // hasAccess sebagai role-wildcard-allow).
+  await run(
+    `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
+     VALUES ('Merchant Owner', '*', 1)`,
+  );
+
+  // Kunci aksi sensitif yang deny-nya dimiliki peran Merchant Staff.
+  // Baris peran (userId = nama peran kanonis) adalah template default
+  // offline: access.ts jatuh kembali dari userId ke peran (via
+  // normalizeRole) bila user tak punya baris sendiri.
   const sensitiveKeys = ['order.void', 'order.cancel', 'sale.refund', 'settings.edit'];
   for (const k of sensitiveKeys) {
     await run(
       `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
-       VALUES ('kasir', ?, 0)`,
-      [k],
-    );
-  }
-  for (const k of sensitiveKeys) {
-    await run(
-      `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
-       VALUES ('supervisor', ?, 1)`,
+       VALUES ('Merchant Staff', ?, 0)`,
       [k],
     );
   }
 
-  // Pastikan baris admin lokal ber-role admin HANYA bila role kosong (DB lama
-  // mungkin berbeda); role hasil pull server tidak pernah ditimpa (GAP-11).
-  await run(`UPDATE ms_posuser SET role = 'admin' WHERE id = 'u-admin' AND (role IS NULL OR role = '')`);
+  // Pastikan baris admin lokal ber-role Merchant Owner HANYA bila role kosong
+  // (DB lama mungkin berbeda); role hasil pull server tidak pernah ditimpa
+  // (GAP-11).
+  await run(`UPDATE ms_posuser SET role = 'Merchant Owner' WHERE id = 'u-admin' AND (role IS NULL OR role = '')`);
 
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
@@ -122,10 +127,10 @@ export async function ensureSeeded(): Promise<void> {
 
   // Satu user admin lokal (ms_posuser: id, username, pinHash, password,
   // authKey, branchId, role, syncDate). PIN disimpan sebagai hash via
-  // SecureStore/AsyncStorage, bukan di kolom DB.
+  // SecureStore/AsyncStorage, bukan di kolom DB. Role kanonis Owner.
   await run(
     `INSERT OR IGNORE INTO ms_posuser (id, username, branchId, role)
-     VALUES ('u-admin', 'admin', 'B001', 'admin')`,
+     VALUES ('u-admin', 'admin', 'B001', 'Merchant Owner')`,
   );
   await savePinHash('u-admin', '1234');
 

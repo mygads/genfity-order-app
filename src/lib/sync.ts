@@ -116,6 +116,15 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     if (op === 'order-error-log') return ApiPath.orderErrorLog;
     if (op === 'delivery-push') return ApiPath.deliveryPushData;
     if (op === 'terminal-verify') return ApiPath.terminalVerifyNotify;
+    // Future-proof: varian order tambahan (kontrak §5 / ApiPath). Belum ada
+    // producer enqueueSync untuk op-op ini — routing disiapkan agar tak jatuh
+    // ke endpoint salah bila kelak dipakai. Murni aditif, tanpa ubah op lama.
+    if (op === 'split-bill') return ApiPath.splitBill;
+    if (op === 'view') return ApiPath.pushOrderView;
+    if (op === 'view-by-qr') return ApiPath.orderViewByQr;
+    if (op === 'view-quick-service') return ApiPath.orderViewQuickService;
+    // Reserved: no producer yet.
+    if (op === 'voucher-template-claim') return ApiPath.voucherTemplateClaim;
     // Deposit / voucher memakai field `kind` di payload (bukan `op`).
     const k = String(payload?.kind ?? '');
     if (k === 'deposit-topup' || k === 'member-deposit') return ApiPath.depositTopup;

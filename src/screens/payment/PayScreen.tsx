@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Image,
   ScrollView,
@@ -19,6 +19,7 @@ import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments'
 import { nextSalesNum, saveSale } from '../../lib/sales';
 import { validateVoucherCode } from '../../lib/apiSource';
 import { syncWarnLevel } from '../../lib/sync';
+import { initDb, query as queryDb } from '../../lib/db';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -128,7 +129,7 @@ const WALLETS = [
   { id: 'shopeepay', name: 'ShopeePay', img: null },
 ];
 
-/** Deposit member mock - di app nyata diambil dari server (member butuh online). */
+/** Deposit member mock - last-resort bila query ms_member melempar; DB kosong = empty-state. */
 const MEMBER_DEPOSIT_DB = [
   { id: 'M001', nama: 'Budi Santoso', saldo: 150000 },
   { id: 'M002', nama: 'Sinta Dewi', saldo: 500000 },
@@ -141,6 +142,10 @@ const SIDEBAR_IDS: Tab[] = ['tunai', 'nontunai', 'online', 'member', 'lainnya'];
 
 const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+/** Baris member live (ms_member hasil seed/pull); saldo dari depositBalance. */
+type LiveMember = { id: string; nama: string; saldo: number };
+type MemberRow = { id: string; memberName: string | null; depositBalance: number | null };
 
 export default function PayScreen({ navigation, route }: Props) {
   /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya tampil
@@ -239,11 +244,42 @@ export default function PayScreen({ navigation, route }: Props) {
   );
   const [ovoPhone, setOvoPhone] = useState('');
 
-  // Deposit member (pra-pilih bila memberId params cocok ID buku mock)
+  // Deposit member live dari ms_member (seed/pull); [] = empty-state, mock hanya bila query melempar.
   const [memberQ, setMemberQ] = useState('');
-  const [memberSel, setMemberSel] = useState<string | null>(() =>
-    memberIdParam && MEMBER_DEPOSIT_DB.some((m) => m.id === memberIdParam) ? memberIdParam : null,
-  );
+  const [memberSel, setMemberSel] = useState<string | null>(null);
+  const [dbMembers, setDbMembers] = useState<LiveMember[] | null>(null);
+  const [memberFailed, setMemberFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const rows = await queryDb<MemberRow>(
+          'SELECT id, memberName, depositBalance FROM ms_member ORDER BY memberName',
+        );
+        if (!alive) return;
+        setDbMembers(
+          rows
+            .map((r) => ({
+              id: String(r.id),
+              nama: r.memberName ?? String(r.id),
+              saldo: Math.max(0, Math.round(Number(r.depositBalance) || 0)),
+            }))
+            .filter((m) => m.id.length > 0),
+        );
+      } catch {
+        if (alive) setMemberFailed(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  // Pra-pilih bila memberId params cocok ID live (atau mock last-resort).
+  useEffect(() => {
+    if (!memberIdParam || memberSel) return;
+    const src = dbMembers ?? (memberFailed ? MEMBER_DEPOSIT_DB : null);
+    if (!src) return;
+    if (src.some((m) => m.id === memberIdParam)) setMemberSel(memberIdParam);
+  }, [dbMembers, memberFailed, memberIdParam, memberSel]);
 
   // Pluxee / Ultra / lainnya
   const [tenderCode, setTenderCode] = useState('');
@@ -434,14 +470,15 @@ export default function PayScreen({ navigation, route }: Props) {
     void goSuccess(wallet, grand, 0);
   };
 
-  // ---- Deposit member actions ----
-  const memberHits = MEMBER_DEPOSIT_DB.filter(
+  // ---- Deposit member actions (live ms_member; nol-baris = empty-state pay_dep_empty) ----
+  const memberSource: LiveMember[] = dbMembers ?? (memberFailed ? MEMBER_DEPOSIT_DB : []);
+  const memberHits = memberSource.filter(
     (m) =>
       memberQ.trim() === '' ||
       m.nama.toLowerCase().includes(memberQ.toLowerCase()) ||
       m.id.toLowerCase().includes(memberQ.toLowerCase()),
   );
-  const memberPicked = MEMBER_DEPOSIT_DB.find((m) => m.id === memberSel) ?? null;
+  const memberPicked = memberSource.find((m) => m.id === memberSel) ?? null;
   const onDepositLanjut = () => {
     if (!memberPicked || memberPicked.saldo <= 0 || payable <= 0) return;
     const pakai = Math.min(memberPicked.saldo, remaining > 0 ? remaining : payable);

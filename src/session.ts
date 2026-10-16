@@ -7,7 +7,7 @@ import { getItem, removeItem, setItem } from './lib/storage';
 export interface Session {
   name: string;
   username: string;
-  /** Peran hasil login (mis. 'admin'/'supervisor'/'kasir'); default 'kasir'. */
+  /** Peran hasil login ('Merchant Owner'/'Merchant Staff'); default Staff. */
   role?: string;
   /** Id user login (kunci tabel ms_posuseraccess); fallback username bila kosong. */
   userId?: string;
@@ -20,7 +20,7 @@ export interface Session {
 const DEMO: Session = {
   name: 'Gista',
   username: 'gista.kasir',
-  role: 'kasir',
+  role: 'Merchant Staff',
   outlet: 'Genfity Cabang Poris',
   shift: 'Shift Pagi',
   clockIn: '08:57',
@@ -51,8 +51,8 @@ function restore(): void {
     if (!raw || current) return;
     try {
       const parsed = JSON.parse(raw) as Session;
-      // Kompatibel mundur: sesi lama tanpa role dibaca sebagai 'kasir'.
-      if (!parsed.role) parsed.role = 'kasir';
+      // Kompatibel mundur: sesi lama tanpa role dibaca sebagai Staff.
+      if (!parsed.role) parsed.role = 'Merchant Staff';
       current = parsed;
       emit();
     } catch {
@@ -63,7 +63,7 @@ function restore(): void {
 
 export function getSession(): Session | null {
   restore();
-  if (current && !current.role) current.role = 'kasir';
+  if (current && !current.role) current.role = 'Merchant Staff';
   return current;
 }
 
@@ -94,7 +94,7 @@ export function loginEmployee(e: { nama: string; username: string; role?: string
     ...base,
     name: e.nama.trim() || base.name,
     username: e.username.trim() || base.username,
-    role: (e.role ?? '').trim() || 'kasir',
+    role: (e.role ?? '').trim() || 'Merchant Staff',
     ...(userId ? { userId } : {}),
   };
   persist();
