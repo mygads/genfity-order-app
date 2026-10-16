@@ -113,10 +113,12 @@ Detail gap per file ada di output workflow; ringkasan jadi TODO bernomor di bawa
 Shift/EndShift/Recap: 14 kunci t() baku (status/kasir/rentang/total/transaksi/item/lainnya). Attendance pulih tr_shiftlog saat mount (FIX3-ATT). Recap: seksi custom_menu_sales (FIX3-RECAP, render terverifikasi di shot) + per_payment split tr_salespayment + fallback. Istirahat placeholder disengaja (FIX3-ISTIRAHAT, keputusan produk). Pay/Success tanggal TETAP HELD: kunci date_days/date_months/date_tz tak ada di kamus (spesifikasi untuk pemilik i18n tercatat). SISA lane-saya: `types.ts` (bersih, params sengaja-undefined) + kunci i18n baru (file kamus milik worker).
 Catatan harness: 4 shot tablet tertukar urutan rute (isi semua benar, nol kunci mentah, nol error).
 
+## Wave-3 2026-10-16 (migrasi fondasi — HASIL: nol-edit + konvergensi worker)
+
 Migrator (2 agen) terap aturan visual-identical ke 12 layar: SEMUA kandidat gagal pemetaan eksak (radius/height/activeOpacity) → skip-and-held by-design, NOL Edit + NOL Write (terbukti `journal.jsonl` wf_aa382984-c08: 0 Edit, 0 Write).
 KONVERGENSI: worker membangun `AppInput`/`AppButton` (alias tipis di atas fondasi `Input`/`Button` wave-2 saya) dan sedang migrasi ~35 layar di WIP mereka (75 file, `tsc` HIJAU EXIT 0 saat ini). Alarm "lane overreach" verifier TERBANTAH jurnal — seluruh diff App* = worker, bukan agen saya.
 Held migrasi (butuh keputusan fondasi ATAU biarkan pass worker): Button tanpa prop `activeOpacity` (0.2 vs 0.8), tanpa varian ukuran (Intro h52/r26 vs h56/r28), tanpa varian navy; QrHow statis; chip/link kecil custom.
-SISA lane-saya (file masih WIP worker): Shift-i18n, state absensi, Istirahat, widget rekap, fix tanggal Pay, `types.ts`/`i18n.ts`.
+SISA wave-3 (penetapan fondasi, ATAU biarkan pass migrasi worker): Button tanpa prop `activeOpacity`, tanpa varian ukuran/navy; QrHow statis; chip/link kecil custom. (Item shift/absensi/rekap/Pay wave-3 SUDAH dikerjakan di wave-4 di atas.)
 
 ### TODO MENTAH 5 AREA TAK-TRIASE (sweep-only, belum vonis kritikus — JANGAN kerjakan buta)
 - Kasir: gap esbOrder DineIn, CustomMenu TRX-047/STATIONS, LoadOrder SEED, PROMOS PromotionList, QS mode TablesScreen, header/date Booking, MODES tanpa DELIVERY
