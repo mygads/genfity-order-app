@@ -118,18 +118,21 @@ Customer display: 2 file (routes + display; sekunder via presentation_displays).
   no_terminal_code.png, customer_display_qris_background…), beep.wav.
 - i18n country_code_picker (id.json ada). Tema/warna: lihat share-dec/res/values.
 
-## 8. Status rebuild (2026-10-16)
+## 8. Status rebuild (2026-10-16, sesi Gas-2)
 
-- Fondasi Expo (App.tsx + 38 layar + aset webp + font HKGrotesk + harness
-  screenshot web `verify/shot.two.cjs`) sudah ada dari sesi sebelumnya.
-- Fondasi data: `src/lib/storage.ts` (AsyncStorage), `src/lib/db.ts`
-  (expo-sqlite, subset inti 97 tabel), sync.ts/server.ts/session.ts tanpa
-  localStorage.
-- Layar baru: SplitBill, MoveItems, MoveTable, PromotionList,
-  TopupDeposit, PettyCash(+Form+Detail), Expense, MenuPrinting, Stock,
-  TableTimer, Sync, Log, About, Help, MenuManagement, Idle.
-- Verifikasi: `npx tsc --noEmit` + screenshot phone+tablet per layar di
-  docs/shots/ dibanding emulator.
+- App Expo: 55 route terdaftar (`src/navigation/types.ts`), tsc EXIT 0.
+- Lapisan native JS: `src/native/printer.ts` (LAN TCP murni JS; BT SPP + USB
+  via modul Kotlin `GenfityPrinter` + config plugin, aktif setelah prebuild +
+  EAS dev-client), `src/native/edc.ts` (intent APOS BCA), kamera QR
+  (expo-camera) + foto expense (kamera-dulu).
+- Realtime + push: `src/lib/realtime.ts` (WS device + self-order, heartbeat,
+  backoff), `src/lib/push.ts` (token Expo + `register-push` + notif lokal).
+- Kontrak BE: `docs/API-CONTRACT.md` v2 (host, envelope, install/PIN,
+  pull 11 grup, push, voucher, OTA, WS JSON, push-register).
+- Bukti visual: `docs/ss-poslite/` (APK asli) + `docs/ss-clone/`
+  (`phone|tablet-<Route>.png`, 55 route × 2 + IntroLast); folder lama
+  `docs/shots/` dihapus. Pixel-fix 6 layar tamu (Intro cs) oleh agen
+  paralel — vonis 1:1 final di `DOKUMENTASI.md` §1.
 
 ## 10. Lampiran A — Route map + label ID (dari agen UI)
 

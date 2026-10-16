@@ -4,7 +4,7 @@
  * Murni JS — jalan di Expo Go maupun dev-client. Di background Android,
  * pasang dengan ForegroundService dari modul native (modules/genfity-printer).
  */
-import { getWsUrl, getBaseUrl } from '../config/server';
+import { getServerEnv, getWsUrl, getBaseUrl } from '../config/server';
 
 export type WsMessage = { type: string; payload: Record<string, unknown> };
 export type WsHandler = (msg: WsMessage) => void;
@@ -52,6 +52,8 @@ function backoff(retry: number): number {
 }
 
 function connect(ch: Channel): void {
+  // Hanya ke server milik sendiri (env Custom) — jangan dial ketiga.
+  if (getServerEnv() !== 'custom') return;
   const url = ch.url();
   if (!url) return;
   try {

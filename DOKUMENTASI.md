@@ -53,8 +53,11 @@ Total route terdaftar: **55** (`src/navigation/types.ts`) — termasuk WebView +
   `login*.png`, `apk-*.png` (10 bukti emulator: intro, registrasi, web-login).
 - `docs/ss-clone/` — screenshot **hasil clone RN** (driver
   `verify/shot.two.cjs`, `EXPO_PUBLIC_NAV_HOOK=1`): `phone-<Route>.png` +
-  `tablet-<Route>.png`, 55 route × 2.
-- Folder lama `docs/ss-clone/` (nama `01-34`, `apk-*` campur) sudah dihapus —
+  `tablet-<Route>.png`, 55 route × 2. Tepat 110 file + pasangan
+  `phone|tablet-IntroLast.png` (halaman akhir onboarding) — tidak ada nama
+  lain; file warisan di luar konvensi (`BillSplit`, `MemberDeposit`,
+  `PrintersEsc`, `RecapPhoto`, `TablesMove`) sudah dihapus Okt 2026.
+- Folder lama `docs/shots/` (nama `01-34`, `apk-*` campur) sudah dihapus —
   duplikatnya (`09-booking`=`11-booking-fix`, `07-history`=`12-history-fix`)
   juga dibuang. Jangan bikin folder screenshot baru.
 - `verify/final/` — 19 screenshot final phone+tablet (cashier, dashboard,
@@ -191,6 +194,8 @@ Yang **belum ada di RN** (prioritas):
 | `tsc --noEmit` gagal karena folder tooling tak-terlacak (`rea-tool/`, `reap/`, `emu/`, `stub/`) ikut dikompilasi | ✅ Okt 2026: `tsconfig.json` exclude 4 folder tsb (file tetap ada, tak dihapus); tsc EXIT 0 |
 | Lint (baru dipasang via `npx expo lint`): timer EDC/QRIS set-state sinkron di effect | ✅ Okt 2026: pola timeout-callback di `EdcScreen` + `QrisScreen`; lint 0 error (9 warning unused-var lama) |
 | Payment lanjutan + web-view + display sync belum ada | ✅ Okt 2026 (gabungan dua pekerja paralel): `src/lib/payments.ts` (transfer/deposit/kompliment/nonsales + outbox + email-validation), `src/lib/supervisor.ts` (otorisasi server, fail-closed offline, tanpa simpan PIN), `ExtraPaySection` di Pay + tab Pluxee/Ultra, tombol Email di Receipt + History (`sales/receipt-email` via outbox), route `WebView` (registrasi web dari Install), `src/lib/display.ts` (bus lokal + WS best-effort) dipakai CustomerDisplay; bukti `docs/ss-clone/phone|tablet-{Pay,Receipt,CustomerDisplay,Install,WebView}.png` |
+| Aplikasi mendial WS prod pihak ketiga saat start (bukti: cek DOM, 403/404 console) | ✅ Okt 2026: `display.ts` + `realtime.ts` hanya connect saat env Custom; bukti ulang `verify/check.sale.cjs` = console 0 error |
+| Tier-penuh order/finish belum terkirim (hanya ringkasan) | ✅ Okt 2026: `buildSalePayload` + rantai Cashier→CartDetail→Pay bawa item; bukti `SALE_OK` (Tunai 66000, 2 item, payments, tanpa data sensitif) via `verify/check.sale.cjs` |
 | Backend milik sendiri belum ada acuannya | ✅ Okt 2026: `docs/API-CONTRACT.md` v1 — konvensi, 11 grup endpoint + WS display + contoh tempel; klien diselaraskan (`apiPost` kirim X-Terminal-Code/X-Branch-Id/Idempotency-Key/Bearer, outbox sertakan `clientId`, supervisor pakai `auth/supervisor-approve`) |
 | Tautan Pratinjau Bill di CartDetail belum terbukti piksel (keranjang kosong di driver) | ✅ Okt 2026: driver `PARAMS.CartDetail` kini kirim 2 item; DOM cek `verify/check.cart.cjs` = item tampil + tautan ada + console 0 error + klik sampai BillPreview; bukti `docs/ss-clone/phone|tablet-CartDetail.png` |
 | 3 route orphan tanpa inbound (CustomMenu, BillPreview, Booking — aturan AGENTS.md #6) | ✅ Okt 2026: tombol Custom di toolbar Kasir → CustomMenu, tautan Pratinjau Bill di CartDetail → BillPreview, kartu Booking di menu Dashboard → Booking; semua 55 route kini terjangkau (Intro via awal, sisanya via navigate/go terverifikasi grep); bukti `docs/ss-clone/phone-{Cashier,Dashboard}.png` + `tablet-{Cashier,Dashboard,Booking,CustomMenu,BillPreview}.png` |

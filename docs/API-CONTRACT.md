@@ -220,7 +220,7 @@ layar update + unduh APK dari `data[].apkUrl` (tambahkan key `apkUrl` di BE Anda
 
 ## 7. WebSocket (realtime)
 
-Dua channel [FAKTA], reconnect otomatis + heartbeat 30 dtk (lihat
+Aturan koneksi [KONTRAK]: kedua channel + bus display HANYA tersambung saat env server = Custom (milik sendiri); env bawaan = mode lokal, aplikasi tidak pernah mendial infrastruktur pihak ketiga tanpa kredensial merchant. Dua channel [FAKTA], reconnect otomatis + heartbeat 30 dtk (lihat
 `src/lib/realtime.ts`).
 
 ### 7.1 Device channel — `WS_URL`

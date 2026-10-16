@@ -4,7 +4,7 @@
  * Implementasi orisinal best-effort: pelanggan lokal selalu sinkron antar
  * layar; dorong WS dicoba bila URL WS terkonfigurasi, gagal diam-diam.
  */
-import { getTerminal, getWsUrl } from '../config/server';
+import { getServerEnv, getTerminal, getWsUrl } from '../config/server';
 
 export type DisplayEvent =
   | { type: 'call'; ticket: string }
@@ -35,6 +35,9 @@ function emitLocal(e: DisplayEvent): void {
 
 function ensureSocket(): void {
   try {
+    // Hanya ke server milik sendiri (env Custom). Env bawaan menunjuk
+    // infrastruktur pihak ketiga — jangan dial tanpa kredensial merchant.
+    if (getServerEnv() !== 'custom') return;
     if (socket) return;
     const url = getWsUrl();
     if (!url) return;
