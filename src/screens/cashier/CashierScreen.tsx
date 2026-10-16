@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import DrawerMenu from '../../components/DrawerMenu';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -145,6 +146,9 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [discDraft, setDiscDraft] = useState('');
+  // Drawer /home APK asli (order, table, shift, sales-history, detail-recap,
+  // esb-order-dashboard, member, expense, petty-cash, settings).
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const subs = useMemo(
     () => CATEGORIES.find((c) => c.name === activeCategory)?.subs ?? [],
@@ -296,7 +300,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')} hitSlop={10}>
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
@@ -710,6 +714,11 @@ export default function CashierScreen({ navigation, route }: Props) {
     return (
       <View style={styles.root}>
         {renderHeader()}
+        <DrawerMenu
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          navigate={(r) => navigation?.navigate(r)}
+        />
         <View style={styles.bodyRow}>
           <View style={styles.catalog}>
             {renderToolbar()}
@@ -757,6 +766,11 @@ export default function CashierScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
+      <DrawerMenu
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        navigate={(r) => navigation?.navigate(r)}
+      />
       {renderToolbar()}
       {showModes && (
         <View style={styles.modeDropdown}>
