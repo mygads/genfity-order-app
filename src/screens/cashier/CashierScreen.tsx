@@ -176,9 +176,9 @@ export default function CashierScreen({ navigation, route }: Props) {
   const { t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge 3-state (mirror DashboardScreen): hijau+Online bila jaringan & WS up,
-  // amber+Offline bila jaringan mati, abu+Local bila tak diketahui (null)/WS putus.
-  // 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Local';
+  // amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui (null)/WS putus.
+  // 'Offline' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Offline';
   const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const [activeCategory, setActiveCategory] = useState('Makanan');
   const [activeSub, setActiveSub] = useState<string | null>(null);

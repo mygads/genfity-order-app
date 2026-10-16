@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -21,9 +21,9 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   const { t } = useLang(); const { online, wsConnected } = useConnectivity();
   // Pill koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan &
-  // WS up, amber+Offline bila jaringan mati, abu+Local bila tak diketahui
-  // (null)/WS putus. 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('hist_online') : 'Local';
+  // WS up, amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui
+  // (null)/WS putus. 'Offline' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('hist_online') : 'Offline';
   const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
@@ -145,7 +145,7 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} right={ <View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </Pressable>
         </View>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
@@ -646,7 +646,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
   },
   recapLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.navyTint }, recapValue: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, marginTop: 4 }, recapSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 4 },
   recapLine: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 2 }, recapBtns: { flexDirection: 'row', gap: 8, marginTop: 10 }, recapBtn: { flex: 1, backgroundColor: colors.white, borderRadius: 8, paddingVertical: 9, alignItems: 'center', }, recapBtnTxt: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
-  split: { flex: 1, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12 },
+  split: { flex: 1, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12, ...wideCenterLg },
   splitList: { flex: 1, minWidth: 0 },
   splitDetail: {
     flex: 1.1,

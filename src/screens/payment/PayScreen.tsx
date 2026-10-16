@@ -170,9 +170,9 @@ export default function PayScreen({ navigation, route }: Props) {
   const { t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan
-  // & WS up, amber+Offline bila jaringan mati, abu+Local bila tak diketahui
-  // (null)/WS putus. 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('pay_online') : 'Local';
+  // & WS up, amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui
+  // (null)/WS putus. 'Offline' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('pay_online') : 'Offline';
   const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const todayStr = useMemo(() => {
     const d = new Date();

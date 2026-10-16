@@ -58,10 +58,10 @@ export default function DashboardScreen({ navigation }: Props) {
   const { t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge koneksi REAL: hijau+Online bila jaringan & WS up, amber+Offline bila
-  // jaringan mati, abu+Local bila jaringan up tapi WS putus (mode lokal)
+  // jaringan mati, abu+Offline (mode lokal) bila jaringan up tapi WS putus
   // atau status awal null (belum dicek).
-  // 'Offline'/'Local' netral EN/ID (i18n.ts beku - tanpa kunci baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Local';
+  // 'Offline' netral EN/ID (i18n.ts beku - tanpa kunci baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Offline';
   const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
