@@ -1,0 +1,18 @@
+{
+  "request": { "username": "gista.kasir", "pin": "1234" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "userId": "U07",
+      "username": "gista.kasir",
+      "nama": "Gista",
+      "authKey": "authkey-dummy-gista-07",
+      "role": "kasir",
+      "branchId": "B001"
+    }
+  }
+}

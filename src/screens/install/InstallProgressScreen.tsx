@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
@@ -10,7 +10,7 @@ const STEP_KEYS = ['g_inst_step1', 'g_inst_step2', 'g_inst_step3'];
 
 export default function InstallProgressScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const branch = route?.params?.branch ?? 'ESB Cabang Poris';
   const [done, setDone] = useState(0);

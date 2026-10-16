@@ -2,7 +2,7 @@
  * Konfigurasi server + terminal milik sendiri (clean-room).
  * Nama host/path di bawah adalah FAKTA hasil bedah string APK (REA),
  * dipakai sebagai default agar flow install/pull/push sama; base URL
- * bisa diganti ke server Anda kapan saja — kontrak JSON ikut server Anda.
+ * bisa diganti ke server Anda kapan saja - kontrak JSON ikut server Anda.
  *
  * Persistensi memakai lib/storage.ts (AsyncStorage) agar work di web +
  * native. API modul ini tetap sinkron (kompatibel dengan layar yang sudah
@@ -27,7 +27,7 @@ export const WS_URL: Record<ServerEnv, string> = {
   custom: '',
 };
 
-/** Path API (fakta dari string table APK — tanpa body JSON). */
+/** Path API (fakta dari string table APK - tanpa body JSON). */
 export const ApiPath = {
   validateTerminal: 'main/validate-terminal',
   getTerminal: 'terminal/get-terminal',
@@ -37,26 +37,40 @@ export const ApiPath = {
   checkBranch: 'main/check-branch-status',
   pullMenu: 'main/get-menu',
   pullBranchMenu: 'main/get-branch-menu',
+  pullBranchSettings: 'main/get-branch-settings',
+  pullMenuOnline: 'main/get-menu-online',
+  pullExpenseCoa: 'main/get-expense-chart-of-accounts',
   pullUser: 'main/get-user',
   pullTable: 'main/get-table',
   pullPromotion: 'main/get-promotion',
   pullMember: 'main/get-member',
   pullVoucher: 'main/get-voucher',
+  pullPaymentMethod: 'main/get-payment-method',
+  pullStation: 'main/get-station',
   pullSales: 'main/get-sales',
   pushOrderFinish: 'order/finish',
   pushOrderView: 'order/view',
   splitBill: 'order/split-bill',
   moveItems: 'order/move-items',
   moveTable: 'order/move-table',
+  pushShiftOpen: 'shift/open',
+  pushShiftClose: 'shift/close',
+  pushExpense: 'branch-expenses/push',
+  pushRegister: 'device/register-push',
   receiptEmail: 'sales/receipt-email',
   voucherLock: 'posv1/esb-voucher/lock',
   voucherUnlock: 'posv1/esb-voucher/unlock',
   voucherValidate: 'posv1/esb-voucher/validate',
+  voucherBurn: 'posv1/esb-voucher/burn',
   clockIn: 'employee-attendance/clock-in',
   supervisorApprove: 'auth/supervisor-approve',
   cashierLogin: 'auth/cashier-login',
   clockOut: 'employee-attendance/clock-out',
   depositInquiry: 'member-deposit-withdrawal/inquiry-deposit',
+  depositTopup: 'member-deposit-withdrawal/topup',
+  // Pendaftaran member baru dari layar Member (aditif: register-member).
+  // Kontrak body ikut server Anda; dummy JSON: push/member-register.json.
+  registerMember: 'member/register',
 } as const;
 
 export interface TerminalInfo {
@@ -98,7 +112,7 @@ function hydrate(): void {
 }
 
 /**
- * Tunggu pemuatan nilai tersimpan selesai — panggil sekali saat start
+ * Tunggu pemuatan nilai tersimpan selesai - panggil sekali saat start
  * aplikasi bila layar pertama butuh nilai pasti, bukan default.
  */
 export async function loadServerState(): Promise<void> {
@@ -172,6 +186,34 @@ export function getTerminal(): TerminalInfo {
 export function setTerminal(next: TerminalInfo): void {
   terminal = { ...next };
   void setItem(LS_TERMINAL, JSON.stringify(terminal));
+}
+
+/**
+ * ID cabang aktif untuk query lokal (ms_branchmenu dsb).
+ * TODO(M9-7): fallback 'B001' hanya untuk mode dummy / terminal belum
+ * diklaim (selaras kontrak §3-§4 dan dummy pull). Bila alur install sudah
+ * mewajibkan klaim, ganti fallback ini menjadi string kosong + guard pemanggil.
+ */
+export function getBranchId(): string {
+  hydrate();
+  const b = (terminal.branchId ?? '').trim();
+  return b || 'B001';
+}
+
+/** GET dengan query branch + paging inkremental (§0 kontrak). */
+export async function apiGet(
+  path: string,
+  params?: Record<string, string | number>,
+): Promise<Response> {
+  const t = getTerminal();
+  const q = new URLSearchParams({
+    ...(t.branchId ? { branchId: t.branchId } : {}),
+    ...Object.fromEntries(Object.entries(params ?? {}).map(([k, v]) => [k, String(v)])),
+  });
+  const url = `${apiUrl(path)}?${q.toString()}`;
+  const headers: Record<string, string> = {};
+  if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  return fetch(url, { headers });
 }
 
 export async function apiPost(

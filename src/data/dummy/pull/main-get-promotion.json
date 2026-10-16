@@ -1,0 +1,20 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 3,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "promoId": "P001", "code": "QOQI10", "name": "Diskon 10 persen member GOLD", "type": "percent", "value": 10, "maxAmount": 15000, "minSpend": 50000, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-10-31 23:59:59", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "promoId": "P002", "code": "HEMAT10K", "name": "Potongan 10000 semua payment", "type": "nominal", "value": 10000, "maxAmount": 10000, "minSpend": 40000, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-12-31 23:59:59", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "promoId": "P003", "code": "GRATISONGKIR", "name": "Gratis ongkir s.d. 10000", "type": "ongkir", "value": 10000, "maxAmount": 10000, "minSpend": 30000, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-12-31 23:59:59", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

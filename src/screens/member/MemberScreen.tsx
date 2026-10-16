@@ -11,18 +11,36 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath, apiPost } from '../../config/server';
+import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
+/** Konteks order opsional (cermin params Pay): dibawa saat Member dibuka dari
+ * alur transaksi agar Terapkan ke Pay tidak me-reset order berjalan. */
+type OrderCtx = {
+  total?: number;
+  items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[];
+  method?: string;
+  mode?: string;
+  table?: string;
+  ongkir?: number;
+  customer?: string;
+  voucher?: string | { code: string; amount: number; kind?: string } | number;
+  voucherCode?: string;
+  discount?: number;
+  service?: number;
+  tax?: number;
+  rounding?: number;
+  feeESB?: number;
+};
 type Props = {
   navigation?: Nav;
-  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number } };
+  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number } & Partial<OrderCtx> };
 };
 
 type Member = {
@@ -58,7 +76,7 @@ const SEED_RIWAYAT: Record<string, Riwayat[]> = {
   ],
 };
 
-/** Deposit cepat minimal Rp 10.000 - sama dengan layar Top Up Deposit. */
+/** Deposit cepat minimal 10000 rupiah (lihat MIN_TOPUP) - sama dengan layar Top Up Deposit. */
 const MIN_TOPUP = 10000;
 
 /** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
@@ -79,7 +97,33 @@ function maskHp(hp: string): string {
   return `${d.slice(0, 4)}---${d.slice(-4)}`;
 }
 
-/** Deposit member: coba server dulu, selalu catat ke outbox + antrean sync. */
+/** Member baru: catat ke outbox + antrean sync (offline-first), lalu POST ke
+ * endpoint register-member saat online. Offline apiFetch jatuh ke dummy lokal
+ * dan data tetap antre via outbox untuk push berikutnya. */
+async function persistMember(id: string, nama: string, noHp: string): Promise<void> {
+  try {
+    await enqueueOutbox('ms_member', id, 'insert');
+  } catch {
+    /* abaikan */
+  }
+  try {
+    enqueueSync('other', { kind: 'member-register', memberId: id, nama, noHp });
+  } catch {
+    /* abaikan */
+  }
+  try {
+    await apiFetch(ApiPath.registerMember, { body: { memberId: id, name: nama, phone: noHp } });
+  } catch {
+    /* offline - terkirim via push berikutnya */
+  }
+}
+
+/**
+ * Deposit member ikut kontrak §5.2 seperti TopupDepositScreen: POST
+ * member-deposit-withdrawal/topup {memberId, amount, paymentMethod, note}.
+ * inquiry-deposit hanya untuk cek saldo, bukan top up. Selalu catat ke
+ * outbox + antrean sync agar aman offline.
+ */
 async function persistDeposit(memberId: string, amount: number, via: string): Promise<void> {
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
@@ -92,7 +136,9 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
     /* abaikan */
   }
   try {
-    await apiPost(ApiPath.depositInquiry, { memberId, amount, via });
+    // 'cepat' adalah label UI deposit cepat - kirim metode bayar yang dikenal server.
+    const paymentMethod = via === 'cepat' ? 'Tunai' : via;
+    await apiFetch(ApiPath.depositTopup, { body: { memberId, amount, paymentMethod, note: 'Deposit cepat Member' } });
   } catch {
     /* offline - terkirim via push berikutnya */
   }
@@ -100,7 +146,7 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
 
 export default function MemberScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -111,6 +157,10 @@ export default function MemberScreen({ navigation, route }: Props) {
   const [depositVisible, setDepositVisible] = useState(false);
   const [depositNominal, setDepositNominal] = useState('');
   const [depositErr, setDepositErr] = useState('');
+  // Saldo inquiry server untuk member terpilih (null = belum ada / hanya dummy).
+  const [inquiry, setInquiry] = useState<{ saldo: number; poin: number } | null>(null);
+  // Riwayat server per member (kosong = fallback cache lokal `riwayat`).
+  const [serverHistory, setServerHistory] = useState<Riwayat[]>([]);
 
   // Riwayat member diambil dari server - guard online; offline tampilkan cache lokal.
   const [online, setOnline] = useState(true);
@@ -122,6 +172,117 @@ export default function MemberScreen({ navigation, route }: Props) {
       .catch(() => { if (live) setOnline(true); });
     return () => { live = false; };
   }, [selected]);
+
+  // Sinkron member dari server (kontrak §4 main/get-member via ApiPath.pullMember
+  // yang ditarik master.ts ke ms_member): tampilkan data sync bila ada, fallback
+  // SEED lokal (DUMMY) bila kosong/offline - fallback JANGAN dihapus agar kasir
+  // tetap jalan tanpa server.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await apiFetch(ApiPath.pullMember, { method: 'GET' });
+        const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
+        const items = Array.isArray(data?.items) ? data.items : [];
+        if (!live || items.length === 0) return;
+        const mapped: Member[] = [];
+        for (const [idx, it] of items.entries()) {
+          const nama = String(it.name ?? it.memberName ?? '').trim();
+          const id = String(it.memberId ?? it.id ?? '').trim() || `M${String(idx + 1).padStart(3, '0')}`;
+          if (!id || !nama) continue;
+          const tierRaw = String(it.tier ?? 'Regular');
+          mapped.push({
+            id,
+            nama,
+            noHp: String(it.phone ?? ''),
+            tipe: tierRaw.charAt(0).toUpperCase() + tierRaw.slice(1).toLowerCase(),
+            saldo: Math.max(0, Math.round(Number(it.balance ?? it.depositBalance ?? 0) || 0)),
+            poin: Math.max(0, Math.round(Number(it.points ?? 0) || 0)),
+          });
+        }
+        if (!live || mapped.length === 0) return;
+        setMembers(mapped);
+        setSelected((sb) => (sb ? mapped.find((m) => m.id === sb.id) ?? sb : sb));
+      } catch {
+        /* offline - fallback SEED lokal tetap dipakai */
+      }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // Saldo inquiry server untuk member terpilih (inquiry-deposit hanya cek saldo,
+  // bukan top up). Dummy Mode selalu fromDummy + menggemakan M001 - hanya
+  // tampilkan bila respons backend asli (bukan dummy) dan memberId cocok,
+  // agar tidak menyesatkan kasir.
+  useEffect(() => {
+    if (!selected) {
+      setInquiry(null);
+      return;
+    }
+    let live = true;
+    const mid = selected.id;
+    const localPoin = selected.poin;
+    setInquiry(null);
+    (async () => {
+      try {
+        const res = await apiFetch(ApiPath.depositInquiry, { body: { memberId: mid } });
+        if (!live || res.fromDummy) return;
+        const { data } = unwrap<Record<string, unknown>>(res.data);
+        const echo = String(data.memberId ?? '');
+        if (echo && echo !== mid) return;
+        const saldo = Number(data.saldo ?? data.balance ?? NaN);
+        if (!live || !Number.isFinite(saldo)) return;
+        const poin = Number(data.poin ?? data.points ?? NaN);
+        setInquiry({
+          saldo: Math.max(0, Math.round(saldo)),
+          poin: Number.isFinite(poin) ? Math.max(0, Math.round(poin)) : localPoin,
+        });
+      } catch {
+        /* offline - kartu memakai cache lokal */
+      }
+    })();
+    return () => { live = false; };
+  }, [selected]);
+
+  // Riwayat deposit server: BE belum menyediakan endpoint riwayat deposit per
+  // member (§5 hanya punya inquiry-deposit + topup), jadi jujur: coba saring
+  // pullSales (main/get-sales) yang menyebut member ini; hasilnya sering kosong
+  // karena sales tak membawa kaitan member - fallback cache lokal `riwayat`
+  // selalu dipakai agar kasir tetap punya data.
+  useEffect(() => {
+    if (!selected || !online) {
+      setServerHistory([]);
+      return;
+    }
+    let live = true;
+    const mid = selected.id;
+    const nama = selected.nama;
+    (async () => {
+      try {
+        const res = await apiFetch(ApiPath.pullSales, { method: 'GET' });
+        const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
+        const items = Array.isArray(data?.items) ? data.items : [];
+        const rows: Riwayat[] = [];
+        for (const it of items) {
+          const cust = String(it.customerName ?? '');
+          const m = String(it.memberId ?? '');
+          if (cust !== nama && m !== mid) continue;
+          const total = Math.round(Number(it.grandTotal ?? 0) || 0);
+          if (total <= 0) continue;
+          rows.push({
+            id: String(it.salesNum ?? `srv-${rows.length}`),
+            tanggal: String(it.salesDate ?? '').slice(0, 10),
+            keterangan: `Bayar ${String(it.salesNum ?? '')} (${String(it.paymentMethod ?? '')})`,
+            nominal: -total,
+          });
+        }
+        if (live) setServerHistory(rows);
+      } catch {
+        if (live) setServerHistory([]);
+      }
+    })();
+    return () => { live = false; };
+  }, [selected, online]);
 
   /** Terima saldo baru dari layar Top Up Deposit: saldo + riwayat ikut bertambah. */
   useEffect(() => {
@@ -160,7 +321,10 @@ export default function MemberScreen({ navigation, route }: Props) {
   const saveMember = () => {
     if (nama.trim() && noHp.trim()) {
       const id = `M${String(members.length + 1).padStart(3, '0')}`;
-      setMembers((ms) => [...ms, { id, nama: nama.trim(), noHp: noHp.trim(), tipe: 'Regular', saldo: 0, poin: 0 }]);
+      const nm = nama.trim();
+      const hp = noHp.trim();
+      void persistMember(id, nm, hp);
+      setMembers((ms) => [...ms, { id, nama: nm, noHp: hp, tipe: 'Regular', saldo: 0, poin: 0 }]);
       setRiwayat((rw) => ({ ...rw, [id]: [] }));
     }
     setAddVisible(false);
@@ -211,10 +375,30 @@ export default function MemberScreen({ navigation, route }: Props) {
     navigation?.navigate('TopupDeposit', { memberId: selected.id, nama: selected.nama, saldo: selected.saldo });
   };
 
-  /** Terapkan member ke pembayaran: agen Pay membaca params opsional memberId. */
+  /** Terapkan member ke pembayaran: kirim memberId + nama, plus konteks order
+   * (total/items/mode/table/ongkir/customer/voucher/...) bila tersedia di
+   * params agar Pay tidak me-reset order yang sedang berjalan. */
   const applyMember = () => {
     if (!selected) return;
-    navigation?.navigate('Pay', { memberId: selected.id });
+    const p = route?.params;
+    navigation?.navigate('Pay', {
+      memberId: selected.id,
+      nama: selected.nama,
+      ...(p?.total != null ? { total: p.total } : {}),
+      ...(p?.items ? { items: p.items } : {}),
+      ...(p?.method ? { method: p.method } : {}),
+      ...(p?.mode ? { mode: p.mode } : {}),
+      ...(p?.table ? { table: p.table } : {}),
+      ...(p?.ongkir != null ? { ongkir: p.ongkir } : {}),
+      ...(p?.customer ? { customer: p.customer } : {}),
+      ...(p?.voucher != null ? { voucher: p.voucher } : {}),
+      ...(p?.voucherCode ? { voucherCode: p.voucherCode } : {}),
+      ...(p?.discount != null ? { discount: p.discount } : {}),
+      ...(p?.service != null ? { service: p.service } : {}),
+      ...(p?.tax != null ? { tax: p.tax } : {}),
+      ...(p?.rounding != null ? { rounding: p.rounding } : {}),
+      ...(p?.feeESB != null ? { feeESB: p.feeESB } : {}),
+    });
   };
 
   const list = (
@@ -259,6 +443,12 @@ export default function MemberScreen({ navigation, route }: Props) {
     </ScrollView>
   );
 
+  // Riwayat tampil: server dulu bila ada, fallback cache lokal (jujur: BE belum
+  // punya endpoint riwayat deposit per member, jadi cache lokal selalu siap).
+  const historyList = selected
+    ? (serverHistory.length > 0 ? serverHistory : (riwayat[selected.id] ?? []))
+    : [];
+
   const detail = (
     <View style={s.detailSide}>
       {selected ? (
@@ -285,11 +475,16 @@ export default function MemberScreen({ navigation, route }: Props) {
               <Text style={s.detailStatValue}>{selected.poin} {t('mem_points')}</Text>
             </View>
           </View>
+          {inquiry ? (
+            <Text style={s.serverSaldo}>
+              Saldo server: {rp(inquiry.saldo)} {/* TODO-i18n:mem_server_balance */}
+            </Text>
+          ) : null}
           <Text style={s.riwayatTitle}>{t('mem_history')}</Text>
           {!online && (
             <Text style={s.offlineNote}>Offline - riwayat dari cache lokal, disinkron saat online.</Text>
           )}
-          {(riwayat[selected.id] ?? []).map((r) => (
+          {historyList.map((r) => (
             <View key={r.id} style={s.riwayatRow}>
               <View style={{ flex: 1 }}>
                 <Text style={s.riwayatKet}>{r.keterangan}</Text>
@@ -302,7 +497,7 @@ export default function MemberScreen({ navigation, route }: Props) {
               </Text>
             </View>
           ))}
-          {(riwayat[selected.id] ?? []).length === 0 && (
+          {historyList.length === 0 && (
             <Text style={s.emptySub}>{t('mem_no_history')}</Text>
           )}
           <TouchableOpacity
@@ -546,6 +741,7 @@ const s = StyleSheet.create({
   detailStat: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, minWidth: 130, alignItems: 'center' },
   detailStatLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
   detailStatValue: { fontSize: 16, fontFamily: fonts.bold, color: colors.navy, marginTop: 4 },
+  serverSaldo: { fontSize: 12, fontFamily: fonts.medium, color: colors.navy, marginTop: 8 },
   riwayatTitle: { fontSize: 14, fontFamily: fonts.bold, color: colors.text, alignSelf: 'flex-start', marginTop: 12, marginBottom: 6 },
   offlineNote: { fontSize: 12, fontFamily: fonts.medium, color: colors.amberDark, alignSelf: 'flex-start', marginBottom: 6 },
   riwayatRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, padding: 10, marginTop: 6, width: '100%' },

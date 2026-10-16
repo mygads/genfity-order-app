@@ -1,0 +1,21 @@
+{
+  "request": {
+    "salesNum": "TRX-20261016-009",
+    "fromTableNo": "A-05",
+    "toTableNo": "A-01",
+    "userId": "U07"
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "salesNum": "TRX-20261016-009",
+      "fromTableNo": "A-05",
+      "toTableNo": "A-01",
+      "syncDate": "2026-10-16 12:10:00"
+    }
+  }
+}

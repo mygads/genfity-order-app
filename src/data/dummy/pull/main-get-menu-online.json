@@ -1,0 +1,21 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 4,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "menuId": "M001", "name": "Ayam Geprek", "price": 18000, "stock": 120, "gofoodId": "GF-1001", "grabId": "GR-1001", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M002", "name": "Nasi Goreng Spesial", "price": 25000, "stock": 96, "gofoodId": "GF-1002", "grabId": "GR-1002", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M006", "name": "Es Teh Manis", "price": 8000, "stock": 200, "gofoodId": "GF-1006", "grabId": "GR-1006", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M008", "name": "Paket Hemat 1", "price": 30000, "stock": 40, "gofoodId": "GF-1008", "grabId": "GR-1008", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

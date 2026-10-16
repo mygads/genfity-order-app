@@ -1,0 +1,20 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 3,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "memberId": "M001", "name": "Budi Santoso", "phone": "081234567890", "phoneMasked": "0812-3456-7890", "tier": "GOLD", "balance": 150000, "depositBalance": 150000, "points": 342, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "memberId": "M002", "name": "Sinta Dewi", "phone": "081398765432", "phoneMasked": "0813-9876-5432", "tier": "SILVER", "balance": 500000, "depositBalance": 500000, "points": 128, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "memberId": "M003", "name": "Andi Pratama", "phone": "082111112222", "phoneMasked": "0821-1111-2222", "tier": "BRONZE", "balance": 0, "depositBalance": 0, "points": 12, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": { "memberId": "M001", "amount": 100000, "paymentMethod": "Tunai", "userId": "U07" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "memberId": "M001",
+      "amount": 100000,
+      "saldo": 250000,
+      "trxId": "DEP-20261016-007",
+      "syncDate": "2026-10-16 13:05:00"
+    }
+  }
+}

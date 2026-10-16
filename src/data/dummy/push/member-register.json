@@ -1,0 +1,11 @@
+{
+  "request": { "memberId": "M004", "name": "Budi Baru", "phone": "081200011122" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "memberId": "M004", "name": "Budi Baru", "ok": true }
+  }
+}

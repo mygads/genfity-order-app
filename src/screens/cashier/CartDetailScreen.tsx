@@ -3,7 +3,7 @@ import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = {
@@ -23,6 +23,7 @@ type Props = {
       mode?: string;
       table?: string;
       customer?: string;
+      memberId?: string;
       ongkir?: number;
       subtotal?: number;
     };
@@ -38,8 +39,20 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [mode] = useState(route?.params?.mode ?? 'DINE IN');
   const [table] = useState(route?.params?.table ?? '');
   const [customer] = useState(route?.params?.customer ?? '');
-  /** Ongkir fungsional - dibawa dari kasir, bisa diubah di sini, diteruskan ke Pay. */
-  const [ongkir, setOngkir] = useState(route?.params?.ongkir ?? 0);
+  const [memberId] = useState(route?.params?.memberId ?? '');
+  /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
+  const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  useEffect(() => {
+    let alive = true;
+    void getTaxRate().then((r) => {
+      if (alive) setTaxRate(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** Ongkir fungsional - bawaan per mode dari FEE_DEFAULTS, bisa diubah di sini, diteruskan ke Pay. */
+  const [ongkir, setOngkir] = useState(route?.params?.ongkir ?? defaultOngkirForMode(route?.params?.mode));
   const [showOngkir, setShowOngkir] = useState(false);
   const [ongkirDraft, setOngkirDraft] = useState('');
   /** Sinkron ulang saat kembali dari PromotionList (params di-merge ke rute yang sudah ada). */
@@ -62,18 +75,19 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     [active],
   );
   const discountTotal = useMemo(() => active.reduce((s, c) => s + c.discount, 0), [active]);
-  /** Kanonis via helper: voucher GRATISONGKIR/kind Ongkir, service 5%, PPN incl info-only, rounding 100. */
+  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100, feeESB utk agregator. */
   const {
     subtotal,
     service,
-    ppnIncl,
+    taxIncl,
+    feeESB,
     ongkirCut,
     ongkirNet,
     bruto,
     total,
     rounding,
     voucherAmt,
-  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, voucher: voucher ?? undefined });
+  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, voucher: voucher ?? undefined, esbOrder: isMarketplaceMode(mode), taxRate });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = active.reduce((s, c) => s + c.qty, 0);
@@ -115,15 +129,24 @@ export default function CartDetailScreen({ navigation, route }: Props) {
 
   const modeLabel = table ? `${mode} · ${t('table')} ${table}` : mode;
 
+  // Rantai Pay (kontrak PayScreen): total penuh + items/mode/table/ongkir/voucher/customer/memberId
+  // + diskon belanja + rincian info-only (service/pajak/pembulatan/fee) agar Pay teruskan ke Success > Receipt.
+  // Voucher sebagai OBJEK {code, amount, kind} (Pay dahulukan discount angka, tanpa hitung ganda).
   const goPay = () =>
     navigation?.navigate('Pay', {
       total,
-      items,
-      ...(voucher ? { voucher: voucher.code } : {}),
+      items: active,
+      discount: discountTotal + voucherAmt,
+      ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
       mode,
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
+      ...(memberId ? { memberId } : {}),
       ongkir: ongkirNet,
+      ...(service > 0 ? { service } : {}),
+      ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+      ...(rounding !== 0 ? { rounding } : {}),
+      ...(feeESB > 0 ? { feeESB } : {}),
     });
   const goPromo = () =>
     navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal, ongkir });
@@ -157,7 +180,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               <Text style={styles.numText}>{idx + 1}</Text>
             </View>
             <View style={styles.rowBody}>
-              <Text style={[styles.itemName, c.voided && styles.voidName]} numberOfLines={2}>
+              <Text style={[styles.itemName, c.voided && styles.voidName, isTablet && styles.itemNameBig]} numberOfLines={2}>
                 {c.name} x{c.qty}
                 {c.voided ? ' (Void)' : ''}
               </Text>
@@ -168,7 +191,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   {m.price > 0 ? `  +${rp(m.price)}` : ''}
                 </Text>
               ))}
-              {c.note ? <Text style={styles.note}>📝 {c.note}</Text> : null}
+              {c.note ? <Text style={styles.note}>{t('kit_note')}: {c.note}</Text> : null}
               {c.discount > 0 && <Text style={styles.discount}>- Diskon {rp(c.discount)}</Text>}
               {c.voided ? (
                 <TouchableOpacity onPress={() => unvoidItem(c.id)}>
@@ -241,8 +264,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               style={styles.emptyImg}
               resizeMode="contain"
             />
-            <Text style={styles.emptyTitle}>{t('cartEmpty')}</Text>
-            <Text style={styles.emptySub}>{t('cartEmptyHint')}</Text>
+            <Text style={[styles.emptyTitle, isTablet && styles.emptyTitleBig]}>{t('cartEmpty')}</Text>
+            <Text style={[styles.emptySub, isTablet && styles.emptySubBig]}>{t('cartEmptyHint')}</Text>
             <TouchableOpacity style={styles.emptyCta} onPress={() => navigation?.navigate('Cashier')}>
               <Text style={styles.emptyCtaText}>＋ {t('addMenu')}</Text>
             </TouchableOpacity>
@@ -252,7 +275,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {/* Voucher / promo ringkas */}
         {items.length > 0 && (
           <View style={styles.promoCard}>
-            <Text style={styles.promoTitle}>{t('voucherPromo')}</Text>
+            <Text style={[styles.promoTitle, isTablet && styles.promoTitleBig]}>{t('voucherPromo')}</Text>
             {voucher ? (
               <View style={styles.promoRow}>
                 <View style={{ flex: 1 }}>
@@ -280,37 +303,43 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {items.length > 0 && (
           <View style={styles.totals}>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('subtotalGross')}</Text>
-              <Text style={styles.sumValue}>{rp(subtotalGross)}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('subtotalGross')}</Text>
+              <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(subtotalGross)}</Text>
             </View>
             {discountTotal > 0 && (
               <View style={styles.sumRow}>
-                <Text style={styles.sumLabel}>{t('itemDiscount')}</Text>
-                <Text style={[styles.sumValue, styles.red]}>-{rp(discountTotal)}</Text>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('itemDiscount')}</Text>
+                <Text style={[styles.sumValue, styles.red, isTablet && styles.sumValueBig]}>-{rp(discountTotal)}</Text>
               </View>
             )}
             {voucher && !useOngkirCut && (
               <View style={styles.sumRow}>
-                <Text style={styles.sumLabel}>Voucher {voucher.code}</Text>
-                <Text style={[styles.sumValue, styles.red]}>-{rp(voucherAmt)}</Text>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>Voucher {voucher.code}</Text>
+                <Text style={[styles.sumValue, styles.red, isTablet && styles.sumValueBig]}>-{rp(voucherAmt)}</Text>
               </View>
             )}
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('subtotalNet')}</Text>
-              <Text style={styles.sumValue}>{rp(subtotal)}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('subtotalNet')}</Text>
+              <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(subtotal)}</Text>
             </View>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('taxIncl')}</Text>
-              <Text style={styles.sumValue}>{rp(ppnIncl)}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('taxIncl')}</Text>
+              <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(taxIncl)}</Text>
             </View>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('serviceExcl')}</Text>
-              <Text style={styles.sumValue}>{rp(service)}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('serviceExcl')}</Text>
+              <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(service)}</Text>
             </View>
+            {feeESB > 0 && (
+              <View style={styles.sumRow}>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('feeESB')}</Text>
+                <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(feeESB)}</Text>
+              </View>
+            )}
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('deliveryFee')}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('deliveryFee')}</Text>
               <View style={styles.ongkirVal}>
-                <Text style={styles.sumValue}>{rp(ongkirNet)}</Text>
+                <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(ongkirNet)}</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setOngkirDraft(ongkir > 0 ? String(ongkir) : '');
@@ -323,17 +352,17 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             </View>
             {voucher && useOngkirCut && (
               <View style={styles.sumRow}>
-                <Text style={styles.sumLabel}>Voucher {voucher.code}</Text>
-                <Text style={[styles.sumValue, styles.red]}>-{rp(ongkirCut)}</Text>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>Voucher {voucher.code}</Text>
+                <Text style={[styles.sumValue, styles.red, isTablet && styles.sumValueBig]}>-{rp(ongkirCut)}</Text>
               </View>
             )}
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>{t('rounding')}</Text>
-              <Text style={styles.sumValue}>{rp(rounding)}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('rounding')}</Text>
+              <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(rounding)}</Text>
             </View>
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>{t('total')}</Text>
-              <Text style={styles.totalValue}>{rp(total)}</Text>
+              <Text style={[styles.totalLabel, isTablet && styles.totalLabelBig]}>{t('total')}</Text>
+              <Text style={[styles.totalValue, isTablet && styles.totalValueBig]}>{rp(total)}</Text>
             </View>
           </View>
         )}
@@ -341,17 +370,24 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {/* Aksi lanjutan ala POSLite: split & pindah */}
         {items.length > 0 && (
           <View style={styles.linksRow}>
-            <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', { items, total })}>
-              <Text style={styles.link}>{t('splitBill')}</Text>
+            <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', {
+              items: active, total, mode,
+              ...(table ? { table } : {}),
+              ...(customer ? { customer } : {}),
+              ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
+              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+              discount: discountTotal + voucherAmt,
+            })}>
+              <Text style={[styles.link, isTablet && styles.linkBig]}>{t('splitBill')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}>
-              <Text style={styles.link}>{t('moveItems')}</Text>
+            <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', { ...(table ? { from: table } : {}) })}>
+              <Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveItems')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate('BillPreview')}>
-              <Text style={styles.link}>{t('billPreview')}</Text>
+              <Text style={[styles.link, isTablet && styles.linkBig]}>{t('billPreview')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}>
-              <Text style={styles.link}>{t('moveTable')}</Text>
+            <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { ...(table ? { from: table } : {}) })}>
+              <Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveTable')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -361,7 +397,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       <Modal visible={showOngkir} transparent animationType="fade" onRequestClose={() => setShowOngkir(false)}>
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{t('ongkirTitle')}</Text>
+            <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('ongkirTitle')}</Text>
             <Text style={styles.modalLabel}>{t('ongkirNominal')}</Text>
             <TextInput
               style={styles.modalInput}
@@ -386,36 +422,48 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       {/* Simpan / Cetak / Bayar - sembunyi saat keranjang 0, ganti CTA tambah menu */}
       <View style={styles.footer}>
         {routeTotal !== undefined && routeTotal !== total && items.length > 0 && (
-          <Text style={styles.footerNote}>
+          <Text style={[styles.footerNote, isTablet && styles.footerNoteBig]}>
             {t('totalUpdatedA')}{rp(routeTotal)} → {rp(total)}{t('totalUpdatedB')}
           </Text>
         )}
         {savedTick && items.length > 0 && (
-          <Text style={styles.footerNote}>{t('orderSavedNote')}</Text>
+          <Text style={[styles.footerNote, isTablet && styles.footerNoteBig]}>{t('orderSavedNote')}</Text>
         )}
         {items.length === 0 ? (
           <TouchableOpacity style={styles.payBtn} onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={styles.payText}>＋ {t('addMenu')} ›</Text>
+            <Text style={[styles.payText, isTablet && styles.payTextBig]}>＋ {t('addMenu')} ›</Text>
           </TouchableOpacity>
         ) : (
           <>
             <View style={styles.footerRow}>
               <TouchableOpacity style={styles.saveBtn} onPress={goSave}>
-                <Text style={styles.saveText}>🧺 {t('save')}</Text>
+                <Text style={[styles.saveText, isTablet && styles.saveTextBig]}>{t('save')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.printBtn}
                 onPress={() => navigation?.navigate('LoadOrder')}>
-                <Text style={styles.printText}>📂 {t('load')}</Text>
+                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>{t('load')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.printBtn}
-                onPress={() => navigation?.navigate('Receipt', { total, mode })}>
-                <Text style={styles.printText}>🖨 {t('printReceipt')}</Text>
+                onPress={() => navigation?.navigate('Receipt', {
+                  total, mode,
+                  items: active,
+                  discount: discountTotal + voucherAmt,
+                  ...(voucher ? { voucherCode: voucher.code } : {}),
+                  ...(table ? { table } : {}),
+                  ...(customer ? { customer } : {}),
+                  ongkir: ongkirNet,
+                  ...(service > 0 ? { service } : {}),
+                  ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+                  ...(rounding !== 0 ? { rounding } : {}),
+                  ...(feeESB > 0 ? { feeESB } : {}),
+                })}>
+                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>Cetak {t('printReceipt')}</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.payBtn} onPress={goPay}>
-              <Text style={styles.payText}>{t('pay')} | {rp(total)} ›</Text>
+              <Text style={[styles.payText, isTablet && styles.payTextBig]}>{t('pay')} | {rp(total)} ›</Text>
             </TouchableOpacity>
           </>
         )}
@@ -594,4 +642,18 @@ const styles = StyleSheet.create({
   modalGhostT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
   modalPrimary: { flex: 2, backgroundColor: colors.navy, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
   modalPrimaryT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  itemNameBig: { fontSize: 15 },
+  sumLabelBig: { fontSize: 14 },
+  sumValueBig: { fontSize: 14 },
+  totalLabelBig: { fontSize: 16 },
+  totalValueBig: { fontSize: 19 },
+  payTextBig: { fontSize: 17 },
+  saveTextBig: { fontSize: 14 },
+  promoTitleBig: { fontSize: 15 },
+  linkBig: { fontSize: 14 },
+  emptyTitleBig: { fontSize: 17 },
+  emptySubBig: { fontSize: 14 },
+  modalTitleBig: { fontSize: 16 },
+  footerNoteBig: { fontSize: 12 },
 });

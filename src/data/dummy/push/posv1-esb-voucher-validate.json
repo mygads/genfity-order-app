@@ -1,0 +1,17 @@
+{
+  "request": { "code": "HEMAT10K", "grandTotal": 60400 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "code": "HEMAT10K",
+      "valid": true,
+      "amount": 10000,
+      "minSpend": 40000,
+      "validTo": "2026-12-31 23:59:59"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 8,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "menuId": "M001", "name": "Ayam Geprek", "price": 18000, "categoryId": "C01", "groupId": "G01", "stationId": "DAPUR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M002", "name": "Nasi Goreng Spesial", "price": 25000, "categoryId": "C01", "groupId": "G01", "stationId": "DAPUR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M003", "name": "Mie Goreng Jawa", "price": 22000, "categoryId": "C01", "groupId": "G01", "stationId": "DAPUR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M004", "name": "Soto Ayam", "price": 17000, "categoryId": "C01", "groupId": "G01", "stationId": "DAPUR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M005", "name": "Tempe Mendoan", "price": 12000, "categoryId": "C02", "groupId": "G02", "stationId": "DAPUR", "flagActive": 1, "soldOut": 1, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M006", "name": "Es Teh Manis", "price": 8000, "categoryId": "C03", "groupId": "G03", "stationId": "BAR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M007", "name": "Jus Alpukat", "price": 15000, "categoryId": "C03", "groupId": "G03", "stationId": "BAR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "menuId": "M008", "name": "Paket Hemat 1", "price": 30000, "categoryId": "C04", "groupId": "G04", "stationId": "DAPUR", "flagActive": 1, "soldOut": 0, "imageUrl": "", "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

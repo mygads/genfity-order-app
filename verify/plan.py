@@ -1,8 +1,8 @@
 """Screenshot semua layar via navigasi React Navigation (deep-link tidak ada).
 Strategi: buka Expo web, klik 'Masuk Demo', lalu navigasi programatik via
-window.__NAV__: tiap layar dibungkus? Tidak — gunakan pendekatan DOM:
+window.__NAV__: tiap layar dibungkus? Tidak - gunakan pendekatan DOM:
 klik tombol/menu yang mengarah ke route, atau panggil navigasi lewat React DevTools hook.
-Lebih sederhana & robust: tiap screen di-render lewat hash query ?screen=X —
+Lebih sederhana & robust: tiap screen di-render lewat hash query ?screen=X -
 tidak didukung. Maka: gunakan Playwright untuk klik berurutan mengikuti alur
 menu Dashboard (semua route ada di MENU + CTA + link), sisanya via tombol di layar.
 
@@ -15,7 +15,7 @@ Peta klik:
 - Success: Order Baru -> Cashier
 - BillPreview -> Receipt ; History (SavedTransactions+History sama komponen, beda judul) ; Tables -> DineIn? ; Shift/Recap/EndShift/Attendance ; EsbOrder/Kitchen ; QrScan ; Edc ; Voucher ; LoadOrder ; CustomMenu ; Cancel ; Printers ; Settings
 Untuk layar tanpa tombol langsung: gunakan menu Dashboard bila ada, atau tombol back + menu lain.
-Fallback terakhir: evaluasi JS — cari objek navigation React via __reactFiber dan panggil navigate.
+Fallback terakhir: evaluasi JS - cari objek navigation React via __reactFiber dan panggil navigate.
 """
 import json, sys, time
 from playwright.sync_api import sync_playwright

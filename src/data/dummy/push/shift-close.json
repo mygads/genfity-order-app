@@ -1,0 +1,17 @@
+{
+  "request": { "shiftId": "S20261016P", "endCash": 512500, "expectedCash": 512500, "note": "Setoran sore" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "shiftId": "S20261016P",
+      "endCash": 512500,
+      "expectedCash": 512500,
+      "diff": 0,
+      "clockOut": "2026-10-16 17:02:00"
+    }
+  }
+}

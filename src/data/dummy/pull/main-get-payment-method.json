@@ -1,0 +1,27 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 10,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "methodId": "PAY01", "name": "Tunai", "type": "cash", "flagActive": 1, "sortOrder": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY02", "name": "Debit", "type": "card", "flagActive": 1, "sortOrder": 2, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY03", "name": "Kredit", "type": "card", "flagActive": 1, "sortOrder": 3, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY04", "name": "QRIS", "type": "online", "flagActive": 1, "sortOrder": 4, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY05", "name": "OVO", "type": "online", "flagActive": 1, "sortOrder": 5, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY06", "name": "GoPay", "type": "online", "flagActive": 1, "sortOrder": 6, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY07", "name": "DANA", "type": "online", "flagActive": 1, "sortOrder": 7, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY08", "name": "ShopeePay", "type": "online", "flagActive": 1, "sortOrder": 8, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY09", "name": "Transfer", "type": "transfer", "flagActive": 1, "sortOrder": 9, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "methodId": "PAY10", "name": "Deposit", "type": "deposit", "flagActive": 1, "sortOrder": 10, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

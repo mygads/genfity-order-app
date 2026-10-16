@@ -1,0 +1,14 @@
+{
+  "request": { "attendanceId": "ATT-20261016-001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "attendanceId": "ATT-20261016-001",
+      "clockOut": "2026-10-16 17:02:00"
+    }
+  }
+}

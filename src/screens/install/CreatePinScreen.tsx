@@ -1,35 +1,33 @@
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenterSm } from '../../theme';
-import { loginDemo } from '../../session';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
-type Props = { navigation?: Nav; route?: { params?: { branch?: string } } };
-
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
-
-export default function CreatePinScreen({ navigation, route }: Props) {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { loginDemo } from '../../session';import { createPinOnServer } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];export default function CreatePinScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const branch = route?.params?.branch ?? 'ESB Cabang Poris';
-  const [pin, setPin] = useState('');
+  const { t } = useLang(); const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [ok, setOk] = useState(false);
 
-  const active = pin.length < 4 ? 'pin' : 'confirm';
+  const [saving, setSaving] = useState(false); const active = pin.length < 4 ? 'pin' : 'confirm';
   const val = active === 'pin' ? pin : confirm;
   const setVal = active === 'pin' ? setPin : setConfirm;
 
+  // PIN dikirim sekali ke server via apiSource (Dummy Mode offline / backend
+  // asli bila env terisi), lalu disimpan sebagai HASH via SecureStore - PIN
+  // plaintext tidak pernah disimpan. Verifikasi login tetap revalidasi ke
+  // server (validateEmployee), bukan PIN lokal saja.
+  // userId dari params bila pemanggil sudah validate employee, else akun
+  // demo Gista (U07) agar alur install-langsung tetap jalan.
+  const userId = route?.params?.userId ?? 'U07';
+  const submitPin = async (matched: string) => { setSaving(true); setError(''); try { const r = await createPinOnServer(userId, matched); if (!r.ok) throw new Error('create-pin gagal'); await savePinHash(userId, matched); setOk(true); } catch { setError(t('inst_pin_fail')); setPin(''); setConfirm(''); } finally { setSaving(false); } };
   const press = (k: string) => {
-    setError('');
+    if (saving) return; setError('');
     if (k === 'C') setVal('');
     else if (k === '⌫') setVal(val.slice(0, -1));
     else if (val.length < 4) {
       const next = val + k;
       setVal(next);
       if (next.length === 4 && active === 'confirm') {
-        if (next === pin) setOk(true);
+        if (next === pin) void submitPin(next);
         else {
           setError('Konfirmasi PIN tidak sama. Ulangi.');
           setPin('');
@@ -44,7 +42,7 @@ export default function CreatePinScreen({ navigation, route }: Props) {
       <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
         <Image source={require('../../../assets/images/process_success.webp')} style={styles.hero} resizeMode="contain" />
         <Text style={styles.title}>Terminal Siap!</Text>
-        <Text style={styles.desc}>{branch} berhasil ditautkan. PIN kasir tersimpan di perangkat ini — gunakan untuk masuk.</Text>
+        <Text style={styles.desc}>{branch} berhasil ditautkan. PIN kasir tersimpan di perangkat ini - gunakan untuk masuk.</Text>
         <TouchableOpacity
           style={styles.primary}
           onPress={() => { loginDemo(); navigation?.navigate('Login'); }}>
@@ -68,7 +66,7 @@ export default function CreatePinScreen({ navigation, route }: Props) {
         ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.keys}>
+      {saving ? <Text style={styles.saving}>{t('inst_pin_saving')}</Text> : null} <View style={styles.keys}>
         {KEYS.map((k) => (
           <TouchableOpacity
             key={k}
@@ -78,12 +76,9 @@ export default function CreatePinScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.foot}>PIN hanya tersimpan di perangkat ini (demo)</Text>
+      <Text style={styles.foot}>{t('inst_pin_secure')}</Text>
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingBottom: 32, alignItems: 'center' },
   hero: { width: 160, height: 160, marginTop: 48 },
@@ -94,12 +89,11 @@ const styles = StyleSheet.create({
   pinDotOn: { borderColor: colors.navy, backgroundColor: colors.paleBlue },
   pinChar: { fontSize: 20, color: colors.navy },
   error: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8 },
-  keys: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16, justifyContent: 'center' },
+  saving: { fontFamily: fonts.medium, fontSize: 13, color: colors.navy, marginTop: 8 }, keys: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16, justifyContent: 'center' },
   key: { width: '31%', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   keyT: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   keyUtil: { backgroundColor: colors.bg },
   keyUtilT: { color: colors.red },
   primary: { backgroundColor: colors.orange, borderRadius: 14, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20, width: '100%' },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
-  foot: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 16 },
-});
+  foot: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center', marginTop: 16 },});

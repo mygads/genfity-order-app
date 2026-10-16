@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { enqueueSync } from '../../lib/sync';
-import { initDb, query } from '../../lib/db';
+import { initDb, query, run } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { from?: string } } };
@@ -44,12 +44,14 @@ function canonTableNo(raw: string): string {
 }
 export default function MoveTableScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? OCCUPIED[0]?.table ?? 'A2'));
   const [to, setTo] = useState(EMPTY[0] as string);
   const [done, setDone] = useState(false);
+  /** Peringatan validasi tujuan (meja sama / asal belum dipilih). */
+  const [warn, setWarn] = useState('');
   // T7: katalog live dari SQLite (bill aktif + ms_table); konstanta di atas
   // hanya fallback saat DB kosong (instalasi baru / belum ada bill terbuka).
   const [liveOcc, setLiveOcc] = useState<Occupied[] | null>(null);
@@ -123,7 +125,10 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const destCode = to.replace(/\s*\(.*\)\s*$/, '').trim();
 
   const move = () => {
-    if (!src) return;
+    // Validasi meja tujuan ala POSLite: asal harus ada, tujuan tak boleh sama.
+    if (!src) { setWarn('Pilih meja asal yang terisi dulu.'); return; }
+    if (destCode === src.table) { setWarn(`Meja tujuan sama dengan asal (${src.table}) - pilih meja lain.`); return; }
+    setWarn('');
     // Catat pindah meja ke antrean sync agar diteruskan ke server (offline-first).
     try {
       enqueueSync('other', {
@@ -133,6 +138,25 @@ export default function MoveTableScreen({ navigation, route }: Props) {
     } catch {
       /* antrean belum siap - status lokal di bawah tetap diubah */
     }
+    // Pindah bill di SQLite: seluruh item, catatan (note), modifier, dan total
+    // ikut pindah karena baris tr_salesmenu/menuextra menempel ke salesNum.
+    void (async () => {
+      try {
+        await initDb();
+        await run(
+          `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status <> 'paid'`,
+          [destCode, src.table],
+        );
+        try {
+          await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['kosong', src.table]);
+        } catch { /* master meja opsional */ }
+        try {
+          await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', destCode]);
+        } catch { /* master meja opsional */ }
+      } catch {
+        /* SQLite belum siap - antrean sync di atas tetap jalan */
+      }
+    })();
     setDone(true);
   };
 
@@ -148,55 +172,56 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         }
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-        <Text style={styles.hint}>{t('mov_hint_table')}</Text>
-        <Text style={styles.label}>Dari meja (terisi)</Text>
+        <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('mov_hint_table')}</Text>
+        <Text style={[styles.label, isTablet && styles.labelBig]}>Dari meja (terisi)</Text>
         <View style={styles.chips}>
           {occupied.map((o) => (
             <TouchableOpacity
               key={o.table}
               style={[styles.chip, from === o.table && styles.chipOn]}
-              onPress={() => { setFrom(o.table); setDone(false); }}>
-              <Text style={[styles.chipT, from === o.table && styles.chipTOn]}>{o.table}</Text>
+              onPress={() => { setFrom(o.table); setDone(false); setWarn(''); }}>
+              <Text style={[styles.chipT, from === o.table && styles.chipTOn, isTablet && styles.chipTBig]}>{o.table}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {src && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Meja {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
+            <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>Meja {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
             <View style={styles.cardRow}>
-              <Text style={styles.cardLabel}>Item</Text>
-              <Text style={styles.cardVal}>{src.items} item</Text>
+              <Text style={[styles.cardLabel, isTablet && styles.cardLabelBig]}>Item</Text>
+              <Text style={[styles.cardVal, isTablet && styles.cardValBig]}>{src.items} item</Text>
             </View>
             <View style={styles.cardRow}>
-              <Text style={styles.cardLabel}>Total berjalan</Text>
-              <Text style={styles.cardVal}>{rp(src.total)}</Text>
+              <Text style={[styles.cardLabel, isTablet && styles.cardLabelBig]}>Total berjalan</Text>
+              <Text style={[styles.cardVal, isTablet && styles.cardValBig]}>{rp(src.total)}</Text>
             </View>
           </View>
         )}
 
-        <Text style={styles.label}>Ke meja (kosong)</Text>
+        <Text style={[styles.label, isTablet && styles.labelBig]}>Ke meja (kosong)</Text>
         <View style={styles.chips}>
           {emptyList.map((tb) => (
-            <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn]} onPress={() => setTo(tb)}>
-              <Text style={[styles.chipT, to === tb && styles.chipTOn]}>{tb}</Text>
+            <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn]} onPress={() => { setTo(tb); setWarn(''); }}>
+              <Text style={[styles.chipT, to === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {done && src ? (
-          <Text style={styles.done}>Transaksi {src.table} ({rp(src.total)}) dipindahkan ke {to}.</Text>
+          <Text style={[styles.done, isTablet && styles.doneBig]}>Transaksi {src.table} ({rp(src.total)}) dipindahkan ke {to} - item dan catatan ikut.</Text>
         ) : null}
+        {warn ? <Text style={styles.warn}>{warn}</Text> : null}
 
         <TouchableOpacity style={styles.primary} onPress={move}>
-          <Text style={styles.primaryT}>{t('mov_do_table')} ›</Text>
+          <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{t('mov_do_table')} ›</Text>
         </TouchableOpacity>
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
-            <Text style={styles.link}>Lihat Denah Meja ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Cashier', { table: destCode })}>
-            <Text style={styles.link}>Buka di Kasir ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>Buka di Kasir ›</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -228,6 +253,17 @@ const styles = StyleSheet.create({
   cardLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   cardVal: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   done: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark, marginTop: 12 },
+  warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8, textAlign: 'center' },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  hintBig: { fontSize: 13 },
+  labelBig: { fontSize: 13 },
+  chipTBig: { fontSize: 14 },
+  cardTitleBig: { fontSize: 15 },
+  cardLabelBig: { fontSize: 14 },
+  cardValBig: { fontSize: 14 },
+  doneBig: { fontSize: 14 },
+  primaryTBig: { fontSize: 16 },
+  linkBig: { fontSize: 14 },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 16 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   links: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },

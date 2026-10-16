@@ -1,6 +1,6 @@
 /**
  * Generator byte ESC/POS untuk struk thermal 58mm/80mm (32 kolom).
- * Murni TypeScript — tanpa dependensi native — sehingga bisa dipakai di
+ * Murni TypeScript - tanpa dependensi native - sehingga bisa dipakai di
  * web (unduh .bin / kirim via Web Bluetooth BLE) maupun native.
  */
 
@@ -102,6 +102,18 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   return Uint8Array.from(out);
 }
 
+/**
+ * Byte tendangan laci kas standar ESC/POS: INIT + `ESC p m t1 t2`
+ * (pin konektor 0, on 50ms, off 200ms). Sama persis dengan
+ * DRAWER_KICK di GenfityPrinterModule.java - satu sumber kebenaran
+ * dalam bentuk yang bisa diuji (`verify/check.drawer.cjs`).
+ */
+export const DRAWER_KICK_HEX = '1b401b700032c8';
+
+export function buildDrawerKickBytes(): Uint8Array {
+  return Uint8Array.from([0x1b, 0x40, 0x1b, 0x70, 0x00, 0x32, 0xc8]);
+}
+
 export function toHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -182,7 +194,7 @@ export async function sendOverWebBluetooth(bytes: Uint8Array): Promise<string> {
   if (!server) throw new Error('Gagal konek GATT ke printer.');
   const svc = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
   const chr = await svc.getCharacteristic('6e400003-b5a3-f393-e0a9-e50e24dcca9e');
-  // MTU BLE kecil — potong 100 byte per tulis.
+  // MTU BLE kecil - potong 100 byte per tulis.
   for (let i = 0; i < bytes.length; i += 100) {
     await chr.writeValue(bytes.slice(i, i + 100));
   }

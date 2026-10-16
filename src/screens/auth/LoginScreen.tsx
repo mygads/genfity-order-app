@@ -10,7 +10,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { loginDemo, loginEmployee } from '../../session';
 import { validateEmployee } from '../../lib/apiSource';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
@@ -86,7 +86,7 @@ function QrTabletArt() {
 
 export default function LoginScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [mode, setMode] = useState<'email' | 'qr'>('email');
   const [username, setUsername] = useState('');

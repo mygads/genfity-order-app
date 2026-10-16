@@ -1,9 +1,9 @@
-# Kontrak API — Genfity Order App ↔ Server
+# Kontrak API - Genfity Order App ↔ Server
 
 Dokumen ini adalah SATU-SATUNYA acuan membangun backend (BE) sendiri.
 Struktur flow/endpoint/urutan mirror ESB POSLite v2.31.13 (fakta bedah di
 `REA-poslite-dossier.md` Lampiran D); skema JSON di bawah adalah kontrak
-resmi clone ini — implementasikan di server apa adanya agar aplikasi jalan.
+resmi clone ini - implementasikan di server apa adanya agar aplikasi jalan.
 
 Legenda: **[FAKTA]** = terverifikasi dari string/APK. **[KONTRAK]** = ditetapkan
 dokumen ini (ikuti persis bila bangun BE baru).
@@ -64,7 +64,7 @@ X-Device-Id: <16-hex deviceID>
 | `E422` | Validasi gagal | Tampilkan `message` + `errors{}` |
 | `E409` | Versi data basi (pull lama) | Pull ulang domain terkait |
 
-## 3. Install & klaim terminal — `INSTALL_BASE_URL`
+## 3. Install & klaim terminal - `INSTALL_BASE_URL`
 
 ### 3.1 `POST /pos/install` [FAKTA path]
 
@@ -87,7 +87,7 @@ Response `data`:
 }
 ```
 
-### 3.2 `POST /main/validate-terminal` — klaim via QR/kode
+### 3.2 `POST /main/validate-terminal` - klaim via QR/kode
 
 ```json
 { "terminalCode": "ESB-PORIS-001", "deviceID": "a91f3c..." }
@@ -101,7 +101,7 @@ Response `data`:
 { "branchId": "B001" }
 ```
 
-→ `data: { "status": "active" }` (`active|inactive|expired` — selain active
+→ `data: { "status": "active" }` (`active|inactive|expired` - selain active
 tampilkan ilustrasi `branch_inactive/branch_expired` + blokir login).
 
 ### 3.4 PIN & user
@@ -114,7 +114,7 @@ tampilkan ilustrasi `branch_inactive/branch_expired` + blokir login).
 | `POST /employee-attendance/clock-in` | `{userId, terminalId, shiftId}` | `{attendanceId, clockIn}` |
 | `POST /employee-attendance/clock-out` | `{attendanceId}` | `{clockOut}` |
 
-## 4. Pull (server → aplikasi) — `API_BASE_URL`
+## 4. Pull (server → aplikasi) - `API_BASE_URL`
 
 Urutan pull [FAKTA]: cabang → menu → pengguna/terminal → promo/voucher →
 member → pengaturan → penjualan (riwayat). Semua pull memakai body:
@@ -149,13 +149,13 @@ Contoh item menu:
   "lastSyncDate": "2026-10-16 10:00:00" }
 ```
 
-## 5. Push (aplikasi → server) —dirty = `syncDate IS NULL`
+## 5. Push (aplikasi → server) -dirty = `syncDate IS NULL`
 
-Urutan push [FAKTA]: shift → penjualan → event/expense → deposit → ESO.
+Aturan kirim [KONTRAK]: push/pull/WS HANYA ke server env Custom (milik sendiri); env bawaan = mode lokal, aplikasi menolak sync agar data tak bocor ke infrastruktur pihak ketiga. Urutan push [FAKTA]: shift → penjualan → event/expense → deposit → ESO.
 Aplikasi mengirim per batch (maks 50/batch), server membalas id yang diterima;
 yang gagal TETAP `syncDate NULL` (retry berikutnya).
 
-### 5.1 `POST order/finish` — penjualan
+### 5.1 `POST order/finish` - penjualan
 
 ```json
 {
@@ -163,9 +163,10 @@ yang gagal TETAP `syncDate NULL` (retry berikutnya).
   "branchId": "B001", "terminalId": "T001", "userId": "U07",
   "shiftId": "S20261016P", "salesDate": "2026-10-16 12:40:00",
   "salesMode": "DINE_IN", "tableNo": "A-01",
-  "subtotal": 70000, "discount": 2500, "tax": 6405,
-  "voucherAmount": 10000, "platformFee": 0, "rounding": -105,
-  "grandTotal": 64050, "paidAmount": 100000, "changeAmount": 35950,
+  "subtotal": 70000, "discount": 2500, "tax": 5698,
+  "serviceCharge": 2875,
+  "voucherAmount": 10000, "platformFee": 0, "rounding": 25,
+  "grandTotal": 60400, "paidAmount": 100000, "changeAmount": 39600,
   "paymentMethod": "Tunai",
   "items": [
     { "menuId": "M001", "name": "Ayam Geprek", "qty": 2,
@@ -201,7 +202,7 @@ POST posv1/esb-voucher/unlock   {code, salesNum}   → {ok:true}   (batal bayar)
 POST posv1/esb-voucher/burn     {code, salesNum}   → {ok:true}   (lunas)
 ```
 
-## 6. OTA — `OTA_BASE_URL`
+## 6. OTA - `OTA_BASE_URL`
 
 `POST /api/web/esb/update/pos-lite-minimum-version-v2` [FAKTA, tanpa envelope]:
 
@@ -223,7 +224,7 @@ layar update + unduh APK dari `data[].apkUrl` (tambahkan key `apkUrl` di BE Anda
 Aturan koneksi [KONTRAK]: kedua channel + bus display HANYA tersambung saat env server = Custom (milik sendiri); env bawaan = mode lokal, aplikasi tidak pernah mendial infrastruktur pihak ketiga tanpa kredensial merchant. Dua channel [FAKTA], reconnect otomatis + heartbeat 30 dtk (lihat
 `src/lib/realtime.ts`).
 
-### 7.1 Device channel — `WS_URL`
+### 7.1 Device channel - `WS_URL`
 
 Server → app (`type` + `payload`):
 
@@ -234,7 +235,7 @@ Server → app (`type` + `payload`):
 { "type": "SHIFT_NOTICE",  "payload": { "message": "Shift Pagi dibuka …" } }
 ```
 
-### 7.2 Self-order channel — `WS_SELF_ORDER_URL`
+### 7.2 Self-order channel - `WS_SELF_ORDER_URL`
 
 ```json
 { "type": "NEW_SELF_ORDER", "payload": { "orderId": "SO-881", "tableNo": "A-03",
@@ -258,8 +259,8 @@ Format `data` selaras §7 (`{type, payload}`) agar handler sama.
 
 ## 9. Kode area & format
 
-- Uang: integer rupiah (tanpa desimal). Pajak PPN 11% default dari
-  `ms_setting(Tax, PPN)`. Pembulatan: `rounding` = selisih ke kelipatan
+- Uang: integer rupiah (tanpa desimal). Pajak 11% default dari
+  `ms_setting(Tax, PPN)` (info-only, inklusif — lih. rumus §10.3). Pembulatan: `rounding` = selisih ke kelipatan
   (`ms_setting(Rounding, Step)`, default 100).
 - Waktu: `YYYY-MM-DD HH:mm:ss` (zona terminal).
 - Nomor transaksi: `TRX-YYYYMMDD-NNN` unik per terminal per hari.
@@ -271,4 +272,83 @@ Format `data` selaras §7 (`{type, payload}`) agar handler sama.
 2. §4 pull cabang/menu/user/meja/payment (8 endpoint)
 3. §5.1 push `order/finish` + balasan id
 4. §8 register-push (atau abaikan push remote, lokal tetap jalan)
-5. §6 OTA (atau kembalikan array kosong — app lanjut)
+5. §6 OTA (atau kembalikan array kosong - app lanjut)
+
+---
+
+## 10. Dummy Mode (FE tanpa BE) - [KONTRAK]
+
+Seluruh layar memanggil backend HANYA lewat satu titik:
+`src/lib/apiSource.ts` (`apiFetch` + helper install). Layar tidak me-require
+JSON dummy langsung dan tidak memanggil `apiGet`/`apiPost` langsung.
+
+### 10.1 Pemilihan sumber
+
+| Kondisi | Mode | Perilaku |
+|---|---|---|
+| `EXPO_PUBLIC_API_BASE_URL` kosong (default) | Dummy | Respons dari `src/data/dummy/**` (offline, tanpa dial ke mana pun) |
+| `EXPO_PUBLIC_API_BASE_URL` terisi URL backend sendiri | Real | `apiGet`/`apiPost` ke backend asli (header X-Terminal-Code/X-Branch-Id/Idempotency-Key/Bearer) |
+| Real Mode tapi fetch gagal/offline | Jatuh-balik dummy | Respons dummy + flag `fromDummy: true` agar kasir tetap jalan |
+
+Beralih ke backend asli: cukup isi `EXPO_PUBLIC_API_BASE_URL` (lihat
+`.env.example`) - tidak ada perubahan layar. JANGAN isi URL prod pihak
+ketiga; hanya backend Custom milik sendiri.
+
+### 10.2 Isi folder dummy
+
+Satu file per endpoint, tiap file = pasangan `{request, response}`:
+
+- `src/data/dummy/install/` - `pos-install`, `main-validate-terminal`,
+  `main-check-branch-status`, `pos-create-pin`, `esb-employee-validate`,
+  `esb-employee-update-pin`, `employee-attendance-clock-in`,
+  `employee-attendance-clock-out`
+- `src/data/dummy/pull/` - `main-get-branch-settings`, `main-get-menu`,
+  `main-get-branch-menu`, `main-get-user`, `main-get-table`,
+  `main-get-promotion`, `main-get-voucher`, `main-get-member`,
+  `main-get-sales`, `main-get-expense-chart-of-accounts`,
+  `main-get-menu-online`, `esb_api-pull-pos-version`,
+  `main-get-payment-method`, `main-get-station`, `terminal-get-terminal`,
+  `terminal-update`
+- `src/data/dummy/push/` - `order-finish` (angka persis contoh §5.1:
+  subtotal 70000, discount 2500, tax 5698, voucher 10000, rounding 25,
+  grandTotal 60400, paid 100000, change 39600), `order-split-bill`,
+  `order-move-items`, `order-move-table`, `order-view`, `shift-open`,
+  `shift-close`, `branch-expenses-push`,
+  `member-deposit-withdrawal-inquiry-deposit`,
+  `member-deposit-withdrawal-topup`, `sales-receipt-email`,
+  `posv1-esb-voucher-validate/lock/unlock/burn`, `auth-cashier-login`,
+  `auth-supervisor-approve`, `device-register-push`
+- `src/data/dummy/ota/pos-lite-minimum-version-v2.json` - array tanpa
+  envelope `[{key1,key2,value1,value2}]` + `apkUrl` milik sendiri
+
+Data realistis: merchant ESB Cabang Poris (B001), user Gista (U07,
+gista.kasir), terminal T001/ESB-PORIS-001, harga rupiah wajar.
+
+### 10.3 Rumus kasir kanonik (wajib konsisten di data dummy)
+
+- Uang integer rupiah. `net = subtotal - discount`.
+- Pajak 11% INKLUSIF informatif: `tax = round(net * 11 / 111)`.
+- Service 5% EKSKLUSIF: `service = round(net * 0.05)`.
+- `GRATISONGKIR` memotong ongkir: `ongkirNet = max(0, ongkir - amount)`.
+- Order ESB/marketplace: fee platform 5% dari net (`platformFee`),
+  `grandTotal = net + service + ongkirNet + platformFee + rounding`.
+- `grandTotal = net + service + ongkirNet + rounding`.
+- Contoh konsisten: subtotal 66000, discount 0, tax 6541, service 3300,
+  rounding 0, grandTotal 69300, paid 100000, change 30700.
+- Contoh delivery: subtotal 52000, discount 2000 (net 50000), tax 4955,
+  service 2500, ongkir 12000 - GRATISONGKIR 10000 = ongkirNet 2000,
+  grandTotal 54500.
+
+### 10.4 PIN dan kode error
+
+- Layar install memanggil `validateTerminal` / `checkBranch` /
+  `createPinOnServer` lewat `apiSource` (tetap jalan offline via dummy).
+- PIN plaintext tidak pernah disimpan; yang disimpan hanya hash KDF
+  (salt + 2000 iterasi SHA-256) via `expo-secure-store`
+  (`src/lib/pin.ts`). Verifikasi login wajib revalidasi server
+  (`validateEmployee`), bukan PIN lokal saja.
+- Kode error kontrak: `E00044` (>7 hari belum sync, blokir transaksi),
+  `E00043` (>3 hari, banner di SyncScreen), `E401`, `E422`, `E409`.
+  Banner E00043/E00044 dihitung dari timestamp sync sukses terakhir
+  (`getLastSyncMs`), bukan nilai statis.
+

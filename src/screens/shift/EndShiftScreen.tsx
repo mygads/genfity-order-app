@@ -1,35 +1,32 @@
-import React, { useState } from 'react';
-import {
-  Modal,
+import React, { useEffect, useState } from 'react';import {
+  Image, Modal,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,
-} from 'react-native';
-import { colors, fonts, rp, rpNum, wideCenter } from '../../theme';
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
-type Props = { navigation?: any };
-
-export default function EndShiftScreen({ navigation }: Props) {
+/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
+const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  // Ringkasan dummy — di app nyata diambil dari transaksi shift berjalan
-  const modalAwal = 200000;
-  const penjualanTunai = 1575000;
-  const pengeluaran = 75000;
-  const kasSeharusnya = modalAwal + penjualanTunai - pengeluaran;
+  const isTablet = width >= TABLET_BP;
 
-  const [kasFisik, setKasFisik] = useState('');
+  const { t } = useLang();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 200000, penjualanTunai: 1575000, pengeluaran: 75000, fromDb: false, });
+  const  [kasFisik, setKasFisik] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [error, setError] = useState('');
 
-  const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
+  // Ringkasan dari shift berjalan (tr_shiftlog) + penjualan lunas + pengeluaran.
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const open = await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null; }>(`SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status = 'open' ORDER BY clockIn DESC LIMIT 1`); const latest = open ?? (await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null }>( 'SELECT id, cashInDrawer, clockIn FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1', )); if (!on || !latest) return; const since = latest.clockIn ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString();    // Kas tunai MURNI: jumlah pembayaran cash dari tr_salespayment yang
+    // head-nya lunas - tanpa fallback ke semua metode (RIW-07).
+    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since], ); const tunai = num(cash?.total); const exp = await queryFirst<{ total: number }>( 'SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense WHERE expenseDate >= ?', [since], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.total)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran } = summary; const kasSeharusnya = modalAwal + penjualanTunai - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
   const touched = kasFisik.length > 0;
   const selisih = touched ? kasFisikNum - kasSeharusnya : 0;
 
@@ -48,12 +45,18 @@ export default function EndShiftScreen({ navigation }: Props) {
     setPinVisible(true);
   };
 
-  const confirmClose = () => {
+  const confirmClose = async () => {
     if (pin.length < 4) {
       setError('Masukkan PIN supervisor (min. 4 digit)');
       return;
     }
-    setPinVisible(false);
+    // Verifikasi PIN ke data user via hash (bukan PIN-lokal-only / plaintext).
+    try { await initDb(); const v = await verifyAttendancePin(pin); if (v.ok === false) { setError('PIN supervisor tidak dikenal - hubungi supervisor.'); return; } } catch { /* DB belum siap - lanjut dengan gerbang panjang-PIN */ }
+    // Tutup shift di SQLite + rincian per metode (tr_shiftlogdetail) + selisih,
+// lalu antre sync dan kembali ke layar Shift.
+    const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? 'Kasir'; let shiftId: string | null = summary.openId; try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); } else { const term = getTerminal(); shiftId = `shift-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, cashActual, cashDiff, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'closed', NULL)`, [shiftId, term.branchId || null, term.terminalCode || null, nm, 'Shift', since, nowIso, Math.round(modalAwal), Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih)], ); }
+    // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16).
+    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? GROUP BY p.paymentMethod`, [since], ); for (const m of byMethod) { try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [`sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
     setPin('');
     navigation?.navigate?.('Shift');
   };
@@ -63,7 +66,7 @@ export default function EndShiftScreen({ navigation }: Props) {
     if (selisih === 0) {
       return (
         <View style={[s.banner, s.bannerOk]}>
-          <Text style={[s.bannerTitle, s.bannerOkTxt]}>Selisih Rp 0 — Kas Pas ✓</Text>
+          <Text style={[s.bannerTitle, s.bannerOkTxt]}>Selisih {rp(0)} - Kas Pas ✓</Text>
           <Text style={s.bannerSub}>Kas fisik sama dengan kas seharusnya</Text>
         </View>
       );
@@ -85,36 +88,34 @@ export default function EndShiftScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
+      <ScreenHeader title={t('title_close')} onBack={() => navigation?.goBack?.()} right={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Tutup Shift / Akhiri Shift</Text>
-        <View style={s.backBtn} />
-      </View>
+        } />
+
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         <View style={s.card}>
-          <Text style={s.cardTitle}>Ringkasan Shift</Text>
+          <Text style={s.cardTitle}>{t('end_summary')}</Text>
           <Row label="Modal Awal (Kas Awal)" value={rp(modalAwal)} />
           <Row label="Penjualan Tunai" value={rp(penjualanTunai)} />
-          <Row label="Pengeluaran" value={'− ' + rp(pengeluaran)} negative />
+          <Row label="Pengeluaran" value={'- ' + rp(pengeluaran)} negative />
           <View style={s.divider} />
           <View style={s.totalRow}>
             <Text style={s.totalLabel}>Kas Seharusnya</Text>
             <Text style={s.totalValue}>{rp(kasSeharusnya)}</Text>
           </View>
           <Text style={s.formula}>
-            Modal awal + penjualan tunai − pengeluaran
+            Modal awal + penjualan tunai - pengeluaran
           </Text>
         </View>
 
         {renderDiffBanner()}
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Kas Fisik (Hasil Hitung Laci)</Text>
+          <Text style={s.cardTitle}>{t('end_cash_real')}</Text>
           <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>Rp</Text>
+            <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
             <TextInput
               style={s.amountInput}
               keyboardType="number-pad"
@@ -122,7 +123,7 @@ export default function EndShiftScreen({ navigation }: Props) {
               placeholderTextColor={colors.faint}
               textAlign="right"
               value={touched ? rpNum(kasFisikNum) : '0'}
-              onChangeText={(t) => setKasFisik(t.replace(/\D/g, ''))}
+              onChangeText={(tx) => setKasFisik(tx.replace(/\D/g, ''))}
             />
           </View>
           <NumPad
@@ -134,7 +135,7 @@ export default function EndShiftScreen({ navigation }: Props) {
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Catatan Shift Out</Text>
+          <Text style={s.cardTitle}>{t('end_note_out')}</Text>
           <TextInput
             style={s.noteInput}
             placeholder="Catatan (opsional)"
@@ -162,7 +163,7 @@ export default function EndShiftScreen({ navigation }: Props) {
           <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
         </View>
         <TouchableOpacity style={s.closeBtn} onPress={askClose}>
-          <Text style={s.closeBtnTxt}>Tutup Shift</Text>
+          <Text style={s.closeBtnTxt}>{t('end_close_btn')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -172,14 +173,14 @@ export default function EndShiftScreen({ navigation }: Props) {
             <Text style={s.modalTitle}>Akhiri Shift?</Text>
             <Text style={s.modalHint}>
               Kas seharusnya {rp(kasSeharusnya)}{'\n'}Kas fisik {rp(kasFisikNum)}
-              {'\n'}Selisih {selisih >= 0 ? '+' : '−'}
+              {'\n'}Selisih {selisih >= 0 ? '+' : '-'}
               {rpNum(Math.abs(selisih))}
             </Text>
             <View style={s.dialogRow}>
               <TouchableOpacity
                 style={s.dialogCancel}
                 onPress={() => setConfirmVisible(false)}>
-                <Text style={s.dialogCancelTxt}>Batal</Text>
+                <Text style={s.dialogCancelTxt}>{t('cm_cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.dialogOk} onPress={askPin}>
                 <Text style={s.dialogOkTxt}>Lanjut</Text>
@@ -222,33 +223,25 @@ export default function EndShiftScreen({ navigation }: Props) {
                 setPinVisible(false);
                 setPin('');
               }}>
-              <Text style={s.cancelTxt}>Batal</Text>
+              <Text style={s.cancelTxt}>{t('cm_cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
-  );
-}
-
-function Row({
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+  );}function Row({
   label,
   value,
-  negative,
-}: {
+  negative,}: {
   label: string;
   value: string;
-  negative?: boolean;
-}) {
+  negative?: boolean;}) {
   return (
     <View style={s.row}>
       <Text style={s.rowLabel}>{label}</Text>
       <Text style={[s.rowValue, negative && { color: colors.red }]}>{value}</Text>
     </View>
-  );
-}
-
-function NumPad({ onKey }: { onKey: (k: string) => void }) {
+  );}function NumPad({ onKey }: { onKey: (k: string) => void }) {
   return (
     <View style={s.pad}>
       {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '000'].map((k) => (
@@ -257,23 +250,11 @@ function NumPad({ onKey }: { onKey: (k: string) => void }) {
         </TouchableOpacity>
       ))}
     </View>
-  );
-}
-
-const s = StyleSheet.create({
+  );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 16, fontFamily: fonts.bold },
+  burger: {
+     width: 22, height: 22 },
+
   body: { padding: 16 },
   card: {
     backgroundColor: colors.card,
@@ -460,5 +441,4 @@ const s = StyleSheet.create({
   pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
   cancelBtn: { marginTop: 12, padding: 10 },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },
-  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },
-});
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },});

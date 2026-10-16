@@ -1,0 +1,48 @@
+{
+  "request": {
+    "parentSalesNum": "TRX-20261016-010",
+    "branchId": "B001", "terminalId": "T001", "userId": "U07",
+    "subtotal": 150000, "discount": 5000, "tax": 14369,
+    "voucherAmount": 10000, "voucherCode": "GRATISONGKIR",
+    "serviceCharge": 7250, "ongkir": 12000, "ongkirNet": 2000, "rounding": 0,
+    "grandTotal": 154250,
+    "bills": [
+      {
+        "salesNum": "TRX-20261016-010-A",
+        "subtotal": 90000, "discount": 0, "tax": 8919,
+        "serviceCharge": 4500, "rounding": 0,
+        "grandTotal": 90000, "paidAmount": 100000, "changeAmount": 10000,
+        "paymentMethod": "Tunai",
+        "items": [
+          { "menuId": "M001", "name": "Ayam Geprek", "qty": 2, "unitPrice": 45000, "discount": 0 }
+        ],
+        "payments": [{ "method": "Tunai", "amount": 100000 }]
+      },
+      {
+        "salesNum": "TRX-20261016-010-B",
+        "subtotal": 60000, "discount": 5000, "tax": 5450,
+        "voucherAmount": 10000, "voucherCode": "GRATISONGKIR",
+        "serviceCharge": 2750, "ongkir": 12000, "ongkirNet": 2000, "rounding": 0,
+        "grandTotal": 64250, "paidAmount": 64250, "changeAmount": 0,
+        "paymentMethod": "QRIS",
+        "items": [
+          { "menuId": "M002", "name": "Nasi Goreng Spesial", "qty": 2, "unitPrice": 25000, "discount": 5000 },
+          { "menuId": "M009", "name": "Es Jeruk", "qty": 1, "unitPrice": 10000, "discount": 0 }
+        ],
+        "payments": [{ "method": "QRIS", "amount": 64250 }]
+      }
+    ]
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "parentSalesNum": "TRX-20261016-010",
+      "bills": ["TRX-20261016-010-A", "TRX-20261016-010-B"],
+      "syncDate": "2026-10-16 12:30:05"
+    }
+  }
+}

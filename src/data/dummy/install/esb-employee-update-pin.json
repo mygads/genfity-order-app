@@ -1,0 +1,11 @@
+{
+  "request": { "userId": "U07", "oldPin": "1234", "newPin": "5678" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true, "userId": "U07" }
+  }
+}

@@ -2,7 +2,7 @@
  * Wrapper AsyncStorage yang aman untuk web + native.
  *
  * - Di web, AsyncStorage memakai driver localStorage; di native memakai
- *   penyimpanan asinkron bawaan — pemanggil tidak perlu peduli platform.
+ *   penyimpanan asinkron bawaan - pemanggil tidak perlu peduli platform.
  * - Setiap kegagalan (paket belum ter-link, storage penuh, mode privat)
  *   jatuh ke fallback memori agar alur kasir tidak pernah crash.
  */
@@ -19,7 +19,7 @@ export async function getItem(key: string): Promise<string | null> {
       return v;
     }
   } catch {
-    /* abaikan — pakai fallback memori di bawah */
+    /* abaikan - pakai fallback memori di bawah */
   }
   return mem.get(key) ?? null;
 }
@@ -30,7 +30,7 @@ export async function setItem(key: string, value: string): Promise<void> {
   try {
     await AsyncStorage.setItem(key, value);
   } catch {
-    /* abaikan — nilai tetap tersedia di memori sesi ini */
+    /* abaikan - nilai tetap tersedia di memori sesi ini */
   }
 }
 
@@ -60,6 +60,6 @@ export async function setJSON(key: string, value: unknown): Promise<void> {
   try {
     await setItem(key, JSON.stringify(value));
   } catch {
-    /* abaikan — setItem sudah menelan galatnya sendiri */
+    /* abaikan - setItem sudah menelan galatnya sendiri */
   }
 }

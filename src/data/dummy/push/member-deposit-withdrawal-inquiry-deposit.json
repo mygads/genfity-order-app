@@ -1,0 +1,17 @@
+{
+  "request": { "memberId": "M001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "memberId": "M001",
+      "name": "Budi Santoso",
+      "tier": "GOLD",
+      "saldo": 150000,
+      "poin": 342
+    }
+  }
+}

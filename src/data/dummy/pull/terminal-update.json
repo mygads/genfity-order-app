@@ -1,0 +1,11 @@
+{
+  "request": { "terminalId": "T001", "settingKey": "charPerLine", "settingValue": "32" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true, "terminalId": "T001" }
+  }
+}

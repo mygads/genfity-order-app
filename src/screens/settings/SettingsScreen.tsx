@@ -7,6 +7,8 @@ import { useLang, type Lang } from '../../lib/i18n';
 import { logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
+import { getLastSync, pushAll } from '../../lib/sync';
+import { pullMaster } from '../../lib/master';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -30,6 +32,9 @@ export default function SettingsScreen({ navigation }: Props) {
   const [draftCode, setDraftCode] = useState('');
   const [draftBranchId, setDraftBranchId] = useState('');
   const [draftBranchName, setDraftBranchName] = useState('');
+  const [syncBusy, setSyncBusy] = useState<'push' | 'pull' | null>(null);
+  const [syncMsg, setSyncMsg] = useState('');
+  const [lastPush, setLastPush] = useState(() => getLastSync() || '');
 
   const go = (route: string) => navigation?.navigate(route);
 
@@ -40,6 +45,38 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const saveCustom = () => {
     setCustomBaseUrl(customUrl);
+  };
+
+  /** Push/pull langsung dari Pengaturan (pola sama dengan SyncScreen).
+   * Guard custom-only melempar pesan Indonesia yang diteruskan apa adanya. */
+  const doPush = async () => {
+    if (syncBusy) return;
+    setSyncBusy('push');
+    setSyncMsg('');
+    try {
+      const r = await pushAll();
+      const last = getLastSync();
+      if (last) setLastPush(last);
+      setSyncMsg(`${t('sync.sent')}: ${r.sent}, ${t('sync.failed')}: ${r.failed}`);
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : t('sync.failed'));
+    } finally {
+      setSyncBusy(null);
+    }
+  };
+
+  const doPull = async () => {
+    if (syncBusy) return;
+    setSyncBusy('pull');
+    setSyncMsg('');
+    try {
+      await pullMaster();
+      setSyncMsg(`${t('sync.lastPull')}: ${new Date().toLocaleString('id-ID')}`);
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : t('sync.failed'));
+    } finally {
+      setSyncBusy(null);
+    }
   };
 
   const openTerminal = () => {
@@ -99,6 +136,20 @@ export default function SettingsScreen({ navigation }: Props) {
             </Pressable>
           </View>
         )}
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.cardTitle}>{t('sync.title')}</Text>
+        <Text style={styles.cardSub}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
+        <View style={styles.syncRow}>
+          <Pressable style={[styles.syncBtn, syncBusy && styles.syncBtnDisabled]} onPress={doPush} disabled={!!syncBusy}>
+            <Text style={styles.syncBtnText}>{syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')}</Text>
+          </Pressable>
+          <Pressable style={[styles.syncBtnPull, syncBusy && styles.syncBtnDisabled]} onPress={doPull} disabled={!!syncBusy}>
+            <Text style={styles.syncBtnPullText}>{syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')}</Text>
+          </Pressable>
+        </View>
+        {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
       </View>
 
       <Text style={styles.groupLabel}>{t('settings.printerPrint')}</Text>
@@ -292,6 +343,13 @@ const styles = StyleSheet.create({
   },
   saveBtn: { borderRadius: 10, backgroundColor: colors.navy, paddingHorizontal: 16, justifyContent: 'center', marginTop: 6 },
   saveBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  syncRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  syncBtn: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 11, alignItems: 'center' },
+  syncBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  syncBtnPull: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 11, alignItems: 'center' },
+  syncBtnPullText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
+  syncBtnDisabled: { opacity: 0.4 },
+  syncMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.navy, marginTop: 8 },
   fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10 },
   centerWrap: {
     flex: 1,

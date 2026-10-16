@@ -1,41 +1,27 @@
-import { useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number } } };
-
-type Promo = {
+import { useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number; ongkir?: number } } };type Promo = {
   code: string;
   name: string;
   desc: string;
   amount: number;
   minBelanja: number;
   sampai: string;
-  tag: string;
-};
-
-const PROMOS: Promo[] = [
-  { code: 'QOQI10', name: 'Diskon Member 10%', desc: 'Member GOLD, maks. Rp 25rb', amount: 10000, minBelanja: 50000, sampai: '31 Okt 2026', tag: 'Member' },
-  { code: 'HEMAT5K', name: 'Potongan Rp 5rb', desc: 'Semua metode bayar', amount: 5000, minBelanja: 30000, sampai: '31 Des 2026', tag: 'Voucher' },
-  { code: 'HEMAT15K', name: 'Potongan Rp 15rb', desc: 'Min. belanja Rp 150rb, Dine In', amount: 15000, minBelanja: 150000, sampai: '30 Nov 2026', tag: 'Voucher' },
-  { code: 'KOPIHEMAT', name: 'Kopi Hemat 20%', desc: 'Kategori Minuman, maks. Rp 10rb', amount: 8000, minBelanja: 25000, sampai: '15 Nov 2026', tag: 'Kategori' },
-  { code: 'GRATISONGKIR', name: 'Gratis Ongkir', desc: 'Take Away & delivery, maks. Rp 12rb', amount: 12000, minBelanja: 40000, sampai: '31 Des 2026', tag: 'Ongkir' },
-];
-
-/**
- * Daftar Promo (select_promotion) — daftar promo/voucher + tombol Pakai
+  tag: string;};const PROMOS: Promo[] = [
+  { code: 'QOQI10', name: 'Diskon Member 10%', desc: 'Member GOLD, maks. ' + rp(25000), amount: 10000, minBelanja: 50000, sampai: '31 Okt 2026', tag: 'Member' },
+  { code: 'HEMAT5K', name: 'Potongan ' + rp(5000), desc: 'Semua metode bayar', amount: 5000, minBelanja: 30000, sampai: '31 Des 2026', tag: 'Voucher' },
+  { code: 'HEMAT15K', name: 'Potongan ' + rp(15000), desc: 'Min. belanja ' + rp(150000) + ', Dine In', amount: 15000, minBelanja: 150000, sampai: '30 Nov 2026', tag: 'Voucher' },
+  { code: 'KOPIHEMAT', name: 'Kopi Hemat 20%', desc: 'Kategori Minuman, maks. ' + rp(10000), amount: 8000, minBelanja: 25000, sampai: '15 Nov 2026', tag: 'Kategori' },
+  { code: 'GRATISONGKIR', name: 'Gratis Ongkir', desc: 'Take Away & delivery, maks. ' + rp(12000), amount: 12000, minBelanja: 40000, sampai: '31 Des 2026', tag: 'Ongkir' },];/**
+ * Daftar Promo (select_promotion) - daftar promo/voucher + tombol Pakai
  * yang kembali ke layar pemanggil dengan params voucher.
  * Daftarkan route: PromotionList.
- */
-export default function PromotionListScreen({ navigation, route }: Props) {
+ */export default function PromotionListScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [query, setQuery] = useState('');
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('Semua');
   const returnTo = route?.params?.returnTo ?? 'CartDetail';
   const subtotal = route?.params?.subtotal;
-  const [warn, setWarn] = useState('');
+  const ongkir = route?.params?.ongkir; const [warn, setWarn] = useState('');
 
   const tags = useMemo(() => ['Semua', ...Array.from(new Set(PROMOS.map((p) => p.tag)))], []);
   const shown = PROMOS.filter((p) => {
@@ -47,11 +33,13 @@ export default function PromotionListScreen({ navigation, route }: Props) {
 
   const pakai = (p: Promo) => {
     if (subtotal !== undefined && subtotal < p.minBelanja) {
-      setWarn(`Belanja ${rp(subtotal)} belum mencapai min. ${rp(p.minBelanja)} untuk ${p.code}.`);
+      setWarn(`Belanja ${rp(subtotal)} belum mencapai ${t('minSpend')} ${rp(p.minBelanja)} untuk ${p.code}.`);
       return;
     }
     setWarn('');
-    navigation?.navigate(returnTo, { voucher: { code: p.code, amount: p.amount } });
+    // Teruskan kind (tag) agar pemanggil tahu voucher ongkir vs diskon belanja.
+    // GRATISONGKIR dipotong dari ongkir di layar pemanggil bila ongkir > 0.
+    navigation?.navigate(returnTo, { voucher: { code: p.code, amount: p.amount, kind: p.tag }, ...(ongkir !== undefined ? { ongkir } : {}), });
   };
 
   return (
@@ -60,7 +48,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={() => navigation?.goBack()} hitSlop={12}>
           <Text style={styles.back}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Promo & Voucher</Text>
+        <Text style={styles.headerTitle}>{t('promoVoucher')}</Text>
         <View style={{ width: 26 }} />
       </View>
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
@@ -69,7 +57,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
             style={styles.search}
             value={query}
             onChangeText={setQuery}
-            placeholder="Cari kode / nama promo…"
+            placeholder={t('searchPromo')}
             placeholderTextColor={colors.faint}
           />
         </View>
@@ -88,7 +76,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
               style={styles.emptyImg}
               resizeMode="contain"
             />
-            <Text style={styles.emptyT}>Promo tidak ditemukan — coba kata kunci lain.</Text>
+            <Text style={styles.emptyT}>{t('promoNotFound')}</Text>
           </View>
         ) : (
           shown.map((p) => (
@@ -97,24 +85,21 @@ export default function PromotionListScreen({ navigation, route }: Props) {
                 <View style={styles.badge}>
                   <Text style={styles.badgeT}>{p.tag}</Text>
                 </View>
-                <Text style={styles.sampai}>s/d {p.sampai}</Text>
+                <Text style={styles.sampai}>{t('validUntil')} {p.sampai}</Text>
               </View>
               <Text style={styles.name}>{p.name}</Text>
               <Text style={styles.code}>{p.code} · potongan {rp(p.amount)}</Text>
               <Text style={styles.desc}>{p.desc}</Text>
-              <Text style={styles.min}>Min. belanja {rp(p.minBelanja)}</Text>
+              <Text style={styles.min}>{t('minSpend')} {rp(p.minBelanja)}</Text>
               <TouchableOpacity style={styles.pakai} onPress={() => pakai(p)}>
-                <Text style={styles.pakaiT}>Pakai ›</Text>
+                <Text style={styles.pakaiT}>{t('useAction')}</Text>
               </TouchableOpacity>
             </View>
           ))
         )}
       </ScrollView>
     </View>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { backgroundColor: colors.navy, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 12 },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, backgroundColor: colors.paleRed, borderRadius: 8, padding: 10, marginTop: 10 },
@@ -141,5 +126,4 @@ const styles = StyleSheet.create({
   desc: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   min: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   pakai: { backgroundColor: colors.orange, borderRadius: 8, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
-  pakaiT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
-});
+  pakaiT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },});

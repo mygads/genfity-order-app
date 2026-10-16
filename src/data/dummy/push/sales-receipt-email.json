@@ -1,0 +1,15 @@
+{
+  "request": { "salesNum": "TRX-20261016-014", "email": "kasir@esb-poris.id" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "salesNum": "TRX-20261016-014",
+      "email": "kasir@esb-poris.id",
+      "queued": true
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "platform": "android", "version": 591 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "minVersion": 655, "latestVersion": 661 }
+  }
+}

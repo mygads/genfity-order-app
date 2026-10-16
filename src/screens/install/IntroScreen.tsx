@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
@@ -37,7 +37,7 @@ const PAGES = [
 
 export default function IntroScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [page, setPage] = useState(0);
   const last = page === PAGES.length - 1;

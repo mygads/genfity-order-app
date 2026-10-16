@@ -1,25 +1,13 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
-import { getSession } from '../../session';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
-
-const fmtClock = (d: Date) =>
-  d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');
-
-export default function AttendanceScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
+  d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const s = getSession();
-  const [pin, setPin] = useState('');
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const s = getSession();
+  const [drawerOpen, setDrawerOpen] = useState(false); const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [inTime, setInTime] = useState<string | null>(null);
   const [outTime, setOutTime] = useState<string | null>(null);
-  const [now, setNow] = useState(() => new Date());
+  const [syncNote, setSyncNote] = useState(''); const [busy, setBusy] = useState(false); const [now, setNow] = useState(() => new Date());
 
   // Ganti PIN
   const [oldPin, setOldPin] = useState('');
@@ -28,8 +16,8 @@ export default function AttendanceScreen({ navigation }: Props) {
   const [pinMsg, setPinMsg] = useState('');
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const press = (k: string) => {
@@ -39,28 +27,28 @@ export default function AttendanceScreen({ navigation }: Props) {
     else if (pin.length < 4) setPin(pin + k);
   };
 
-  const clockIn = () => {
-    if (pin.length < 4) { setError('PIN salah — coba lagi atau hubungi supervisor.'); return; }
-    setInTime(fmtClock(new Date()).slice(0, 5));
-    setPin('');
-  };
+  /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out') => { const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? s?.name ?? 'Kasir'; const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 'open', NULL)`, [id, term.branchId || null, term.terminalCode || null, nm, s?.shift ?? 'Shift', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [nm, nm], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', user: nm, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
+    if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try { const ok = (await verifyAttendancePin(pin)).ok; if (ok === false) { setError(t('att_pin_wrong')); return; }
+    await recordClock('in'); setInTime(fmtClock(new Date()).slice(0, 5));
+    setSyncNote(t('att_queued')); setPin('');
+  } finally { setBusy(false); } };
 
-  const clockOut = () => {
-    if (pin.length < 4) { setError('Masukkan PIN untuk clock-out.'); return; }
-    setOutTime(fmtClock(new Date()).slice(0, 5));
-    setPin('');
-  };
+  const clockOut = async () => {
+    if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
+    setBusy(true); try { const ok = (await verifyAttendancePin(pin)).ok; if (ok === false) { setError(t('att_pin_wrong')); return; } await recordClock('out'); setOutTime(fmtClock(new Date()).slice(0, 5));
+    setSyncNote(t('att_queued')); setPin('');
+  } finally { setBusy(false); } };
 
-  const changePin = () => {
+  /** * Ganti PIN: verifikasi PIN lama (hash), simpan hash baru - plaintext TIDAK * PERNAH ditulis ke DB. Perubahan dikirim ke server bila online, selebihnya * antre via sync (server sumber akhir). */ const changePin = async () => {
     const clean = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 6);
     const o = clean(oldPin);
     const n = clean(newPin);
     const c = clean(confirmPin);
-    if (o.length < 4) { setPinMsg('PIN lama minimal 4 digit.'); return; }
-    if (n.length < 4) { setPinMsg('PIN baru minimal 4 digit.'); return; }
-    if (n !== c) { setPinMsg('Konfirmasi PIN baru tidak sama.'); return; }
-    if (o === n) { setPinMsg('PIN baru harus berbeda dari PIN lama.'); return; }
-    setPinMsg('PIN berhasil diganti.');
+    if (o.length < 4) { setPinMsg(t('att_old_short')); return; }
+    if (n.length < 4) { setPinMsg(t('att_new_short')); return; }
+    if (n !== c) { setPinMsg(t('att_confirm_mismatch')); return; }
+    if (o === n) { setPinMsg(t('att_same_pin')); return; }
+    const v = await verifyAttendancePin(o); if (v.ok === false) { setPinMsg(t('att_old_wrong')); return; } const userId = v.userId ?? getSession()?.username ?? 'kasir'; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; try { const r = await updatePinOnServer(userId, o, n); sent = r.ok; } catch { /* offline - antre di bawah */ } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : t('att_pin_saved_pending'));
     setOldPin('');
     setNewPin('');
     setConfirmPin('');
@@ -68,32 +56,32 @@ export default function AttendanceScreen({ navigation }: Props) {
 
   const clockedIn = inTime !== null && outTime === null;
 
-  return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <Text style={styles.hint}>Karyawan {s?.outlet ?? 'ESB Cabang Poris'} · Kasir {s?.name ?? 'Gista'}</Text>
-      <Text style={styles.sec}>Masuk / Keluar Kerja</Text>
+  const outlet = s?.outlet ?? 'ESB Cabang Poris'; const who = s?.name ?? 'Gista'; return (
+    <View style={styles.root}> <ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} right={ <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </TouchableOpacity> } /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
+      <Text style={styles.sec}>{t('att_inout')}</Text>
       <Text style={styles.clock}>{fmtClock(now)}</Text>
       <Text style={styles.date}>{now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-      <Text style={styles.meta}>Shift Pagi (08:00 – 16:00) · {clockedIn ? '● Sudah Masuk' : outTime ? '● Sudah Keluar' : '● Belum Masuk'}</Text>
+      <Text style={styles.meta}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
 
       <View style={styles.card}>
-        <Text style={styles.cardT}>Outlet {s?.outlet ?? 'ESB Cabang Poris'}</Text>
-        <Text style={styles.meta}>{s?.name ?? 'Gista'} ({s?.username ?? 'gista.kasir'})</Text>
-        <Text style={styles.meta}>{s?.shift ?? 'Shift Pagi'} · Kas {rp(s?.cash ?? 200000)} · Shift Buka</Text>
+        <Text style={styles.cardT}>{t('att_outlet')} {outlet}</Text>
+        <Text style={styles.meta}>{who} ({s?.username ?? 'gista.kasir'})</Text>
+        <Text style={styles.meta}>{s?.shift ?? t('fallback_shift')} · {t('att_cash')} {rp(s?.cash ?? 200000)} · {t('dash_shift_open')}</Text>
       </View>
 
-      <Text style={styles.sec}>Daftar Kehadiran</Text>
+      <Text style={styles.sec}>{t('att_list')}</Text>
       <View style={styles.card}>
-        <View style={styles.row}><Text style={styles.item}>Masuk</Text><Text style={styles.item}>{inTime ?? '-- : --'}</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Istirahat</Text><Text style={styles.item}>-- : --</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Keluar</Text><Text style={styles.item}>{outTime ?? '-- : --'}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>{t('att_in')}</Text><Text style={styles.item}>{inTime ?? '-- : --'}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>{t('att_break')}</Text><Text style={styles.item}>-- : --</Text></View>
+        <View style={styles.row}><Text style={styles.item}>{t('att_out')}</Text><Text style={styles.item}>{outTime ?? '-- : --'}</Text></View>
       </View>
-      {!inTime && <Text style={styles.empty}>Belum ada absen masuk hari ini.</Text>}
+      {!inTime && <Text style={styles.empty}>{t('att_empty_in')}</Text>}
 
-      <Text style={styles.sec}>Masukkan PIN Absensi</Text>
+      <Text style={styles.sec}>{t('att_pin_entry')}</Text>
       <View style={styles.pinRow}>
         {[0, 1, 2, 3].map((i) => (
-          <View key={i} style={styles.pinDot}><Text style={styles.pinChar}>{pin[i] ? '●' : '–'}</Text></View>
+          <View key={i} style={styles.pinDot}><Text style={styles.pinChar}>{pin[i] ? '●' : '-'}</Text></View>
         ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -107,71 +95,68 @@ export default function AttendanceScreen({ navigation }: Props) {
 
       <View style={styles.actions}>
         {!outTime ? (
-          <TouchableOpacity style={[styles.primary, clockedIn && styles.disabled]} onPress={clockIn} disabled={clockedIn}>
-            <Text style={styles.primaryT}>Masuk ›</Text>
+          <TouchableOpacity style={[styles.primary, (clockedIn || busy) && styles.disabled]} onPress={clockIn} disabled={clockedIn || busy}>
+            <Text style={styles.primaryT}>{t('att_in')} ›</Text>
           </TouchableOpacity>
         ) : null}
         {clockedIn ? (
-          <TouchableOpacity style={styles.danger} onPress={clockOut}>
-            <Text style={styles.primaryT}>Keluar ›</Text>
+          <TouchableOpacity style={styles.danger} onPress={clockOut} disabled={busy}>
+            <Text style={styles.primaryT}>{t('att_out')} ›</Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Dashboard')}>
-          <Text style={styles.ghostT}>Keluar</Text>
+          <Text style={styles.ghostT}>{t('att_exit')}</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.links}>
-        <TouchableOpacity onPress={() => navigation?.navigate('Shift')}><Text style={styles.link}>Setelah masuk → Buka Shift</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')}><Text style={styles.link}>Lewati → Dashboard</Text></TouchableOpacity>
+      {syncNote ? <Text style={styles.syncNote}>{syncNote}</Text> : null} <View style={styles.links}>
+        <TouchableOpacity onPress={() => navigation?.navigate('Shift')}><Text style={styles.link}>{t('att_after_shift')}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')}><Text style={styles.link}>{t('att_skip_dash')}</Text></TouchableOpacity>
       </View>
 
-      <Text style={styles.sec}>Ganti PIN</Text>
+      <Text style={styles.sec}>{t('att_change_pin')}</Text>
       <View style={styles.card}>
-        <Text style={styles.fieldLabel}>PIN lama</Text>
+        <Text style={styles.fieldLabel}>{t('att_old_label')}</Text>
         <TextInput
           style={styles.input}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
-          placeholder="PIN lama"
+          placeholder={t('att_old_ph')}
           placeholderTextColor={colors.faint}
           value={oldPin}
-          onChangeText={(t) => setOldPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+          onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
         />
-        <Text style={styles.fieldLabel}>PIN baru (min. 4 digit)</Text>
+        <Text style={styles.fieldLabel}>{t('att_new_label')}</Text>
         <TextInput
           style={styles.input}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
-          placeholder="PIN baru"
+          placeholder={t('att_new_ph')}
           placeholderTextColor={colors.faint}
           value={newPin}
-          onChangeText={(t) => setNewPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+          onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
         />
-        <Text style={styles.fieldLabel}>Konfirmasi PIN baru</Text>
+        <Text style={styles.fieldLabel}>{t('att_confirm_label')}</Text>
         <TextInput
           style={styles.input}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
-          placeholder="Ulangi PIN baru"
+          placeholder={t('att_confirm_ph')}
           placeholderTextColor={colors.faint}
           value={confirmPin}
-          onChangeText={(t) => setConfirmPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+          onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
         />
         {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
         <TouchableOpacity style={styles.primary} onPress={changePin}>
-          <Text style={styles.primaryT}>Simpan PIN Baru</Text>
+          <Text style={styles.primaryT}>{t('att_save_pin')}</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate(r); }} /> </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  burger: { width: 22, height: 22 }, body: { padding: 16, paddingBottom: 40 },
   hint: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   sec: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginTop: 16 },
   clock: { fontFamily: fonts.bold, fontSize: 34, color: colors.navy, marginTop: 6 },
@@ -198,12 +183,11 @@ const styles = StyleSheet.create({
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
   ghostT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
-  links: { gap: 8, marginTop: 14 },
+  syncNote: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8, textAlign: 'center' }, links: { gap: 8, marginTop: 14 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
-  fieldLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 10, marginBottom: 5 },
+  fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 5 },
   input: {
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10,
-    padding: 11, fontFamily: fonts.bold, fontSize: 15, color: colors.text, letterSpacing: 3, textAlign: 'center',
+    padding: 11, fontFamily: fonts.bold, fontSize: 14, color: colors.text, letterSpacing: 3, textAlign: 'center',
   },
-  pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },
-});
+  pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },});

@@ -1,0 +1,17 @@
+{
+  "request": { "branchId": "B001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "branchId": "B001",
+      "branchName": "ESB Cabang Poris",
+      "status": "active",
+      "address": "Jl. Poris Raya No. 8, Tangerang",
+      "expiredAt": null
+    }
+  }
+}

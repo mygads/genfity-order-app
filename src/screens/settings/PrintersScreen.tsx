@@ -1,5 +1,4 @@
-import { useMemo, useState } from 'react';
-import {
+import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
   Image,
   Modal,
@@ -10,21 +9,7 @@ import {
   Text,
   TextInput,
   View,
-  useWindowDimensions,
-} from 'react-native';
-import { colors, fonts, wideCenter } from '../../theme';
-import { printers, type PrinterDevice } from '../../data/mock';
-import { buildReceiptBytes, toHex } from '../../lib/escpos';
-import { shareReceipt } from '../../lib/print';
-import { listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-type ConnType = 'Bluetooth' | 'LAN' | 'Star';
-type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';
-
-interface Station {
+  useWindowDimensions,} from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -33,58 +18,42 @@ interface Station {
   cpl: 32 | 48;
   autocut: boolean;
   isDefault: boolean;
-  connected: boolean;
-}
-
-interface Bonded {
+  connected: boolean;}interface Bonded {
   id: string;
   name: string;
   mac: string;
-  paired: boolean;
-}
-
-const DEFAULT_STATIONS: Station[] = [
+  paired: boolean;}const LS_STATIONS = 'genfity.printer.stations';const DEFAULT_STATIONS: Station[] = [
   { id: 'st-kasir', name: 'Printer Kasir', role: 'Kasir', conn: 'Bluetooth', address: '00:11:22:33:44:55', cpl: 32, autocut: true, isDefault: true, connected: true },
   { id: 'st-dapur', name: 'Printer Dapur', role: 'Dapur', conn: 'LAN', address: '192.168.1.50:9100', cpl: 32, autocut: false, isDefault: false, connected: false },
   { id: 'st-checker', name: 'Printer Checker', role: 'Checker', conn: 'LAN', address: '192.168.1.51:9100', cpl: 48, autocut: false, isDefault: false, connected: false },
-  { id: 'st-label', name: 'Printer Label', role: 'Label', conn: 'Star', address: '', cpl: 32, autocut: true, isDefault: false, connected: false },
-];
-
-const DEFAULT_BONDED: Bonded[] = [
+  { id: 'st-label', name: 'Printer Label', role: 'Label', conn: 'Star', address: '', cpl: 32, autocut: true, isDefault: false, connected: false },];const DEFAULT_BONDED: Bonded[] = [
   { id: 'bt1', name: 'XPrinter XP-80C', mac: '00:11:22:33:44:55', paired: true },
   { id: 'bt2', name: 'XPrinter XP-58IIH', mac: 'AA:BB:CC:DD:EE:01', paired: true },
-  { id: 'bt3', name: 'Star TSP143IIIU', mac: 'AA:BB:CC:DD:EE:02', paired: false },
-];
-
-const typeFilters = ['Semua', 'Bluetooth', 'USB', 'LAN'] as const;
-
-function roleColor(r: StationRole) {
+  { id: 'bt3', name: 'Star TSP143IIIU', mac: 'AA:BB:CC:DD:EE:02', paired: false },];const typeFilters = ['Semua', 'Bluetooth', 'USB', 'LAN'] as const;function roleColor(r: StationRole) {
   if (r === 'Kasir') return colors.navy;
   if (r === 'Dapur') return colors.orange;
   if (r === 'Checker') return colors.blue;
-  return colors.green;
-}
-
-/** Susun teks pratinjau struk uji per station (cetak nyata butuh dev-client). */
-function previewText(s: Station): string {
+  return colors.green;}/** Susun teks pratinjau struk uji per station. Rupiah selalu via rp(). Baris
+ *  catatan dev-client hanya ditambah bila modul native tak tersedia (teks via
+ *  kunci printers.detectedHint dari pemanggil agar ikut bahasa aktif). */function previewText(s: Station, hint: string | null): string {
   const bar = '-'.repeat(s.cpl);
   return [
-    `UJI CETAK · ${s.name}`,
-    `${s.role} · ${s.conn}${s.address ? ` · ${s.address}` : ''}`,
-    `${s.cpl} kolom · ${s.autocut ? 'autocut' : 'tanpa autocut'}`,
+    `UJI CETAK - ${s.name}`,
+    `${s.role} - ${s.conn}${s.address ? ` - ${s.address}` : ''}`,
+    `${s.cpl} kolom - ${s.autocut ? 'autocut' : 'tanpa autocut'}`,
     bar,
     '1x Ayam Geprek Pelakor',
     '2x Es Teh Manis',
     bar,
-    'TOTAL Rp 64.050',
-    'Butuh dev-client utk kirim BT/LAN.',
-  ].join('\n');
+    `TOTAL ${rp(64050)}`,
+    ...(hint ? [hint] : []),
+  ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. */function stationTarget(s: Station): PrinterTarget { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
 }
 
-export default function PrintersScreen(_props: Props) {
+if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } return { transport: 'bt', address: s.address.trim() };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master. */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT OR REPLACE INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, 'receipt', ?, ?, 1, ?, NULL)`, [s.id, s.name, s.name, s.address, s.conn, s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [filter, setFilter] = useState<(typeof typeFilters)[number]>('Semua');
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<(typeof typeFilters)[number]>('Semua');
   const [stations, setStations] = useState<Station[]>(DEFAULT_STATIONS);
   const [bonded, setBonded] = useState<Bonded[]>(DEFAULT_BONDED);
   const [pairing, setPairing] = useState(false);
@@ -98,26 +67,42 @@ export default function PrintersScreen(_props: Props) {
   const [stName, setStName] = useState('');
   const [stRole, setStRole] = useState<StationRole>('Dapur');
   const [stConn, setStConn] = useState<ConnType>('Bluetooth');
+  // Modul native ada = jalan di dev-client/APK produksi; tidak ada = Expo Go/web.
+  // Dipakai untuk menyembunyikan catatan dev-client bila sudah tidak relevan.
+  const [nativeReady] = useState(hasNativePrinter);
 
-  const list = useMemo(
+  useEffect(() => { let alive = true; void getJSON<Station[]>(LS_STATIONS, DEFAULT_STATIONS).then((cached) => { if (alive && cached.length > 0) setStations(cached); }); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]); const list = useMemo(
     () => printers.filter((p) => filter === 'Semua' || p.type === filter),
     [filter],
   );
 
   const patchStation = (id: string, patch: Partial<Station>) =>
-    setStations((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    { setStations((ss) => { const next = ss.map((x) => (x.id === id ? { ...x, ...patch } : x));
 
-  const setDefault = (id: string) =>
-    setStations((ss) => ss.map((s) => ({ ...s, isDefault: s.id === id })));
+  const changed = next.find((x) => x.id === id); if (changed) void persistStation(changed); return next; }); }; const setDefault = (id: string) =>
+    { setStations((ss) => { const next = ss.map((x) => ({ ...x, isDefault: x.id === id })); next.forEach((x) => { void persistStation(x); }); return next; }); };
 
   const removeStation = (id: string) =>
-    setStations((ss) => (ss.length <= 1 ? ss : ss.filter((s) => s.id !== id)));
+    setStations((ss) => {
+      if (ss.length <= 1) return ss;
+      const next = ss.filter((x) => x.id !== id);
+      // Cerminkan hapus ke ms_station agar daftar live KitchenScreen ikut bersih.
+      void (async () => {
+        try {
+          await initDb();
+          await run('DELETE FROM ms_station WHERE id = ?', [id]);
+          await enqueueOutbox('ms_station', id, 'delete');
+        } catch {
+          /* abaikan: cache JSON di bawah tetap menyimpan */
+        }
+      })();
+      return next;
+    });
 
   const addStation = () => {
     const name = stName.trim();
     if (!name) return;
-    setStations((ss) => ([
-      ...ss,
+    const entry: Station =
       {
         id: `st-${Date.now()}`,
         name,
@@ -126,31 +111,18 @@ export default function PrintersScreen(_props: Props) {
         address: stConn === 'LAN' ? `${lanIp.trim()}:${lanPort.trim()}` : '',
         cpl: 32,
         autocut: true,
-        isDefault: ss.length === 0,
+        isDefault: stations.length === 0,
         connected: false,
-      },
-    ]));
+      }; setStations((ss) => [...ss, entry]); void persistStation(entry);
     setStName('');
   };
 
   /** Pairing BT: daftar bonded nyata via modul native (dev-client), kosong di Expo Go/web. */
-/** Bangun target kirim dari konfigurasi stasiun. */
-function stationTarget(s: Station): PrinterTarget {
-  if (s.conn === 'LAN') {
-    const [host, portRaw] = s.address.split(':');
-    return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
-  }
-  if (s.conn === 'Star') {
-    const m = s.address.match(/(\d+)\s*\/\s*(\d+)/);
-    return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 };
-  }
-  return { transport: 'bt', address: s.address.trim() };
-}
 
-  const startPairing = async () => {
+    const  startPairing = async () => {
     setPairing(true);
     try {
-      // Daftar BT bonded nyata — perlu dev-client + izin; di Expo Go/web: kosong.
+      // Daftar BT bonded nyata, perlu dev-client + izin; di Expo Go/web hasilnya kosong.
       const found = await listBondedBtPrinters();
       if (found.length > 0) {
         setBonded((bb) => [
@@ -161,7 +133,7 @@ function stationTarget(s: Station): PrinterTarget {
         ]);
         setStatusMsg(`${found.length} printer BT bonded terdeteksi.`);
       } else {
-        setStatusMsg('Tak ada printer BT bonded terdeteksi — perlu dev-client + izin Bluetooth.');
+        setStatusMsg('Tak ada printer BT bonded terdeteksi - perlu dev-client + izin Bluetooth.');
       }
     } finally {
       setPairing(false);
@@ -176,10 +148,10 @@ function stationTarget(s: Station): PrinterTarget {
     const ipOk = /^\d{1,3}(\.\d{1,3}){3}$/.test(lanIp.trim());
     const port = Number(lanPort);
     if (!ipOk || !Number.isInteger(port) || port < 1 || port > 65535) {
-      setLanMsg('IP/port tidak valid — contoh 192.168.1.50:9100.');
+      setLanMsg('IP/port tidak valid - contoh 192.168.1.50:9100.');
       return;
     }
-    setLanMsg(`Menghubungi ${lanIp.trim()}:${port}…`);
+    setLanMsg(`Menghubungi ${lanIp.trim()}:${port}...`);
     // ESC @ = reset printer, aman dikirim sebagai probe koneksi.
     const res = await printBytes(
       { transport: 'lan', host: lanIp.trim(), port },
@@ -187,7 +159,7 @@ function stationTarget(s: Station): PrinterTarget {
     );
     setLanMsg(
       res.ok
-        ? `Terhubung — printer menjawab (${res.bytes} byte terkirim).`
+        ? `Terhubung - printer menjawab (${res.bytes} byte terkirim).`
         : res.reason === 'connect-failed'
           ? `Koneksi gagal: ${res.detail ?? 'pastikan satu jaringan Wi-Fi'}.`
           : 'Kirim butuh dev-client / modul TCP.',
@@ -200,7 +172,7 @@ function stationTarget(s: Station): PrinterTarget {
     setStatusMsg(
       ok
         ? `Perintah buka drawer dikirim ke ${s.name}.`
-        : `Gagal buka drawer ${s.name} — perlu dev-client (modul native).`,
+        : `Gagal buka drawer ${s.name} - perlu dev-client (modul native).`,
     );
   };
 
@@ -208,8 +180,8 @@ function stationTarget(s: Station): PrinterTarget {
   const testPrintStation = async (s: Station) => {
     const bytes = buildReceiptBytes({
       shop: 'ESB CABANG PORIS',
-      addr: `Uji cetak · ${s.name}`,
-      trx: `${s.role} · ${s.conn} · ${s.cpl} kolom`,
+      addr: `Uji cetak - ${s.name}`,
+      trx: `${s.role} - ${s.conn} - ${s.cpl} kolom`,
       items: [
         { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
         { name: 'Es Teh Manis', qty: 2, price: 8000 },
@@ -219,7 +191,7 @@ function stationTarget(s: Station): PrinterTarget {
       total: 64050,
       method: 'Tunai',
     });
-    setPreview({ station: s.name, text: previewText(s), hex: toHex(bytes).slice(0, 240) + '…' });
+    setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint')), hex: toHex(bytes).slice(0, 240) + '...' });
     const res = await printBytes(stationTarget(s), bytes);
     setStatusMsg(
       res.ok
@@ -238,21 +210,17 @@ function stationTarget(s: Station): PrinterTarget {
     setConfirm(null);
   };
 
-  return (
+  const go = (route: string) => navigation?.navigate(route); return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Printer</Text>
-        <Text style={styles.headerSub}>Station kasir/dapur/checker/label · BT SPP · LAN · Star</Text>
-      </View>
-
-      <Text style={styles.groupLabel}>Station Printer</Text>
+      <ScreenHeader title={t('printers.title')} sub={t('printers.sub')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+        <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
       {stations.map((s) => (
         <View key={s.id} style={styles.stCard}>
           <View style={styles.stTop}>
             <View style={styles.stLeft}>
-              <Text style={styles.stName}>{s.name}{s.isDefault ? ' • Utama' : ''}</Text>
+              <Text style={styles.stName}>{s.name}{s.isDefault ? ` - ${t('printers.main')}` : ''}</Text>
               <Text style={styles.stMeta}>
-                {s.conn}{s.address ? ` · ${s.address}` : ''} · {s.connected ? 'Terhubung' : 'Terputus'}
+                {s.conn}{s.address ? ` - ${s.address}` : ''} - {s.connected ? t('printers.connected') : t('printers.disconnected')}
               </Text>
             </View>
             <View style={[styles.roleBadge, { backgroundColor: roleColor(s.role) }]}>
@@ -279,35 +247,35 @@ function stationTarget(s: Station): PrinterTarget {
             ))}
           </View>
           <View style={styles.stRowBetween}>
-            <Text style={styles.stMeta}>Potong kertas otomatis</Text>
+            <Text style={styles.stMeta}>{t('printers.autocut')}</Text>
             <Switch value={s.autocut} onValueChange={(v) => patchStation(s.id, { autocut: v })} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
           <View style={styles.stBtns}>
             <Pressable style={styles.btnTest} onPress={() => testPrintStation(s)}>
-              <Text style={styles.btnTestText}>Uji Cetak</Text>
+              <Text style={styles.btnTestText}>{t('printers.testPrint')}</Text>
             </Pressable>
             <Pressable style={styles.btnDrawer} onPress={() => openDrawer(s)}>
-              <Text style={styles.btnDrawerText}>Buka Drawer</Text>
+              <Text style={styles.btnDrawerText}>{t('printers.openDrawer')}</Text>
             </Pressable>
             <Pressable style={styles.btnMini} onPress={() => setDefault(s.id)}>
-              <Text style={styles.btnMiniText}>Utama</Text>
+              <Text style={styles.btnMiniText}>{t('printers.setPrimary')}</Text>
             </Pressable>
             <Pressable style={styles.btnMiniDanger} onPress={() => removeStation(s.id)}>
-              <Text style={styles.btnMiniDangerText}>Hapus</Text>
+              <Text style={styles.btnMiniDangerText}>{t('printers.remove')}</Text>
             </Pressable>
           </View>
           <Pressable
             style={[styles.btnConn, s.connected && styles.btnConnOff]}
             onPress={() => patchStation(s.id, { connected: !s.connected })}>
             <Text style={[styles.btnConnText, s.connected && styles.btnConnOffText]}>
-              {s.connected ? 'Putuskan' : 'Sambungkan (butuh dev-client)'}
+              {s.connected ? t('printers.disconnect') : t('printers.connect')}
             </Text>
           </Pressable>
         </View>
       ))}
       <View style={styles.stCard}>
-        <Text style={styles.stName}>Tambah Station</Text>
-        <TextInput style={styles.input} value={stName} onChangeText={setStName} placeholder="Nama station baru" placeholderTextColor={colors.faint} />
+        <Text style={styles.stName}>{t('printers.addStation')}</Text>
+        <TextInput style={styles.input} value={stName} onChangeText={setStName} placeholder={t('printers.stationNamePh')} placeholderTextColor={colors.faint} />
         <View style={styles.chipRow}>
           {(['Kasir', 'Dapur', 'Checker', 'Label'] as StationRole[]).map((r) => (
             <Pressable key={r} onPress={() => setStRole(r)} style={[styles.chip, stRole === r && styles.chipActive]}>
@@ -323,63 +291,64 @@ function stationTarget(s: Station): PrinterTarget {
           ))}
         </View>
         <Pressable style={[styles.btnPrimary, !stName.trim() && styles.btnDisabled]} disabled={!stName.trim()} onPress={addStation}>
-          <Text style={styles.btnPrimaryText}>Tambah Station</Text>
+          <Text style={styles.btnPrimaryText}>{t('printers.addStation')}</Text>
         </Pressable>
       </View>
 
       {preview ? (
         <View style={styles.previewCard}>
-          <Text style={styles.previewTitle}>Pratinjau Struk · {preview.station}</Text>
+          <Text style={styles.previewTitle}>{preview.station}</Text>
           <Text style={styles.previewText}>{preview.text}</Text>
           <Text style={styles.previewHex} numberOfLines={2}>{preview.hex}</Text>
-          <Pressable style={styles.btnTest} onPress={() => shareReceipt(preview.text)}>
-            <Text style={styles.btnTestText}>Bagikan Pratinjau</Text>
+          <Pressable style={[styles.btnTest, { marginTop: 8 }]} onPress={() => shareReceipt(preview.text)}>
+            <Text style={styles.btnTestText}>{t('printers.sharePreview')}</Text>
           </Pressable>
         </View>
       ) : null}
       {statusMsg ? <Text style={styles.statusMsg}>{statusMsg}</Text> : null}
 
-      <Text style={styles.groupLabel}>Bluetooth (SPP)</Text>
+      <Text style={styles.groupLabel}>{t('printers.bt')}</Text>
       <View style={styles.panel}>
-        <Text style={styles.cardTitle}>Pairing + Perangkat Bonded</Text>
-        <Text style={styles.cardSub}>Cetak BT klasik via SPP — kirim nyata butuh dev-client.</Text>
+        <Text style={styles.cardTitle}>{t('printers.btTitle')}</Text>
+        <Text style={styles.cardSub}>{t('printers.btSub')}</Text>
         {bonded.map((b) => (
           <View key={b.id} style={styles.btRow}>
             <View style={styles.stLeft}>
               <Text style={styles.stName}>{b.name}</Text>
-              <Text style={styles.stMeta}>{b.mac} · {b.paired ? 'Terpairing' : 'Belum pairing'}</Text>
+              <Text style={styles.stMeta}>{b.mac} - {b.paired ? t('printers.paired') : t('printers.notPaired')}</Text>
             </View>
             <Pressable style={b.paired ? styles.btnMiniDanger : styles.btnMini} onPress={() => togglePair(b.id)}>
               <Text style={b.paired ? styles.btnMiniDangerText : styles.btnMiniText}>
-                {b.paired ? 'Lupakan' : 'Pairing'}
+                {b.paired ? t('printers.forget') : t('printers.pair')}
               </Text>
             </Pressable>
           </View>
         ))}
         <Pressable style={[styles.btnPrimary, pairing && styles.btnDisabled]} onPress={startPairing} disabled={pairing}>
-          <Text style={styles.btnPrimaryText}>{pairing ? 'Memindai (120 dtk)…' : 'Pindai Perangkat BT'}</Text>
+          <Text style={styles.btnPrimaryText}>{pairing ? t('printers.scanning') : t('printers.scanBt')}</Text>
         </Pressable>
       </View>
 
-      <Text style={styles.groupLabel}>LAN / Wi-Fi</Text>
+      <Text style={styles.groupLabel}>{t('printers.lan')}</Text>
       <View style={styles.panel}>
-        <Text style={styles.cardTitle}>Printer Jaringan (ESC/POS via TCP)</Text>
-        <Text style={styles.cardSub}>Isi IP + port printer struk/label dapur.</Text>
+        <Text style={styles.cardTitle}>{t('printers.lanTitle')}</Text>
+        <Text style={styles.cardSub}>{t('printers.lanSub')}</Text>
         <View style={styles.lanRow}>
           <TextInput style={styles.input} value={lanIp} onChangeText={setLanIp} placeholder="192.168.1.50" placeholderTextColor={colors.faint} autoCapitalize="none" />
           <TextInput style={[styles.input, styles.portInput]} value={lanPort} onChangeText={setLanPort} placeholder="9100" placeholderTextColor={colors.faint} keyboardType="numeric" />
         </View>
-        <Pressable style={styles.btnTest} onPress={testLan}>
-          <Text style={styles.btnTestText}>Uji Koneksi LAN</Text>
+        <Pressable style={[styles.btnTest, { marginTop: 8 }]} onPress={testLan}>
+          <Text style={styles.btnTestText}>{t('printers.testLan')}</Text>
         </Pressable>
         {lanMsg ? <Text style={styles.statusMsg}>{lanMsg}</Text> : null}
       </View>
 
-      <Text style={styles.groupLabel}>Daftar Printer Terdeteksi</Text>
+      <Text style={styles.groupLabel}>{t('printers.detected')}</Text>
+      {nativeReady ? null : <Text style={styles.hint}>{t('printers.detectedHint')}</Text>}
       <View style={styles.tabs}>
         {typeFilters.map((f) => (
           <Pressable key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive]}>
-            <Text style={[styles.tabText, filter === f && styles.tabTextActive]}>{f}</Text>
+            <Text style={[styles.tabText, filter === f && styles.tabTextActive]}> {f === 'Semua' ? t('common.all') : f} </Text>
           </Pressable>
         ))}
       </View>
@@ -390,8 +359,8 @@ function stationTarget(s: Station): PrinterTarget {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Image source={require('../../../assets/images/empty_printer.webp')} style={styles.emptyImg} resizeMode="contain" />
-            <Text style={styles.emptyTitle}>Printer Tidak Ditemukan</Text>
-            <Text style={styles.emptySub}>Pastikan printer menyala lalu pindai ulang</Text>
+            <Text style={styles.emptyTitle}>{t('printers.noPrinter')}</Text>
+            <Text style={styles.emptySub}>{t('printers.noPrinterSub')}</Text>
           </View>
         }
         renderItem={({ item }) => {
@@ -407,16 +376,16 @@ function stationTarget(s: Station): PrinterTarget {
                   <Text style={styles.typeText}>{item.type}</Text>
                 </View>
               </View>
-              <Text style={styles.cardRole}>{item.role} • {on ? 'Terhubung' : 'Terputus'}</Text>
+              <Text style={styles.cardRole}>{item.role} - {on ? t('printers.connected') : t('printers.disconnected')}</Text>
               <View style={styles.cardBtns}>
                 <Pressable style={styles.btnTest} onPress={() => testPrintStation({
                   id: item.id, name: item.name, role: 'Kasir', conn: item.type === 'LAN' ? 'LAN' : 'Bluetooth',
                   address: item.address, cpl: 32, autocut: true, isDefault: false, connected: on,
                 })}>
-                  <Text style={styles.btnTestText}>Uji Cetak</Text>
+                  <Text style={styles.btnTestText}>{t('printers.testPrint')}</Text>
                 </Pressable>
                 <Pressable style={on ? styles.btnOff : styles.btnOn} onPress={() => (on ? setConfirm(item) : togglePrinter(item))}>
-                  <Text style={on ? styles.btnOffText : styles.btnOnText}>{on ? 'Putuskan' : 'Sambungkan'}</Text>
+                  <Text style={on ? styles.btnOffText : styles.btnOnText}>{on ? t('printers.disconnect') : t('printers.connect')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -427,31 +396,26 @@ function stationTarget(s: Station): PrinterTarget {
       <Modal visible={confirm !== null} animationType="fade" transparent>
         <View style={styles.centerWrap}>
           <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>Putuskan Printer?</Text>
-            <Text style={styles.dialogSub}>Koneksi ke {confirm?.name} akan diputus. Cetak struk tidak dapat dilakukan.</Text>
+            <Text style={styles.dialogTitle}>{t('printers.disconnectTitle')}</Text>
+            <Text style={styles.dialogSub}>{t('printers.disconnectSub1')} {confirm?.name} {t('printers.disconnectSub2')}</Text>
             <View style={styles.dialogBtns}>
               <Pressable style={styles.btnGhost} onPress={() => setConfirm(null)}>
-                <Text style={styles.btnGhostText}>Batal</Text>
+                <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable style={styles.btnDanger} onPress={() => confirm && togglePrinter(confirm)}>
-                <Text style={styles.btnDangerText}>Ya, Putuskan</Text>
+                <Text style={styles.btnDangerText}>{t('printers.yesDisconnect')}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Text style={styles.foot}>Jenis: Struk 58mm/80mm · Label · Mode Star line-mode · Margin & drawer per station</Text>
-    </ScrollView>
-  );
-}
 
-const styles = StyleSheet.create({
+    </ScrollView>
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
-  header: { backgroundColor: colors.navy, paddingTop: 52, paddingBottom: 16, paddingHorizontal: 16 },
-  headerTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.white },
-  headerSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 4 },
+
   groupLabel: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy, marginTop: 18, marginBottom: 6, paddingHorizontal: 16 },
   stCard: {
     backgroundColor: colors.card,
@@ -475,14 +439,14 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.white },
   stRowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   stBtns: { flexDirection: 'row', gap: 6, marginTop: 10 },
-  btnTest: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 10, alignItems: 'center' },
-  btnTestText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
-  btnDrawer: { flex: 1, borderRadius: 10, backgroundColor: colors.paleAmber, paddingVertical: 10, alignItems: 'center' },
-  btnDrawerText: { fontFamily: fonts.bold, fontSize: 12, color: colors.amberDark },
-  btnMini: { borderRadius: 8, borderWidth: 1, borderColor: colors.navy, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'center' },
-  btnMiniText: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy },
-  btnMiniDanger: { borderRadius: 8, backgroundColor: colors.paleRed, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'center' },
-  btnMiniDangerText: { fontFamily: fonts.bold, fontSize: 11, color: colors.red },
+  btnTest: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
+  btnTestText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy, textAlign: 'center' },
+  btnDrawer: { flex: 1, borderRadius: 10, backgroundColor: colors.paleAmber, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
+  btnDrawerText: { fontFamily: fonts.bold, fontSize: 12, color: colors.amberDark, textAlign: 'center' },
+  btnMini: { borderRadius: 8, borderWidth: 1, borderColor: colors.navy, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'center', minHeight: 42 },
+  btnMiniText: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy, textAlign: 'center' },
+  btnMiniDanger: { borderRadius: 8, backgroundColor: colors.paleRed, paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'center', minHeight: 42 },
+  btnMiniDangerText: { fontFamily: fonts.bold, fontSize: 11, color: colors.red, textAlign: 'center' },
   btnConn: { borderRadius: 10, backgroundColor: colors.green, paddingVertical: 11, alignItems: 'center', marginTop: 8 },
   btnConnOff: { backgroundColor: colors.paleRed },
   btnConnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
@@ -516,6 +480,7 @@ const styles = StyleSheet.create({
   previewText: { fontFamily: fonts.regular, fontSize: 12, color: colors.text, marginTop: 8 },
   previewHex: { fontFamily: fonts.regular, fontSize: 10, color: colors.faint, marginTop: 6 },
   statusMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.navy, marginTop: 8, paddingHorizontal: 16 },
+  hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, paddingHorizontal: 16, marginTop: 2 },
   panel: {
     backgroundColor: colors.card,
     borderRadius: 12,
@@ -544,10 +509,10 @@ const styles = StyleSheet.create({
   typeText: { fontFamily: fonts.bold, fontSize: 10, color: colors.white },
   cardRole: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 6 },
   cardBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  btnOn: { flex: 1, borderRadius: 10, backgroundColor: colors.green, paddingVertical: 10, alignItems: 'center' },
-  btnOnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
-  btnOff: { flex: 1, borderRadius: 10, backgroundColor: colors.paleRed, paddingVertical: 10, alignItems: 'center' },
-  btnOffText: { fontFamily: fonts.bold, fontSize: 12, color: colors.red },
+  btnOn: { flex: 1, borderRadius: 10, backgroundColor: colors.green, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
+  btnOnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white, textAlign: 'center' },
+  btnOff: { flex: 1, borderRadius: 10, backgroundColor: colors.paleRed, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', minHeight: 42 },
+  btnOffText: { fontFamily: fonts.bold, fontSize: 12, color: colors.red, textAlign: 'center' },
   empty: { alignItems: 'center', paddingTop: 40, paddingBottom: 20 },
   emptyImg: { width: 180, height: 140 },
   emptyTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, marginTop: 12 },
@@ -560,6 +525,4 @@ const styles = StyleSheet.create({
   btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 12, alignItems: 'center' },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 13, color: colors.muted },
   btnDanger: { flex: 1, borderRadius: 10, backgroundColor: colors.red, paddingVertical: 12, alignItems: 'center' },
-  btnDangerText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
-  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 16, paddingHorizontal: 24 },
-});
+  btnDangerText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },});

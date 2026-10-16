@@ -1,0 +1,15 @@
+{
+  "request": { "userId": "U01", "pin": "9999", "action": "void", "salesNum": "TRX-20261016-013" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "approved": true,
+      "approver": "Budi",
+      "approverId": "U01"
+    }
+  }
+}

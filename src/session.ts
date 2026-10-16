@@ -63,10 +63,28 @@ export function isLoggedIn(): boolean {
   return current !== null;
 }
 
-/** Simulasi login dev — tombol "Masuk Demo" di LoginScreen memanggil ini. */
+/** Simulasi login dev - tombol "Masuk Demo" di LoginScreen memanggil ini. */
 export function loginDemo(): Session {
   restore();
   current = { ...DEMO };
+  persist();
+  emit();
+  return current;
+}
+
+/**
+ * Login karyawan tervalidasi server (T1): nama + username dari hasil
+ * validateEmployee; outlet/shift/kas ikut sesi berjalan bila ada,
+ * else default demo. loginDemo tetap ada untuk kompatibilitas alur lain.
+ */
+export function loginEmployee(e: { nama: string; username: string }): Session {
+  restore();
+  const base = current ?? DEMO;
+  current = {
+    ...base,
+    name: e.nama.trim() || base.name,
+    username: e.username.trim() || base.username,
+  };
   persist();
   emit();
   return current;

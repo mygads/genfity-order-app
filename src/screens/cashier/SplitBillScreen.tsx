@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { useEffect, useMemo, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
+import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { itemTotal, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -24,6 +25,9 @@ type SplitParams = {
 };
 
 type Props = { navigation?: Nav; route?: { params?: SplitParams } };
+
+/** Mode bagi bill: rata = total dibagi sama besar; perItem = ketuk item; nominal = input Rp per bill. */
+type SplitMode = 'rata' | 'perItem' | 'nominal';
 
 const asAmount = (v: unknown) => {
   const n = Math.round(Number(v) || 0);
@@ -88,7 +92,7 @@ const NAMES = ['Bill 1', 'Bill 2', 'Bill 3', 'Bill 4'];
  */
 export default function SplitBillScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const params = route?.params ?? {};
   const items = useMemo(() => {
@@ -96,15 +100,30 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     return fromRoute.length > 0 ? fromRoute : SEED;
   }, [route?.params?.items]);
   const [splits, setSplits] = useState(2);
+  /** perItem = perilaku lama (ketuk item pindah bill); default agar UX tak berubah. */
+  const [splitMode, setSplitMode] = useState<SplitMode>('perItem');
+  const [nominals, setNominals] = useState<string[]>(['', '']);
   const [assign, setAssign] = useState<Record<string, number>>(() =>
     Object.fromEntries(items.map((it, i) => [it.id, i % 2])),
   );
   const [methods, setMethods] = useState<string[]>(['Tunai', 'QRIS']);
   const [paid, setPaid] = useState<boolean[]>([false, false]);
+  /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11) untuk rumus kanonik. */
+  const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  useEffect(() => {
+    let alive = true;
+    void getTaxRate().then((r) => {
+      if (alive) setTaxRate(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const resetSplits = (n: number) => {
     setSplits(n);
     setPaid(Array(n).fill(false));
+    setNominals(Array(n).fill(''));
     setMethods(Array.from({ length: n }, (_, i) => METHODS[i % METHODS.length] as string));
     setAssign(Object.fromEntries(items.map((it, i) => [it.id, i % n])));
   };
@@ -117,12 +136,16 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const customer = asText(params.customer);
   const memberId = asText(params.memberId);
 
-  // Voucher order: objek kasir {code, amount}, string kode (kontrak Pay), atau nominal.
+  // Voucher order: objek kasir {code, kind, amount}, string kode (kontrak Pay), atau nominal.
   const voucherParam = params.voucher as VoucherParam;
   const voucherCode =
     typeof voucherParam === 'string'
       ? voucherParam.trim()
       : asText((voucherParam as { code?: unknown } | null)?.code);
+  const voucherKind =
+    typeof voucherParam === 'object' && voucherParam !== null
+      ? asText((voucherParam as { kind?: unknown } | null)?.kind)
+      : '';
   const voucherRaw =
     typeof voucherParam === 'number'
       ? asAmount(voucherParam)
@@ -138,42 +161,88 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   }, [items, assign, splits]);
   const itemSum = itemSplits.reduce((s, v) => s + v, 0);
 
-  // Ikuti rumus kasir/CartDetail: voucher dibatasi nilai item, service 5% dari net.
-  const voucherCapped = Math.min(voucherRaw, itemSum);
-  const discountCapped = Math.min(asAmount(params.discount), Math.max(0, itemSum - voucherCapped));
-  const netBase = Math.max(0, itemSum - voucherCapped - discountCapped);
-  const serviceAmt = params.service !== undefined ? asAmount(params.service) : Math.round(netBase * 0.05);
-  const expectedTotal = netBase + serviceAmt + ongkirParam;
-  // Total dari pemanggil adalah angka resmi (sudah mencakup service/ongkir/voucher).
-  const orderTotal = Math.max(0, Math.round(Number(params.total) || expectedTotal));
+  // Rumus kanonik kasir/CartDetail (src/lib/totals.ts): voucher dibatasi nilai
+  // item (flat atau persen sebelum service/pajak), service 5% dari net,
+  // pajak inclusive info-only (setting-driven via taxRate, default 11),
+  // feeESB 5% utk agregator, bulat Rp 100.
+  const canon = totals({
+    gross: itemSum,
+    discount: asAmount(params.discount),
+    voucher: { code: voucherCode, kind: voucherKind, amount: voucherRaw },
+    ongkir: ongkirParam,
+    esbOrder: isMarketplaceMode(mode),
+    taxRate,
+  });
+  const discountEff = Math.min(asAmount(params.discount), Math.max(0, itemSum - canon.voucherAmt));
+  const serviceEff = params.service !== undefined ? asAmount(params.service) : canon.service;
+  const feeEff = canon.feeESB;
+  // Total dari pemanggil adalah angka resmi (sudah mencakup service/ongkir/voucher/fee).
+  const orderTotal = Math.max(0, Math.round(Number(params.total) || canon.total));
   // Pemanggil lama hanya kirim {items, total} tanpa rincian ongkir/voucher -
-  // selisihnya dilipat ke share ongkir agar rincian per bill tetap pas dengan total.
-  const residual = orderTotal - expectedTotal;
-  const ongkirEff = Math.max(0, ongkirParam + residual);
-  const voucherEff = voucherCapped + Math.max(0, -(ongkirParam + residual));
+  // selisih tak membulat (termasuk pembulatan pemanggil) dilipat ke share
+  // ongkir agar jumlah per bill tetap pas dengan total.
+  const residual = orderTotal - (itemSum - canon.voucherAmt - discountEff + serviceEff + canon.ongkirNet + feeEff);
+  const ongkirEff = Math.max(0, canon.ongkirNet + residual);
+  const voucherEff = canon.voucherAmt + Math.max(0, -(canon.ongkirNet + residual));
 
-  // Reaporsi tiap komponen proporsional itemSplit; jumlah split = orderTotal persis.
-  const { billTotals, voucherShares, discountShares, serviceShares, ongkirShares } = useMemo(() => {
-    const v = splitShare(voucherEff, itemSplits, itemSum);
-    const d = splitShare(discountCapped, itemSplits, itemSum);
-    const s = splitShare(serviceAmt, itemSplits, itemSum);
-    const o = splitShare(ongkirEff, itemSplits, itemSum);
+  // Reaporsi tiap komponen: perItem proporsional itemSplit; rata/nominal bobot
+  // sama agar share ongkir/voucher/diskon/fee/pajak tetap diteruskan ke Pay.
+  // Jumlah per-bill mode perItem = orderTotal persis (matematika bayar tak berubah).
+  const { billTotals, voucherShares, discountShares, serviceShares, ongkirShares, feeShares, taxShares } = useMemo(() => {
+    const weights = splitMode === 'perItem' ? itemSplits : Array(splits).fill(1);
+    const base = splitMode === 'perItem' ? itemSum : splits;
+    const v = splitShare(voucherEff, weights, base);
+    const d = splitShare(discountEff, weights, base);
+    const s = splitShare(serviceEff, weights, base);
+    const o = splitShare(ongkirEff, weights, base);
+    const f = splitShare(feeEff, weights, base);
+    const tx = splitShare(canon.taxIncl, weights, base);
     const totals = itemSplits.map((it, i) =>
-      Math.max(0, it - (v[i] as number) - (d[i] as number) + (s[i] as number) + (o[i] as number)),
+      Math.max(0, it - (v[i] as number) - (d[i] as number) + (s[i] as number) + (o[i] as number) + (f[i] as number)),
     );
-    return { billTotals: totals, voucherShares: v, discountShares: d, serviceShares: s, ongkirShares: o };
-  }, [itemSplits, itemSum, voucherEff, discountCapped, serviceAmt, ongkirEff]);
+    return { billTotals: totals, voucherShares: v, discountShares: d, serviceShares: s, ongkirShares: o, feeShares: f, taxShares: tx };
+  }, [itemSplits, itemSum, voucherEff, discountEff, serviceEff, ongkirEff, feeEff, canon.taxIncl, splitMode, splits]);
+
+  // Mode rata: total dibagi sama besar, sisa pembulatan masuk bill terakhir.
+  const rataBase = splits > 0 ? Math.floor(orderTotal / splits) : 0;
+  const rataTotals = useMemo(
+    () =>
+      Array.from(
+        { length: splits },
+        (_, i) => (i < splits - 1 ? rataBase : orderTotal - rataBase * (splits - 1)),
+      ),
+    [splits, rataBase, orderTotal],
+  );
+  // Mode nominal: input Rp per bill, sisa harus nol sebelum bisa bayar.
+  const nominalNums = nominals.map((s) => Math.max(0, Number(String(s).replace(/[^0-9]/g, '')) || 0));
+  const nominalSum = nominalNums.reduce((s, v) => s + v, 0);
+  const nominalSisa = orderTotal - nominalSum;
+  const nominalPas = nominalSisa === 0;
+  const nominalBlocked = splitMode === 'nominal' && !nominalPas;
+
+  const billVal = (i: number): number =>
+    splitMode === 'rata'
+      ? (rataTotals[i] as number)
+      : splitMode === 'nominal'
+        ? (nominalNums[i] ?? 0)
+        : (billTotals[i] as number);
 
   const grand = orderTotal;
   const paidCount = paid.filter(Boolean).length;
 
   const payBill = (i: number) => {
-    const val = billTotals[i] as number;
+    const val = billVal(i);
     if (val <= 0 || paid[i]) return;
-    const members = items.filter((it) => (assign[it.id] ?? 0) === i);
-    // Kontrak Pay (PayScreen read-only): total + items/mode/table/ongkir/voucher.
+    // Mode nominal diblokir bila sisa != 0 (nominal belum pas dengan total).
+    if (splitMode === 'nominal' && !nominalPas) return;
+    // perItem meneruskan item bill ini; rata/nominal meneruskan semua item.
+    const members = splitMode === 'perItem' ? items.filter((it) => (assign[it.id] ?? 0) === i) : items;
+    // Kontrak Pay (PayScreen read-only): total + items/mode/table/ongkir/voucher/diskon
+    // + rincian info-only (service/fee/pajak) agar Pay teruskan ke Success > Receipt.
     // total = tagihan penuh split ini (selaras CartDetail yang kirim total penuh),
-    // ongkir/voucher diteruskan agar Pay mencatat rinciannya.
+    // voucher diteruskan sebagai OBJEK per-split agar Pay mencatat kode + nominal.
+    // Rounding tak diteruskan per split: tiap bill sudah bulat persis (pembulatan
+    // pemanggil sudah dilipat ke ongkirEff via residual).
     navigation?.navigate('Pay', {
       total: val,
       method: methods[i],
@@ -183,7 +252,11 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
       ...((ongkirShares[i] as number) > 0 ? { ongkir: ongkirShares[i] } : {}),
-      ...(voucherCode ? { voucher: voucherCode } : {}),
+      ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherShares[i] as number, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+      ...((discountShares[i] as number) > 0 ? { discount: discountShares[i] } : {}),
+      ...((serviceShares[i] as number) > 0 ? { service: serviceShares[i] } : {}),
+      ...((feeShares[i] as number) > 0 ? { feeESB: feeShares[i] } : {}),
+      ...((taxShares[i] as number) > 0 ? { tax: taxShares[i] } : {}),
     });
     setPaid((p) => p.map((v, j) => (j === i ? true : v)));
   };
@@ -208,17 +281,80 @@ export default function SplitBillScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           ))}
         </View>
+        <Text style={styles.label}>{t('bill_mode')}</Text>
+        <View style={styles.chips}>
+          {([['rata', t('bill_mode_even').replace('{n}', String(splits))], ['perItem', t('bill_mode_item')], ['nominal', t('bill_mode_nominal')]] as [SplitMode, string][]).map(([m, l]) => (
+            <TouchableOpacity key={m} style={[styles.chip, splitMode === m && styles.chipOn]} onPress={() => setSplitMode(m)}>
+              <Text style={[styles.chipT, splitMode === m && styles.chipTOn]}>{l}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.sumCard}>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaL}>{t('c_subtotal')}</Text>
+            <Text style={styles.metaV}>{rp(itemSum)}</Text>
+          </View>
+          {voucherEff > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>Voucher{voucherCode ? ` ${voucherCode}` : ''}</Text>
+              <Text style={[styles.metaV, styles.metaDisc]}>-{rp(voucherEff)}</Text>
+            </View>
+          )}
+          {discountEff > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>{t('discount')}</Text>
+              <Text style={[styles.metaV, styles.metaDisc]}>-{rp(discountEff)}</Text>
+            </View>
+          )}
+          {serviceEff > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>{t('serviceExcl')}</Text>
+              <Text style={styles.metaV}>+{rp(serviceEff)}</Text>
+            </View>
+          )}
+          {ongkirEff > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>{t('deliveryFee')}</Text>
+              <Text style={styles.metaV}>+{rp(ongkirEff)}</Text>
+            </View>
+          )}
+          <View style={styles.metaRow}>
+            <Text style={styles.metaL}>{t('taxIncl')}</Text>
+            <Text style={styles.metaV}>{rp(canon.taxIncl)}</Text>
+          </View>
+          {feeEff > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>{t('feeESB')}</Text>
+              <Text style={styles.metaV}>+{rp(feeEff)}</Text>
+            </View>
+          )}
+          <View style={styles.metaRow}>
+            <Text style={styles.metaL}>{t('rounding')}</Text>
+            <Text style={styles.metaV}>{canon.rounding >= 0 ? `+${rp(canon.rounding)}` : `-${rp(-canon.rounding)}`}</Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaL}>{t('total')}</Text>
+            <Text style={styles.billTotal}>{rp(orderTotal)}</Text>
+          </View>
+        </View>
 
         <Text style={styles.sec}>{t('sp_items_sec')} · {rp(grand)}</Text>
-        {items.map((it) => (
-          <TouchableOpacity key={it.id} style={styles.itemRow} onPress={() => cycleAssign(it.id)}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemName}>{it.qty}× {it.name}</Text>
-              <Text style={styles.itemPrice}>{rp(itemTotal(it))}</Text>
-            </View>
-            <Text style={styles.splitBadge}>Bill #{(assign[it.id] ?? 0) + 1} ›</Text>
-          </TouchableOpacity>
-        ))}
+        {splitMode === 'perItem' ? (
+          items.map((it) => (
+            <TouchableOpacity key={it.id} style={styles.itemRow} onPress={() => cycleAssign(it.id)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemName}>{it.qty}× {it.name}</Text>
+                <Text style={styles.itemPrice}>{rp(itemTotal(it))}</Text>
+              </View>
+              <Text style={styles.splitBadge}>Bill #{(assign[it.id] ?? 0) + 1} ›</Text>
+            </TouchableOpacity>
+          ))
+        ) : splitMode === 'rata' ? (
+          <Text style={styles.hint}>{t('bill_rata_hint')}</Text>
+        ) : (
+          <Text style={styles.hint}>{t('bill_nom_hint').replace('{t}', rp(orderTotal))}</Text>
+        )}
         {items.length === 0 && (
           <View style={styles.emptyWrap}>
             <Image
@@ -231,9 +367,37 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         )}
 
         <Text style={styles.sec}>{t('sp_perbill')}</Text>
+        {splitMode === 'nominal' && (
+          <View style={styles.sumCard}>
+            {NAMES.slice(0, splits).map((name, i) => (
+              <View key={name} style={styles.nomRow}>
+                <Text style={styles.metaL}>{t('sp_name').replace('{n}', String(i + 1))}</Text>
+                <TextInput
+                  style={styles.nomInput}
+                  value={nominals[i] ?? ''}
+                  onChangeText={(v) => setNominals((arr) => arr.map((x, j) => (j === i ? v : x)))}
+                  placeholder={rp(0)}
+                  placeholderTextColor={colors.faint}
+                  keyboardType="numeric"
+                />
+              </View>
+            ))}
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>{t('bill_remain')}</Text>
+              <Text style={[styles.metaV, !nominalPas && styles.metaDisc]}>
+                {nominalPas
+                  ? t('bill_pas')
+                  : nominalSisa > 0
+                    ? t('bill_short').replace('{k}', rp(nominalSisa))
+                    : t('bill_over').replace('{k}', rp(-nominalSisa))}
+              </Text>
+            </View>
+            {!nominalPas && <Text style={styles.gateMsg}>{t('bill_gate')}</Text>}
+          </View>
+        )}
         {NAMES.slice(0, splits).map((name, i) => {
-          const val = billTotals[i] as number;
-          const members = items.filter((it) => (assign[it.id] ?? 0) === i);
+          const val = billVal(i);
+          const members = splitMode === 'perItem' ? items.filter((it) => (assign[it.id] ?? 0) === i) : items;
           const label = t('sp_name').replace('{n}', String(i + 1));
           return (
             <View key={name} style={styles.billCard}>
@@ -246,15 +410,22 @@ export default function SplitBillScreen({ navigation, route }: Props) {
               <Text style={styles.billItems}>
                 {members.length === 0 ? t('sp_noitems') : members.map((m) => `${m.qty}× ${m.name}`).join(' · ')}
               </Text>
+              {splitMode === 'perItem' && (
               <View style={styles.meta}>
                 <View style={styles.metaRow}>
                   <Text style={styles.metaL}>{t('c_subtotal')}</Text>
                   <Text style={styles.metaV}>{rp(itemSplits[i] as number)}</Text>
                 </View>
-                {serviceAmt > 0 && (
+                {serviceEff > 0 && (
                   <View style={styles.metaRow}>
                     <Text style={styles.metaL}>{t('serviceExcl')}</Text>
                     <Text style={styles.metaV}>+{rp(serviceShares[i] as number)}</Text>
+                  </View>
+                )}
+                {feeEff > 0 && (
+                  <View style={styles.metaRow}>
+                    <Text style={styles.metaL}>{t('feeESB')}</Text>
+                    <Text style={styles.metaV}>+{rp(feeShares[i] as number)}</Text>
                   </View>
                 )}
                 {ongkirEff > 0 && (
@@ -269,13 +440,14 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                     <Text style={[styles.metaV, styles.metaDisc]}>-{rp(voucherShares[i] as number)}</Text>
                   </View>
                 )}
-                {discountCapped > 0 && (
+                {discountEff > 0 && (
                   <View style={styles.metaRow}>
                     <Text style={styles.metaL}>{t('discount')}</Text>
                     <Text style={[styles.metaV, styles.metaDisc]}>-{rp(discountShares[i] as number)}</Text>
                   </View>
                 )}
               </View>
+              )}
               <Text style={styles.label}>{t('sp_method')}</Text>
               <View style={styles.chips}>
                 {METHODS.map((m) => (
@@ -290,8 +462,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
               <View style={styles.billActs}>
                 {!paid[i] && (
                   <TouchableOpacity
-                    style={[styles.payBtn, val <= 0 && styles.payOff]}
-                    disabled={val <= 0}
+                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff]}
+                    disabled={val <= 0 || nominalBlocked}
                     onPress={() => payBill(i)}>
                     <Text style={styles.payT}>{t('sp_pay').replace('{m}', methods[i] as string)} ›</Text>
                   </TouchableOpacity>
@@ -346,6 +518,22 @@ const styles = StyleSheet.create({
   metaL: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   metaV: { fontFamily: fonts.semibold, fontSize: 12, color: colors.text },
   metaDisc: { color: colors.red },
+  sumCard: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1, borderColor: colors.line },
+  nomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  nomInput: {
+    width: 130,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+    textAlign: 'right',
+  },
+  gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },
   billActs: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12 },
   payBtn: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 10 },
   payOff: { opacity: 0.4 },

@@ -1,16 +1,7 @@
-import { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { colors, fonts, rp } from '../../theme';
-import { printReceipt, shareReceipt } from '../../lib/print';
-import { isValidEmail, recordReceiptEmail } from '../../lib/payments';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number } } };
-
-export default function ReceiptScreen({ navigation, route }: Props) {
+import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { printReceiptData, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const no = route?.params?.no ?? '#148';
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const no = route?.params?.no ?? '#148';
   const method = route?.params?.method ?? 'QRIS';
   const mode = route?.params?.mode ?? 'Bawa Pulang';
   const cash = route?.params?.cash ?? 0;
@@ -21,68 +12,100 @@ export default function ReceiptScreen({ navigation, route }: Props) {
   const now = new Date();
   const todayId = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
   const timeId = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
-  // Struk konsisten: 19900 + 19000 = subtotal 38900 − diskon 5000 = total 33900
+  // Struk dari data transaksi asli: total terusan adalah sumber kebenaran
+  // (payable kasir); subtotal dihitung mundur hanya bila item tak dioper
+  // (cetak ulang arsip) - tanpa angka hardcode.
+  const cartItems = route?.params?.items;
+  const hasItems = !!cartItems && cartItems.length > 0;
+  const discount = route?.params?.discount ?? 0;
+  const ongkir = route?.params?.ongkir ?? 0;
+  // Rincian struk bawaan rantai pay (opsional): tampil bila dikirim pemanggil.
+  // Semua baris rincian info-only - total terusan pemanggil adalah kebenaran.
+  const service = Math.max(0, Math.round(Number(route?.params?.service) || 0));
+  const tax = Math.max(0, Math.round(Number(route?.params?.tax) || 0));
+  const rounding = Math.round(Number(route?.params?.rounding) || 0);
+  const feeESB = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0));
+  const itemsSum = hasItems ? cartItems.reduce((s, it) => s + lineTotal(it), 0) : 0;
+  const total = route?.params?.total ?? (itemsSum - discount + ongkir);
+  // Mundur tanpa item: kurangi SEMUA komponen info-only agar konsisten
+  // (sebelumnya service/rounding/feeESB tak dikurangi → subtotal kebesaran).
+  const subtotal  = hasItems ? itemsSum : Math.max(0, total + discount - ongkir - service - rounding - feeESB);
 
-  const paper = (
-    <View style={styles.paper}>
-      <Text style={styles.shop}>ESB Cabang Poris</Text>
-      <Text style={styles.addr}>Jl. Poris Raya No. 8 · 021-555-0100</Text>
-      <Text style={styles.line}>No: {no}    {mode}</Text>
-      <Text style={styles.line}>Kasir Gista · QoQi</Text>
+  const cashierLine = [route?.params?.cashier ?? 'Kasir Gista', route?.params?.table ?? route?.params?.customer ?? 'QoQi'].join(' · ');
+  // Rincian void dari CancelScreen/History (T8): tampil sebagai seksi struk tersendiri.
+  const voidLines = route?.params?.voidLines ?? [];
+  const voidReason = route?.params?.reason ?? '';
+  const hasVoid = voidLines.length > 0;
+  const voidTotal = voidLines.reduce((s, l) => s + l.qty * l.price, 0);
+  // Kode voucher + footer custom cabang bila dioper via params (jangan hardcode).
+  const voucherCode = route?.params?.voucherCode ?? '';
+  const approvalCode = route?.params?.approvalCode ?? '';
+  const cardLast4 = route?.params?.cardLast4 ?? '';
+  const edcLine = [route?.params?.bank, route?.params?.terminal].filter(Boolean).join(' · ');
+  const shopName = route?.params?.shopName ?? 'ESB Cabang Poris';
+  const shopAddr = route?.params?.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
+  const customFooter = route?.params?.footer ?? '';
+  const [printing, setPrinting] = useState(false);
+  /** Cetak nyata: ESC/POS → printer default; sukses = printedCount+1 + dirty. */
+  const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: 'ESB CABANG PORIS', addr: 'Jl. Poris Raya No. 8', trx: `No: ${no} - ${mode}`, cashier: cashierLine, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), total: Math.round(total), method, }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } } } finally { setPrinting(false); } };
+  const paper = ( <View style={styles.paper}>
+      <Text style={styles.shop}>{shopName}</Text> <Text style={styles.addr}>{shopAddr}</Text> <Text style={styles.line}>No: {no}    {mode}</Text>
+      <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
       <View style={styles.div} />
-      <Text style={styles.item}>1× Sudirman Coffee</Text>
-      <Text style={styles.note}>  Creamy Pandan, Normal {rp(12900)}</Text>
-      <Text style={styles.note}>  + Modifier {rp(7000)}</Text>
-      <Text style={styles.item}>1× Lele goreng kremes</Text>
-      <Text style={styles.note}>  Ekstra Sambel {rp(15000)} + {rp(4000)}</Text>
-      <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.item}>{rp(38900)}</Text></View>
-      <View style={styles.row}><Text style={styles.item}>Diskon</Text><Text style={styles.item}>-{rp(5000)}</Text></View>
-      <View style={styles.div} />
-      <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(33900)}</Text></View>
-      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(33900)}</Text></View>
+      {hasItems ? ( cartItems.map((it) => ( <View key={it.id}> <View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View> {(it.modifiers ?? []).map((m) => ( <Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))} </View> )) ) : null}
+      <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.item}>{rp(subtotal)}</Text></View> {discount > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('rc_discount')}</Text><Text style={styles.item}>-{rp(discount)}</Text></View> )} {service > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.item}>{rp(service)}</Text></View> )} {feeESB > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )} {tax > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )} {voucherCode ? (
+      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null} {approvalCode ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null} {edcLine ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null} {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} {rounding !== 0 && ( <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )} <View style={styles.div} />
+      <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(total)}</Text></View>
+      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View> {hasVoid && ( <> <View style={styles.div} /> <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> {voidLines.map((l) => ( <View key={l.name} style={styles.row}> <Text style={styles.voidItem}>{l.qty}x {l.name}</Text> <Text style={styles.item}>-{rp(l.qty * l.price)}</Text> </View> ))} {voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null} <View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View> </> )}
       {isCash && cash > 0 ? (
         <>
-          <View style={styles.row}><Text style={styles.item}>Tunai Diterima</Text><Text style={styles.item}>{rp(cash)}</Text></View>
-          <View style={styles.row}><Text style={styles.item}>Kembali</Text><Text style={styles.item}>{rp(change)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{t('rc_cashin')}</Text><Text style={styles.item}>{rp(cash)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{t('rc_change')}</Text><Text style={styles.item}>{rp(change)}</Text></View>
         </>
       ) : (
-        <View style={styles.row}><Text style={styles.item}>Kembali</Text><Text style={styles.item}>Rp 0</Text></View>
+        <View style={styles.row}><Text style={styles.item}>{t('rc_change')}</Text><Text style={styles.item}>{rp(0)}</Text></View>
       )}
-      <Text style={styles.thanks}>*** Terima kasih ***</Text>
+      <Text style={styles.thanks}>{t('rc_thanks')}</Text> {customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}
     </View>
   );
 
-  const shareText = `ESB Cabang Poris · Struk ${no} · ${mode} · ${method} · TOTAL ${rp(33900)}`;
+  // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
+  const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...(it.modifiers ?? []).map((m) => ` + ${m.name} ${rp(m.price * it.qty)}`), ]) : [];
+  const shareText = [ `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${t('serviceExcl')}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${t('feeESB')}: ${rp(feeESB)}`] : []), ...(tax > 0 ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `TOTAL: ${rp(total)}`, `${method}: ${rp(total)}`, ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
   const sendMail = () => {
     if (!isValidEmail(mailTo)) {
-      setMailMsg('Alamat email tidak valid.');
+      setMailMsg(t('hist_mail_bad'));
       return;
     }
-    recordReceiptEmail(mailTo, no, 33900, method);
-    setMailMsg('Struk masuk antrean kirim — terkirim saat online.');
+    recordReceiptEmail(mailTo, no, total, method);
+    setMailMsg(t('hist_mail_queued'));
   };
 
   const actions = (
     <View style={[styles.actions, isTablet && styles.actionsStack]}>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('Dashboard')}>
-        <Text style={styles.ghostT}>Kembali</Text>
+      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => navigation?.navigate('Dashboard')}>
+        <Text style={styles.ghostT}>{t('c_back')}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => printReceipt()}>
-        <Text style={styles.ghostT}>🖨 Cetak</Text>
+      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => void doPrint()}>
+        <Text style={styles.ghostT}>🖨 {printing ? '...' : t('rc_print')}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => { void shareReceipt(shareText); }}>
-        <Text style={styles.ghostT}>⤴ Bagikan</Text>
+      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => { void shareReceipt(shareText); }}>
+        <Text style={styles.ghostT}>⤴ {t('rc_share')}</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet && styles.actionCol]} onPress={() => { setMailMsg(''); setMailOpen(true); }}>
+      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => { setMailMsg(''); setMailOpen(true); }}>
         <Text style={styles.ghostT}>✉ Email</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.primary, isTablet && styles.actionCol]} onPress={() => navigation?.navigate('Cashier')}>
-        <Text style={styles.primaryT}>+ Transaksi Baru</Text>
+      <TouchableOpacity style={[styles.primary, isTablet ? styles.actionCol : styles.actionFull]} onPress={() => navigation?.navigate('Cashier')}>
+        <Text style={styles.primaryT}>{t('rc_new')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -91,24 +114,24 @@ export default function ReceiptScreen({ navigation, route }: Props) {
     <Modal visible={mailOpen} animationType="fade" transparent>
       <View style={styles.wrap}>
         <View style={[styles.dialog, styles.dialogNarrow]}>
-          <Text style={styles.dTitle}>Kirim Struk via Email</Text>
-          <Text style={styles.dSub}>Struk {no} • {rp(33900)}</Text>
+          <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
+          <Text style={styles.dSub}>Struk {no} • {rp(total)}</Text>
           <TextInput
             style={styles.input}
             value={mailTo}
             onChangeText={setMailTo}
-            placeholder="nama@email.com"
+            placeholder={t('hist_mail_ph')}
             placeholderTextColor={colors.faint}
             keyboardType="email-address"
             autoCapitalize="none"
           />
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
-            <TouchableOpacity style={styles.ghost} onPress={() => setMailOpen(false)}>
-              <Text style={styles.ghostT}>Tutup</Text>
+            <TouchableOpacity style={[styles.ghost, styles.dBtnFlex]} onPress={() => setMailOpen(false)}>
+              <Text style={styles.ghostT}>{t('c_close')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.primary} onPress={sendMail}>
-              <Text style={styles.primaryT}>Kirim</Text>
+            <TouchableOpacity style={[styles.primary, styles.dBtnFlex]} onPress={sendMail}>
+              <Text style={styles.primaryT}>{t('hist_mail_send')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -118,38 +141,35 @@ export default function ReceiptScreen({ navigation, route }: Props) {
 
   if (isTablet) {
     return (
-      <View style={styles.split}>
+      <View style={styles.root}> <ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /> <View style={styles.split}>
         <ScrollView style={styles.paperSide} contentContainerStyle={styles.body}>
           {paper}
         </ScrollView>
-        <View style={styles.summarySide}>
-          <Text style={styles.summaryTitle}>Ringkasan Struk</Text>
+        <ScrollView style={styles.summarySide} contentContainerStyle={styles.summarySideBody}>
+          <Text style={styles.summaryTitle}>{t('rc_summary')}</Text>
           <View style={styles.summaryCard}>
-            <View style={styles.row}><Text style={styles.item}>No. Struk</Text><Text style={styles.item}>{no}</Text></View>
-            <View style={styles.row}><Text style={styles.item}>Mode</Text><Text style={styles.item}>{mode}</Text></View>
-            <View style={styles.row}><Text style={styles.item}>Metode</Text><Text style={styles.item}>{method}</Text></View>
-            <View style={styles.div} />
-            <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(33900)}</Text></View>
+            <View style={styles.row}><Text style={styles.item}>{t('rc_no')}</Text><Text style={styles.item}>{no}</Text></View>
+            <View style={styles.row}><Text style={styles.item}>{t('rc_mode')}</Text><Text style={styles.item}>{mode}</Text></View>
+            <View style={styles.row}><Text style={styles.item}>{t('rc_method')}</Text><Text style={styles.item}>{method}</Text></View>
+            {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} <View style={styles.div} />
+            <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>
-          {mailModal}
+          </ScrollView> {mailModal}
         </View>
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.body}>
+    <View style={styles.root}> <ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /> <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
       {paper}
       {actions}
       {mailModal}
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  scroll: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16, paddingBottom: 40 },
   paper: { backgroundColor: colors.white, borderRadius: 8, padding: 18, borderWidth: 1, borderColor: colors.line },
   shop: { fontFamily: fonts.bold, fontSize: 17, color: colors.text, textAlign: 'center' },
   addr: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 },
@@ -159,20 +179,20 @@ const styles = StyleSheet.create({
   note: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   total: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, marginTop: 4 },
-  thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 12 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  voidTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.red, marginTop: 4 }, voidItem: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 3, textDecorationLine: 'line-through' }, thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 12 },
+  footerNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   actionsStack: { flexDirection: 'column' },
   actionCol: { flex: 0, width: '100%' },
-  split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+  actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
   paperSide: { flex: 1.2 },
-  summarySide: { flex: 1, backgroundColor: colors.card, borderLeftWidth: 1, borderLeftColor: colors.line, padding: 20 },
+  summarySide: { flex: 1, backgroundColor: colors.card, borderLeftWidth: 1, borderLeftColor: colors.line }, summarySideBody: { padding: 20, paddingBottom: 32 },
   summaryTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   summaryCard: { backgroundColor: colors.bg, borderRadius: 10, padding: 14, marginTop: 12 },
   actionsColumn: { marginTop: 16 },
-  primary: { flex: 1, backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center' },
-  primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
-  ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
-  ghostT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
+  primary: {  backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center' },
+  primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white, textAlign: 'center' },
+  ghost: {  backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
+  ghostT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy, textAlign: 'center' },
   wrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
   dialogNarrow: { width: '100%', maxWidth: 480, alignSelf: 'center' },
@@ -183,5 +203,4 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular, fontSize: 14, color: colors.text, backgroundColor: colors.white, marginTop: 12,
   },
   mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
-  dBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
-});
+  dBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },});

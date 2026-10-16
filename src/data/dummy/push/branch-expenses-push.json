@@ -1,0 +1,23 @@
+{
+  "request": {
+    "date": "2026-10-16",
+    "branchId": "B001",
+    "coaId": "COA002",
+    "coaName": "Gas LPG",
+    "amount": 85000,
+    "note": "Belanja gas LPG 3 kg",
+    "userId": "U07",
+    "photoUrl": ""
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "expenseId": "EXP-20261016-003",
+      "syncDate": "2026-10-16 14:20:00"
+    }
+  }
+}

@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import { getSession, logout } from '../../session';
+import { getTerminal } from '../../config/server';
+import { initDb, query, queryFirst } from '../../lib/db';
+import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -14,20 +19,27 @@ interface MenuItem {
   soon?: boolean;
 }
 
-/** Menu utama (drawer) — route null = modul belum tersedia, tampil "Segera". */
-const MENU: MenuItem[] = [
-  { label: 'Order', sub: 'Kasir · 47 transaksi', route: 'Cashier' },
-  { label: 'Meja', sub: 'Denah · 6 terisi', route: 'Tables' },
-  { label: 'Booking', sub: 'Reservasi meja', route: 'Booking' },
-  { label: 'Shift', sub: 'Kehadiran & kas', route: 'Shift' },
-  { label: 'Riwayat Penjualan', sub: 'Semua transaksi', route: 'History' },
-  { label: 'Detail Rekap', sub: 'Rekap shift', route: 'Recap' },
-  { label: 'ESB Order', sub: 'Pesanan online · 2 baru', route: 'EsbOrder' },
-  { label: 'Member', sub: '342 terdaftar', route: 'Member' },
-  { label: 'Expense', sub: 'Biaya operasional', route: 'Expense' },
-  { label: 'Petty Cash', sub: 'Kas kecil', route: 'PettyCash' },
-  { label: 'Pengaturan', sub: 'Printer · sinkron', route: 'Settings' },
-];
+/** Item menu utama - label diisi di dalam komponen via t() agar siap EN dan ID. */
+
+type TableState = 'busy' | 'free' | 'res';
+
+interface TableMini {
+  id: string;
+  s: TableState;
+}
+
+interface StockMini {
+  name: string;
+  left: number;
+}
+
+/** Normalisasi status ms_table APK ke tiga state peta. */
+function mapStatus(raw: string): TableState {
+  const v = raw.trim().toLowerCase();
+  if (v === 'busy' || v === 'terisi' || v === 'occupied' || v === 'gabung' || v === 'isi') return 'busy';
+  if (v === 'res' || v === 'reservasi' || v === 'reserved' || v === 'booked' || v === 'booking') return 'res';
+  return 'free';
+}
 
 const TABLES = [
   { id: 'A-01', s: 'busy' }, { id: 'A-02', s: 'free' }, { id: 'A-03', s: 'res' },
@@ -51,66 +63,211 @@ function tableStyle(s: string) {
 
 export default function DashboardScreen({ navigation }: Props) {
   const s = getSession();
+  const { t } = useLang();
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const [notice, setNotice] = useState('');
-  // Drawer /home juga dibuka dari Dashboard (home) — dulu hanya dari Cashier.
+  // Drawer /home juga dibuka dari Dashboard (home) - dulu hanya dari Cashier.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Angka awal = fallback demo (dipakai di web yang stub DB-nya kosong).
+  // Di native, efek di bawah menimpa dengan hitungan nyata SQLite.
+  const [sales, setSales] = useState({ total: 1284500, trx: 47 });
+  // T12: pembanding H-1 dari SQLite; null = kemarin belum ada data / DB kosong.
+  const [yest, setYest] = useState<{ total: number; trx: number } | null>(null);
+  const [tables, setTables] = useState<TableMini[]>(() => TABLES.map((x) => ({ id: x.id, s: x.s })));
+  const [lowStock, setLowStock] = useState<StockMini[]>(() => LOW_STOCK.map((x) => ({ ...x })));
+  const [shift, setShift] = useState(() => ({
+    open: true,
+    clockIn: s?.clockIn ?? '08:57',
+    cash: s?.cash ?? 200000,
+  }));
+  const [lastSync, setLastSync] = useState(() => getLastSync());
+  const [pending, setPending] = useState(() => pendingCount());
+  // NAV-04/05: hitungan nyata; null = DB kosong → fallback demo.
+  const [esbNew, setEsbNew] = useState<number | null>(null);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+
+  // Muat angka nyata dari SQLite (tr_saleshead hari ini, ms_table,
+  // ms_branchmenu join ms_menu, tr_shiftlog terakhir). Gagal = fallback
+  // tetap tampil, kasir tidak diblokir.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const d = new Date();
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const dayRow = await queryFirst<{ c: number; t: number }>(
+          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE substr(salesDate, 1, 10) = ?',
+          [day],
+        );
+        if (alive && dayRow) {
+          setSales({ total: Number(dayRow.t) || 0, trx: Number(dayRow.c) || 0 });
+        }
+        // T12: omzet + transaksi kemarin sebagai baseline delta.
+        const yd = new Date(d.getTime() - 86400000);
+        const yday = `${yd.getFullYear()}-${pad(yd.getMonth() + 1)}-${pad(yd.getDate())}`;
+        const yRow = await queryFirst<{ c: number; t: number }>(
+          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE substr(salesDate, 1, 10) = ?',
+          [yday],
+        );
+        if (alive && yRow) {
+          setYest({ total: Number(yRow.t) || 0, trx: Number(yRow.c) || 0 });
+        }
+        const tRows = await query<{ id: string; tableNo: string | null; status: string | null }>(
+          'SELECT id, tableNo, status FROM ms_table LIMIT 60',
+        );
+        if (alive && tRows.length > 0) {
+          setTables(tRows.map((r) => ({ id: r.tableNo || r.id, s: mapStatus(r.status ?? '') })));
+        }
+        const lRows = await query<{ name: string | null; left: number | null }>(
+          `SELECT COALESCE(m.menuName, b.menuId) AS name, b.qty AS left
+             FROM ms_branchmenu b LEFT JOIN ms_menu m ON m.id = b.menuId
+             WHERE b.flagSoldOut = 0 AND b.qty <= 8 ORDER BY b.qty ASC LIMIT 5`,
+        );
+        if (alive && lRows.length > 0) {
+          setLowStock(lRows.map((r) => ({ name: r.name ?? '-', left: Math.round(Number(r.left) || 0) })));
+        }
+        const shiftRow = await queryFirst<{
+          shiftName: string | null; clockIn: string | null; cashInDrawer: number | null;
+          clockOut: string | null; status: string | null;
+        }>(
+          'SELECT shiftName, clockIn, cashInDrawer, clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+        );
+        if (alive && shiftRow) {
+          const hhmm = String(shiftRow.clockIn ?? '').slice(11, 16);
+          setShift({
+            open: shiftRow.status === 'open' || !shiftRow.clockOut,
+            clockIn: hhmm || s?.clockIn || '08:57',
+            cash: Number(shiftRow.cashInDrawer) || s?.cash || 0,
+          });
+        }
+        // NAV-04: order online baru (belum diproses) + total member terdaftar.
+        const esbRow = await queryFirst<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM tr_saleshead
+           WHERE onlineOrderId IS NOT NULL AND status = 'open'`,
+        );
+        if (alive && esbRow) setEsbNew(Number(esbRow.c) || 0);
+        const memRow = await queryFirst<{ c: number }>(
+          'SELECT COUNT(*) AS c FROM ms_member',
+        );
+        if (alive && memRow) setMemberCount(Number(memRow.c) || 0);
+      } catch {
+        // DB belum init - fallback demo tetap tampil.
+      }
+      if (alive) {
+        setLastSync(getLastSync());
+        setPending(pendingCount());
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const busy = useMemo(() => tables.filter((x) => x.s === 'busy').length, [tables]);
+  const free = useMemo(() => tables.filter((x) => x.s === 'free').length, [tables]);
+  const resCount = useMemo(() => tables.filter((x) => x.s === 'res').length, [tables]);
+  const avg = sales.trx > 0 ? Math.round(sales.total / sales.trx) : 0;
+  // T12: delta omzet hari ini vs kemarin; fallback teks bila baseline kosong.
+  const delta = yest && yest.total > 0
+    ? Math.round(((sales.total - yest.total) / yest.total) * 100)
+    : null;
+  const deltaTxt = delta === null
+    ? t('dash_vs_empty')
+    : `${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% ${t('dash_vs')}`;
+
+  const MENU: MenuItem[] = [
+    { label: t('nav_order'), sub: `${t('nav_cashier')} · ${sales.trx} ${t('unit_trx')}`, route: 'Cashier' },
+    { label: t('nav_tables'), sub: `${t('nav_layout')} · ${busy} ${t('unit_filled')}`, route: 'Tables' },
+    // Booking disengaja hanya kartu dashboard (route Booking valid) -
+    // drawer kanonis 10 item Lampiran A tetap tanpa Booking agar sinkron.
+    { label: t('nav_booking'), sub: t('nav_booking_sub'), route: 'Booking' },
+    { label: t('nav_shift'), sub: t('nav_shift_sub'), route: 'Shift' },
+    { label: t('nav_history'), sub: t('nav_history_sub'), route: 'History' },
+    { label: t('nav_recap'), sub: t('nav_recap_sub'), route: 'Recap' },
+    { label: t('nav_esb'), sub: `${t('nav_online_orders')} · ${esbNew ?? 2} ${t('unit_new')}`, route: 'EsbOrder' },
+    { label: t('nav_member'), sub: `${memberCount ?? 342} ${t('unit_registered')}`, route: 'Member' },
+    { label: t('nav_expense'), sub: t('nav_expense_sub'), route: 'Expense' },
+    { label: t('nav_petty'), sub: t('nav_petty_sub'), route: 'PettyCash' },
+    { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings' },
+  ];
 
   const openMenu = (m: MenuItem) => {
     if (!m.route) {
-      setNotice(`${m.label} belum tersedia di build ini.`);
+      setNotice(`${m.label} ${t('dash_not_available')}`);
       return;
     }
     setNotice('');
     navigation?.navigate(m.route);
   };
 
+  const doLogout = () => {
+    logout();
+    navigation?.navigate('Login');
+  };
+
+  // Baris sinkron: waktu nyata modul sync + jumlah antrean bila ada.
+  const syncLine =
+    pending > 0
+      ? `${t('dash_sync')} ${lastSync || t('dash_never')} · ${pending} ${t('sync_pending')} · ${t('badge_online')}`
+      : `${t('dash_sync')} ${lastSync || t('dash_never')} · ${t('badge_online')}`;
+
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerBranch}>{s?.outlet ?? 'ESB Cabang Poris'}</Text>
-          <Text style={styles.headerSub}>Kasir {s?.name ?? 'Gista'} · {s?.shift ?? 'Shift Pagi'}</Text>
-        </View>
-        <View style={styles.onlineDark}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineDarkT}>Online</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title={s?.outlet ?? 'ESB Cabang Poris'}
+        sub={`${t('nav_cashier')} ${s?.name ?? 'Gista'} · ${s?.shift ?? t('fallback_shift')}`}
+        left={
+          <TouchableOpacity
+            onPress={() => setDrawerOpen(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={t('action_open_menu')}>
+            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+          </TouchableOpacity>
+        }
+        right={
+          <View style={styles.onlineDark}>
+            <View style={styles.onlineDot} />
+            <Text style={styles.onlineDarkT}>{t('badge_online')}</Text>
+          </View>
+        }
+      />
       <DrawerMenu
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         navigate={(r) => navigation?.navigate(r)}
+        outlet={s?.outlet || getTerminal().branchName || undefined}
+        user={s ? `${s.name} | ${s.shift}` : undefined}
       />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
 
       <View style={styles.shiftCard}>
         <View style={styles.shiftLeft}>
-          <Text style={styles.shiftTitle}>Shift Buka ✓</Text>
-          <Text style={styles.shiftSub}>
-            Masuk {s?.clockIn ?? '08:57'} · Kas awal {rp(s?.cash ?? 200000)}
+          <Text style={[styles.shiftTitle, isTablet && styles.shiftTitleBig]}>{shift.open ? `${t('dash_shift_open')} ✓` : t('dash_shift_closed')}</Text>
+          <Text style={[styles.shiftSub, isTablet && styles.shiftSubBig]}>
+            {t('dash_clock_in')} {shift.clockIn} · {t('dash_opening')} {rp(shift.cash)}
           </Text>
         </View>
         <TouchableOpacity style={styles.shiftBtn} onPress={() => navigation?.navigate('Shift')}>
-          <Text style={styles.shiftBtnText}>Shift ›</Text>
+          <Text style={[styles.shiftBtnText, isTablet && styles.shiftBtnTextBig]}>{t('nav_shift')} ›</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.salesCard}>
-        <Text style={styles.salesLabel}>Penjualan Hari Ini</Text>
-        <Text style={styles.salesValue}>{rp(1284500)}</Text>
-        <Text style={styles.salesSub}>47 transaksi · rata-rata Rp 27.329 · ▲ 12% vs kemarin</Text>
+        <Text style={styles.salesLabel}>{t('dash_today')}</Text>
+        <Text style={[styles.salesValue, isTablet && styles.salesValueBig]}>{rp(sales.total)}</Text>
+        <Text style={[styles.salesSub, isTablet && styles.salesSubBig]}>{sales.trx} {t('unit_trx')} · {t('dash_avg')} {rp(avg)} · {deltaTxt}</Text>
       </View>
 
       <TouchableOpacity style={styles.cta} onPress={() => navigation?.navigate('Cashier')}>
-        <Text style={styles.ctaText}>+ Transaksi Baru</Text>
+        <Text style={[styles.ctaText, isTablet && styles.ctaTextBig]}>{t('dash_new_trx')}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.sectionTitle}>Menu Utama</Text>
+      <Text style={[styles.sectionTitle, isTablet && styles.sectionTitleBig]}>{t('dash_main_menu')}</Text>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <View style={[styles.menuGrid, isTablet && styles.menuGridTablet]}>
         {MENU.map((m) => (
@@ -119,33 +276,33 @@ export default function DashboardScreen({ navigation }: Props) {
             style={[styles.menuCell, isTablet && styles.menuCellTablet, m.soon && styles.menuCellSoon]}
             onPress={() => openMenu(m)}>
             <View style={styles.menuTop}>
-              <Text style={styles.menuLabel}>{m.label}</Text>
+              <Text style={[styles.menuLabel, isTablet && styles.menuLabelBig]}>{m.label}</Text>
               {m.soon ? (
                 <View style={styles.soonBadge}>
-                  <Text style={styles.soonText}>Segera</Text>
+                  <Text style={styles.soonText}>{t('badge_soon')}</Text>
                 </View>
               ) : null}
             </View>
-            <Text style={styles.menuSub}>{m.sub}</Text>
+            <Text style={[styles.menuSub, isTablet && styles.menuSubBig]}>{m.sub}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
       <View style={styles.card}>
         <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>Peta Meja</Text>
+          <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('dash_table_map')}</Text>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
-            <Text style={styles.link}>Lihat denah ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('dash_view_layout')}</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.cardSub}>6 terisi · 5 kosong · 3 reservasi</Text>
-        <Text style={styles.legend}>■ Terisi · □ Kosong · ● Reservasi — warna + label, bukan warna saja</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{busy} {t('unit_filled')} · {free} {t('unit_empty')} · {resCount} {t('unit_res')}</Text>
+        <Text style={[styles.legend, isTablet && styles.legendBig]}>{t('dash_legend')}</Text>
         <View style={styles.grid}>
-          {TABLES.map((t) => {
-            const c = tableStyle(t.s);
+          {tables.map((tb) => {
+            const c = tableStyle(tb.s);
             return (
-              <View key={t.id} style={[styles.cell, { backgroundColor: c.bg, borderColor: c.bd }]}>
-                <Text style={[styles.cellText, { color: c.tx }]}>{t.id}</Text>
+              <View key={tb.id} style={[styles.cell, { backgroundColor: c.bg, borderColor: c.bd }]}>
+                <Text style={[styles.cellText, isTablet && styles.cellTextBig, { color: c.tx }]}>{tb.id}</Text>
               </View>
             );
           })}
@@ -154,29 +311,47 @@ export default function DashboardScreen({ navigation }: Props) {
 
       <View style={styles.card}>
         <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>Stok Menipis</Text>
+          <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('dash_low_stock')}</Text>
           <TouchableOpacity onPress={() => navigation?.navigate('Stock')}>
-            <Text style={styles.link}>Kelola stok ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('dash_manage_stock')}</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.cardSub}>3 item perlu restok</Text>
-        {LOW_STOCK.map((i) => (
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{lowStock.length} {t('dash_restock')}</Text>
+        {lowStock.map((i) => (
           <View key={i.name} style={styles.stockRow}>
-            <Text style={styles.stockName}>{i.name}</Text>
-            <Text style={styles.stockLeft}>sisa {i.left}</Text>
+            <Text style={[styles.stockName, isTablet && styles.stockNameBig]}>{i.name}</Text>
+            <Text style={[styles.stockLeft, isTablet && styles.stockLeftBig]}>{t('unit_left')} {i.left}</Text>
           </View>
         ))}
       </View>
 
-      <View style={styles.row}>
-        <TouchableOpacity onPress={() => navigation?.navigate('Attendance')}>
-          <Text style={styles.link}>Absensi ›</Text>
+      <View style={[styles.quickGrid, isTablet && styles.quickGridTablet]}>
+        <TouchableOpacity
+          style={[styles.quickCard, isTablet && styles.quickCardTablet]}
+          onPress={() => navigation?.navigate('Attendance')}>
+          <View style={styles.quickIconWrap}>
+            <Text style={styles.quickIcon}>◷</Text>
+          </View>
+          <View style={styles.quickText}>
+            <Text style={[styles.quickLabel, isTablet && styles.quickLabelBig]}>{t('dash_attendance_title')}</Text>
+            <Text style={[styles.quickSub, isTablet && styles.quickSubBig]}>{t('dash_attendance_sub')}</Text>
+          </View>
+          <Text style={styles.quickChev}>›</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => { logout(); navigation?.navigate('Login'); }}>
-          <Text style={styles.link}>Keluar ›</Text>
+        <TouchableOpacity
+          style={[styles.quickCard, isTablet && styles.quickCardTablet]}
+          onPress={doLogout}>
+          <View style={[styles.quickIconWrap, styles.quickIconDanger]}>
+            <Text style={[styles.quickIcon, styles.quickIconDangerText]}>↩</Text>
+          </View>
+          <View style={styles.quickText}>
+            <Text style={[styles.quickLabel, isTablet && styles.quickLabelBig]}>{t('action_logout')}</Text>
+            <Text style={[styles.quickSub, isTablet && styles.quickSubBig]}>{t('dash_logout_sub')}</Text>
+          </View>
+          <Text style={styles.quickChev}>›</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.sync}>Sinkron terakhir 5 mnt lalu · Online</Text>
+      <Text style={styles.sync}>{syncLine}</Text>
       </ScrollView>
     </View>
   );
@@ -185,11 +360,8 @@ export default function DashboardScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 16, paddingBottom: 40 },
-  header: { backgroundColor: colors.navy, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 12 },
   burger: { width: 22, height: 22 },
-  headerBranch: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
-  headerSub: { fontFamily: fonts.medium, fontSize: 12, color: colors.navyTint, marginTop: 2 },
-  onlineDark: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
+  onlineDark: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.navyDark, borderWidth: 1, borderColor: colors.navyTint, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5, gap: 6 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
   onlineDarkT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.white },
   shiftCard: {
@@ -243,5 +415,52 @@ const styles = StyleSheet.create({
   stockName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   stockLeft: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
   row: { flexDirection: 'row', gap: 16, marginTop: 14 },
+  quickGrid: { flexDirection: 'column', gap: 8, marginTop: 12 },
+  quickGridTablet: { flexDirection: 'row', gap: 10 },
+  quickCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 12,
+  },
+  quickCardTablet: { flex: 1 },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.paleBlue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickIconDanger: { backgroundColor: colors.paleRed },
+  quickIcon: { fontFamily: fonts.bold, fontSize: 18, color: colors.blueDark },
+  quickIconDangerText: { color: colors.red },
+  quickText: { flex: 1 },
+  quickLabel: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  quickSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  quickChev: { fontFamily: fonts.bold, fontSize: 22, color: colors.faint },
   sync: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, marginTop: 14, textAlign: 'center' },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  shiftTitleBig: { fontSize: 16 },
+  shiftSubBig: { fontSize: 13 },
+  shiftBtnTextBig: { fontSize: 14 },
+  salesValueBig: { fontSize: 26 },
+  salesSubBig: { fontSize: 13 },
+  ctaTextBig: { fontSize: 16 },
+  sectionTitleBig: { fontSize: 16 },
+  menuLabelBig: { fontSize: 15 },
+  menuSubBig: { fontSize: 13 },
+  cardTitleBig: { fontSize: 16 },
+  cardSubBig: { fontSize: 13 },
+  linkBig: { fontSize: 14 },
+  legendBig: { fontSize: 12 },
+  cellTextBig: { fontSize: 14 },
+  stockNameBig: { fontSize: 15 },
+  stockLeftBig: { fontSize: 14 },
+  quickLabelBig: { fontSize: 15 },
+  quickSubBig: { fontSize: 13 },
 });

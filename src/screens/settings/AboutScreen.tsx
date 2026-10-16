@@ -1,54 +1,38 @@
-import { Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenterSm } from '../../theme';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-export default function AboutScreen(_props: Props) {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
 
-  return (
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const go = (route: string) => navigation?.navigate(route); return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
-      <View style={styles.hero}>
+      <ScreenHeader title={t('settings.about')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /> <View style={styles.hero}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
-        <Text style={styles.appName}>Genfity Order</Text>
-        <Text style={styles.version}>Versi 1.0.0 (build 761)</Text>
-        <Text style={styles.heroSub}>Aplikasi kasir restoran & ritel — offline-first</Text>
+        <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
+        <Text style={styles.version}>{t('about.version')}</Text>
+        <Text style={styles.heroSub}>{t('about.heroSub')}</Text>
       </View>
       <View style={styles.card}>
-        <Row label="Paket" value="posclone-rn (Expo RN)" />
-        <Row label="Cabang" value="ESB Cabang Poris · BR-01" />
-        <Row label="Terminal" value="TRM-001" />
-        <Row label="Lingkungan" value="Production" />
-        <Row label="Printer" value="BT SPP · LAN · Star" />
+        <Row label={t('about.package')} value="posclone-rn (Expo RN)" />
+        <Row label={t('about.branch')} value="ESB Cabang Poris - BR-01" />
+        <Row label={t('about.terminal')} value="TRM-001" />
+        <Row label={t('about.env')} value={t('about.envVal')} />
+        <Row label={t('about.printer')} value="BT SPP - LAN - Star" />
       </View>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Tentang</Text>
-        <Text style={styles.cardText}>
-          Genfity Order membantu kasir mencatat pesanan, mencetak struk dan tiket dapur,
-          mengelola member, serta sinkron ke server saat online. Cetak berjalan 100% lokal
-          (Bluetooth/LAN) tanpa internet; kirim nyata membutuhkan dev-client.
-        </Text>
+        <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('about.title')}</Text>
+        <Text style={[styles.cardText, isTablet && { fontSize: 14 }]}>{t('about.body')}</Text>
       </View>
-      <Text style={styles.foot}>© 2026 Genfity • Dibuat dengan Expo + React Native</Text>
+      <Text style={styles.foot}>{t('about.foot')}</Text>
     </ScrollView>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
+  );}function Row({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
       <Text style={styles.rowValue}>{value}</Text>
     </View>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
-  hero: { backgroundColor: colors.navy, paddingTop: 52, paddingBottom: 24, paddingHorizontal: 16, alignItems: 'center' },
+  hero: { backgroundColor: colors.navy, paddingTop: 24, paddingBottom: 24, paddingHorizontal: 16, alignItems: 'center' },
   logo: { width: 120, height: 60 },
   appName: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, marginTop: 10 },
   version: { fontFamily: fonts.medium, fontSize: 13, color: colors.orange, marginTop: 4 },
@@ -67,5 +51,4 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.line },
   rowLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   rowValue: { fontFamily: fonts.bold, fontSize: 13, color: colors.text },
-  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 16 },
-});
+  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 16 },});

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -10,7 +10,7 @@ import { initDb, query } from '../../lib/db';
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { from?: string } } };
 
-type MoveItem = { id: string; name: string; qty: number; price: number };
+type MoveItem = { id: string; name: string; qty: number; price: number; note?: string; discount?: number };
 
 /** Kanonis mengikuti TablesScreen: no tanpa strip (A1/A2/B1) + section Dalam/Teras/VIP. */
 const SECTION_OF: Record<string, string> = {
@@ -46,7 +46,7 @@ function canonTableNo(raw: string): string {
  */
 export default function MoveItemsScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   // T7: katalog live dari SQLite (bill aktif per meja + ms_table); konstanta
@@ -67,19 +67,25 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         if (!on || names.length === 0) return;
         const catalog: Record<string, MoveItem[]> = {};
         for (const tb of names) {
-          const rows = await query<{ id: string | null; name: string | null; qty: number | null; price: number | null }>(
-            `SELECT m.menuId AS id, m.menuName AS name, SUM(m.qty) AS qty, m.price AS price
+          // Kelompokkan per menu + harga + catatan + diskon agar catatan dapur
+          // (note) dan diskon per baris ikut pindah, tidak hilang tergabung.
+          const rows = await query<{ id: string | null; name: string | null; qty: number | null; price: number | null; note: string | null; discount: number | null }>(
+            `SELECT m.menuId AS id, m.menuName AS name, SUM(m.qty) AS qty, m.price AS price,
+                    m.note AS note, m.discount AS discount
              FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
              WHERE h.status <> 'paid' AND h.tableNo = ?
-             GROUP BY m.menuId, m.menuName, m.price`,
+             GROUP BY m.menuId, m.menuName, m.price, m.note, m.discount`,
             [tb],
           );
           const items = rows
+            // Kunci unik per baris grup (menu sama beda catatan = id beda).
             .map((r, i) => ({
-              id: (r.id || `${tb}-${i}`).trim(),
+              id: `${(r.id || `${tb}-${i}`).trim()}#${i}`,
               name: (r.name || '-').trim(),
               qty: Math.max(1, Math.round(Number(r.qty) || 0)),
               price: Math.round(Number(r.price) || 0),
+              note: (r.note || '').trim() || undefined,
+              discount: Math.max(0, Math.round(Number(r.discount) || 0)) || undefined,
             }))
             .filter((it) => it.qty > 0);
           if (items.length > 0) catalog[tb] = items;
@@ -137,8 +143,15 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const pickedItems = remaining
     .filter((it) => (pickedQty[it.id] ?? 0) > 0)
     .map((it) => ({ ...it, move: Math.min(pickedQty[it.id] ?? 0, it.left) }));
-  const pickedTotal = pickedItems.reduce((s, it) => s + it.move * it.price, 0);
+  // Total pindahan = harga qty pindah dikurangi porsi diskon barisnya.
+  const pickedTotal = pickedItems.reduce(
+    (s, it) => s + it.move * it.price - Math.round(((it.discount ?? 0) * it.move) / Math.max(1, it.qty)),
+    0,
+  );
   const pickedCount = pickedItems.reduce((s, it) => s + it.move, 0);
+  /** Kode meja tujuan ("B1 (terisi)" ke "B1") untuk validasi. */
+  const destCode = to.replace(/\s*\(.*\)\s*$/, '').trim();
+  const sameTable = destCode === from;
 
   const toggle = (id: string) =>
     setPickedQty((m) => {
@@ -161,12 +174,17 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const destOccupied = to.includes('(terisi)');
 
   const move = () => {
-    if (pickedItems.length === 0) return;
+    if (pickedItems.length === 0 || sameTable) return;
     // Catat pindah item ke antrean sync agar diteruskan ke server (offline-first).
+    // Catatan dan diskon per baris ikut agar dapur/struk tujuan tetap sama.
     try {
       enqueueSync('other', {
         op: 'move-items', from, to,
-        items: pickedItems.map((it) => ({ id: it.id, name: it.name, qty: it.move, price: it.price })),
+        items: pickedItems.map((it) => ({
+          id: it.id, name: it.name, qty: it.move, price: it.price,
+          ...(it.note ? { note: it.note } : {}),
+          ...(it.discount ? { discount: Math.round((it.discount * it.move) / Math.max(1, it.qty)) } : {}),
+        })),
         total: pickedTotal, merge: destOccupied, at: new Date().toISOString(),
       });
     } catch {
@@ -195,19 +213,19 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         }
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-        <Text style={styles.step}>1 · Pilih meja sumber</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>1 · Pilih meja sumber</Text>
         <View style={styles.chips}>
           {tables.map((tb) => (
             <TouchableOpacity
               key={tb}
               style={[styles.chip, from === tb && styles.chipOn]}
               onPress={() => { setFrom(tb); setPickedQty({}); }}>
-              <Text style={[styles.chipT, from === tb && styles.chipTOn]}>{tb}</Text>
+              <Text style={[styles.chipT, from === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={styles.step}>2 · Pilih item dari {from}{SECTION_OF[from] ? ` · ${SECTION_OF[from]}` : ''}</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>2 · Pilih item dari {from}{SECTION_OF[from] ? ` · ${SECTION_OF[from]}` : ''}</Text>
         {remaining.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Image
@@ -230,8 +248,9 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
                   {on && <Text style={styles.checkT}>✓</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.itemName}>{it.left}x {it.name}</Text>
-                  <Text style={styles.itemPrice}>{rp(it.left * it.price)}</Text>
+                  <Text style={[styles.itemName, isTablet && styles.itemNameBig]}>{it.left}x {it.name}</Text>
+                  {it.note ? <Text style={[styles.itemNote, isTablet && styles.itemNoteBig]}>{t('kit_note')}: {it.note}</Text> : null}
+                  <Text style={[styles.itemPrice, isTablet && styles.itemPriceBig]}>{rp(it.left * it.price)}</Text>
                 </View>
                 {on && (
                   <View style={styles.qtyRow}>
@@ -249,37 +268,38 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           })
         )}
 
-        <Text style={styles.step}>3 · Pilih meja tujuan</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>3 · Pilih meja tujuan</Text>
         <View style={styles.chips}>
           {destList.map((tb) => (
             <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn]} onPress={() => setTo(tb)}>
-              <Text style={[styles.chipT, to === tb && styles.chipTOn]}>{tb}</Text>
+              <Text style={[styles.chipT, to === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
         <View style={styles.summary}>
-          <Text style={styles.sumTitle}>Ringkasan pindah</Text>
-          <Text style={styles.sumLine}>
+          <Text style={[styles.sumTitle, isTablet && styles.sumTitleBig]}>Ringkasan pindah</Text>
+          <Text style={[styles.sumLine, isTablet && styles.sumLineBig]}>
             {pickedItems.length === 0
               ? 'Belum ada item dipilih.'
               : `${pickedCount} pcs · ${rp(pickedTotal)} · ${from} ke ${to}${destOccupied ? ' (gabung)' : ''}`}
           </Text>
-          {doneMsg ? <Text style={styles.done}>{doneMsg}</Text> : null}
+          {sameTable ? <Text style={styles.warn}>Meja tujuan sama dengan asal ({from}) - pilih meja lain.</Text> : null}
+          {doneMsg ? <Text style={[styles.done, isTablet && styles.doneBig]}>{doneMsg}</Text> : null}
         </View>
 
         <TouchableOpacity
-          style={[styles.primary, pickedItems.length === 0 && styles.off]}
-          disabled={pickedItems.length === 0}
+          style={[styles.primary, (pickedItems.length === 0 || sameTable) && styles.off]}
+          disabled={pickedItems.length === 0 || sameTable}
           onPress={move}>
-          <Text style={styles.primaryT}>{t('mov_do_items')} ›</Text>
+          <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{t('mov_do_items')} ›</Text>
         </TouchableOpacity>
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
-            <Text style={styles.link}>Lihat Denah Meja ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={styles.link}>Buka di Kasir ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>Buka di Kasir ›</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -310,6 +330,8 @@ const styles = StyleSheet.create({
   checkOn: { borderColor: colors.orange, backgroundColor: colors.orange },
   checkT: { color: colors.white, fontFamily: fonts.bold, fontSize: 14 },
   itemName: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
+  itemNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.blue, marginTop: 2 },
+  warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 6 },
   itemPrice: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   qtyBtn: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: colors.orange, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white },
@@ -327,4 +349,15 @@ const styles = StyleSheet.create({
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   links: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  stepBig: { fontSize: 15 },
+  chipTBig: { fontSize: 14 },
+  itemNameBig: { fontSize: 15 },
+  itemNoteBig: { fontSize: 13 },
+  itemPriceBig: { fontSize: 13 },
+  sumTitleBig: { fontSize: 15 },
+  sumLineBig: { fontSize: 14 },
+  doneBig: { fontSize: 13 },
+  primaryTBig: { fontSize: 16 },
+  linkBig: { fontSize: 14 },
 });

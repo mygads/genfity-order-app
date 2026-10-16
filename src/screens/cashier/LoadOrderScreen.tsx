@@ -1,14 +1,6 @@
-import { useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
-import type { CartItem } from './CashierScreen';
+import { useEffect, useRef, useState } from 'react';import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number };
 
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; }
-
-const SEED: Saved[] = [
+}; };};interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; ongkir?: number; }const SEED: Saved[] = [
   {
     id: 'o1', badge: 'TA', mode: 'Take Away', title: 'Bawa Pulang · QoQi', detail: '2 item · ' + rp(33900) + ' · 13:10',
     items: [
@@ -25,50 +17,47 @@ const SEED: Saved[] = [
     ],
   },
   {
-    id: 'o3', badge: 'OL', mode: 'Online', title: 'Online · GoFood #GO-88213', detail: '2 item · ' + rp(45800) + ' · 13:42',
+    id: 'o3', badge: 'GF', mode: 'GOFOOD', title: 'GoFood #GO-88213', detail: '2 item · ' + rp(45800) + ' · 13:42',
     items: [
       { id: 'p10', name: 'Paket Nasi + Ayam', basePrice: 28000, qty: 1, modifiers: [], discount: 0 },
       { id: 'p8', name: 'Americano Ice', basePrice: 18000, qty: 1, modifiers: [], discount: 0 },
     ],
   },
-];
-
-const FILTERS = ['Semua', 'Dine In', 'Take Away', 'Online'];
-
-/** Order tersimpan (load_order) — muat kembali order yang disimpan dari kasir. */
-export default function LoadOrderScreen({ navigation }: Props) {
+{ id: 'o4', badge: 'GF', mode: 'GRABFOOD', title: 'GrabFood #GR-51107', detail: '1 item · ' + rp(22000) + ' · 14:05', items: [ { id: 'p7', name: 'Kopi Susu Gula Aren', basePrice: 22000, qty: 1, modifiers: [], discount: 0 }, ], }, { id: 'o5', badge: 'SF', mode: 'SHOPEEFOOD', title: 'ShopeeFood #SP-30981', detail: '1 item · ' + rp(32000) + ' · 14:20', items: [ { id: 'p13', name: 'Cheese Cake Slice', basePrice: 32000, qty: 1, modifiers: [], discount: 0 }, ], },];const FILTERS = ['Semua', 'Dine In', 'Take Away', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];/** Peta mode simpanan ke mode kasir (dulu GOFOOD/GRABFOOD/SHOPEEFOOD jatuh ke tanpa mode). */const MODE_TO_CASHIER: Record<string, string> = { 'Dine In': 'DINE IN', 'Take Away': 'TAKE AWAY', GOFOOD: 'GOFOOD', GRABFOOD: 'GRABFOOD', SHOPEEFOOD: 'SHOPEEFOOD',};/** Order tersimpan (load_order) - muat kembali order yang disimpan dari kasir. */export default function LoadOrderScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [orders, setOrders] = useState<Saved[]>(SEED);
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [orders, setOrders] = useState<Saved[]>(SEED);
   const [filter, setFilter] = useState('Semua');
 
   const shown = orders.filter((o) => filter === 'Semua' || o.mode === filter);
 
-  /** Muat order ke kasir — minta konfirmasi dulu sesuai teks hint (dulu langsung tanpa payload). */
+  /** Order yang baru disimpan dari kasir/cart langsung masuk daftar (dulu Simpan tanpa payload). */ const appliedRef = useRef(''); useEffect(() => { const n = route?.params?.newOrder; if (!n) return; const key = JSON.stringify(n); if (appliedRef.current === key) return; appliedRef.current = key; const count = n.items.reduce((s, c) => s + c.qty, 0); const sum = n.items.reduce((s, c) => s + (c.basePrice + (c.modifiers ?? []).reduce((m, x) => m + x.price, 0)) * c.qty - (c.discount ?? 0), 0); const badge = n.mode === 'DINE IN' ? 'DI' : n.mode === 'TAKE AWAY' ? 'TA' : n.mode === 'GOFOOD' ? 'GF' : n.mode === 'GRABFOOD' ? 'GF' : n.mode === 'SHOPEEFOOD' ? 'SF' : 'OL'; const label = n.mode === 'DINE IN' ? 'Dine In' : n.mode === 'TAKE AWAY' ? 'Take Away' : n.mode; setOrders((prev) => [ { id: `saved-${Date.now()}`, badge, mode: label, title: n.title, detail: `${count} item · ${rp(sum + (n.ongkir ?? 0))}`, table: n.table, items: n.items, ongkir: n.ongkir }, ...prev, ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.newOrder]); /** Muat order ke kasir - minta konfirmasi dulu sesuai teks hint (dulu langsung tanpa payload). */
   const muat = (o: Saved) => {
-    Alert.alert('Muat order?', `${o.title}\nIsi cart kasir saat ini akan diganti.`, [
-      { text: 'Batal', style: 'cancel' },
+    Alert.alert(t('loadConfirmTitle'), `${o.title}\n${t('loadConfirmBodyA')}`, [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Muat',
+        text: t('loadAction'),
         onPress: () =>
           navigation?.navigate('Cashier', {
             loadItems: o.items,
             ...(o.table ? { table: o.table } : {}),
-            ...(o.mode === 'Dine In' ? { mode: 'DINE IN' } : o.mode === 'Take Away' ? { mode: 'TAKE AWAY' } : {}),
+             mode: MODE_TO_CASHIER[o.mode] ?? 'DINE IN', ...(o.ongkir ? { ongkir: o.ongkir } : {}),
           }),
       },
     ]);
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <Text style={styles.hint}>Muat atau hapus order — order dengan perubahan belum disimpan akan diminta konfirmasi sebelum dimuat.</Text>
-      <Text style={styles.sec}>Muat Order</Text>
-      <Text style={styles.hint}>Order yang disimpan dari kasir dan belum dibayar.</Text>
+    <View style={styles.root}> <ScreenHeader title={t('loadOrderTitle')} onBack={() => navigation?.goBack()} /> <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <Text style={styles.hint}>{t('loadOrderHint')}</Text>
+      <Text style={styles.sec}>{t('loadOrderSec')}</Text>
+      <Text style={styles.hint}>{t('loadOrderHint')}</Text>
       <View style={styles.chips}>
         {FILTERS.map((f) => (
           <TouchableOpacity key={f} style={[styles.chip, filter === f && styles.chipOn]} onPress={() => setFilter(f)}>
-            <Text style={[styles.chipT, filter === f && styles.chipTOn]}>{f}</Text>
+            <Text style={[styles.chipT, filter === f && styles.chipTOn]}>{f === 'Semua' ? t('all') : f}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -79,7 +68,7 @@ export default function LoadOrderScreen({ navigation }: Props) {
             style={styles.emptyImg}
             resizeMode="contain"
           />
-          <Text style={styles.empty}>Daftar Transaksi Tersimpan kosong — order yang disimpan dari kasir akan muncul di sini.</Text>
+          <Text style={styles.empty}>{t('emptyLoadOrder')}</Text>
         </View>
       )}
       {shown.map((o) => (
@@ -87,26 +76,23 @@ export default function LoadOrderScreen({ navigation }: Props) {
           <View style={styles.badge}><Text style={styles.badgeT}>{o.badge}</Text></View>
           <View style={styles.info}>
             <Text style={styles.title}>{o.title}</Text>
-            <Text style={styles.detail}>{o.detail}</Text>
+            <Text style={styles.detail}>{o.mode} · {o.detail}</Text>
           </View>
           <TouchableOpacity style={styles.load} onPress={() => muat(o)}>
-            <Text style={styles.loadT}>Muat</Text>
+            <Text style={styles.loadT}>{t('loadAction')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setOrders((l) => l.filter((x) => x.id !== o.id))}>
-            <Text style={styles.del}>Hapus</Text>
+            <Text style={styles.del}>{t('delete')}</Text>
           </TouchableOpacity>
         </View>
       ))}
       <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Cashier')}>
-        <Text style={styles.primaryT}>+ Tambah Transaksi Baru</Text>
+        <Text style={styles.primaryT}>{t('newTx')}</Text>
       </TouchableOpacity>
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  body: { padding: 16, paddingBottom: 40 },
+  list: { flex: 1 }, body: { padding: 16, paddingBottom: 40 },
   hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   sec: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginTop: 12, marginBottom: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
@@ -127,5 +113,4 @@ const styles = StyleSheet.create({
   loadT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   del: { fontFamily: fonts.semibold, fontSize: 12, color: colors.faint },
   primary: { backgroundColor: colors.navy, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 16 },
-  primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
-});
+  primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },});

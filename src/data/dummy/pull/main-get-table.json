@@ -1,0 +1,21 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 4,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "tableId": "T-A01", "tableNo": "A-01", "section": "Depan", "capacity": 4, "status": "free", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "tableId": "T-A05", "tableNo": "A-05", "section": "Depan", "capacity": 4, "status": "occupied", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "tableId": "T-B03", "tableNo": "B-03", "section": "Belakang", "capacity": 6, "status": "reserved", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "tableId": "T-C02", "tableNo": "C-02", "section": "Belakang", "capacity": 2, "status": "free", "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

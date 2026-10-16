@@ -11,10 +11,10 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath, apiPost } from '../../config/server';
+import { ApiPath } from '../../config/server';import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -84,7 +84,7 @@ async function persistVoucherOp(
       op === 'validate'
         ? { code: v.kode, grandTotal: opts?.grandTotal ?? 0 }
         : { code: v.kode, salesNum: opts?.salesNum ?? '' };
-    await apiPost(path, body);
+    await apiFetch(path, { body });
   } catch {
     /* offline - terkirim via push berikutnya */
   }
@@ -92,7 +92,7 @@ async function persistVoucherOp(
 
 export default function VoucherScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -114,6 +114,56 @@ export default function VoucherScreen({ navigation }: Props) {
     return () => { live = false; };
   }, []);
 
+  // Sinkron voucher dari server (kontrak §4 main/get-voucher via
+  // ApiPath.pullVoucher yang ditarik master.ts ke ms_voucher): tampilkan data
+  // sync bila ada, fallback SEED lokal bila kosong/offline - fallback JANGAN
+  // dihapus agar kasir tetap jalan tanpa server.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await apiFetch(ApiPath.pullVoucher, { method: 'GET' });
+        const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
+        const rows = Array.isArray(data?.items) ? data.items : [];
+        if (!live || rows.length === 0) return;
+        const mapped: Voucher[] = [];
+        for (const [idx, it] of rows.entries()) {
+          const kode = String(it.code ?? '').trim().toUpperCase();
+          if (!kode) continue;
+          const st = String(it.status ?? 'available').toLowerCase();
+          const status: VoucherStatus =
+            st === 'available' ? 'tersedia'
+            : st === 'locked' ? 'terkunci'
+            : st === 'used' || st === 'burned' ? 'terpakai'
+            : 'kadaluwarsa';
+          let hingga = String(it.validTo ?? '').slice(0, 10);
+          try {
+            const d = new Date(String(it.validTo ?? ''));
+            if (!Number.isNaN(d.getTime())) {
+              hingga = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+            }
+          } catch {
+            /* pakai potongan tanggal mentah */
+          }
+          mapped.push({
+            id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
+            kode,
+            nama: String(it.name ?? kode),
+            jenis: 'Diskon (Rp)', /* TODO-i18n:vou_kind_discount */
+            nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
+            minBelanja: 0,
+            berlakuHingga: hingga,
+            status,
+          });
+        }
+        if (live && mapped.length > 0) setItems(mapped);
+      } catch {
+        /* offline - SEED lokal tetap dipakai */
+      }
+    })();
+    return () => { live = false; };
+  }, []);
+
   const STATUS_TXT: Record<VoucherStatus, string> = {
     tersedia: t('vou_st_available'),
     terkunci: t('vou_st_locked'),
@@ -132,8 +182,9 @@ export default function VoucherScreen({ navigation }: Props) {
   const setStatus = (id: string, status: VoucherStatus) =>
     setItems((list) => list.map((v) => (v.id === id ? { ...v, status } : v)));
 
-  /** Validasi kode manual: cek server, fallback ke data lokal + antrean. */
-  const validate = () => {
+  /** Validasi kode manual: tanya server dulu (valid/amount/minSpend),
+   * fallback ke data lokal + antrean bila offline. */
+  const validate = async () => {
     const kode = kodeManual.trim().toUpperCase();
     if (kode.length < 3) {
       setMsg(t('vou_short'));
@@ -152,9 +203,30 @@ export default function VoucherScreen({ navigation }: Props) {
       setMsg(`Kode ${kode} ${t('vou_is_used')}`);
       return;
     }
-    void persistVoucherOp('validate', found);
-    setQ(kode);
-    setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
+    // Offline: fallback SEED lokal agar kasir tetap jalan.
+    if (!online) {
+      void persistVoucherOp('validate', found);
+      setQ(kode);
+      setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
+      return;
+    }
+    // Online: tampilkan valid/amount/minSpend dari server (apiSource.ts:314).
+    setMsg('Memeriksa kode ke server...'); /* TODO-i18n:vou_checking */
+    try {
+      const r = await validateVoucherCode(kode, found.minBelanja);
+      void persistVoucherOp('validate', found);
+      setQ(kode);
+      if (r.ok) {
+        setMsg(`Kode ${kode} valid - ${rp(r.amount)}. Min. belanja ${rp(r.minSpend)}. ${t('vou_lock_first')}`); /* TODO-i18n:vou_server_valid */
+      } else {
+        setMsg(`Kode ${kode} ${t('vou_unknown')} Min. belanja ${rp(r.minSpend)}.`); /* TODO-i18n:vou_server_invalid */
+      }
+    } catch {
+      // Server tak terjangkau: fallback SEED lokal + antrean sync.
+      void persistVoucherOp('validate', found);
+      setQ(kode);
+      setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
+    }
   };
 
   /** Kunci voucher agar tidak dipakai transaksi lain. */
@@ -211,6 +283,12 @@ export default function VoucherScreen({ navigation }: Props) {
     setCancelVisible(false);
   };
 
+  /** Kembali ke kasir dengan objek voucher {code, amount, kind} kontrak totals.ts:
+   * kind 'Ongkir'/kode GRATISONGKIR = potong ongkir, nominal = potong belanja.
+   * Ragam 'Diskon (%)' diteruskan apa adanya - JANGAN hitung persen di sini.
+   * Rumus persen kanonis milik totals.ts (bukan file ini); kebutuhan untuk
+   * pemilik totals.ts: potong = round(dasar * nilai / 100), dibulatkan integer
+   * rupiah sebelum dipakai sebagai voucherBelanja pada rumus-BE PARITY §3. */
   const backToCashier = () => {
     if (!applied) {
       navigation?.goBack?.();

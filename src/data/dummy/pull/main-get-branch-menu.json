@@ -1,0 +1,25 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 8,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "branchId": "B001", "menuId": "M001", "stationId": "DAPUR", "qty": 120, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M002", "stationId": "DAPUR", "qty": 96, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M003", "stationId": "DAPUR", "qty": 80, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M004", "stationId": "DAPUR", "qty": 64, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M005", "stationId": "DAPUR", "qty": 0, "flagSoldOut": 1, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M006", "stationId": "BAR", "qty": 200, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M007", "stationId": "BAR", "qty": 75, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "branchId": "B001", "menuId": "M008", "stationId": "DAPUR", "qty": 40, "flagSoldOut": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

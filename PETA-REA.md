@@ -1,4 +1,4 @@
-# PETA-REA — ESB POSLite v2.31.13 → Clone RN (hasil REA + pemetaan)
+# PETA-REA - ESB POSLite v2.31.13 → Clone RN (hasil REA + pemetaan)
 
 > Target: `https://cloud.genfity.my.id/s/BMdT2S2oGHiQfDy` = **ESB POSLite v2.31.13 XAPK**.
 > Dokumen pendamping: `ARCH-APK.md` (arsitektur), `REA-DEEP.md` (printer/endpoint/SQLite),
@@ -28,7 +28,7 @@ diminta dijalankan **manual setara**:
 | `inspect-android-package` | jadx 1.5.1 → 4146/4160 class (3 error, usable) + baca `MainActivity`, `GeneratedPluginRegistrant` | §5, temuan EDC BCA |
 | `decode-android-resources` | apktool 2.12.1 → manifest + `res/values*` | izin §5, warna = default lib (UI digambar Flutter, bukan XML) |
 
-Build REA dari source: butuh Node 22/24/26 — mesin awalnya Node 23 (gagal `notsup`),
+Build REA dari source: butuh Node 22/24/26 - mesin awalnya Node 23 (gagal `notsup`),
 sudah OK setelah user upgrade ke **Node 26.11.1** (`npm run build:cached` 3 successful).
 Choco tidak bisa dipakai (butuh admin) → apktool/jadx/commandlinetools diunduh
 langsung tanpa instalasi. Artefak kerja di `%TEMP%\rea-work\` (di luar repo, sesuai `.gitignore`).
@@ -51,7 +51,7 @@ Edc←Pay:480). Peta edge lengkap terverifikasi via grep `navigate(` (Okt 2026).
 
 **Gap flow terbesar:** seluruh alur **install/klaim terminal** belum ada di RN
 (intro, install-home, get-QR, select-branch, install-progress, success-create-pin,
-forgot-pin) — lihat DOKUMENTASI §3.1.
+forgot-pin) - lihat DOKUMENTASI §3.1.
 
 ## 3. Pages: 29 route RN vs ±83 screen.dart
 
@@ -77,7 +77,7 @@ RN mencakup **alur kasir inti** ✅. Yang belum ada (prioritas, dari strings):
 | Full service | order_full_service, move-table/items, split-bill, select-promotion | Booking≈BookTable/MoveTable parsial; split-bill belum |
 | Bayar tunai | cash drawer, Uang Pas, nominal cepat, split (+Tambah) | Pay ✅ (grid nominal, Tambah, drawer Cash Authorization/Child) |
 | QRIS | polling status, timer 5 mnt | Qris ✅ (timer + polling sim + sideCol tablet) |
-| EDC | **app-switch ke aplikasi EDC BCA** — `MainActivity.onResume` → channel `onResumeFromEdcBca`; approval 6 digit dari struk | Edc ✅ (waiting 60 dtk/error/approval + split tablet); integrasi intent asli = gap |
+| EDC | **app-switch ke aplikasi EDC BCA** - `MainActivity.onResume` → channel `onResumeFromEdcBca`; approval 6 digit dari struk | Edc ✅ (waiting 60 dtk/error/approval + split tablet); integrasi intent asli = gap |
 | Voucher | `esb-voucher+external-voucher/{validate,burn,unburn,lock,unlock}`, claim/validate-online-voucher | Voucher list+filter+apply ✅ (tanpa lock/unlock server) |
 | Member/deposit | member + `member-deposit/top-up`, `membertransactionlog`, inquiry-deposit | Member ✅ (mask HP, +Baru, Deposit modal); top-up/deposit server = gap |
 | Expense | expense + petty-cash + CoA, foto, approve | Recap ada form pengeluaran sederhana (tanpa CoA/foto/approve) |
@@ -102,7 +102,7 @@ RN mencakup **alur kasir inti** ✅. Yang belum ada (prioritas, dari strings):
 - **Izin manifest:** BT scan/connect/advertise, lokasi (BT scan), kamera, flashlight,
   USB accessory/permission, foreground service, notifikasi, boot-completed,
   system-alert-window, battery-optimization-ignore, vibrate, wake-lock.
-- **Resource XML** hanya default library — tema/warna 100% di Dart (konsisten dgn
+- **Resource XML** hanya default library - tema/warna 100% di Dart (konsisten dgn
   RN: token `src/theme`, navy `#16215E`, orange `#F5820D`).
 
 ## 6. BE & API (base + endpoint terkelompok)
@@ -124,7 +124,7 @@ Env dev/stg/qa/smoke/int via EndpointType (ada UI ganti endpoint di install-scre
   angka/simbol), Kode Referal (opsional), persetujuan Syarat & Ketentuan +
   Kebijakan Privasi, tombol Daftar, link "Sudah punya akun? Masuk Sekarang".
 - Login web (bukti `docs/shots/apk-weblogin2.png`): **`poslite.esb.co.id/login`**
-  — form Email + Kata Sandi, link "Lupa Kata Sandi?", tombol Masuk,
+  - form Email + Kata Sandi, link "Lupa Kata Sandi?", tombol Masuk,
   "Kirim ulang link verifikasi", "Belum punya akun? Daftar Sekarang".
   Rangkaian entry lengkap: intro(4 hal) → browser eksternal
   (`esb.id/…/registration/` daftar | `poslite.esb.co.id/login` masuk) →
@@ -133,7 +133,7 @@ Env dev/stg/qa/smoke/int via EndpointType (ada UI ganti endpoint di install-scre
   alur pasca-login (install-home/scan-QR) butuh kredensial merchant.
 - Uji bypass-PIN-lokal: `run-as` → "package not debuggable",
   `ls /data/data/…` → "Permission denied" (APK release, tanpa root).
-  Kesimpulan: hash PIN `ms_posuser` tidak bisa diekstrak dari APK release —
+  Kesimpulan: hash PIN `ms_posuser` tidak bisa diekstrak dari APK release -
   kabar baik utk keamanan; untuk testing pakai DB demo milik clone RN
   (`loginDemo`) bukan membobol APK.
 - Pull master: `main/get-{branch-settings,master-settings,menu,branch-menu,user,table,promotion,member,voucher,sales,shift-log-data,terminal-settings}` + `pull/*`
@@ -153,7 +153,7 @@ Env dev/stg/qa/smoke/int via EndpointType (ada UI ganti endpoint di install-scre
   `wideCenter*` / 2-panel & split (cashier, pay, history, tables, dashboard grid,
   qris/edc sideCol). Bukti: `docs/shots/` **66 file** (28 phone + 28 tablet RN
   via `verify/shot.win.cjs` + `shot.fix.cjs`, + 10 bukti APK asli `apk-*`
-  dari emulator: intro 1–4, chrome-welcome, registrasi, web-login).
+  dari emulator: intro 1-4, chrome-welcome, registrasi, web-login).
 - Skor DOKUMENTASI §1 tetap; yang berubah: orphan/Edc di kode sudah terhubung
   (perlu update §6), tablet receipt/success/member/booking masih kolom-tengah (TODO §7.1).
 
@@ -161,7 +161,7 @@ Env dev/stg/qa/smoke/int via EndpointType (ada UI ganti endpoint di install-scre
 
 Rencana: AVD `poslite` (API 34 x86_64) → `install-multiple` base+arm64+en+xxxhdpi →
 buka app → screenshot login → `uiautomator dump` → konfirmasi layar PIN vs SQLite
-`ms_posuser` (bypass lokal untuk testing: baca DB via `run-as`/`adb backup` —
+`ms_posuser` (bypass lokal untuk testing: baca DB via `run-as`/`adb backup` -
 APK release, jadi ekspektasi: verifikasi visual + skema; isi PIN tidak diutak-atik).
 
 Hasil (14 Okt 2026, AVD `poslite` API 34 x86_64 + `install-multiple` base+arm64+en+xxxhdpi):
@@ -171,13 +171,13 @@ Hasil (14 Okt 2026, AVD `poslite` API 34 x86_64 + `install-multiple` base+arm64+
   tombol **"Lanjutkan >"**, indikator 4 titik (aktif = orange).
   Bukti: `docs/shots/apk-login.png` (+ `apk-intro.png` setelah ANR di-dismiss).
 - Catatan emulator: muncul dialog "System UI isn't responding" (ANR) karena
-  emulasi ARM→x86_64 + swiftshader lambat — di-dismiss via tombol **Wait**,
+  emulasi ARM→x86_64 + swiftshader lambat - di-dismiss via tombol **Wait**,
   app di belakangnya tetap jalan normal. Ada juga dialog izin sistem
-  ("Don't allow" terlihat) — izin runtime standar (kamera/BT/lokasi).
+  ("Don't allow" terlihat) - izin runtime standar (kamera/BT/lokasi).
 - Intro hal.1/4 (bukti `docs/shots/apk-intro2.png`): judul biru
   "Pembayaran modern", body "Ciptakan pengalaman membayar yang cepat, praktis,
   dan aman bagi konsumen. Tinggal scan QRIS Dinamis, transaksi berhasil!",
-  CTA orange "Lanjutkan >". Desain: bg putih, heading biru, CTA orange —
+  CTA orange "Lanjutkan >". Desain: bg putih, heading biru, CTA orange -
   selaras dgn token RN (navy/orange).
 - Intro hal.2/4 (bukti `docs/shots/apk-intro-p2b.png`): "Laporan bisnis yang
   akurat" + "Kontrol penuh bisnis Anda dengan laporan lengkap yang mudah
@@ -189,7 +189,7 @@ Hasil (14 Okt 2026, AVD `poslite` API 34 x86_64 + `install-multiple` base+arm64+
   "Jangkau lebih banyak konsumen, tampilkan produk secara menarik, dan
   tingkatkan efisiensi proses penjualan Anda." + 2 CTA: outline biru
   "Buat Akun POSLite" & solid orange "Masuk ke POS".""
-- Login PIN kasir belum tercapai (butuh klaim/install terminal dulu —
+- Login PIN kasir belum tercapai (butuh klaim/install terminal dulu -
   sesuai desain APK: tanpa terminal terdaftar tidak ada `ms_posuser`).
   Rencana bypass-lokal untuk testing: setelah install-screen, baca SQLite
   app (`ms_posuser`: `posPassword`/`posSalt`) via `run-as` (debug) atau

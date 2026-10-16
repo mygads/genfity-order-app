@@ -10,10 +10,10 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp, rpNum, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath, apiPost } from '../../config/server';
+import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -48,7 +48,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
     /* abaikan */
   }
   try {
-    await apiPost(ApiPath.depositTopup, { memberId, amount: nominal, paymentMethod: method, note: note ?? '' });
+    await apiFetch(ApiPath.depositTopup, { body: { memberId, amount: nominal, paymentMethod: method, note: note ?? '' } });
   } catch {
     /* offline - terkirim via push berikutnya */
   }
@@ -56,7 +56,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
 
 export default function TopupDepositScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const memberId = route?.params?.memberId ?? 'M001';

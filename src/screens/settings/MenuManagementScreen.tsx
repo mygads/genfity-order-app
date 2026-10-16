@@ -7,6 +7,7 @@ import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { enqueueOutbox } from '../../lib/sync';
+import { getBranchId } from '../../config/server';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -30,32 +31,73 @@ const DEFAULT_MENUS: MenuEntry[] = [
   { id: 'm5', name: 'Mie Goreng Jawa', group: 'Makanan Utama', price: 22000, soldOut: true, imageState: 'missing' },
 ];
 
-const BRANCH_ID = 'BR-01';
+/** Sanitasi qty/harga: bulatkan, tolak NaN/negatif (default 0, bukan -1). */
+function cleanQty(v: unknown, fallback = 0): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.round(n));
+}
+
+/**
+ * Petakan nama grup tampilan ke id kategori ms_category; null bila tak cocok.
+ * categoryId di ms_menu wajib id, bukan nama grup.
+ */
+async function resolveCategoryId(groupName: string): Promise<string | null> {
+  const name = groupName.trim();
+  if (!name) return null;
+  try {
+    const row = await queryFirst<{ id: string }>(
+      'SELECT id FROM ms_category WHERE categoryName = ? LIMIT 1',
+      [name],
+    );
+    return row?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Tulis perubahan menu ke SQLite agar ikut sync master. */
 async function persistMenu(m: MenuEntry): Promise<void> {
   try {
     await initDb();
+    const branchId = getBranchId();
+    const old = await queryFirst<{
+      categoryId: string | null;
+      imageUrl: string | null;
+      stationId: string | null;
+      flagActive: number | null;
+    }>(
+      'SELECT categoryId, imageUrl, stationId, flagActive FROM ms_menu WHERE id = ?',
+      [m.id],
+    );
+    // categoryId wajib id kategori: cocokkan ke kamus ms_category,
+    // pertahankan nilai lama bila nama grup tidak cocok.
+    const catId = (await resolveCategoryId(m.group)) ?? old?.categoryId ?? null;
     await run(
-      `INSERT INTO ms_menu (id, menuName, categoryId, price, flagActive, syncDate)
-       VALUES (?, ?, ?, ?, 1, NULL)
-       ON CONFLICT (id) DO UPDATE SET menuName = excluded.menuName, price = excluded.price, syncDate = NULL`,
-      [m.id, m.name, m.group, Math.round(m.price)],
+      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+       ON CONFLICT (id) DO UPDATE SET menuName = excluded.menuName, categoryId = excluded.categoryId,
+       price = excluded.price, imageUrl = excluded.imageUrl, stationId = excluded.stationId,
+       flagActive = excluded.flagActive, syncDate = NULL`,
+      [m.id, m.name, catId, cleanQty(m.price), old?.imageUrl ?? null, old?.stationId ?? null, old?.flagActive ?? 1],
     );
     // Jangan wipe stok StockScreen: pertahankan qty existing bila baris sudah ada.
-    const existing = await queryFirst<{ qty: number | null }>(
-      'SELECT qty FROM ms_branchmenu WHERE branchId = ? AND menuId = ?',
-      [BRANCH_ID, m.id],
+    // Guard: qty tidak boleh -1/NaN; baris baru default 0.
+    const existing = await queryFirst<{ qty: number | null; stationId: string | null }>(
+      'SELECT qty, stationId FROM ms_branchmenu WHERE branchId = ? AND menuId = ?',
+      [branchId, m.id],
     );
-    const keepQty = existing ? Math.round(Number(existing.qty ?? -1)) : -1;
+    const keepQty = existing ? cleanQty(existing.qty, 0) : 0;
+    const stationId = existing?.stationId ?? old?.stationId ?? null;
     await run(
-      `INSERT INTO ms_branchmenu (branchId, menuId, qty, flagSoldOut, flagActive, syncDate)
-       VALUES (?, ?, ?, ?, 1, NULL)
-       ON CONFLICT (branchId, menuId) DO UPDATE SET flagSoldOut = excluded.flagSoldOut, syncDate = NULL`,
-      [BRANCH_ID, m.id, keepQty, m.soldOut ? 1 : 0],
+      `INSERT INTO ms_branchmenu (branchId, menuId, qty, stationId, flagSoldOut, flagActive, syncDate)
+       VALUES (?, ?, ?, ?, ?, 1, NULL)
+       ON CONFLICT (branchId, menuId) DO UPDATE SET qty = excluded.qty, stationId = excluded.stationId,
+       flagSoldOut = excluded.flagSoldOut, syncDate = NULL`,
+      [branchId, m.id, keepQty, stationId, m.soldOut ? 1 : 0],
     );
     await enqueueOutbox('ms_menu', m.id, 'update');
-    await enqueueOutbox('ms_branchmenu', `${BRANCH_ID}:${m.id}`, 'update');
+    await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'update');
   } catch {
     /* abaikan: cache JSON tetap menyimpan */
   }
@@ -91,16 +133,27 @@ export default function MenuManagementScreen({ navigation }: Props) {
         }
         const sold = await query<{ menuId: string; flagSoldOut: number | null }>(
           'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
-          [BRANCH_ID],
+          [getBranchId()],
         );
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
+        // Kamus id -> nama kategori agar badge grup tampil ramah (id mentah
+        // bila kamus kosong; editor tetap menyimpan id via resolveCategoryId).
+        let catName = new Map<string, string>();
+        try {
+          const cats = await query<{ id: string; categoryName: string | null }>(
+            'SELECT id, categoryName FROM ms_category',
+          );
+          catName = new Map(cats.map((c) => [c.id, c.categoryName ?? c.id]));
+        } catch {
+          /* kamus kosong - pakai id apa adanya */
+        }
         setMenus(
           rows.map((r) => {
             const prev = cached.find((c) => c.id === r.id);
             return {
               id: r.id,
               name: r.menuName ?? prev?.name ?? r.id,
-              group: r.categoryId ?? prev?.group ?? 'Lainnya',
+              group: (r.categoryId ? catName.get(r.categoryId) ?? r.categoryId : null) ?? prev?.group ?? 'Lainnya',
               price: Number(r.price ?? prev?.price ?? 0),
               soldOut: soldMap.get(r.id) ?? prev?.soldOut ?? false,
               imageState: prev?.imageState ?? 'ok',
@@ -131,7 +184,11 @@ export default function MenuManagementScreen({ navigation }: Props) {
     });
   };
 
-  /** Unduh gambar nyata: ambil imageUrl hasil pull master, verifikasi via HEAD, lalu tandai ok. */
+  /** Validasi URL gambar secara jujur: tanpa expo-file-system (tidak ada di
+   * package.json) tidak ada unduhan berkas lokal. Fungsi ini hanya memastikan
+   * imageUrl hasil pull master valid, lalu memakai URL remote apa adanya.
+   * TODO: tambah expo-file-system lalu unduh via downloadAsync ke direktori
+   * dokumen + simpan path lokal ke ms_menu.imageUrl agar katalog offline penuh. */
   const downloadImage = async (id: string) => {
     patch(id, { imageState: 'downloading' });
     setMsg(t('menu.downloading'));
@@ -141,29 +198,24 @@ export default function MenuManagementScreen({ navigation }: Props) {
         'SELECT imageUrl FROM ms_menu WHERE id = ?',
         [id],
       );
-      const url = row?.imageUrl ?? '';
-      if (url && /^https?:\/\//.test(url)) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 12000);
-        try {
-          const res = await fetch(url, { method: 'HEAD', signal: ctrl.signal });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        } finally {
-          clearTimeout(timer);
-        }
+      const url = (row?.imageUrl ?? '').trim();
+      if (!/^https?:\/\/.+/i.test(url)) {
+        patch(id, { imageState: 'missing' });
+        setMsg(t('menu.imgFail'));
+        return;
       }
       patch(id, { imageState: 'ok' });
-      setMsg('Gambar menu terverifikasi dan tersimpan.');
+      setMsg(t('menu.imgUrlOk'));
     } catch {
       patch(id, { imageState: 'missing' });
-      setMsg('Unduh gambar gagal - periksa koneksi lalu coba lagi.');
+      setMsg(t('menu.imgFail'));
     }
   };
 
   const downloadAll = async () => {
     const missing = menus.filter((m) => m.imageState === 'missing');
     if (missing.length === 0) {
-      setMsg('Semua gambar menu sudah lengkap.');
+      setMsg(t('menu.imgAllOk'));
       return;
     }
     for (const m of missing) {
@@ -184,12 +236,12 @@ export default function MenuManagementScreen({ navigation }: Props) {
     const price = Number(draftPrice.replace(/\D/g, '')) || 0;
     const grp = draftGroup.trim() || 'Lainnya';
     if (name.length < 3 || price <= 0) {
-      setMsg('Nama min. 3 huruf dan harga harus lebih dari 0.');
+      setMsg(t('menu.invalidForm'));
       return;
     }
     patch(id, { name, price, group: grp });
     setEditing(null);
-    setMsg('Perubahan menu tersimpan dan ikut sync.');
+    setMsg(t('menu.savedSync'));
   };
 
   const q = queryText.trim().toLowerCase();
@@ -204,7 +256,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <ScreenHeader
         title={t('menu.title')}
-        sub={`${soldCount} habis - ${missingCount} gambar belum terunduh`}
+        sub={`${soldCount} ${t('menu.soldOut')} - ${missingCount} ${t('menu.imgMissing')}`}
         onBack={() => setDrawerOpen(true)}
         backLabel="☰"
       />
@@ -251,7 +303,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
           {editing === m.id ? (
             <View style={styles.editor}>
               <Text style={styles.fieldLabel}>{t('menu.menuName')}</Text>
-              <TextInput style={styles.input} value={draftName} onChangeText={setDraftName} placeholder="Nama menu" placeholderTextColor={colors.faint} />
+              <TextInput style={styles.input} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} placeholderTextColor={colors.faint} />
               <Text style={styles.fieldLabel}>{t('menu.price')}</Text>
               <TextInput
                 style={styles.input}
@@ -262,7 +314,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
                 keyboardType="number-pad"
               />
               <Text style={styles.fieldLabel}>{t('menu.group')}</Text>
-              <TextInput style={styles.input} value={draftGroup} onChangeText={setDraftGroup} placeholder="Grup" placeholderTextColor={colors.faint} />
+              <TextInput style={styles.input} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} placeholderTextColor={colors.faint} />
               <View style={styles.editorBtns}>
                 <Pressable style={styles.btnGhost} onPress={() => setEditing(null)}>
                   <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>

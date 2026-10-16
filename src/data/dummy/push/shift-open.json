@@ -1,0 +1,18 @@
+{
+  "request": { "userId": "U07", "terminalId": "T001", "startCash": 200000, "note": "Shift Pagi" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "shiftId": "S20261016P",
+      "userId": "U07",
+      "nama": "Gista",
+      "terminalId": "T001",
+      "startCash": 200000,
+      "clockIn": "2026-10-16 08:57:00"
+    }
+  }
+}

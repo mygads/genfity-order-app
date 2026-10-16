@@ -21,6 +21,8 @@ type Props = {
       voucherCode?: string;
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;
+      /** Fee platform agregator + pembulatan bawaan pemanggil (info-only, diteruskan). */
+      feeESB?: number; rounding?: number;
       mode?: string; table?: string; ongkir?: number;
       customer?: string; memberId?: string;
     };
@@ -48,6 +50,8 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const ongkirVal = p.ongkir ?? 0;
   const serviceVal = p.service ?? p.serviceTotal ?? 0;
   const taxVal = p.tax ?? p.vatTotal ?? 0;
+  const feeESBVal = p.feeESB ?? 0;
+  const roundingVal = p.rounding ?? 0;
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
   const [mode, setMode] = useState<Mode>('none');
@@ -100,6 +104,26 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(p.customer ? { customer: p.customer } : {}),
     ...(p.memberId ? { memberId: p.memberId } : {}),
   };
+  // Share proporsional service/pajak/pembulatan untuk split parsial (info-only
+  // struk di Pay > Success > Receipt). Diskon/voucher tak diteruskan per-split
+  // karena total split sudah neto (hindari catat ganda).
+  const splitShareCtx = (val: number): Record<string, number> => {
+    if (total <= 0 || val <= 0) return {};
+    const r = val / total;
+    return {
+      ...(serviceVal > 0 ? { service: Math.max(0, Math.round(serviceVal * r)) } : {}),
+      ...(taxVal > 0 ? { tax: Math.max(0, Math.round(taxVal * r)) } : {}),
+      ...(roundingVal !== 0 ? { rounding: Math.round(roundingVal * r) } : {}),
+    };
+  };
+  // Rincian info-only bawaan pemanggil (service/pajak/fee/pembulatan) - diteruskan
+  // agar baris struk pas dengan total di Pay > Success > Receipt.
+  const breakdownCtx = {
+    ...(serviceVal > 0 ? { service: serviceVal } : {}),
+    ...(taxVal > 0 ? { tax: taxVal } : {}),
+    ...(feeESBVal > 0 ? { feeESB: feeESBVal } : {}),
+    ...(roundingVal !== 0 ? { rounding: roundingVal } : {}),
+  };
 
   return (
     <View style={styles.root}>
@@ -124,10 +148,16 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={styles.item}>Diskon{voucherCode ? ` (${voucherCode})` : ''}</Text><Text style={styles.disc}>-{rp(discountVal)}</Text></View>
         )}
         {taxVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>Pajak PB1 10% (termasuk)</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{t('taxIncl')}</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
         )}
         {serviceVal > 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+        )}
+        {feeESBVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
+        )}
+        {roundingVal !== 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.price}>{rp(roundingVal)}</Text></View>
         )}
         <View style={styles.totalRow}><Text style={styles.totalL}>TOTAL</Text><Text style={styles.totalV}>{rp(total)}</Text></View>
         <Text style={styles.member}>Member QoQi · GOLD · +79 poin</Text>
@@ -138,13 +168,15 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           total, items: saleItems, discount: discountVal,
           ...(voucherCode ? { voucherCode } : {}),
           ...orderCtx,
+          ...breakdownCtx,
         })}>
           <Text style={styles.ghostT}>{t('ok_print')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', {
           total, items: saleItems, discount: discountVal,
-          ...(voucherCode ? { voucher: voucherCode } : {}),
+          ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal } } : {}),
           ...orderCtx,
+          ...breakdownCtx,
         })}>
           <Text style={styles.primaryT}>{t('bill_pay')} ›</Text>
         </TouchableOpacity>
@@ -236,8 +268,9 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
                     style={[styles.payBtn, !nominalGateOk(mode) && styles.payBtnOff]}
                     disabled={val <= 0 || !nominalGateOk(mode)}
                     // Split parsial: total split sudah neto (termasuk diskon),
-                    // jadi teruskan konteks tanpa diskon/voucher ganda.
-                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx })}>
+                    // jadi teruskan konteks + share proporsional service/pajak/
+                    // pembulatan, tanpa diskon/voucher ganda.
+                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) })}>
                     <Text style={styles.payBtnT}>{t('bill_pay')} ›</Text>
                   </TouchableOpacity>
                 )}

@@ -1,27 +1,18 @@
-import React, { useState } from 'react';
-import {
-  Modal,
+import React, { useEffect, useRef, useState } from 'react';import {
+  Image, Modal,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,
-} from 'react-native';
-import { colors, fonts, rp, rpNum, wideCenter } from '../../theme';
-
-type Props = { navigation?: any };
-
-const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];
-
-const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
     if (x < 12) return kata[x];
     if (x < 20) return `${sebut(x - 10)} belas`;
-    if (x < 100) return `${sebut(Math.floor(x / 10))} puluh ${sebut(x % 10)}`.trim();
+    if (x < 100) return `${sebut(Math.floor(x / 10))} puluh ${sebut(x % 100)}`.trim();
     if (x < 200) return `seratus ${sebut(x - 100)}`.trim();
     if (x < 1000) return `${sebut(Math.floor(x / 100))} ratus ${sebut(x % 100)}`.trim();
     if (x < 2000) return `seribu ${sebut(x - 1000)}`.trim();
@@ -29,19 +20,24 @@ const terbilang = (n: number): string => {
     if (x < 1000000000) return `${sebut(Math.floor(x / 1000000))} juta ${sebut(x % 1000000)}`.trim();
     return `${sebut(Math.floor(x / 1000000000))} miliar ${sebut(x % 1000000000)}`.trim();
   };
-  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;
-};
+  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
+const RP_PREFIX = rp(0).replace(/\d/g, '').trim();
 
-export default function ShiftScreen({ navigation }: Props) {
+/** Batas kas awal sesuai hint chip di bawah. */
+const MAX_KAS_AWAL = 10000000;
+/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift. */const fmtShift = (iso: string | null): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const tgl = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }); const jam = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [kasAwal, setKasAwal] = useState('');
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [kasAwal, setKasAwal] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
   const [error, setError] = useState('');
+  const openingRef = useRef(false); // cegah ketuk ganda tombol OK selama verifikasi async berjalan
 
-  const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
+  const [lastShift, setLastShift] = useState<LastShift | null>(null);
+  // Shift terakhir dari SQLite (tr_shiftlog), bukan hardcoded.
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1'); if (on && row) { setLastShift({ status: row.status === 'open' ? 'Shift berjalan' : 'Tidak ada shift aktif', cashier: row.cashierName || row.userId || 'Kasir Utama', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
 
   const openPin = () => {
     if (kasAwalNum <= 0) {
@@ -53,10 +49,78 @@ export default function ShiftScreen({ navigation }: Props) {
     setPinVisible(true);
   };
 
-  const confirmOpen = () => {
+  const confirmOpen = async () => {
+    if (openingRef.current) return;
     if (pin.length < 4) {
       setError('Masukkan PIN (min. 4 digit)');
       return;
+    }
+    openingRef.current = true;
+    setError('');
+    try {
+      await initDb();
+      // (1) Cegah shift-ganda: tolak bila masih ada shift berstatus open, JANGAN insert.
+      const openShift = await queryFirst<{ id: string }>(
+        'SELECT id FROM tr_shiftlog WHERE status = ? LIMIT 1',
+        ['open'],
+      );
+      if (openShift) {
+        setError(t('shf_double_open'));
+        return;
+      }
+      // (2) Verifikasi PIN ke server saat online (pola ApiPath.supervisorApprove
+      // di lib/supervisor.ts). authorizeSupervisor mengembalikan code
+      // 'offline'/'unconfigured' bila server tak terjangkau - hanya saat itu
+      // kami izinkan PIN lokal agar kasir tetap jalan offline.
+      const auth = await authorizeSupervisor(pin);
+      if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') {
+        setError(auth.message);
+        return;
+      }
+      if (!auth.ok) {
+        // Offline jujur: server tak terjangkau, cocokkan PIN lokal (lib/pin.ts).
+        const local = await verifyAttendancePin(pin);
+        if (local.ok !== true) {
+          setError(
+            local.ok === false ? t('shf_pin_wrong') : t('shf_pin_offline_unknown'),
+          );
+          return;
+        }
+      }
+      // Catat buka shift ke SQLite + antrean sync (offline-first).
+      const nowIso = new Date().toISOString();
+      const shiftId = `shift-${Date.now()}`;
+      const term = getTerminal();
+      const nm = getSession()?.name ?? 'Kasir';
+      try {
+        await run(
+          `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, 'open', NULL)`,
+          [shiftId, term.branchId || null, term.terminalCode || null, nm, 'Shift', nowIso, kasAwalNum],
+        );
+        // Buka shift tercatat ke outbox agar ikut push berikutnya (parity EndShift).
+        try {
+          await enqueueOutbox('tr_shiftlog', shiftId, 'insert');
+        } catch {
+          /* abaikan - antrean sync ringan di bawah tetap jalan */
+        }
+      } catch {
+        // Tulis lokal gagal (mis. DB terkunci) - tetap lanjut: server menjadi
+        // sumber akhir lewat antrean sync di bawah.
+      }
+      // Offline jujur: op shift-open selalu diantrekan agar terkirim saat online
+      // kembali; kasir dibuka lokal tanpa menunggu server.
+      enqueueSync('other', {
+        op: 'shift-open',
+        shiftId,
+        cashInDrawer: kasAwalNum,
+        note: catatan.trim() || null,
+        at: nowIso,
+      });
+    } catch {
+      setError(t('shf_open_failed'));
+      return;
+    } finally {
+      openingRef.current = false;
     }
     setPinVisible(false);
     setPin('');
@@ -70,40 +134,38 @@ export default function ShiftScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
+      <ScreenHeader title={t('shf_open_title')} onBack={() => navigation?.goBack?.()} right={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Buka Kasir / Shift</Text>
-        <View style={s.backBtn} />
-      </View>
+        } />
+
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         <View style={s.card}>
-          <Text style={s.cardTitle}>Shift Terakhir</Text>
+          <Text style={s.cardTitle}>{t('shf_last')}</Text>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>Status</Text>
-            <Text style={s.shiftValue}>Tidak ada shift aktif</Text>
+            <Text style={s.shiftValue}>{lastShift ? lastShift.status : t('shf_no_history')}</Text>
           </View>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>Kasir</Text>
-            <Text style={s.shiftValue}>Kasir Utama</Text>
+            <Text style={s.shiftValue}>{lastShift ? lastShift.cashier : '-'}</Text>
           </View>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>Waktu Buka</Text>
-            <Text style={s.shiftValue}>14 Okt 2026 · 08:00</Text>
+            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.opened) : '-'}</Text>
           </View>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>Waktu Tutup</Text>
-            <Text style={s.shiftValue}>14 Okt 2026 · 15:00</Text>
+            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.closed) : '-'}</Text>
           </View>
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Kas Awal</Text>
-          <Text style={s.hint}>Modal awal kas fisik di laci kasir</Text>
+          <Text style={s.cardTitle}>{t('shf_cash_open')}</Text>
+          <Text style={s.hint}>{t('shf_cash_hint')}</Text>
           <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>Rp</Text>
+            <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
             <TextInput
               style={s.amountInput}
               keyboardType="number-pad"
@@ -111,17 +173,17 @@ export default function ShiftScreen({ navigation }: Props) {
               placeholderTextColor={colors.faint}
               textAlign="right"
               value={kasAwalNum ? rpNum(kasAwalNum) : '0'}
-              onChangeText={(t) => setKasAwal(t.replace(/\D/g, ''))}
+              onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
             />
           </View>
-          <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : 'Nol rupiah — masukkan nominal kas awal'}</Text>
-          <Text style={s.chipHint}>Ketuk nominal untuk menambah ke Kas Awal · maks. Rp 10.000.000</Text>
+          <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : 'Nol rupiah - masukkan nominal kas awal'}</Text>
+          <Text style={s.chipHint}>Ketuk nominal untuk menambah ke Kas Awal · maks. {rp(MAX_KAS_AWAL)}</Text>
           <View style={s.chips}>
             {QUICK_NOMINAL.map((n) => (
               <TouchableOpacity
                 key={n}
                 style={[s.chip, kasAwalNum === n && s.chipActive]}
-                onPress={() => setKasAwal(String(kasAwalNum + n))}>
+                onPress={() => setKasAwal(String(Math.min(kasAwalNum + n, MAX_KAS_AWAL)))}>
                 <Text style={[s.chipTxt, kasAwalNum === n && s.chipTxtActive]}>
                   +{rpNum(n)}
                 </Text>
@@ -131,7 +193,7 @@ export default function ShiftScreen({ navigation }: Props) {
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Catatan Buka Shift</Text>
+          <Text style={s.cardTitle}>{t('shf_note_open')}</Text>
           <TextInput
             style={s.noteInput}
             placeholder="Catatan (opsional)"
@@ -157,14 +219,14 @@ export default function ShiftScreen({ navigation }: Props) {
           style={[s.openBtn, kasAwalNum <= 0 && s.openBtnDisabled]}
           onPress={openPin}
           accessibilityState={{ disabled: kasAwalNum <= 0 }}>
-          <Text style={s.openBtnTxt}>{kasAwalNum > 0 ? `Buka Shift · ${rp(kasAwalNum)}` : 'Isi Kas Awal untuk Buka Shift'}</Text>
+          <Text style={s.openBtnTxt}>{kasAwalNum > 0 ? `${t('shf_open_btn')} · ${rp(kasAwalNum)}` : t('shf_fill_cash')}</Text>
         </TouchableOpacity>
       </View>
 
       <Modal visible={pinVisible} transparent animationType="slide">
         <View style={s.modalBg}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Masukkan PIN</Text>
+            <Text style={s.modalTitle}>{t('shf_pin_title')}</Text>
             <Text style={s.modalHint}>PIN kasir untuk membuka shift</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -194,29 +256,17 @@ export default function ShiftScreen({ navigation }: Props) {
                 setPinVisible(false);
                 setPin('');
               }}>
-              <Text style={s.cancelTxt}>Batal</Text>
+              <Text style={s.cancelTxt}>{t('cm_cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
-  );
-}
-
-const s = StyleSheet.create({
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+  );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 17, fontFamily: fonts.bold },
+  burger: {
+     width: 22, height: 22 },
+
   body: { padding: 16, paddingBottom: 24 },
   card: {
     backgroundColor: colors.card,
@@ -361,5 +411,4 @@ const s = StyleSheet.create({
   pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
   cancelBtn: { marginTop: 12, padding: 10 },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },
-  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },
-});
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },});

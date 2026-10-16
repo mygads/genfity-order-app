@@ -1,5 +1,5 @@
 /**
- * Stub web untuk lapisan SQLite (dipakai hanya di web — Metro memilih
+ * Stub web untuk lapisan SQLite (dipakai hanya di web - Metro memilih
  * file `.web.ts` ini saat bundling web sehingga `expo-sqlite` + wasm
  * tidak ikut terbundel; di native tetap dipakai `db.ts`).
  *
@@ -35,7 +35,7 @@ export function getDb(): WebDatabase {
   return emptyDb;
 }
 
-/** No-op di web — skema hanya dibuat di native. */
+/** No-op di web - skema hanya dibuat di native. */
 export async function initDb(): Promise<void> {}
 
 /** SELECT banyak baris (web: selalu kosong). */

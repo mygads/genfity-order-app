@@ -1,5 +1,5 @@
 /**
- * Lapisan SQLite lokal (expo-sqlite v15) — database `poslite.db`.
+ * Lapisan SQLite lokal (expo-sqlite v15) - database `poslite.db`.
  *
  * Aturan offline (Lampiran B dossier):
  * - kolom `syncDate` NULL = baris kotor (belum ter-push),
@@ -8,7 +8,7 @@
  *   pullDateTime)`, diakses lewat getWatermark/setWatermark di lib/sync.ts;
  * - outbox di `tr_esoprocessqueue(orderID, serverID, ...)`.
  *
- * Tanpa FK/views/trigger — port verbatim dari skema sqflite APK.
+ * Tanpa FK/views/trigger - port verbatim dari skema sqflite APK.
  */
 import {
   openDatabaseSync,
@@ -38,7 +38,7 @@ export async function all<T = Record<string, unknown>>(
   return getDb().getAllAsync<T>(sql, params);
 }
 
-/** Alias `all` — SELECT banyak baris. */
+/** Alias `all` - SELECT banyak baris. */
 export async function query<T = Record<string, unknown>>(
   sql: string,
   params: BindParams = [],
@@ -92,6 +92,7 @@ const SCHEMA: string[] = [
     platformFee REAL DEFAULT 0, rounding REAL DEFAULT 0, grandTotal REAL DEFAULT 0,
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
+    ongkir REAL DEFAULT 0,
     status TEXT DEFAULT 'open', note TEXT, queueNumber TEXT, refNum TEXT,
     externalId TEXT, onlineOrderId TEXT, cashierName TEXT,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT, printedCount INTEGER DEFAULT 0)`,
@@ -120,6 +121,7 @@ const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_shiftlog (
     id TEXT PRIMARY KEY, branchId TEXT, terminalId TEXT, userId TEXT, shiftName TEXT,
     clockIn TEXT, clockOut TEXT, cashInDrawer REAL DEFAULT 0, totalSales REAL DEFAULT 0,
+    cashActual REAL DEFAULT 0, cashDiff REAL DEFAULT 0,
     status TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_shiftlogdetail (
     id TEXT PRIMARY KEY, shiftId TEXT, paymentMethod TEXT,
@@ -133,7 +135,7 @@ const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_branchexpensedocument (
     id TEXT PRIMARY KEY, expenseId TEXT, docPath TEXT, docType TEXT, syncDate TEXT)`,
 
-  // --- Sync / audit (tanpa syncDate — ini infrastrukturnya) ---
+  // --- Sync / audit (tanpa syncDate - ini infrastrukturnya) ---
   `CREATE TABLE IF NOT EXISTS tr_sync (
     syncType TEXT PRIMARY KEY, pushDateTime TEXT, pullDateTime TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_esoprocessqueue (
@@ -144,6 +146,10 @@ const SCHEMA: string[] = [
     resCode INTEGER DEFAULT 0, resBody TEXT, createdAt TEXT)`,
 
   // --- Master katalog ---
+  `CREATE TABLE IF NOT EXISTS ms_branchmenu (
+    branchId TEXT NOT NULL, menuId TEXT NOT NULL, stationId TEXT, qty REAL DEFAULT 0,
+    flagSoldOut INTEGER DEFAULT 0, flagActive INTEGER DEFAULT 1, syncDate TEXT,
+    PRIMARY KEY (branchId, menuId))`,
   `CREATE TABLE IF NOT EXISTS ms_menu (
     id TEXT PRIMARY KEY, menuName TEXT, categoryId TEXT, price REAL DEFAULT 0,
     imageUrl TEXT, stationId TEXT, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
@@ -165,7 +171,19 @@ const SCHEMA: string[] = [
 ];
 
 /**
- * Buat semua tabel inti bila belum ada. Idempoten — aman dipanggil tiap
+ * Migrasi kolom bertahap untuk database lama: satu ADD COLUMN per statement
+ * (SQLite tidak mendukung IF NOT EXISTS untuk ADD COLUMN di semua versi,
+ * jadi kegagalan "duplicate column" ditelan initDb).
+ */
+const MIGRATIONS: string[] = [
+  'ALTER TABLE tr_saleshead ADD COLUMN ongkir REAL DEFAULT 0',
+  'ALTER TABLE tr_salesvoucherusage ADD COLUMN voucherAmount REAL DEFAULT 0',
+  'ALTER TABLE tr_shiftlog ADD COLUMN cashActual REAL DEFAULT 0',
+  'ALTER TABLE tr_shiftlog ADD COLUMN cashDiff REAL DEFAULT 0',
+];
+
+/**
+ * Buat semua tabel inti bila belum ada. Idempoten - aman dipanggil tiap
  * start aplikasi. Guard promise ganda agar dua pemanggil bersamaan tidak
  * membuat skema dua kali.
  */
@@ -176,6 +194,14 @@ export async function initDb(): Promise<void> {
       for (const stmt of SCHEMA) {
         await database.execAsync(stmt);
       }
+      // Migrasi ringan kolom baru (tanpa CHECK inline): gagal = sudah ada.
+      for (const stmt of MIGRATIONS) {
+        try {
+          await database.execAsync(stmt);
+        } catch {
+          /* kolom sudah ada - abaikan */
+        }
+      }
     })().catch((e) => {
       initPromise = null;
       throw e;
@@ -185,7 +211,7 @@ export async function initDb(): Promise<void> {
 }
 
 /** Kolom id per tabel untuk markDirty/resetSyncDate (whitelist anti-injeksi). */
-const DIRTY_PK: Record<string, string> = {
+const DIRTY_PK: Record<string, string | string[]> = {
   ms_setting: 'key1',
   ms_posuser: 'id',
   ms_terminalsetting: 'terminalId',
@@ -204,6 +230,7 @@ const DIRTY_PK: Record<string, string> = {
   tr_branchexpense: 'id',
   tr_branchexpensedocument: 'id',
   ms_menu: 'id',
+  ms_branchmenu: ['branchId', 'menuId'],
   ms_category: 'id',
   ms_table: 'id',
   ms_paymentmethod: 'id',
@@ -214,11 +241,20 @@ const DIRTY_PK: Record<string, string> = {
 /**
  * Tandai baris sebagai kotor (syncDate = NULL) agar ikut push berikutnya.
  * Kembalikan jumlah baris yang diubah; 0 bila tabel tak dikenal / DB gagal.
+ * PK komposit (ms_branchmenu: [branchId, menuId]) memakai id gabungan
+ * `${branchId}:${menuId}` sesuai pemanggil MenuManagement/Stock.
  */
 export async function markDirty(table: string, id: string): Promise<number> {
   const pk = DIRTY_PK[table];
   if (!pk) return 0;
   try {
+    if (Array.isArray(pk)) {
+      const parts = id.split(':');
+      if (parts.length !== pk.length) return 0;
+      const where = pk.map((c) => `"${c}" = ?`).join(' AND ');
+      const res = await run(`UPDATE "${table}" SET syncDate = NULL WHERE ${where}`, parts);
+      return res.changes;
+    }
     const res = await run(`UPDATE "${table}" SET syncDate = NULL WHERE "${pk}" = ?`, [id]);
     return res.changes;
   } catch {
@@ -227,7 +263,7 @@ export async function markDirty(table: string, id: string): Promise<number> {
 }
 
 /**
- * Paksa push ulang (dipakai alur cetak-ulang): sama dengan markDirty —
+ * Paksa push ulang (dipakai alur cetak-ulang): sama dengan markDirty -
  * mereset syncDate ke NULL sesuai aturan Lampiran B dossier.
  */
 export async function resetSyncDate(table: string, id: string): Promise<number> {

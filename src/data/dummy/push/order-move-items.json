@@ -1,0 +1,21 @@
+{
+  "request": {
+    "fromSalesNum": "TRX-20261016-009",
+    "toTableNo": "B-03",
+    "itemIds": ["sm-1729001000-11", "sm-1729001000-12"],
+    "userId": "U07"
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "fromSalesNum": "TRX-20261016-009",
+      "toTableNo": "B-03",
+      "moved": 2,
+      "syncDate": "2026-10-16 12:15:00"
+    }
+  }
+}

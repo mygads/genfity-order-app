@@ -1,33 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenterSm } from '../../theme';
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { recordSale,
 
-type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale } from '../../lib/sales';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
-  goBack: () => void;
-};
-
-type Props = {
+  goBack: () => void;};type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number } };
-};
-
-const fmtTime = (s: number) => {
+  route?: { params?: { total?: number; orderNo?: string; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
+};};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
-};
-
-export default function QrisScreen({ navigation, route }: Props) {
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;};/** * Matriks QR dekoratif deterministik dari nominal - pola finder 3 sudut ala QR. * Bukan payload QRIS asli (payload asli butuh merchant ID dari backend). */function FauxQr({ seed }: { seed: number }) { const N = 21; const cells: boolean[] = []; for (let r = 0; r < N; r++) { for (let c = 0; c < N; c++) { const inFinder = (r < 7 && c < 7) || (r < 7 && c >= N - 7) || (r >= N - 7 && c < 7); if (inFinder) { const lr = r >= N - 7 ? r - (N - 7) : r; const lc = c >= N - 7 ? c - (N - 7) : c; cells.push(lr === 0 || lr === 6 || lc === 0 || lc === 6 || (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4)); } else { cells.push((r * 31 + c * 17 + seed * 13) % 7 < 3); } } } return ( <View style={styles.qrMatrix}> {cells.map((on, i) => ( <View key={i} style={[styles.qrCell, on && styles.qrCellOn]} /> ))} </View> );}export default function QrisScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const total = route?.params?.total ?? 101200;
-  const [seconds, setSeconds] = useState(5 * 60);
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const total = route?.params?.total ?? 101200;
+  const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
   const [pollCount, setPollCount] = useState(0);
 
-  /** Kode referensi mock — di app nyata dari backend saat generate QR. */
+  const pollRef = useRef(0); /** Kode referensi mock - di app nyata dari backend saat generate QR. */
   const refCode = useMemo(() => {
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
@@ -46,52 +36,43 @@ export default function QrisScreen({ navigation, route }: Props) {
     return () => clearTimeout(t);
   }, [seconds, status]);
 
-  // Cek status otomatis tiap 10 dtk saat menunggu (simulasi polling backend)
+  // Cek status  tiap 10 dtk saat menunggu (backend asli / simulasi dummy).
   useEffect(() => {
     if (status !== 'waiting') return;
     const t = setTimeout(() => {
-      setPollCount((c) => c + 1);
-      setStatus('checking');
+      void doCheck();
     }, 10000);
     return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, seconds]);
 
-  useEffect(() => {
-    if (status !== 'checking') return;
-    const t = setTimeout(() => setStatus('waiting'), 1500);
-    return () => clearTimeout(t);
-  }, [status]);
+  /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja). */ const settlePaid = async () => {
+    // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
+    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS: Real Mode tanya order/view (status PAID = lunas); * Dummy Mode simulasi realistis (lunas pada cek ke-3 ≈ ±30 dtk); * offline/gagal = tetap menunggu. Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
+    setStatus('checking'); pollRef.current += 1; setPollCount(pollRef.current); let paid = false; try { const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
 
-  const checkStatus = () => {
-    setStatus('checking');
-    setPollCount((c) => c + 1);
-    setTimeout(() => {
+  const { data } = unwrap<Record<string, unknown>>(r.data); paid = r.fromDummy ? pollRef.current >= 3 : String(data.status ?? '').toUpperCase() === 'PAID'; } catch {
+    paid = false; } if (paid) {
       setStatus('paid');
-      navigation?.navigate('Success', { total, method: 'qris' });
-    }, 1500);
+      void settlePaid(); } else { setStatus('waiting'); }
   };
 
   const statusChip =
-    status === 'paid' ? 'Lunas' : status === 'expired' ? 'Kadaluarsa' : status === 'checking' ? 'Memeriksa…' : 'Menunggu';
+    status === 'paid' ? t('qris_paid') : status === 'expired' ? t('qris_expired') : status === 'checking' ? t('qris_checking') : t('qris_wait');
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => (seconds > 0 && status !== 'expired' ? setConfirmExit(true) : navigation?.goBack())}>
-          <Text style={styles.back}>‹ Batal</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>QRIS</Text>
-        <View style={{ width: 70 }} />
-      </View>
+      <ScreenHeader title={t('qris_title')} onBack={() => (seconds > 0 && status !== 'expired' ? setConfirmExit(true) : navigation?.goBack())} right={<Text style={styles.headRight}>{statusChip}</Text>} />
+
       {confirmExit && (
         <View style={styles.exitBar}>
-          <Text style={styles.exitText}>QR akan hangus jika keluar. Yakin batalkan pembayaran ini?</Text>
+          <Text style={styles.exitText}>{t('qris_exit')}</Text>
           <View style={styles.exitRow}>
             <TouchableOpacity style={styles.exitKeep} onPress={() => setConfirmExit(false)}>
-              <Text style={styles.exitKeepText}>Tetap di sini</Text>
+              <Text style={styles.exitKeepText}>{t('qris_stay')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.exitYes} onPress={() => navigation?.goBack()}>
-              <Text style={styles.exitYesText}>Ya, batalkan</Text>
+              <Text style={styles.exitYesText}>{t('qris_exit_yes')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -99,9 +80,9 @@ export default function QrisScreen({ navigation, route }: Props) {
 
       <View style={[styles.body, isTablet && styles.bodyTablet]}>
         <View style={styles.mainCol}>
-          <Text style={styles.totalLabel}>Total Bayar</Text>
+          <Text style={styles.totalLabel}>{t('qris_total')}</Text>
           <Text style={styles.totalValue}>{rp(total)}</Text>
-          <Text style={styles.refCode}>{refCode} · Berlaku 5 menit</Text>
+          <Text style={styles.refCode}>{refCode} - {t('qris_valid')}</Text>
 
           <View style={styles.qrBox}>
             <Image
@@ -110,49 +91,46 @@ export default function QrisScreen({ navigation, route }: Props) {
               resizeMode="contain"
             />
             <View style={styles.qrPlaceholder}>
-              <View style={styles.qrCornerTL} />
-              <View style={styles.qrCornerTR} />
-              <View style={styles.qrCornerBL} />
-              <View style={styles.qrCornerBR} />
-              <Text style={styles.qrText}>QRIS</Text>
-              <Text style={styles.qrSub}>Scan dengan e-wallet / m-banking</Text>
+              <FauxQr seed={total} />
+
+              <Text style={styles.qrSub}>{t('qris_scan')}</Text>
             </View>
           </View>
 
           <View style={[styles.timerBadge, seconds < 60 && styles.timerBadgeUrgent]}>
             <Text style={[styles.timerText, seconds < 60 && styles.timerTextUrgent]}>
-              Sisa {status === 'expired' ? 'Kadaluarsa' : fmtTime(seconds)}
+               {status === 'expired' ? t('qris_expired') : t('qris_left').replace('{t}', fmtTime(seconds))}
             </Text>
           </View>
           <Text style={styles.hint}>
             {status === 'expired'
-              ? 'Kode QR kadaluarsa. Buat kode baru untuk melanjutkan.'
+              ? t('qris_expired_hint')
               : status === 'checking'
-                ? 'Memeriksa status pembayaran otomatis…'
-                : 'Minta pelanggan memindai QR di atas. Status diperiksa otomatis tiap 10 detik.'}
+                ? t('qris_checking_hint')
+                : t('qris_wait_hint')}
           </Text>
           <Text style={styles.txnMeta}>
-            Nominal {rp(total)} • Metode QRIS • Dicek {pollCount}x otomatis
+            {t('qris_meta').replace('{t}', rp(total)).replace('{c}', String(pollCount))}
           </Text>
-          <Text style={styles.steps}>1. Tampilkan QR ke pelanggan  2. Pelanggan pindai & bayar  3. Cek Status / tunggu otomatis</Text>
+          <Text style={styles.steps}>{t('qris_steps')}</Text>
         </View>
         {isTablet && (
           <View style={styles.sideCol}>
-            <Text style={styles.sideTitle}>Ringkasan</Text>
+            <Text style={styles.sideTitle}>{t('qris_summary')}</Text>
             <View style={styles.sideRow}>
-              <Text style={styles.sideLabel}>Nominal</Text>
+              <Text style={styles.sideLabel}>{t('qris_nominal')}</Text>
               <Text style={styles.sideValue}>{rp(total)}</Text>
             </View>
             <View style={styles.sideRow}>
-              <Text style={styles.sideLabel}>Referensi</Text>
+              <Text style={styles.sideLabel}>{t('qris_ref')}</Text>
               <Text style={styles.sideValue}>{refCode}</Text>
             </View>
             <View style={styles.sideRow}>
-              <Text style={styles.sideLabel}>Metode</Text>
+              <Text style={styles.sideLabel}>{t('qris_method')}</Text>
               <Text style={styles.sideValue}>QRIS</Text>
             </View>
             <View style={styles.sideRow}>
-              <Text style={styles.sideLabel}>Status</Text>
+              <Text style={styles.sideLabel}>{t('qris_status')}</Text>
               <Text style={styles.sideValue}>{statusChip}</Text>
             </View>
           </View>
@@ -160,11 +138,7 @@ export default function QrisScreen({ navigation, route }: Props) {
       </View>
 
       <View style={[styles.footer, isTablet && wideCenterSm]}>
-        <TouchableOpacity
-          style={styles.printBtn}
-          onPress={() => navigation?.navigate('Receipt', { total, method: 'QRIS' })}>
-          <Text style={styles.printBtnText}>Cetak QR</Text>
-        </TouchableOpacity>
+
         {status === 'expired' ? (
           <TouchableOpacity
             style={styles.checkBtn}
@@ -172,35 +146,25 @@ export default function QrisScreen({ navigation, route }: Props) {
               setSeconds(5 * 60);
               setStatus('waiting');
             }}>
-            <Text style={styles.checkBtnText}>Buat QR Baru</Text>
+            <Text style={styles.checkBtnText}>{t('qris_new')}</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
             style={[styles.checkBtn, status === 'checking' && styles.checkBtnDisabled]}
             disabled={status === 'checking'}
-            onPress={checkStatus}>
+            onPress={() => void doCheck()}>
             <Text style={styles.checkBtnText}>
-              {status === 'checking' ? 'Memeriksa…' : 'Cek Status'}
+              {status === 'checking' ? t('qris_checking') : t('qris_check')}
             </Text>
           </TouchableOpacity>
         )}
       </View>
     </View>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  back: { color: colors.white, fontFamily: fonts.medium, fontSize: 14, width: 70 },
-  headerTitle: { color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
+  headRight: {
+     color: colors.white, fontFamily: fonts.semibold, fontSize: 13, textAlign: 'right' },
+
   body: { flex: 1, alignItems: 'center', padding: 20 },
   bodyTablet: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: 16, width: '100%', maxWidth: 880, alignSelf: 'center' },
   mainCol: { flex: 1, alignItems: 'center', maxWidth: 420 },
@@ -224,19 +188,18 @@ const styles = StyleSheet.create({
   qrLogo: { width: 96, height: 28, marginBottom: 12 },
   qrPlaceholder: {
     width: 230,
-    height: 230,
+    minHeight: 230,
     backgroundColor: colors.white,
     borderWidth: 2,
     borderColor: colors.navy,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  qrCornerTL: { position: 'absolute', top: 12, left: 12, width: 44, height: 44, borderTopWidth: 5, borderLeftWidth: 5, borderColor: colors.navy },
-  qrCornerTR: { position: 'absolute', top: 12, right: 12, width: 44, height: 44, borderTopWidth: 5, borderRightWidth: 5, borderColor: colors.navy },
-  qrCornerBL: { position: 'absolute', bottom: 12, left: 12, width: 44, height: 44, borderBottomWidth: 5, borderLeftWidth: 5, borderColor: colors.navy },
-  qrCornerBR: { position: 'absolute', bottom: 12, right: 12, width: 44, height: 44, borderBottomWidth: 5, borderRightWidth: 5, borderColor: colors.navy },
-  qrText: { fontFamily: fonts.bold, fontSize: 34, color: colors.red },
+  padding: 10, },
+  qrMatrix: {  width: 189, flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.white },
+  qrCell: {  width: 9, height: 9 },
+  qrCellOn: { backgroundColor: colors.text },
+
   qrSub: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginTop: 6, textAlign: 'center' },
   timerBadge: {
     marginTop: 16,
@@ -266,15 +229,7 @@ const styles = StyleSheet.create({
   exitYes: { flex: 1, backgroundColor: colors.red, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   exitYesText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
-  printBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.navy,
-    borderRadius: 8,
-    alignItems: 'center',
-    paddingVertical: 13,
-  },
-  printBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
+
   checkBtn: {
     flex: 2,
     backgroundColor: colors.orange,
@@ -283,5 +238,4 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   checkBtnDisabled: { opacity: 0.5 },
-  checkBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
-});
+  checkBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },});

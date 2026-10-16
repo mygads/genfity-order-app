@@ -1,0 +1,17 @@
+{
+  "request": { "userId": "U07", "terminalId": "T001", "shiftId": "S20261016P" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "attendanceId": "ATT-20261016-001",
+      "userId": "U07",
+      "nama": "Gista",
+      "shiftId": "S20261016P",
+      "clockIn": "2026-10-16 08:57:00"
+    }
+  }
+}

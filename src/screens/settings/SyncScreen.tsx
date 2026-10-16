@@ -1,147 +1,124 @@
-import { useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, wideCenter } from '../../theme';
+import { useEffect, useMemo, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
 
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-interface QueueItem {
+type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
   createdAt: string;
-  status: 'antre' | 'terkirim' | 'gagal';
-}
+  status: 'antre' | 'terkirim' | 'gagal';}const LS_OPTS = 'genfity.sync.opts';/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string }): string {
 
-const DEFAULT_QUEUE: QueueItem[] = [
-  { id: 'q1', kind: 'Penjualan', desc: 'TRX-20261016-014 · Rp 64.050 · Tunai', createdAt: '16 Okt 12:40', status: 'antre' },
-  { id: 'q2', kind: 'Shift', desc: 'Shift Pagi · kas awal Rp 200.000', createdAt: '16 Okt 08:57', status: 'terkirim' },
-  { id: 'q3', kind: 'Pengeluaran', desc: 'Gas 3kg · Rp 145.000', createdAt: '15 Okt 17:20', status: 'gagal' },
-  { id: 'q4', kind: 'Penjualan', desc: 'TRX-20261015-089 · Rp 132.000 · QRIS', createdAt: '15 Okt 19:02', status: 'terkirim' },
-];
-
-/** Hari sejak sync sukses terakhir (mock) → level peringatan 3/7 hari. */
-function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
+const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `${String(p.method ?? labels.sale)} - ${rp(Number(p.total ?? 0))}`; if (o.kind === 'receipt') return `Email ${String(p.email ?? '')} - ${String(p.no ?? '')}`; if (o.kind === 'attendance') return labels.attendance; return String(p.table ?? p.rowId ?? labels.other);}function fmtTime(iso: string): string
+  { try
+  { return new Date(iso).toLocaleString('id-ID',
+  { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch
+  { return iso; }}/** Hari sejak sync sukses terakhir: level peringatan 3/7 hari. */function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
   if (daysAgo > 7) return 'block7';
   if (daysAgo > 3) return 'warn3';
-  return 'ok';
-}
-
-export default function SyncScreen(_props: Props) {
+  return 'ok';}export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [autoSync, setAutoSync] = useState(true);
+  const isTablet = width >= TABLET_BP;
+  const { t, lang } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [autoSync, setAutoSync] = useState(true);
   const [syncOnWifi, setSyncOnWifi] = useState(false);
-  const [lastPush, setLastPush] = useState('16 Okt 2026 12:35');
-  const [lastPull, setLastPull] = useState('16 Okt 2026 12:35');
+  const [lastPush, setLastPush] = useState(() => getLastSync() || t('sync_never'));
+  const [lastPull, setLastPull] = useState(t('sync_never'));
   const [daysAgo, setDaysAgo] = useState(0);
   const [busy, setBusy] = useState<'push' | 'pull' | null>(null);
   const [msg, setMsg] = useState('');
-  const [queue, setQueue] = useState<QueueItem[]>(DEFAULT_QUEUE);
+  const [tick, setTick] = useState(0);
 
   const level = warnLevel(daysAgo);
-  const pending = useMemo(() => queue.filter((q) => q.status !== 'terkirim').length, [queue]);
+  const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(LS_OPTS, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
+    void setJSON(LS_OPTS, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
+  // Hitung umur sync nyata dari timestamp sukses terakhir agar banner E00043
+  // (>3 hari) dan E00044 (>7 hari) mencerminkan kondisi sebenarnya.
+  useEffect(() => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); }, []); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
+      sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind }), createdAt: fmtTime(o.createdAt), status: o.status, })),
+  [tick, lang], );
 
-  const fakeSend = (mode: 'push' | 'pull', done: () => void) => {
-    setBusy(mode);
-    setMsg(mode === 'push' ? 'Mengirim antrean…' : 'Menarik data master…');
-    setTimeout(() => {
-      done();
-      setBusy(null);
-    }, 1200);
+  const pending = pendingCount(); const doPush = async () => {
+    if (busy) return;
+    setBusy('push'); setMsg(t('sync_push_msg')); try {
+      const r = await pushAll(); setTick((x) => x + 1); const last = getLastSync(); if (last) setLastPush(last); setDaysAgo(0); setMsg(t('sync_push_done').replace('{s}', String(r.sent)).replace('{f}', String(r.failed))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_push_fail')} (${e.message})` : t('sync_push_fail')); } finally { setBusy(null); }
   };
 
-  const doPush = () => {
+  const doPull = async () => {
     if (busy) return;
-    fakeSend('push', () => {
-      setQueue((qs) => qs.map((q) => (q.status === 'terkirim' ? q : { ...q, status: 'terkirim' })));
-      setLastPush('16 Okt 2026 12:45 (baru saja)');
+    setBusy('pull'); setMsg(t('sync_pull_msg')); try {
+      const r = await pullMaster(); setLastPull(new Date().toLocaleString('id-ID'));
       setDaysAgo(0);
-      setMsg('Push selesai — antrean terkirim.');
-    });
-  };
-
-  const doPull = () => {
-    if (busy) return;
-    fakeSend('pull', () => {
-      setLastPull('16 Okt 2026 12:45 (baru saja)');
-      setDaysAgo(0);
-      setMsg('Pull selesai — menu/promo/pengguna diperbarui.');
-    });
+      setMsg(t('sync_pull_done').replace('{t}', String(r.total)).replace('{m}', String(r.per.menu ?? 0)).replace('{tb}', String(r.per.table ?? 0)).replace('{mb}', String(r.per.member ?? 0)).replace('{v}', String(r.per.voucher ?? 0))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_pull_fail')} (${e.message})` : t('sync_pull_fail')); } finally { setBusy(null); }
   };
 
   const simulateOld = () => {
     setDaysAgo(5);
-    setLastPush('11 Okt 2026 09:12');
-    setLastPull('11 Okt 2026 09:12');
-    setMsg('Simulasi: sync terakhir 5 hari lalu.');
+    const fiveAgo = fmtTime(new Date(Date.now() - 5 * 86400000).toISOString());
+    setLastPush(fiveAgo);
+    setLastPull(fiveAgo);
+    setMsg(t('sync_sim_msg'));
   };
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Sinkronisasi</Text>
-        <Text style={styles.headerSub}>Push/pull manual · watermark · antrean offline</Text>
-      </View>
+      <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       {level !== 'ok' ? (
         <View style={[styles.alert, level === 'block7' ? styles.alertBlock : styles.alertWarn]}>
           <Image source={require('../../../assets/images/no_connection.webp')} style={styles.alertImg} resizeMode="contain" />
           <View style={styles.alertLeft}>
-            <Text style={styles.alertTitle}>
-              {level === 'block7' ? 'Kasir diblokir — sync > 7 hari' : 'Peringatan — sync > 3 hari'}
+            <Text style={[styles.alertTitle, isTablet && { fontSize: 16 }]}>
+              {level === 'block7' ? t('sync.blocked') : t('sync.warn')}
             </Text>
-            <Text style={styles.alertSub}>
+            <Text style={styles.alertCode}> {level === 'block7' ? t('sync_code_block') : t('sync_code_warn')} </Text> <Text style={styles.alertSub}>
               {level === 'block7'
-                ? 'Kode E00044: lakukan push/pull agar bisa transaksi lagi.'
-                : 'Segera sinkronkan agar data tidak menumpuk.'}
+                ? t('sync.blockedMsg')
+                : t('sync.warnMsg')}
             </Text>
           </View>
         </View>
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Watermark Terakhir</Text>
+        <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('sync.watermark')}</Text>
         <View style={styles.wmRow}>
-          <Text style={styles.wmLabel}>Push terakhir</Text>
+          <Text style={styles.wmLabel}>{t('sync.lastPush')}</Text>
           <Text style={styles.wmVal}>{lastPush}</Text>
         </View>
         <View style={styles.wmRow}>
-          <Text style={styles.wmLabel}>Pull terakhir</Text>
+          <Text style={styles.wmLabel}>{t('sync.lastPull')}</Text>
           <Text style={styles.wmVal}>{lastPull}</Text>
         </View>
         <View style={styles.btnRow}>
           <Pressable style={[styles.btnPush, busy && styles.btnDisabled]} onPress={doPush} disabled={!!busy}>
-            <Text style={styles.btnPushText}>{busy === 'push' ? 'Push…' : 'Push Sekarang'}</Text>
+            <Text style={styles.btnPushText}>{busy === 'push' ? t('sync.pushing') : t('sync.pushNow')}</Text>
           </Pressable>
           <Pressable style={[styles.btnPull, busy && styles.btnDisabled]} onPress={doPull} disabled={!!busy}>
-            <Text style={styles.btnPullText}>{busy === 'pull' ? 'Pull…' : 'Pull Sekarang'}</Text>
+            <Text style={styles.btnPullText}>{busy === 'pull' ? t('sync.pulling') : t('sync.pullNow')}</Text>
           </Pressable>
         </View>
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Opsi Sinkronisasi</Text>
+        <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('sync.opts')}</Text>
         <View style={styles.rowBetween}>
-          <Text style={styles.rowLabel}>Sync otomatis berkala</Text>
+          <Text style={styles.rowLabel}>{t('sync.auto')}</Text>
           <Switch value={autoSync} onValueChange={setAutoSync} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         <View style={styles.rowBetween}>
-          <Text style={styles.rowLabel}>Hanya saat Wi-Fi</Text>
+          <Text style={styles.rowLabel}>{t('sync.wifi')}</Text>
           <Switch value={syncOnWifi} onValueChange={setSyncOnWifi} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
-        <Text style={styles.cardSub}>Urutan pull: cabang → menu → pengguna → promo/voucher → pengaturan. Push: shift → penjualan → expense → deposit.</Text>
+        <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
 
-      <Text style={styles.groupLabel}>Antrean Offline ({pending} tertunda)</Text>
+      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text> {queue.length === 0 && ( <View style={styles.card}> <Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text> </View> )}
       {queue.map((q) => (
         <View key={q.id} style={styles.card}>
           <View style={styles.qTop}>
             <Text style={styles.qKind}>{q.kind}</Text>
             <View style={[styles.qBadge, q.status === 'terkirim' ? styles.qOk : q.status === 'gagal' ? styles.qFail : styles.qWait]}>
               <Text style={[styles.qBadgeText, q.status === 'terkirim' ? styles.qOkText : q.status === 'gagal' ? styles.qFailText : styles.qWaitText]}>
-                {q.status === 'terkirim' ? 'Terkirim' : q.status === 'gagal' ? 'Gagal' : 'Antre'}
+                {q.status === 'terkirim' ? t('sync.sent') : q.status === 'gagal' ? t('sync.failed') : t('sync.queued')}
               </Text>
             </View>
           </View>
@@ -151,19 +128,14 @@ export default function SyncScreen(_props: Props) {
       ))}
 
       <Pressable style={styles.btnGhost} onPress={simulateOld}>
-        <Text style={styles.btnGhostText}>Simulasikan sync 5 hari lalu</Text>
+        <Text style={styles.btnGhostText}>{t('sync.simOld')}</Text>
       </Pressable>
-      <Text style={styles.foot}>Mock in-memory — tanpa localStorage. Enforcement nyata: blokir &gt; 7 hari (E00044).</Text>
+      <Text style={styles.foot}>{t('sync_foot')}</Text>
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
-  header: { backgroundColor: colors.navy, paddingTop: 52, paddingBottom: 16, paddingHorizontal: 16 },
-  headerTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.white },
-  headerSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 4 },
+
   groupLabel: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy, marginTop: 18, marginBottom: 2, paddingHorizontal: 16 },
   alert: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, padding: 12, marginHorizontal: 16, marginTop: 12, borderWidth: 1 },
   alertWarn: { backgroundColor: colors.paleAmber, borderColor: colors.amber },
@@ -171,7 +143,7 @@ const styles = StyleSheet.create({
   alertImg: { width: 56, height: 56, marginRight: 10 },
   alertLeft: { flex: 1 },
   alertTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
-  alertSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  alertCode: { fontFamily: fonts.bold, fontSize: 11, color: colors.muted, marginTop: 2 }, alertSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   card: {
     backgroundColor: colors.card,
     borderRadius: 12,
@@ -209,5 +181,4 @@ const styles = StyleSheet.create({
   qTime: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginTop: 2 },
   btnGhost: { marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 11, alignItems: 'center', backgroundColor: colors.card },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
-  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14, paddingHorizontal: 24 },
-});
+  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14, paddingHorizontal: 24 },});

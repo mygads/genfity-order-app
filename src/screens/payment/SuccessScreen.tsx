@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { printReceipt } from '../../lib/print';
@@ -18,9 +18,11 @@ type Props = {
       total?: number; method?: string; cash?: number; change?: number; orderNo?: string;
       items?: SaleItemIn[]; discount?: number; ongkir?: number;
       mode?: string; table?: string; customer?: string;
+      voucher?: string | { code: string; amount?: number; kind?: string };
       voucherCode?: string; approvalCode?: string; cardLast4?: string;
       bank?: string; terminal?: string; memberId?: string;
       tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
+      rounding?: number; feeESB?: number;
     };
   };
 };
@@ -53,7 +55,7 @@ const METHOD_LABEL: Record<string, string> = {
 
 export default function SuccessScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const total = route?.params?.total ?? 101200;
   const method = route?.params?.method ?? 'cash';
@@ -65,13 +67,17 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const ongkir = route?.params?.ongkir ?? 0;
   const orderMode = route?.params?.mode;
   const discount = route?.params?.discount ?? 0;
-  const voucherCode = route?.params?.voucherCode;
+  const voucherParam = route?.params?.voucher;
+  const voucherCode = route?.params?.voucherCode
+    ?? (typeof voucherParam === 'string' ? voucherParam : voucherParam?.code);
   const approvalCode = route?.params?.approvalCode;
   const cardLast4 = route?.params?.cardLast4;
   const bank = route?.params?.bank;
   const terminal = route?.params?.terminal;
   const tax = route?.params?.tax ?? route?.params?.vatTotal ?? 0;
   const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
+  const rounding = route?.params?.rounding ?? 0;
+  const feeESB = route?.params?.feeESB ?? 0;
   // Ringkasan mini: hitung subtotal dari item agar rinciannya ikut tampil (bukan cuma total).
   const miniItems = route?.params?.items ?? [];
   const lineTotal = (it: SaleItemIn): number =>
@@ -90,6 +96,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const receiptParams = {
     total, method: METHOD_LABEL[method] ?? method, cash, change,
     no: orderNo, items: route?.params?.items, discount,
+    ...(service > 0 ? { service } : {}),
+    ...(tax > 0 ? { tax } : {}),
+    ...(rounding !== 0 ? { rounding } : {}),
+    ...(feeESB > 0 ? { feeESB } : {}),
     ...(voucherCode ? { voucherCode } : {}),
     ...(approvalCode ? { approvalCode } : {}),
     ...(cardLast4 ? { cardLast4 } : {}),
@@ -174,6 +184,12 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('serviceExcl')}</Text>
             <Text style={styles.value}>{rp(service)}</Text>
+          </View>
+        )}
+        {feeESB > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('feeESB')}</Text>
+            <Text style={styles.value}>{rp(feeESB)}</Text>
           </View>
         )}
         <View style={styles.row}>

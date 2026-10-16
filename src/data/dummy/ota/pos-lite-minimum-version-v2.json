@@ -1,0 +1,12 @@
+{
+  "request": { "platform": "android" },
+  "response": [
+    {
+      "key1": "POS",
+      "key2": "Version",
+      "value1": 591,
+      "value2": 655,
+      "apkUrl": "https://ota.contoh.id/apks/poslite-656.apk"
+    }
+  ]
+}

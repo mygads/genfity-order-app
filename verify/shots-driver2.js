@@ -1,4 +1,4 @@
-// Driver screenshot 15 layar lanjutan — phone 390x844.
+// Driver screenshot 15 layar lanjutan - phone 390x844.
 const { chromium } = require('playwright-core');
 
 const URL = 'http://127.0.0.1:8905';

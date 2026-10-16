@@ -1,0 +1,18 @@
+{
+  "request": { "terminalCode": "ESB-PORIS-001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "terminalId": "T001",
+      "terminalCode": "ESB-PORIS-001",
+      "branchId": "B001",
+      "branchName": "ESB Cabang Poris",
+      "deviceID": "a91f3c07d2e84b5a",
+      "claimed": true
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 2,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "id": "ST-KASIR", "stationName": "Printer Kasir", "printerName": "XPrinter XP-80C", "connection": "Bluetooth", "printerType": "Bluetooth", "charPerLine": 32, "flagDefault": 1, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "id": "ST-DAPUR", "stationName": "Printer Dapur", "printerName": "XPrinter XP-58", "connection": "Bluetooth", "printerType": "Bluetooth", "charPerLine": 32, "flagDefault": 0, "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

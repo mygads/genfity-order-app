@@ -40,7 +40,7 @@ yarn-error.*
 /ios
 /android
 
-# REA artefacts (APK/XAPK + hasil bedah, tidak ikut repo — lihat DOKUMENTASI.md §4)
+# REA artefacts (APK/XAPK + hasil bedah, tidak ikut repo - lihat DOKUMENTASI.md §4)
 apktest/
 *.xapk
 *.apk

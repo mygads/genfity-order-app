@@ -141,6 +141,81 @@ public class GenfityPrinterModule extends ReactContextBaseJavaModule {
     }
   }
 
+  private static final byte[] DRAWER_KICK = new byte[] {
+      0x1B, 0x40, 0x1B, 0x70, 0x00, 0x32, (byte) 0xC8 };
+
+  /**
+   * Buka laci kas: kirim pulse ESC/POS `ESC p m t1 t2` (pin 0, 50ms×200ms).
+   * targetJson = {"transport":"bt|usb|lan","address":"MAC","host":"IP","port":9100,
+   * "vendorId":0,"productId":0} - bentuk yang dikirim src/native/printer.ts.
+   */
+  @ReactMethod
+  public void openDrawer(String targetJson, Promise promise) {
+    try {
+      org.json.JSONObject t = new org.json.JSONObject(targetJson);
+      String transport = t.optString("transport", "bt");
+      if ("lan".equals(transport)) {
+        String host = t.optString("host", "");
+        int port = t.optInt("port", 9100);
+        java.net.Socket sock = new java.net.Socket();
+        try {
+          sock.connect(new java.net.InetSocketAddress(host, port), 8000);
+          sock.getOutputStream().write(DRAWER_KICK);
+          sock.getOutputStream().flush();
+        } finally {
+          try { sock.close(); } catch (Exception ignored) { }
+        }
+        promise.resolve(true);
+        return;
+      }
+      if ("usb".equals(transport)) {
+        int vid = t.optInt("vendorId", 0);
+        int pid = t.optInt("productId", 0);
+        UsbManager mgr =
+            (UsbManager) getReactApplicationContext().getSystemService(Context.USB_SERVICE);
+        UsbDevice target = null;
+        for (UsbDevice d : mgr.getDeviceList().values()) {
+          if (d.getVendorId() == vid && d.getProductId() == pid) { target = d; break; }
+        }
+        if (target == null || !mgr.hasPermission(target)) {
+          promise.reject("DRAWER_USB_UNAVAILABLE", "printer USB tak tersedia/izin");
+          return;
+        }
+        android.hardware.usb.UsbDeviceConnection conn = mgr.openDevice(target);
+        android.hardware.usb.UsbInterface intf = target.getInterface(0);
+        conn.claimInterface(intf, true);
+        android.hardware.usb.UsbEndpoint epOut = null;
+        for (int i = 0; i < intf.getEndpointCount(); i++) {
+          android.hardware.usb.UsbEndpoint ep = intf.getEndpoint(i);
+          if (ep.getDirection() == android.hardware.usb.UsbConstants.USB_DIR_OUT
+              && ep.getType() == android.hardware.usb.UsbConstants.USB_ENDPOINT_XFER_BULK) {
+            epOut = ep; break;
+          }
+        }
+        int sent = conn.bulkTransfer(epOut, DRAWER_KICK, DRAWER_KICK.length, 8000);
+        conn.close();
+        if (sent < 0) promise.reject("DRAWER_USB_FAILED", "bulkTransfer gagal");
+        else promise.resolve(true);
+        return;
+      }
+      String mac = t.optString("address", "");
+      BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+      BluetoothDevice device = adapter.getRemoteDevice(mac);
+      BluetoothSocket socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+      try {
+        socket.connect();
+        OutputStream out = socket.getOutputStream();
+        out.write(DRAWER_KICK);
+        out.flush();
+      } finally {
+        try { socket.close(); } catch (Exception ignored) { }
+      }
+      promise.resolve(true);
+    } catch (Exception e) {
+      promise.reject("DRAWER_FAILED", e.getMessage());
+    }
+  }
+
   @ReactMethod
   public void startWsService(Promise promise) {
     try {

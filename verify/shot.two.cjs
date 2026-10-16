@@ -22,7 +22,7 @@ async function shot(device, vp, screens, port) {
   await page.waitForFunction(() => document.body && document.body.innerText.length > 50, null, { timeout: 120000 });
   await page.waitForTimeout(4000);
   const hook = await page.evaluate(() => !!window.__NAV__);
-  if (!hook) throw new Error('__NAV__ hilang — pastikan EXPO_PUBLIC_NAV_HOOK=1');
+  if (!hook) throw new Error('__NAV__ hilang - pastikan EXPO_PUBLIC_NAV_HOOK=1');
   await page.evaluate(() => window.__NAV__.go('Dashboard'));
   await page.waitForTimeout(1500);
   for (const s of screens) {

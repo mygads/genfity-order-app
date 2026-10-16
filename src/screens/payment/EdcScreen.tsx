@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { startEdcPayment } from '../../native/edc';
@@ -16,6 +16,9 @@ type Props = {
       items?: SaleItemIn[];
       discount?: number;
       voucherCode?: string;
+      service?: number;
+      tax?: number;
+      rounding?: number;
       mode?: string;
       table?: string;
       ongkir?: number;
@@ -32,7 +35,7 @@ const TERMINALS = ['EDC-01', 'EDC-02'];
 
 export default function EdcScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const total = route?.params?.total ?? 33900;
   const [phase, setPhase] = useState<Phase>('waiting');
@@ -79,6 +82,9 @@ export default function EdcScreen({ navigation, route }: Props) {
     const method = `EDC ${bank}`;
     const cardLast4 = cardNo.slice(-4);
     const orderNo = await nextSalesNum();
+    const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
+    const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
+    const roundingParam = Math.round(Number(p.rounding) || 0);
     const input: SaleInput = {
       method,
       salesNum: orderNo,
@@ -88,6 +94,8 @@ export default function EdcScreen({ navigation, route }: Props) {
       items: p.items,
       payments: [{ method, amount: total, approvalCode: approval }],
       discountTotal: p.discount ?? 0,
+      ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
+      ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(p.memberId ? { memberId: p.memberId } : {}),
@@ -100,7 +108,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     try {
       await saveSale(input);
     } catch {
-      /* DB gagal — kasir tetap jalan */
+      /* DB gagal - kasir tetap jalan */
     }
     navigation?.navigate('Success', {
       total,
@@ -114,6 +122,9 @@ export default function EdcScreen({ navigation, route }: Props) {
       terminal,
       items: p.items,
       discount: p.discount ?? 0,
+      ...(serviceParam > 0 ? { service: serviceParam } : {}),
+      ...(taxParam > 0 ? { tax: taxParam } : {}),
+      ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(p.memberId ? { memberId: p.memberId } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
@@ -229,7 +240,24 @@ export default function EdcScreen({ navigation, route }: Props) {
           onPress={save}>
           <Text style={styles.primaryT}>{t('edc_save')}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.linkBtn} onPress={() => navigation?.navigate('Pay', { total })}>
+        <TouchableOpacity style={styles.linkBtn} onPress={() => {
+          // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay.
+          const p = route?.params ?? {};
+          navigation?.navigate('Pay', {
+            total,
+            ...(p.items ? { items: p.items } : {}),
+            ...(p.discount ? { discount: p.discount } : {}),
+            ...(p.voucherCode ? { voucher: p.voucherCode } : {}),
+            ...(p.service ? { service: p.service } : {}),
+            ...(p.tax ? { tax: p.tax } : {}),
+            ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
+            ...(p.mode ? { mode: p.mode } : {}),
+            ...(p.table ? { table: p.table } : {}),
+            ...(p.ongkir ? { ongkir: p.ongkir } : {}),
+            ...(p.customer ? { customer: p.customer } : {}),
+            ...(p.memberId ? { memberId: p.memberId } : {}),
+          });
+        }}>
           <Text style={styles.link}>{t('edc_change')} ›</Text>
         </TouchableOpacity>
       </View>

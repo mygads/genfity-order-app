@@ -1,0 +1,22 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 5,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "coaId": "COA001", "coaName": "Belanja Bahan Baku", "type": "out", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "coaId": "COA002", "coaName": "Gas LPG", "type": "out", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "coaId": "COA003", "coaName": "Plastik dan Tissue", "type": "out", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "coaId": "COA004", "coaName": "Listrik dan Air", "type": "out", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "coaId": "COA005", "coaName": "Modal Kas (Kas Masuk)", "type": "in", "flagActive": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

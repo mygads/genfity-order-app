@@ -1,21 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Modal,
+import React, { useEffect, useState } from 'react';import {
+  Image, Modal,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,
-} from 'react-native';
-import { colors, fonts, rp, wideCenterLg } from '../../theme';
-
-type Props = { navigation?: any };
-
-type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';
-
-type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueSync } from '../../lib/sync';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -23,11 +14,8 @@ type Table = {
   status: TableStatus;
   total?: number;
   namaTamu?: string;
-  /** Menit sejak tamu duduk — timer durasi meja terisi. */
-  seatedMin?: number;
-};
-
-const TABLES: Table[] = [
+  /** Menit sejak tamu duduk - timer durasi meja terisi (dipulihkan dari storage). */
+  seatedMin?: number;};const TABLES: Table[] = [
   { id: '1', no: 'A1', section: 'Dalam', kapasitas: 2, status: 'kosong' },
   { id: '2', no: 'A2', section: 'Dalam', kapasitas: 2, status: 'terisi', total: 185000, namaTamu: 'Budi', seatedMin: 25 },
   { id: '3', no: 'A3', section: 'Dalam', kapasitas: 4, status: 'kosong' },
@@ -36,32 +24,22 @@ const TABLES: Table[] = [
   { id: '6', no: 'B2', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
   { id: '7', no: 'B3', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
   { id: '8', no: 'C1', section: 'VIP', kapasitas: 2, status: 'kosong' },
-  { id: '9', no: 'C2', section: 'VIP', kapasitas: 8, status: 'dipesan', namaTamu: 'Rapat · 20:00' },
-];
-
-const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];
-
-const STATUS_META: Record<TableStatus, { label: string; bg: string; fg: string }> = {
+  { id: '9', no: 'C2', section: 'VIP', kapasitas: 8, status: 'dipesan', namaTamu: 'Rapat · 20:00' },];const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { label: string; bg: string; fg: string }> = {
   kosong: { label: 'Tersedia', bg: colors.paleGreen, fg: colors.green },
   terisi: { label: 'Terisi', bg: colors.paleRed, fg: colors.red },
   dipesan: { label: 'Dipesan', bg: colors.paleOrange, fg: colors.orange },
-  gabung: { label: 'Gabung', bg: colors.paleBlue, fg: colors.navy },
-};
-
-/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */
-function fmtDurasi(min?: number): string {
+  gabung: { label: 'Gabung', bg: colors.paleBlue, fg: colors.navy },};/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */function fmtDurasi(min?: number): string {
   if (min === undefined) return '';
   if (min < 60) return `${min} mnt`;
   const h = Math.floor(min / 60);
   const m = min % 60;
-  return m === 0 ? `${h} jam` : `${h} jam ${m} mnt`;
+  return m === 0 ? `${h} jam` : `${h} jam ${m} mnt`;}/** Catat mutasi meja ke antrean sync (offline-first, tidak memblokir UI). */function queueTableOp(op: string, payload: Record<string, unknown>): void { try { enqueueSync('other', { op, ...payload, at: new Date().toISOString() });
 }
 
-/** Denah meja — section, status, timer durasi, hold order, transaksi cepat (QS). */
-export default function TablesScreen({ navigation }: Props) {
+catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer durasi, hold order, transaksi cepat (QS). */export default function TablesScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [tables, setTables] = useState<Table[]>(TABLES);
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>(TABLES);
   const [section, setSection] = useState('Semua');
   const [filter, setFilter] = useState<'semua' | TableStatus>('semua');
   const [selected, setSelected] = useState<Table | null>(null);
@@ -71,32 +49,34 @@ export default function TablesScreen({ navigation }: Props) {
   const [namaBooking, setNamaBooking] = useState('');
   const [jamBooking, setJamBooking] = useState('');
   const [pax, setPax] = useState('');
-  /** Hold order: order ditahan, meja tetap terisi tapi ditandai. */
+  const [bookingWarn, setBookingWarn] = useState(''); /** Hold order: order ditahan, meja tetap terisi tapi ditandai. */
   const [held, setHeld] = useState<Record<string, boolean>>({});
   const [qsCount, setQsCount] = useState(0);
 
-  // Timer durasi: tiap menit tambah 1 menit utk meja terisi/gabung.
+  // Pulihkan snapshot timer meja dari storage saat layar dibuka.
+  useEffect(() => { let on = true; void getJSON<Record<string, number>>(SEATED_KEY, {}).then((saved) => { if (!on) return; setTables((list) => list.map((tb) => saved[tb.id] !== undefined && (tb.status === 'terisi' || tb.status === 'gabung') ? { ...tb, seatedMin: saved[tb.id] } : tb, ), ); }); return () => { on = false; }; }, []);
+  // Timer durasi: tiap menit tambah 1 menit utk meja terisi/gabung + simpan snapshot.
   useEffect(() => {
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       setTables((list) =>
-        list.map((tb) =>
+        { const next = list.map((tb) =>
           tb.status === 'terisi' || tb.status === 'gabung'
             ? { ...tb, seatedMin: (tb.seatedMin ?? 0) + 1 }
             : tb,
-        ),
+
       );
-    }, 60000);
-    return () => clearInterval(t);
+    const snap: Record<string, number> = {}; for (const tb of next) { if (tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung')) { snap[tb.id] = tb.seatedMin; } } void setJSON(SEATED_KEY, snap); return next; }); }, 60000);
+    return () => clearInterval(timer);
   }, []);
 
   const shown = tables.filter(
-    (t) =>
-      (section === 'Semua' || t.section === section) &&
-      (filter === 'semua' || t.status === filter),
+    (tb) =>
+      (section === 'Semua' || tb.section === section) &&
+      (filter === 'semua' || tb.status === filter),
   );
 
-  const openDetail = (t: Table) => {
-    setSelected(t);
+  const openDetail = (tb: Table) => {
+    setSelected(tb);
     setMoveMode(null);
     setConfirmCancel(false);
   };
@@ -112,28 +92,28 @@ export default function TablesScreen({ navigation }: Props) {
     if (!selected) return;
     const sel = selected;
     setTables((list) =>
-      list.map((t) => {
+      list.map((tb) => {
         if (moveMode === 'pindah') {
-          if (t.id === target.id)
-            return { ...t, status: 'terisi' as TableStatus, namaTamu: sel.namaTamu, total: sel.total, seatedMin: sel.seatedMin ?? 0 };
-          if (t.id === sel.id)
-            return { ...t, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined };
-          return t;
+          if (tb.id === target.id)
+            return { ...tb, status: 'terisi' as TableStatus, namaTamu: sel.namaTamu, total: sel.total, seatedMin: sel.seatedMin ?? 0 };
+          if (tb.id === sel.id)
+            return { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined };
+          return tb;
         }
         // gabung
-        if (t.id === target.id)
+        if (tb.id === target.id)
           return {
-            ...t,
+            ...tb,
             status: 'gabung' as TableStatus,
-            total: (t.total ?? 0) + (sel.total ?? 0),
-            namaTamu: `${t.no}+${sel.no}${t.namaTamu ? ` · ${t.namaTamu}` : ''}`,
+            total: (tb.total ?? 0) + (sel.total ?? 0),
+            namaTamu: `${tb.no}+${sel.no}${tb.namaTamu ? ` · ${tb.namaTamu}` : ''}`,
           };
-        if (t.id === sel.id)
-          return { ...t, status: 'gabung' as TableStatus, namaTamu: `${sel.no}+${target.no}`, total: undefined };
-        return t;
+        if (tb.id === sel.id)
+          return { ...tb, status: 'gabung' as TableStatus, namaTamu: `${sel.no}+${target.no}`, total: undefined };
+        return tb;
       }),
     );
-    closeModal();
+    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); closeModal();
   };
 
   const cancelTable = () => {
@@ -143,36 +123,39 @@ export default function TablesScreen({ navigation }: Props) {
       return;
     }
     const id = selected.id;
-    setTables((list) =>
-      list.map((t) =>
-        t.id === id ? { ...t, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : t,
+    const no = selected.no; setTables((list) =>
+      list.map((tb) =>
+        tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
       ),
     );
-    closeModal();
+    queueTableOp('table-clear', { table: no }); closeModal();
   };
 
   const toggleHold = () => {
     if (!selected) return;
     const id = selected.id;
     setHeld((h) => ({ ...h, [id]: !h[id] }));
-  };
+  queueTableOp('order-hold-toggle', { table: selected.no, held: !held[id] }); };
 
-  /** Transaksi cepat (QS): order tanpa meja — langsung buka kasir mode TAKE AWAY. */
+  /** Transaksi cepat (QS): order tanpa meja - langsung buka kasir mode TAKE AWAY. */
   const quickTransaction = () => {
     setQsCount((n) => n + 1);
     navigation?.navigate?.('Cashier');
   };
 
-  const moveTargets = tables.filter((t) =>
-    !selected || t.id === selected.id
+  const moveTargets = tables.filter((tb) =>
+    !selected || tb.id === selected.id
       ? false
       : moveMode === 'pindah'
-        ? t.status === 'kosong'
-        : t.status === 'terisi',
+        ? tb.status === 'kosong'
+        : tb.status === 'terisi',
   );
 
-  const saveBooking = () => {
-    setBookingVisible(false);
+  /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
+    if (!namaBooking.trim()) { setBookingWarn('Isi nama pelanggan dulu.'); return; } if (!jamBooking.trim()) { setBookingWarn('Isi jam reservasi dulu.'); return; } setBookingWarn(''); const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
+    // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
+    void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); }
+  setBookingVisible(false);
     setSelected(null);
     setNamaBooking('');
     setJamBooking('');
@@ -181,24 +164,22 @@ export default function TablesScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
+      <ScreenHeader title={t('title_tables')} onBack={() => navigation?.goBack?.()} right={ <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Peta Meja</Text>
-        <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>
-          <Text style={s.qsTxt}>+ QS</Text>
-        </TouchableOpacity>
-      </View>
 
-      <View style={s.legend}>
+      } /> <View style={s.legend}>
         {(Object.keys(STATUS_META) as TableStatus[]).map((k) => (
           <View key={k} style={s.legendItem}>
             <View style={[s.legendDot, { backgroundColor: STATUS_META[k].fg }]} />
-            <Text style={s.legendTxt}>{STATUS_META[k].label}</Text>
+            <Text style={[s.legendTxt, isTablet && s.legendTxtBig]}>{STATUS_META[k].label}</Text>
           </View>
         ))}
+        <View style={s.legendRight}>
         {qsCount > 0 && <Text style={s.qsNote}>{qsCount} QS shift ini</Text>}
+        <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>
+          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>+ QS</Text>
+        </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -211,7 +192,7 @@ export default function TablesScreen({ navigation }: Props) {
             key={sec}
             style={[s.filterChip, section === sec && s.filterActive]}
             onPress={() => setSection(sec)}>
-            <Text style={[s.filterTxt, section === sec && s.filterTxtActive]}>{sec}</Text>
+            <Text style={[s.filterTxt, section === sec && s.filterTxtActive, isTablet && s.filterTxtBig]}>{sec}</Text>
           </TouchableOpacity>
         ))}
         <View style={s.filterSep} />
@@ -220,7 +201,7 @@ export default function TablesScreen({ navigation }: Props) {
             key={f}
             style={[s.filterChip, filter === f && s.filterActive]}
             onPress={() => setFilter(f)}>
-            <Text style={[s.filterTxt, filter === f && s.filterTxtActive]}>
+            <Text style={[s.filterTxt, filter === f && s.filterTxtActive, isTablet && s.filterTxtBig]}>
               {f === 'semua' ? 'Semua' : STATUS_META[f].label}
             </Text>
           </TouchableOpacity>
@@ -228,27 +209,27 @@ export default function TablesScreen({ navigation }: Props) {
       </ScrollView>
 
       <ScrollView contentContainerStyle={[s.grid, isTablet && wideCenterLg]}>
-        {shown.map((t) => {
-          const meta = STATUS_META[t.status];
-          const isHeld = !!held[t.id];
+        {shown.map((tb) => {
+          const meta = STATUS_META[tb.status];
+          const isHeld = !!held[tb.id];
           return (
             <TouchableOpacity
-              key={t.id}
+              key={tb.id}
               style={[s.tableCard, { backgroundColor: meta.bg }, isHeld && s.tableHeld]}
-              onPress={() => openDetail(t)}>
-              <Text style={s.tableNo}>{t.no}</Text>
-              <Text style={[s.tableStatus, { color: meta.fg }]}>{meta.label}</Text>
-              <Text style={s.tableCap}>{t.kapasitas} tamu</Text>
-              {t.total ? (
-                <Text style={s.tableTotal}>{rp(t.total)}</Text>
+              onPress={() => openDetail(tb)}>
+              <Text style={[s.tableNo, isTablet && s.tableNoBig]}>{tb.no}</Text>
+              <Text style={[s.tableStatus, { color: meta.fg }, isTablet && s.tableStatusBig]}>{meta.label}</Text>
+              <Text style={[s.tableCap, isTablet && s.tableCapBig]}>{tb.kapasitas} tamu</Text>
+              {tb.total ? (
+                <Text style={[s.tableTotal, isTablet && s.tableTotalBig]}>{rp(tb.total)}</Text>
               ) : null}
-              {t.seatedMin !== undefined && (t.status === 'terisi' || t.status === 'gabung') ? (
-                <Text style={s.tableDur}>⏱ {fmtDurasi(t.seatedMin)}</Text>
+              {tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung') ? (
+                <Text style={[s.tableDur, isTablet && s.tableDurBig]}>Timer {fmtDurasi(tb.seatedMin)}</Text>
               ) : null}
-              {isHeld ? <Text style={s.holdBadge}>⏸ Hold</Text> : null}
-              {t.namaTamu ? (
-                <Text style={s.tableGuest} numberOfLines={1}>
-                  {t.namaTamu}
+              {isHeld ? <Text style={s.holdBadge}>Hold</Text> : null}
+              {tb.namaTamu ? (
+                <Text style={[s.tableGuest, isTablet && s.tableGuestBig]} numberOfLines={1}>
+                  {tb.namaTamu}
                 </Text>
               ) : null}
             </TouchableOpacity>
@@ -259,40 +240,40 @@ export default function TablesScreen({ navigation }: Props) {
       {/* Detail / aksi meja */}
       <Modal visible={!!selected} transparent animationType="slide" onRequestClose={closeModal}>
         <View style={s.modalBg}>
-          <View style={s.modalCard}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
             {selected ? (
               moveMode ? (
                 <>
-                  <Text style={s.modalTitle}>
+                  <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
                     {moveMode === 'pindah' ? `Pindah dari Meja ${selected.no}` : `Gabung Meja ${selected.no}`}
                   </Text>
-                  <Text style={s.modalHint}>
+                  <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
                     {moveMode === 'pindah'
-                      ? 'Pilih meja kosong tujuan — tamu & total ikut pindah.'
-                      : 'Pilih meja terisi tujuan — total digabungkan.'}
+                      ? 'Pilih meja kosong tujuan - tamu dan total ikut pindah.'
+                      : 'Pilih meja terisi tujuan - total digabungkan.'}
                   </Text>
                   {moveTargets.length === 0 && (
-                    <Text style={s.modalHint}>
+                    <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
                       {moveMode === 'pindah' ? 'Tidak ada meja kosong.' : 'Tidak ada meja terisi lain.'}
                     </Text>
                   )}
-                  {moveTargets.map((t) => (
-                    <TouchableOpacity key={t.id} style={s.targetRow} onPress={() => applyMove(t)}>
-                      <Text style={s.targetNo}>Meja {t.no}</Text>
-                      <Text style={s.targetMeta}>
-                        {STATUS_META[t.status].label} • {t.kapasitas} pax
-                        {t.total ? ` • ${rp(t.total)}` : ''}
+                  {moveTargets.map((tb) => (
+                    <TouchableOpacity key={tb.id} style={s.targetRow} onPress={() => applyMove(tb)}>
+                      <Text style={[s.targetNo, isTablet && s.targetNoBig]}>Meja {tb.no}</Text>
+                      <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
+                        {STATUS_META[tb.status].label} • {tb.kapasitas} pax
+                        {tb.total ? ` • ${rp(tb.total)}` : ''}
                       </Text>
                     </TouchableOpacity>
                   ))}
                   <TouchableOpacity style={s.cancelBtn} onPress={() => setMoveMode(null)}>
-                    <Text style={s.cancelTxt}>Kembali</Text>
+                    <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>Kembali</Text>
                   </TouchableOpacity>
                 </>
               ) : (
               <>
-                <Text style={s.modalTitle}>Meja {selected.no}</Text>
-                <Text style={s.modalHint}>
+                <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>Meja {selected.no}</Text>
+                <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
                   {STATUS_META[selected.status].label} • {selected.section} • {selected.kapasitas} pax
                   {selected.namaTamu ? ` • ${selected.namaTamu}` : ''}
                   {selected.total ? ` • ${rp(selected.total)}` : ''}
@@ -305,7 +286,7 @@ export default function TablesScreen({ navigation }: Props) {
                     closeModal();
                     navigation?.navigate?.('Cashier', { table: selected.no });
                   }}>
-                  <Text style={s.primaryTxt}>
+                  <Text style={[s.primaryTxt, isTablet && s.primaryTxtBig]}>
                     {selected.status === 'kosong' ? 'Buat Pesanan' : 'Buka Pesanan'}
                   </Text>
                 </TouchableOpacity>
@@ -313,13 +294,13 @@ export default function TablesScreen({ navigation }: Props) {
                   <TouchableOpacity
                     style={s.secondaryBtn}
                     onPress={() => setBookingVisible(true)}>
-                    <Text style={s.secondaryTxt}>Booking Meja</Text>
+                    <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_book')}</Text>
                   </TouchableOpacity>
                   {selected.status !== 'kosong' && (
                     <TouchableOpacity
                       style={s.secondaryBtn}
                       onPress={toggleHold}>
-                      <Text style={s.secondaryTxt}>{held[selected.id] ? 'Lanjut Order' : 'Hold Order'}</Text>
+                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{held[selected.id] ? 'Lanjut Order' : 'Hold Order'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -331,14 +312,14 @@ export default function TablesScreen({ navigation }: Props) {
                         closeModal();
                         navigation?.navigate?.('MoveTable', { from: selected.no });
                       }}>
-                      <Text style={s.secondaryTxt}>Pindah Meja</Text>
+                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_move')}</Text>
                     </TouchableOpacity>
                   )}
                   {selected.status === 'terisi' && (
                     <TouchableOpacity
                       style={s.secondaryBtn}
                       onPress={() => setMoveMode('gabung')}>
-                      <Text style={s.secondaryTxt}>Gabungkan Meja</Text>
+                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_merge')}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -350,13 +331,13 @@ export default function TablesScreen({ navigation }: Props) {
                         closeModal();
                         navigation?.navigate?.('MoveItems', { from: selected.no });
                       }}>
-                      <Text style={s.secondaryTxt}>Pindah Item</Text>
+                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_move_items')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={confirmCancel ? s.dangerBtnSolid : s.dangerBtn}
                       onPress={cancelTable}>
-                      <Text style={confirmCancel ? s.dangerSolidTxt : s.dangerTxt}>
-                        {confirmCancel ? 'Yakin? Ketuk lagi' : 'Batalkan Meja'}
+                      <Text style={[confirmCancel ? s.dangerSolidTxt : s.dangerTxt, isTablet && s.secondaryTxtBig]}>
+                        {confirmCancel ? 'Yakin? Ketuk lagi' : t('tbl_cancel_table')}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -364,7 +345,7 @@ export default function TablesScreen({ navigation }: Props) {
                 <TouchableOpacity
                   style={s.cancelBtn}
                   onPress={closeModal}>
-                  <Text style={s.cancelTxt}>Tutup</Text>
+                  <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('cm_close')}</Text>
                 </TouchableOpacity>
               </>
               )
@@ -376,11 +357,11 @@ export default function TablesScreen({ navigation }: Props) {
       {/* Booking */}
       <Modal visible={bookingVisible} transparent animationType="slide" onRequestClose={() => setBookingVisible(false)}>
         <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>
-              Booking Meja{selected ? ` ${selected.no}` : ''}
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
+              {t('tbl_book')}{selected ? ` ${selected.no}` : ''}
             </Text>
-            <Text style={s.modalHint}>Sudah memesan meja? Catat reservasi</Text>
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Sudah memesan meja? Catat reservasi</Text>
             <TextInput
               style={s.input}
               placeholder="Nama pelanggan"
@@ -405,35 +386,22 @@ export default function TablesScreen({ navigation }: Props) {
                 onChangeText={setPax}
               />
             </View>
-            <TouchableOpacity style={s.primaryBtn} onPress={saveBooking}>
-              <Text style={s.primaryTxt}>Simpan Booking</Text>
+            {bookingWarn ? <Text style={s.warn}>{bookingWarn}</Text> : null} <TouchableOpacity style={s.primaryBtn} onPress={saveBooking}>
+              <Text style={[s.primaryTxt, isTablet && s.primaryTxtBig]}>{t('tbl_save_book')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setBookingVisible(false)}>
-              <Text style={s.cancelTxt}>Batal</Text>
+              <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('cm_cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
-  );
-}
-
-const s = StyleSheet.create({
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+  );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 17, fontFamily: fonts.bold },
+  burger: { width: 22, height: 22 },
+
   qsBtn: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   qsTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
   legend: {
@@ -448,7 +416,8 @@ const s = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', marginRight: 16 },
   legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 5 },
   legendTxt: { fontSize: 12, fontFamily: fonts.medium, color: colors.muted },
-  qsNote: { fontSize: 12, fontFamily: fonts.semibold, color: colors.orangeDark, marginLeft: 'auto' },
+  qsNote: { fontSize: 12, fontFamily: fonts.semibold, color: colors.orangeDark },
+  legendRight: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 8 },
   filtersScroll: { flexGrow: 0 },
   filters: { flexDirection: 'row', padding: 12, paddingRight: 20, alignItems: 'center' },
   filterChip: {
@@ -580,4 +549,24 @@ const s = StyleSheet.create({
   },
   inputRow: { flexDirection: 'row' },
   inputHalf: { flex: 1, marginHorizontal: 4 },
-});
+  /* Varian tablet (breakpoint 768): teks +1..4pt agar proporsional di layar lebar. */
+  legendTxtBig: { fontSize: 13 },
+  qsTxtBig: { fontSize: 14 },
+  filterTxtBig: { fontSize: 13 },
+  tableNoBig: { fontSize: 24 },
+  tableStatusBig: { fontSize: 13 },
+  tableCapBig: { fontSize: 12 },
+  tableTotalBig: { fontSize: 14 },
+  tableDurBig: { fontSize: 12 },
+  tableGuestBig: { fontSize: 12 },
+  modalCardTablet: { maxWidth: 640, width: '100%', alignSelf: 'center' },
+  modalTitleBig: { fontSize: 19 },
+  modalHintBig: { fontSize: 14 },
+  primaryTxtBig: { fontSize: 16 },
+  secondaryTxtBig: { fontSize: 14 },
+  dangerTxtBig: { fontSize: 14 },
+  dangerSolidTxtBig: { fontSize: 14 },
+  targetNoBig: { fontSize: 16 },
+  targetMetaBig: { fontSize: 13 },
+  cancelTxtBig: { fontSize: 15 },
+warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8, textAlign: 'center' },});

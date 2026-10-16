@@ -1,9 +1,9 @@
 /**
  * Lapisan printer: SATU interface untuk 3 transport.
  *
- * - LAN (Wi-Fi/Ethernet, IP+port): murni JS via react-native-tcp-socket — JALAN.
+ * - LAN (Wi-Fi/Ethernet, IP+port): murni JS via react-native-tcp-socket - JALAN.
  * - BT SPP klasik (MAC bonded): modul native `GenfityPrinter` (Kotlin,
- *   modules/genfity-printer) — aktif setelah `npx expo prebuild` + EAS build.
+ *   modules/genfity-printer) - aktif setelah `npx expo prebuild` + EAS build.
  * - USB serial (VID/PID): modul native yang sama via UsbManager bulk-transfer.
  *
  * Di Expo Go / web (modul native tak ada): kirim ditolak halus dengan
@@ -42,6 +42,11 @@ function native(): NativePrinter | null {
   } catch {
     return null;
   }
+}
+
+/** True bila modul native printer tersedia (dev-client / APK produksi). */
+export function hasNativePrinter(): boolean {
+  return native() !== null;
 }
 
 function bytesToBinary(bytes: Uint8Array): string {

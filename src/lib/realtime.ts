@@ -1,7 +1,7 @@
 /**
  * Realtime ganda ala POSLite: device channel + self-order channel,
  * heartbeat 30 dtk, reconnect backoff, dispatch ke handler terdaftar.
- * Murni JS — jalan di Expo Go maupun dev-client. Di background Android,
+ * Murni JS - jalan di Expo Go maupun dev-client. Di background Android,
  * pasang dengan ForegroundService dari modul native (modules/genfity-printer).
  */
 import { getServerEnv, getWsUrl, getBaseUrl } from '../config/server';
@@ -52,7 +52,7 @@ function backoff(retry: number): number {
 }
 
 function connect(ch: Channel): void {
-  // Hanya ke server milik sendiri (env Custom) — jangan dial ketiga.
+  // Hanya ke server milik sendiri (env Custom) - jangan dial ketiga.
   if (getServerEnv() !== 'custom') return;
   const url = ch.url();
   if (!url) return;

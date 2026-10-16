@@ -1,0 +1,16 @@
+{
+  "request": {
+    "userId": "U07",
+    "terminalId": "T001",
+    "expoPushToken": "ExponentPushToken[dummy-poris-001]",
+    "platform": "android"
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true }
+  }
+}

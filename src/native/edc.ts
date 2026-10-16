@@ -13,7 +13,7 @@ export interface EdcResult {
   reason?: 'need-dev-client' | 'cancelled' | 'failed';
 }
 
-/** Paket APOS umum — pilih yang terinstal di terminal Anda. */
+/** Paket APOS umum - pilih yang terinstal di terminal Anda. */
 export const EDC_PACKAGES = [
   'com.bca.apos', // BCA APOS
   'id.co.bca.cpdroid', // fallback

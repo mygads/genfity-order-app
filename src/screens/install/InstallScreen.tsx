@@ -1,37 +1,22 @@
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { fonts, wideCenterSm } from '../../theme';
-import { WEB_URLS } from '../../config/server';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-
-const NAVY = '#16215E';
-const BLUE = '#1E88E5';
-const ORANGE = '#F5820D';
-const GREY = '#757575';
-const BORDER = '#E0E0E0';
-
-const STEPS = [
-  'Buka dashboard owner, masuk ke menu Perangkat.',
-  'Pindai QR klaim atau salin kode terminal.',
-  'Tekan “Klaim Terminal” untuk menautkan perangkat.',
-];
-
-export default function InstallScreen({ navigation }: { navigation?: Nav }) {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [code, setCode] = useState('');
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [showHelp, setShowHelp] = useState(false);
 
-  const claim = () => {
-    if (code.trim().length < 4) {
-      setError('Masukkan kode klaim terminal (min. 4 karakter) atau pindai QR.');
+  const [checking, setChecking] = useState(false);
+  // Klaim via lapisan apiSource (Dummy Mode offline / backend asli bila env
+  // terisi). Kode terminal yang lolos disimpan ke setTerminal untuk header
+  // request berikutnya.
+  const claim = async () => {
+    if (checking) return; if (code.trim().length < 4) {
+      setError(t('inst_code_short'));
       return;
     }
-    setError('');
-    navigation?.navigate('SelectBranch');
-  };
+    setChecking(true); setError('');
+    try { const r = await validateTerminal(code.trim().toUpperCase()); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: code.trim().toUpperCase(), branchId: r.branchId, branchName: r.branchName, }); navigation?.navigate('SelectBranch');
+  } catch { setError(t('inst_claim_invalid')); } finally { setChecking(false); } };
 
   return (
     <ScrollView
@@ -39,112 +24,107 @@ export default function InstallScreen({ navigation }: { navigation?: Nav }) {
       contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
       showsVerticalScrollIndicator={false}>
       <Image source={require('../../../assets/images/claim_terminal.webp')} style={styles.banner} resizeMode="contain" />
-      <Text style={styles.title}>Klaim Terminal</Text>
+      <Text style={styles.title}>{t('inst_title')}</Text>
       <Text style={styles.desc}>
-        Pindai QR klaim dari dashboard owner atau masukkan kode terminal untuk
-        menghubungkan perangkat ini ke outlet Anda.
+        {t('inst_desc')}
       </Text>
 
       <View style={styles.stepsCard}>
-        {STEPS.map((s, i) => (
+        {STEP_KEYS.map((k, i) => (
           <View key={i} style={styles.stepRow}>
             <View style={styles.stepNum}>
               <Text style={styles.stepNumT}>{i + 1}</Text>
             </View>
-            <Text style={styles.stepT}>{s}</Text>
+            <Text style={styles.stepT}>{t(k)}</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.scanBox}>
         <Text style={styles.scanGlyph}>▣</Text>
-        <Text style={styles.scanText}>Bingkai QR klaim di sini</Text>
+        <Text style={styles.scanText}>{t('inst_scan_frame')}</Text>
         <TouchableOpacity
           style={styles.scanBtn}
           onPress={() => { setCode('ESB-PORIS-01'); setError(''); }}>
-          <Text style={styles.scanBtnT}>Simulasikan Hasil Pindai</Text>
+          <Text style={styles.scanBtnT}>{t('inst_sim_scan')}</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.label}>Kode terminal</Text>
+      <Text style={styles.label}>{t('inst_code_label')}</Text>
       <TextInput
         style={styles.input}
         value={code}
         onChangeText={(t) => { setCode(t); setError(''); }}
-        placeholder="cth. ESB-PORIS-01"
-        placeholderTextColor="#BDBDBD"
+        placeholder={t('inst_code_ph')}
+        placeholderTextColor={colors.faint}
         autoCapitalize="characters"
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.primary} onPress={claim}>
-        <Text style={styles.primaryT}>Klaim Terminal ›</Text>
+      <TouchableOpacity style={[styles.primary, checking && styles.primaryIdle]} onPress={claim} disabled={checking}>
+        <Text style={styles.primaryT}> {checking ? t('inst_claim_checking') : `${t('inst_claim_btn')} ›`} </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.webBtn}
         onPress={() => navigation?.navigate('WebView', { url: WEB_URLS.register, title: 'Pendaftaran POS' })}>
-        <Text style={styles.webBtnT}>Daftar Akun via Web ›</Text>
+        <Text style={styles.webBtnT}>{`${t('inst_web_btn')} ›`}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => setShowHelp((v) => !v)}>
-        <Text style={styles.link}>Belum punya QR? Lihat cara mendapatkan ›</Text>
+        <Text style={styles.link}>{`${t('inst_no_qr')} ›`}</Text>
       </TouchableOpacity>
       {showHelp && (
         <View style={styles.helpCard}>
           <Image source={require('../../../assets/images/get_qr_banner.webp')} style={styles.helpImg} resizeMode="contain" />
-          <Text style={styles.helpT}>1. Masuk ke dashboard owner (web) sebagai pemilik usaha.</Text>
-          <Text style={styles.helpT}>2. Buka menu Perangkat → Tambah Terminal.</Text>
-          <Text style={styles.helpT}>3. Pindai QR yang muncul, atau salin kode terminal ke sini.</Text>
+          <Text style={styles.helpT}>{t('inst_help1')}</Text>
+          <Text style={styles.helpT}>{t('inst_help2')}</Text>
+          <Text style={styles.helpT}>{t('inst_help3')}</Text>
         </View>
       )}
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 32 },
   banner: { width: '100%', height: 150 },
-  title: { fontFamily: fonts.bold, fontSize: 20, color: NAVY, marginTop: 16 },
+  title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 16 },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: GREY, marginTop: 6, lineHeight: 19 },
   stepsCard: {
-    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line,
     borderRadius: 12, padding: 14, marginTop: 14, gap: 10,
   },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   stepNum: {
-    width: 26, height: 26, borderRadius: 13, backgroundColor: NAVY,
+    width: 26, height: 26, borderRadius: 13, backgroundColor: colors.navy,
     alignItems: 'center', justifyContent: 'center',
   },
   stepNumT: { fontFamily: fonts.bold, fontSize: 13, color: '#FFFFFF' },
   stepT: { flex: 1, fontFamily: fonts.regular, fontSize: 13, color: '#2B2B2B', lineHeight: 18 },
   scanBox: {
-    borderWidth: 1.5, borderColor: NAVY, borderStyle: 'dashed', borderRadius: 14,
+    borderWidth: 1.5, borderColor: colors.navy, borderStyle: 'dashed', borderRadius: 14,
     alignItems: 'center', padding: 20, marginTop: 14, backgroundColor: '#FFFFFF',
   },
-  scanGlyph: { fontSize: 40, color: NAVY },
+  scanGlyph: { fontSize: 40, color: colors.navy },
   scanText: { fontFamily: fonts.medium, fontSize: 13, color: GREY, marginTop: 6 },
   scanBtn: { marginTop: 10, backgroundColor: '#EAF2FF', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
-  scanBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: NAVY },
-  label: { fontFamily: fonts.semibold, fontSize: 13, color: '#2B2B2B', marginTop: 18, marginBottom: 8 },
+  scanBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
+  label: { fontFamily: fonts.semibold, fontSize: 12, color: '#2B2B2B', marginTop: 18, marginBottom: 8 },
   input: {
-    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#BDBDBD', borderRadius: 12,
-    paddingHorizontal: 16, height: 52, fontFamily: fonts.bold, fontSize: 15, color: '#2B2B2B', letterSpacing: 1,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line, borderRadius: 10,
+    paddingHorizontal: 16, height: 52, fontFamily: fonts.bold, fontSize: 14, color: '#2B2B2B', letterSpacing: 1,
   },
   error: { fontFamily: fonts.medium, fontSize: 13, color: '#D33A3F', marginTop: 8 },
   primary: {
-    backgroundColor: ORANGE, borderRadius: 14, height: 52,
+    backgroundColor: colors.orange, borderRadius: 14, height: 52,
     alignItems: 'center', justifyContent: 'center', marginTop: 18,
   },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF' },
-  link: { fontFamily: fonts.semibold, fontSize: 13, color: '#D96F00', textAlign: 'center', marginTop: 14 },
-  helpCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, marginTop: 12 },
+  primaryIdle: { opacity: 0.6 }, link: { fontFamily: fonts.semibold, fontSize: 13, color: '#D96F00', textAlign: 'center', marginTop: 14 },
+  helpCard: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 14, marginTop: 12 },
   helpImg: { width: '100%', height: 120, marginBottom: 8 },
   helpT: { fontFamily: fonts.regular, fontSize: 13, color: '#2B2B2B', marginTop: 4, lineHeight: 18 },
   webBtn: {
-    backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: NAVY, borderRadius: 14,
+    backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: colors.navy, borderRadius: 14,
     height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 12,
   },
-  webBtnT: { fontFamily: fonts.bold, fontSize: 14, color: NAVY },
-});
+  webBtnT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },});

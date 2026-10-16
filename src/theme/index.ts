@@ -34,7 +34,7 @@ export const fonts = {
   bold: 'HKGrotesk-Bold',
 };
 export const rp = (n: number) => 'Rp ' + rpNum(n);
-/** Angka grouping ala Indonesia tanpa prefix — utk input yg sudah ada label "Rp". */
+/** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 export const rpNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 

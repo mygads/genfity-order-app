@@ -1,0 +1,28 @@
+{
+  "request": { "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "salesNum": "TRX-20261016-014",
+      "branchId": "B001", "terminalId": "T001", "userId": "U07",
+      "shiftId": "S20261016P", "salesDate": "2026-10-16 12:40:00",
+      "salesMode": "DINE_IN", "tableNo": "A-01", "status": "PAID",
+      "subtotal": 70000, "discount": 2500, "tax": 5698,
+      "serviceCharge": 2875,
+      "voucherAmount": 10000, "platformFee": 0, "rounding": 25,
+      "grandTotal": 60400, "paidAmount": 100000, "changeAmount": 39600,
+      "paymentMethod": "Tunai",
+      "items": [
+        { "menuId": "M001", "name": "Ayam Geprek", "qty": 2,
+          "unitPrice": 45000, "discount": 2500, "note": "level 3",
+          "extras": [{ "name": "Nasi", "price": 5000 }], "voided": 0 }
+      ],
+      "payments": [{ "method": "Tunai", "amount": 100000 }],
+      "vouchers": [{ "code": "HEMAT10K", "amount": 10000 }]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-// Driver screenshot POSClone-RN — phone 390x844, via playwright-core + chrome-headless-shell.
+// Driver screenshot POSClone-RN - phone 390x844, via playwright-core + chrome-headless-shell.
 // 1) Klik "Masuk Demo" (klik teks tombol), 2) navigasi tiap route via __NAV__.go, 3) screenshot.
 const { chromium } = require('playwright-core');
 
@@ -33,13 +33,13 @@ const STEPS = [
   await page.screenshot({ path: `${OUT}/01-login.png` });
   console.log('shot 01-login.png');
 
-  // (1) LOGIN via klik teks tombol "Masuk Demo" — setara CDP Runtime.evaluate klik
+  // (1) LOGIN via klik teks tombol "Masuk Demo" - setara CDP Runtime.evaluate klik
   await page.getByText('Masuk Demo', { exact: true }).first().click();
   await page.waitForTimeout(2500);
 
   const hasNav = await page.evaluate(() => !!window.__NAV__);
   console.log('__NAV__ hook:', hasNav);
-  if (!hasNav) throw new Error('EXPO_PUBLIC_NAV_HOOK tidak aktif — __NAV__ hilang');
+  if (!hasNav) throw new Error('EXPO_PUBLIC_NAV_HOOK tidak aktif - __NAV__ hilang');
 
   for (const s of STEPS.slice(1)) {
     await page.evaluate(([r, p]) => window.__NAV__.go(r, p), [s.route, s.params || undefined]);

@@ -1,47 +1,24 @@
-import { useMemo, useState } from 'react';
-import {
+import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
-  Modal,
+  Image, Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
-  useWindowDimensions,
-} from 'react-native';
-import { colors, fonts, rp } from '../../theme';
-import { transactions, type Transaction, type TxnStatus } from '../../data/mock';
-import { isValidEmail, recordReceiptEmail } from '../../lib/payments';
-
-const STATUS_LABEL: Record<TxnStatus, string> = {
-  Selesai: 'Berhasil',
-  Batal: 'Dibatalkan',
-  Void: 'Void',
-};
-
-function statusColor(s: TxnStatus) {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import {
+  useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
-  return colors.orangeDark;
-}
-
-function statusBg(s: TxnStatus) {
+  return colors.orangeDark;}function statusBg(s: TxnStatus) {
   if (s === 'Selesai') return colors.paleGreen;
   if (s === 'Void') return colors.paleRed;
-  return colors.paleOrange;
-}
-
-const billNo = (t: Transaction) => t.no.replace(/^TRX/, 'BILL');
-const payOf = (t: Transaction, over: Record<string, string>) => over[t.id] ?? t.payment;
-
-const PAY_OPTIONS = ['Tunai', 'QRIS', 'EDC', 'Debit', 'Kredit', 'Transfer'];
-
-export default function HistoryScreen({ navigation }: { navigation?: { navigate: (s: string, p?: object) => void; goBack?: () => void } }) {
+  return colors.paleOrange;}const billNo = (t: Transaction) => t.no.replace(/^TRX/, 'BILL');const payOf = (t: Transaction, over: Record<string, string>) => over[t.id] ?? t.payment;const PAY_OPTIONS = ['Tunai', 'QRIS', 'EDC', 'Debit', 'Kredit', 'Transfer'];/** Void: tulis DB (head → void + tr_cancelmenu) + outbox/sync/server. */async function persistVoid(t: Transaction, reason: string): Promise<void> { await persistVoidDb(t.no, reason);}/** Ganti metode bayar: tulis DB (payment + head) + outbox/sync/server. */async function persistPayChange(t: Transaction, method: string): Promise<void> { await persistPayChangeDb(t.no, method);}export default function HistoryScreen({ navigation }: { navigation?: { navigate: (s: string, p?: object) => void; goBack?: () => void } }) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
 
-  const [query, setQuery] = useState('');
+  const { lang, setLang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState<TxnStatus | null>(null);
   const [fPayment, setFPayment] = useState<string | null>(null);
@@ -56,33 +33,33 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  const dates = useMemo(() => [...new Set(transactions.map((t) => t.date))], []);
-  const payments = useMemo(() => [...new Set(transactions.map((t) => t.payment))], []);
+  /** Baris DB riil; null = belum dimuat / DB kosong → pakai data demo. */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live && rows.length > 0) setDbTxns(rows); }); return () => { live = false; }; }, []); const base = dbTxns ?? transactions; const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
+  const payments = useMemo(() => [...new Set(base.map((tr) => tr.payment))], [base]);
 
   const list = useMemo(() => {
-    const rows = transactions.map((t) =>
-      voided.includes(t.id) ? { ...t, status: 'Void' as TxnStatus } : t,
+    const rows = base.map((tr) =>
+      voided.includes(tr.id) ? { ...tr, status: 'Void' as TxnStatus } : tr,
     );
     const q = query.trim().toLowerCase();
-    return rows.filter((t) => {
-      if (fDate && t.date !== fDate) return false;
-      if (fStatus && t.status !== fStatus) return false;
-      if (fPayment && payOf(t, payOver) !== fPayment) return false;
+    return rows.filter((tr) => {
+      if (fDate && tr.date !== fDate) return false;
+      if (fStatus && tr.status !== fStatus) return false;
+      if (fPayment && payOf(tr, payOver) !== fPayment) return false;
       if (
         q &&
         !(
-          t.no.toLowerCase().includes(q) ||
-          billNo(t).toLowerCase().includes(q) ||
-          t.cashier.toLowerCase().includes(q) ||
-          payOf(t, payOver).toLowerCase().includes(q)
+          tr.no.toLowerCase().includes(q) ||
+          billNo(tr).toLowerCase().includes(q) ||
+          tr.cashier.toLowerCase().includes(q) ||
+          payOf(tr, payOver).toLowerCase().includes(q)
         )
       )
         return false;
       return true;
     });
-  }, [query, fDate, fStatus, fPayment, voided, payOver]);
+  }, [base, query, fDate, fStatus, fPayment, voided, payOver]);
 
-  const hasFilter = query.trim() !== '' || fDate !== null || fStatus !== null || fPayment !== null;
+  /** Rekap penjualan dari daftar terfilter: omzet lunas + hitung per metode. */ const recap = useMemo(() => { const paid = list.filter((tr) => tr.status === 'Selesai'); const omzet = paid.reduce((s, tr) => s + tr.total, 0); const byPay: Record<string, number> = {}; for (const tr of paid) { const m = payOf(tr, payOver); byPay[m] = (byPay[m] ?? 0) + tr.total; } return { omzet, count: paid.length, byPay }; }, [list, payOver]); const hasFilter = query.trim() !== '' || fDate !== null || fStatus !== null || fPayment !== null;
   const clearAll = () => {
     setQuery('');
     setFDate(null);
@@ -91,23 +68,23 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
   };
 
   const selected: Transaction | null =
-    list.find((t) => t.id === selectedId) ?? list[0] ?? null;
+    list.find((tr) => tr.id === selectedId) ?? list[0] ?? null;
 
-  const doVoid = () => {
-    if (!selected) return;
-    setVoided((v) => (v.includes(selected.id) ? v : [...v, selected.id]));
+  /** Tandai void di state: baris DB diupdate langsung, baris demo via overlay. */ const markVoided = (id: string) => {
+    if (dbTxns) { setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev, ); } else {
+    setVoided((v) => (v.includes(id) ? v : [...v, id])); } }; const doVoid = () => { if (!selected) return; void persistVoid(selected, voidNote.trim()).catch(() => undefined); markVoided(selected.id);
     setConfirmVoid(false);
     setVoidNote('');
   };
 
-  const sendMail = () => {
+  const doVoidAndPrint = () => { if (!selected) return; const s = selected; void persistVoid(s, voidNote.trim()).catch(() => undefined); markVoided(s.id); setConfirmVoid(false); setVoidNote(''); navigation?.navigate('Receipt', { no: s.no, total: s.total, method: payOf(s, payOver), voidLines: s.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason: voidNote.trim(), }); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
-      setMailMsg('Alamat email tidak valid.');
+      setMailMsg(t('hist_mail_bad'));
       return;
     }
     recordReceiptEmail(mailTo, selected.no, selected.total, payOf(selected, payOver));
-    setMailMsg('Struk masuk antrean kirim — terkirim saat online.');
+    setMailMsg(t('hist_mail_queued'));
   };
 
   const pickerOptions: string[] =
@@ -125,96 +102,88 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
     setPicker(null);
   };
 
-  const detail = selected ? (
+  const langToggle = ( <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8} accessibilityLabel="Ganti bahasa / Switch language"> <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable> ); const detail = selected ? (
     <DetailPanel
       txn={selected}
       payment={payOf(selected, payOver)}
-      onPrint={() =>
+      statusLabel={STATUS_LABEL[selected.status]} t={t} onPrint={() =>
         navigation?.navigate('Receipt', {
           no: selected?.no,
           total: selected?.total ?? 0,
           method: selected ? payOf(selected, payOver) : undefined,
-        })
+        items: selected?.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: selected?.discount ?? 0, mode: selected?.mode, ...(selected?.table ? { table: selected.table } : {}), })
       }
       onChangePay={() => setPayModal(true)}
       onVoid={() => setConfirmVoid(true)}
-      onVoidItem={() => navigation?.navigate('Cancel', { orderId: selected?.no })}
+      onVoidItem={() => navigation?.navigate('Cancel', { orderId: selected?.no, table: selected?.table ?? '-', cashier: selected?.cashier ?? '-', total: selected?.total ?? 0, }) }
       onEmail={() => { setMailMsg(''); setMailTo(''); setMailOpen(true); }}
       onClose={() => setSelectedId(null)}
       showClose={!isTablet}
     />
   ) : (
     <View style={styles.noSel}>
-      <Text style={styles.noSelText}>Pilih transaksi untuk melihat detail</Text>
+      <Text style={styles.noSelText}>{t('hist_pick_hint')}</Text>
     </View>
   );
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.backBtn} onPress={() => navigation?.goBack?.()}>‹</Text>
-          <Text style={styles.histIcon}>◷</Text>
-          <Text style={styles.headerTitle}>Riwayat Penjualan</Text>
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> {langToggle} <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+          </Pressable>
         </View>
-        <View style={styles.onlinePill}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>Online</Text>
-          <Text style={styles.onlineCaret}>▾</Text>
-        </View>
-      </View>
+      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
 
       <View style={styles.searchRow}>
         <Text style={styles.searchIcon}>⌕</Text>
-        <TextInput
+        <View style={{ flex: 1 }}> <Text style={styles.fieldLabel}>{t('hist_search_label')}</Text> <TextInput
           style={styles.search}
-          placeholder="Cari nomor transaksi / tagihan"
+          placeholder={t('hist_search_ph')}
           placeholderTextColor={colors.faint}
           value={query}
           onChangeText={setQuery}
         />
       </View>
 
-      <View style={styles.filterRow}>
+      </View> <View style={styles.filterRow}>
         <Pressable style={styles.filterBtn} onPress={() => setPicker('date')}>
           <Text style={styles.filterIcon}>▦</Text>
           <Text style={styles.filterText} numberOfLines={1}>
-            {fDate ?? 'Tanggal'}
+            {fDate ?? t('hist_f_date')}
           </Text>
           <Text style={styles.filterCaret}>▾</Text>
         </Pressable>
         <Pressable style={styles.filterBtn} onPress={() => setPicker('status')}>
           <Text style={styles.filterText} numberOfLines={1}>
-            {fStatus ? STATUS_LABEL[fStatus] : 'Status'}
+            {fStatus ? STATUS_LABEL[fStatus] : t('hist_f_status')}
           </Text>
           <Text style={styles.filterCaret}>▾</Text>
         </Pressable>
         <Pressable style={styles.filterBtn} onPress={() => setPicker('payment')}>
           <Text style={styles.filterText} numberOfLines={1}>
-            {fPayment ?? 'Pembayaran'}
+            {fPayment ?? t('hist_f_payment')}
           </Text>
           <Text style={styles.filterCaret}>▾</Text>
         </Pressable>
         {hasFilter && (
-          <Pressable style={styles.clearBtn} onPress={clearAll} accessibilityLabel="Bersihkan filter">
+          <Pressable style={styles.clearBtn} onPress={clearAll} accessibilityLabel={t('hist_clear')}>
             <Text style={styles.clearText}>✕</Text>
           </Pressable>
         )}
       </View>
 
-      <View style={styles.summaryRow}>
-        <Text style={styles.summaryLeft}>Penjualan Tanggal : {fDate ?? 'Semua'}</Text>
-        <Text style={styles.summaryRight}>{list.length} TRANSAKSI</Text>
+      <View style={styles.recapCard}> <View style={styles.recapTop}> <View style={{ flex: 1 }}>
+        <Text style={styles.recapLabel}>{t('hist_omzet')}</Text> <Text style={styles.recapValue}>{rp(recap.omzet)}</Text> <Text style={styles.recapSub}> {recap.count} {t('hist_trx')} - {t('hist_sales_on')} : {fDate ?? t('c_all')} </Text> {Object.entries(recap.byPay).slice(0, 4).map(([m, v]) => (
+        <Text key={m} style={styles.recapLine}> {m} - {rp(v)} </Text> ))}
       </View>
 
-      {isTablet ? (
+      <View style={styles.onlinePill}> <View style={styles.onlineDot} /> <Text style={styles.onlineText}>{t('hist_online')}</Text> </View> </View> <View style={styles.recapBtns}> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}> <Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text> </Pressable> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}> <Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text> </Pressable> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}> <Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text> </Pressable> </View> </View> {isTablet ? (
         <View style={styles.split}>
           <View style={styles.splitList}>
             <TxnList
               data={list}
               compact
               selectedId={selected?.id ?? null}
-              onSelect={(t) => setSelectedId(t.id)}
+              onSelect={(tr) => setSelectedId(tr.id)} statusLabel={(s) => STATUS_LABEL[s]} emptyTitle={t('hist_empty')} emptySub={t('hist_empty_sub')} t={t}
             />
           </View>
           <View style={styles.splitDetail}>
@@ -222,7 +191,7 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
           </View>
         </View>
       ) : (
-        <TxnList data={list} selectedId={null} onSelect={(t) => setSelectedId(t.id)} />
+        <TxnList data={list} selectedId={null} onSelect={(tr) => setSelectedId(tr.id)} statusLabel={(s) => STATUS_LABEL[s]} emptyTitle={t('hist_empty')} emptySub={t('hist_empty_sub')} t={t} />
       )}
 
       {!isTablet && (
@@ -240,7 +209,7 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
         <View style={styles.centerWrap}>
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>
-              {picker === 'date' ? 'Pilih Tanggal' : picker === 'status' ? 'Status' : 'Pembayaran'}
+              {picker === 'date' ? t('hist_pick_date') : picker === 'status' ? t('hist_f_status') : t('hist_f_payment')}
             </Text>
             {pickerOptions.map((o) => (
               <Pressable
@@ -267,7 +236,7 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
                 setPicker(null);
               }}
             >
-              <Text style={styles.btnGhostText}>Semua</Text>
+              <Text style={styles.btnGhostText}>{t('c_all')}</Text>
             </Pressable>
           </View>
         </View>
@@ -276,22 +245,19 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
       <Modal visible={payModal} animationType="fade" transparent>
         <View style={styles.centerWrap}>
           <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>Ubah Pembayaran</Text>
+            <Text style={styles.dialogTitle}>{t('hist_change_pay')}</Text>
             <Text style={styles.dialogSub}>{selected?.no}</Text>
             {PAY_OPTIONS.map((o) => (
               <Pressable
                 key={o}
                 style={styles.optRow}
-                onPress={() => {
-                  if (selected) setPayOver((p) => ({ ...p, [selected.id]: o }));
-                  setPayModal(false);
-                }}
+                onPress={() => changePay(o)}
               >
                 <Text style={styles.optText}>{o}</Text>
               </Pressable>
             ))}
             <Pressable style={styles.btnGhost} onPress={() => setPayModal(false)}>
-              <Text style={styles.btnGhostText}>Batal</Text>
+              <Text style={styles.btnGhostText}>{t('c_cancel')}</Text>
             </Pressable>
           </View>
         </View>
@@ -300,13 +266,13 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
       <Modal visible={confirmVoid} animationType="fade" transparent>
         <View style={styles.centerWrap}>
           <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>Void Transaksi?</Text>
+            <Text style={styles.dialogTitle}>{t('hist_void_title')}</Text>
             <Text style={styles.dialogSub}>
-              Transaksi {selected?.no} akan dibatalkan dan tercatat pada Cetak Rincian Void.
+              {t('hist_void_title')} {selected?.no}
             </Text>
-            <TextInput
+            <Text style={styles.fieldLabel}>{t('hist_void_reason_ph')}</Text> <TextInput
               style={styles.noteInput}
-              placeholder="Alasan pembatalan (wajib)"
+              placeholder={t('hist_void_reason_ph')}
               placeholderTextColor={colors.faint}
               value={voidNote}
               onChangeText={setVoidNote}
@@ -320,28 +286,28 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
                   setVoidNote('');
                 }}
               >
-                <Text style={styles.btnGhostText}>Batal</Text>
+                <Text style={styles.btnGhostText}>{t('c_cancel')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.btnVoid, !voidNote.trim() && styles.btnDisabled]}
                 disabled={!voidNote.trim()}
                 onPress={doVoid}
               >
-                <Text style={styles.btnVoidText}>Ya, Void</Text>
+                <Text style={styles.btnVoidText}>{t('hist_void_yes')}</Text>
               </Pressable>
             </View>
-          </View>
+          <Pressable style={[styles.btnPrint, (!voidNote.trim()) && styles.btnDisabled]} disabled={!voidNote.trim()} onPress={doVoidAndPrint} > <Text style={styles.btnPrintText}>{t('hist_void_print')}</Text> </Pressable> </View>
         </View>
       </Modal>
 
       <Modal visible={mailOpen} animationType="fade" transparent>
         <View style={styles.centerWrap}>
           <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>Kirim Struk via Email</Text>
-            <Text style={styles.dialogSub}>{selected?.no} · {selected ? rp(selected.total) : ''}</Text>
-            <TextInput
+            <Text style={styles.dialogTitle}>{t('hist_mail_title')}</Text>
+            <Text style={styles.dialogSub}>{selected?.no} - {selected ? rp(selected.total) : ''}</Text>
+            <Text style={styles.fieldLabel}>{t('hist_email')}</Text> <TextInput
               style={styles.mailInput}
-              placeholder="nama@email.com"
+              placeholder={t('hist_mail_ph')}
               placeholderTextColor={colors.faint}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -351,39 +317,36 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
             {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
             <View style={styles.dialogBtns}>
               <Pressable style={styles.btnGhost} onPress={() => setMailOpen(false)}>
-                <Text style={styles.btnGhostText}>Tutup</Text>
+                <Text style={styles.btnGhostText}>{t('c_close')}</Text>
               </Pressable>
               <Pressable style={styles.btnPrint} onPress={sendMail}>
-                <Text style={styles.btnPrintText}>Kirim</Text>
+                <Text style={styles.btnPrintText}>{t('hist_mail_send')}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
     </View>
-  );
-}
-
-function TxnList({
+  );}function TxnList({
   data,
   compact,
   selectedId,
   onSelect,
-}: {
+statusLabel, emptyTitle, emptySub, t,}: {
   data: Transaction[];
   compact?: boolean;
   selectedId: string | null;
-  onSelect: (t: Transaction) => void;
-}) {
+  onSelect: (tr: Transaction) => void;
+statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: (k: string) => string;}) {
   return (
     <FlatList
       data={data}
-      keyExtractor={(t) => t.id}
+      keyExtractor={(tr) => tr.id}
       contentContainerStyle={styles.list}
       ListEmptyComponent={
         <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>Belum Ada Transaksi</Text>
-          <Text style={styles.emptySub}>Transaksi yang selesai akan tercatat di sini</Text>
+          <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+          <Text style={styles.emptySub}>{emptySub}</Text>
         </View>
       }
       renderItem={({ item }) => (
@@ -399,7 +362,7 @@ function TxnList({
                 </Text>
                 <View style={[styles.badge, { backgroundColor: statusBg(item.status) }]}>
                   <Text style={[styles.badgeText, { color: statusColor(item.status) }]}>
-                    {STATUS_LABEL[item.status]}
+                    {statusLabel(item.status)}
                   </Text>
                 </View>
               </View>
@@ -412,84 +375,76 @@ function TxnList({
           ) : (
             <View style={styles.cardCols}>
               <View style={styles.cardColL}>
-                <Field label="Tanggal" value={`${item.date} ${item.time}`} />
-                <Field label="Info tambahan" value={item.cashier} />
-                <Field label="Nomor Transaksi" value={item.no} />
-                <Field label="Nomor Bill" value={billNo(item)} />
+                <Field label={t('hist_col_date')} value={`${item.date} ${item.time}`} />
+                <Field label={t('hist_col_extra')} value={item.cashier} />
+                <Field label={t('hist_col_trxno')} value={item.no} />
+                <Field label={t('hist_col_billno')} value={billNo(item)} />
               </View>
               <View style={styles.cardColR}>
-                <Text style={styles.fieldLabel}>Status</Text>
+                <Text style={styles.fieldLabel}>{t('hist_col_status')}</Text>
                 <View style={[styles.badge, { backgroundColor: statusBg(item.status) }]}>
                   <Text style={[styles.badgeText, { color: statusColor(item.status) }]}>
-                    {STATUS_LABEL[item.status]}
+                    {statusLabel(item.status)}
                   </Text>
                 </View>
-                <Field label="Total Penjualan" value={rp(item.total)} bold />
-                <Field label="Metode Pembayaran" value={item.payment} />
+                <Field label={t('hist_col_total')} value={rp(item.total)} bold />
+                <Field label={t('hist_col_pay')} value={item.payment} />
               </View>
             </View>
           )}
         </Pressable>
       )}
     />
-  );
-}
-
-function Field({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  );}function Field({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <Text style={[styles.fieldValue, bold && styles.fieldValueBold]}>{value}</Text>
     </View>
-  );
-}
-
-function DetailPanel({
+  );}function DetailPanel({
   txn,
   payment,
-  onPrint,
+  statusLabel, t, onPrint,
   onChangePay,
   onVoid,
   onVoidItem,
   onEmail,
   onClose,
-  showClose,
-}: {
+  showClose,}: {
   txn: Transaction;
   payment: string;
-  onPrint: () => void;
+  statusLabel: string; t: (k: string) => string; onPrint: () => void;
   onChangePay: () => void;
   onVoid: () => void;
   onVoidItem: () => void;
   onEmail: () => void;
   onClose: () => void;
-  showClose: boolean;
-}) {
+  showClose: boolean;}) {
   const qty = txn.items.reduce((a, i) => a + i.qty, 0);
   return (
     <View style={styles.detail}>
       <View style={styles.detailHead}>
         <View>
           <Text style={styles.detailMode}>
-            {txn.mode} • Kasir {txn.cashier}
+            {txn.mode} - {t('c_cashier')} {txn.cashier}
           </Text>
           <Text style={styles.detailNo}>
-            {txn.no} • {txn.date} {txn.time}
+            {txn.no} - {txn.date} {txn.time}
           </Text>
         </View>
         <View style={[styles.badge, { backgroundColor: statusBg(txn.status) }]}>
           <Text style={[styles.badgeText, { color: statusColor(txn.status) }]}>
-            {STATUS_LABEL[txn.status]}
+            {statusLabel}
           </Text>
         </View>
       </View>
 
       <View style={styles.payRow}>
-        <Text style={styles.rowLabel}>Metode Pembayaran</Text>
+        <Text style={styles.rowLabel}>{t('hist_pay_method')}</Text>
         <Text style={styles.rowValue}>{payment}</Text>
       </View>
 
-      <View style={styles.divider} />
+      <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('hist_mode')}</Text> <Text style={styles.rowValue}>{txn.mode}</Text> </View> <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_table')}</Text> <Text style={styles.rowValue}>{txn.table ?? '-'}</Text> </View> <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_cashier')}</Text> <Text style={styles.rowValue}>{txn.cashier}</Text> </View> <View style={styles.divider} />
       {txn.items.map((it, idx) => (
         <View key={idx} style={styles.itemRow}>
           <View style={styles.qtyCircle}>
@@ -508,65 +463,57 @@ function DetailPanel({
       <View style={styles.divider} />
 
       <View style={styles.row}>
-        <Text style={styles.rowLabel}>Kuantitas</Text>
-        <Text style={styles.rowValue}>{qty}</Text>
+        <Text style={styles.rowLabel}>{t('hist_qty')}</Text>
+        <Text style={styles.rowValue}>{qty} {t('hist_items')}</Text>
       </View>
       <View style={styles.row}>
-        <Text style={styles.totalLabel}>TOTAL</Text>
-        <Text style={styles.totalValue}>{rp(txn.total)}</Text>
+        <Text style={styles.rowLabel}>{t('c_subtotal')}</Text>
+        <Text style={styles.rowValue}>{rp(txn.subtotal)}</Text> </View> <View style={styles.row}> <Text style={styles.totalLabel}>{t('c_total')}</Text> <Text style={styles.totalValue}>{rp(txn.total)}</Text>
       </View>
 
       <View style={styles.detailBtns}>
         <Pressable style={styles.btnPrint} onPress={onPrint}>
-          <Text style={styles.btnPrintText}>Cetak Ulang</Text>
+          <Text style={styles.btnPrintText}>{t('c_reprint')}</Text>
         </Pressable>
         <Pressable style={styles.btnPrint} onPress={onEmail}>
-          <Text style={styles.btnPrintText}>Email</Text>
+          <Text style={styles.btnPrintText}>{t('hist_email')}</Text>
         </Pressable>
         {txn.status === 'Selesai' && (
           <Pressable style={styles.btnChange} onPress={onChangePay}>
-            <Text style={styles.btnChangeText}>Ubah Pembayaran</Text>
+            <Text style={styles.btnChangeText}>{t('hist_change_pay')}</Text>
           </Pressable>
         )}
         {txn.status === 'Selesai' && (
           <Pressable style={styles.btnVoid} onPress={onVoid}>
-            <Text style={styles.btnVoidText}>Void</Text>
+            <Text style={styles.btnVoidText}>{t('hist_void')}</Text>
           </Pressable>
         )}
         {txn.status === 'Selesai' && (
           <Pressable style={styles.btnGhost} onPress={onVoidItem}>
-            <Text style={styles.btnGhostText}>Void per Item ›</Text>
+            <Text style={styles.btnGhostText}>{t('hist_void_item')} ›</Text>
           </Pressable>
         )}
         {showClose && (
           <Pressable style={styles.btnGhost} onPress={onClose}>
-            <Text style={styles.btnGhostText}>Tutup</Text>
+            <Text style={styles.btnGhostText}>{t('c_close')}</Text>
           </Pressable>
         )}
       </View>
     </View>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    paddingTop: 52,
-    paddingBottom: 14,
-    paddingHorizontal: 16,
+  headRight: {
+
     flexDirection: 'row',
-    justifyContent: 'space-between',
+
     alignItems: 'center',
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  backBtn: { color: colors.white, fontSize: 26, fontFamily: fonts.bold },
-  histIcon: { color: colors.white, fontSize: 18 },
-  headerTitle: { fontFamily: fonts.bold, fontSize: 19, color: colors.white },
+   gap: 12 },
+  langTxt: { color: colors.white,  fontFamily: fonts.bold, fontSize: 13 },
+  burger: { width: 22, height: 22 },
   onlinePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.paleGreen,
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -574,27 +521,27 @@ const styles = StyleSheet.create({
   },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
   onlineText: { fontFamily: fonts.bold, fontSize: 12, color: colors.green },
-  onlineCaret: { fontSize: 10, color: colors.green },
+
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
     marginHorizontal: 16,
-    marginTop: 20,
+    marginTop: 12,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.line,
     paddingHorizontal: 12,
-  },
+  paddingVertical: 6, },
   searchIcon: { fontSize: 16, color: colors.faint, marginRight: 8 },
   search: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 9,
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: colors.text,
   },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 18, gap: 8, alignItems: 'center' },
+  filterRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, gap: 8, alignItems: 'center' },
   filterBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -618,16 +565,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clearText: { color: colors.white, fontSize: 14, fontWeight: '700' },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
+  clearText: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
+  recapCard: {
+    backgroundColor: colors.navy, borderRadius: 12, marginHorizontal: 16, marginTop: 12, padding: 14, }, recapTop: { flexDirection: 'row',
+    gap: 10
   },
-  summaryLeft: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
-  summaryRight: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
-  split: { flex: 1, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16 },
+  recapLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.navyTint }, recapValue: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, marginTop: 4 }, recapSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 4 },
+  recapLine: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 2 }, recapBtns: { flexDirection: 'row', gap: 8, marginTop: 10 }, recapBtn: { flex: 1, backgroundColor: colors.white, borderRadius: 8, paddingVertical: 9, alignItems: 'center', }, recapBtnTxt: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
+  split: { flex: 1, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12 },
   splitList: { flex: 1, minWidth: 0 },
   splitDetail: {
     flex: 1.1,
@@ -637,7 +582,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   detailWrap: { padding: 16, flexGrow: 1 },
-  list: { paddingBottom: 24 },
+  list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
   card: {
     backgroundColor: colors.card,
     borderRadius: 12,
@@ -662,7 +607,7 @@ const styles = StyleSheet.create({
   cardColL: { flex: 1.2, minWidth: 0 },
   cardColR: { flex: 1, minWidth: 0 },
   field: { marginBottom: 7 },
-  fieldLabel: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint },
+  fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted },
   fieldValue: { fontFamily: fonts.medium, fontSize: 12, color: colors.text, marginTop: 1 },
   fieldValueBold: { fontFamily: fonts.bold, color: colors.navy, fontSize: 14 },
   badge: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },
@@ -712,7 +657,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     minWidth: 100,
-  },
+  marginTop: 8, paddingHorizontal: 16, },
   btnPrintText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   btnChange: {
     flex: 1,
@@ -790,7 +735,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.text,
-    marginTop: 12,
+    marginTop: 6,
     minHeight: 72,
     textAlignVertical: 'top',
   },
@@ -803,8 +748,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.text,
-    marginTop: 12,
+    marginTop: 6,
   },
   mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
-  dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
-});
+  dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },});

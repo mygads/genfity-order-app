@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 
 type Nav = {
@@ -23,7 +23,7 @@ const DIVIDER = '#D8D8D8';
  */
 export default function QrHowScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
 
   const goBack = () => {

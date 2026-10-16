@@ -18,7 +18,7 @@ import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, unwrap } from '../../lib/apiSource';
-import { totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -33,6 +33,7 @@ type Props = {
       mode?: string;
       customer?: string;
       tamu?: number;
+      memberId?: string;
       ongkir?: number;
       voucher?: { code: string; amount: number; kind?: string };
       customItem?: { name: string; price: number; qty: number; note?: string };
@@ -176,10 +177,23 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [voucher, setVoucher] = useState<{ code: string; amount: number; kind?: string } | null>(
     route?.params?.voucher ?? null,
   );
-  /** Ongkir - diisi via dialog tombol Ongkir, default 0, diteruskan ke CartDetail/Pay. */
-  const [ongkir, setOngkir] = useState(Math.max(0, Number(route?.params?.ongkir) || 0));
+  /** Ongkir - bawaan per mode dari FEE_DEFAULTS, bisa diubah via dialog tombol Ongkir, diteruskan ke CartDetail/Pay. */
+  const [ongkir, setOngkir] = useState(Math.max(0, Number(route?.params?.ongkir ?? defaultOngkirForMode('DINE IN')) || 0));
   const [ongkirOpen, setOngkirOpen] = useState(false);
-  const [ongkirDraft, setOngkirDraft] = useState('0');
+  const [ongkirDraft, setOngkirDraft] = useState(String(defaultOngkirForMode('DINE IN')));
+  /** Member terpilih - diteruskan ke CartDetail/Pay agar poin + deposit nempel. */
+  const [memberId, setMemberId] = useState(route?.params?.memberId ?? '');
+  /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
+  const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  useEffect(() => {
+    let alive = true;
+    void getTaxRate().then((r) => {
+      if (alive) setTaxRate(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [cart, setCart] = useState<CartItem[]>([
     {
       id: 'p11',
@@ -314,7 +328,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         if (!alive || !row) return;
         setShiftInfo({ open: row.status === 'open' || !row.clockOut });
       } catch {
-        /* DB belum siap — fallback buka */
+        /* DB belum siap - fallback buka */
       }
     })();
     return () => {
@@ -334,6 +348,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (!p) return;
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
+    if (p.memberId !== undefined) setMemberId(p.memberId ?? '');
     /** Booking oper nama + jumlah tamu - gabung ke kolom info (bisa diedit kasir). */
     if (p.customer !== undefined || p.tamu !== undefined) {
       const nm = (p.customer ?? '').trim();
@@ -463,13 +478,14 @@ export default function CashierScreen({ navigation, route }: Props) {
     voucherAmt,
     subtotal,
     service,
-    ppnIncl,
+    taxIncl,
+    feeESB,
     ongkirCut: ongkirDiscount,
     ongkirNet,
     bruto,
     total,
     rounding,
-  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir });
+  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir, esbOrder: isMarketplaceMode(mode), taxRate });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
@@ -493,6 +509,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       table,
       ongkir,
       customer: customer.trim(),
+      ...(memberId.trim() ? { memberId: memberId.trim() } : {}),
       ...(voucher ? { voucher } : {}),
     });
   /** Dialog nominal ongkir - dibuka dari tombol Ongkir di toolbar. */
@@ -731,7 +748,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.crumbActive}>{activeSub}</Text>
         </>
       )}
-      <Text style={styles.crumbDim}> · {filtered.length} menu · PPN 11% incl, service excl</Text>
+      <Text style={styles.crumbDim}> · {filtered.length} menu · PPN {taxRate}% incl, service excl</Text>
     </View>
   );
 
@@ -983,12 +1000,18 @@ export default function CashierScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>{t('taxIncl')}</Text>
-          <Text style={styles.totalVal}>{rp(ppnIncl)}</Text>
+          <Text style={styles.totalVal}>{rp(taxIncl)}</Text>
         </View>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>{t('serviceExcl')}</Text>
           <Text style={styles.totalVal}>{rp(service)}</Text>
         </View>
+        {feeESB > 0 && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>{t('feeESB')}</Text>
+            <Text style={styles.totalVal}>{rp(feeESB)}</Text>
+          </View>
+        )}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>{t('deliveryFee')}</Text>
           <Text style={styles.totalVal}>{rp(ongkirNet)}</Text>
@@ -1016,7 +1039,20 @@ export default function CashierScreen({ navigation, route }: Props) {
             <Image source={require('../../../assets/icons/export.webp')} style={styles.btnIcon} resizeMode="contain" />
             <Text style={styles.btnSaveText}>{t('save')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.btnPrint} onPress={() => navigation?.navigate('Receipt', { total, mode, ...(table ? { table } : {}) })}>
+          <TouchableOpacity style={styles.btnPrint} onPress={() => navigation?.navigate('Receipt', {
+            total, mode,
+            items: activeCart,
+            discount: discountTotal + voucherAmt,
+            ...(voucher ? { voucherCode: voucher.code } : {}),
+            ...(table ? { table } : {}),
+            ...(customer.trim() ? { customer: customer.trim() } : {}),
+            ...(memberId.trim() ? { memberId: memberId.trim() } : {}),
+            ongkir: ongkirNet,
+            ...(service > 0 ? { service } : {}),
+            ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+            ...(rounding !== 0 ? { rounding } : {}),
+            ...(feeESB > 0 ? { feeESB } : {}),
+          })}>
             <Image source={require('../../../assets/icons/print_blue.webp')} style={styles.btnIcon} resizeMode="contain" />
             <Text style={styles.btnPrintText}>{t('printReceipt')}</Text>
           </TouchableOpacity>

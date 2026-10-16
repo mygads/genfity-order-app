@@ -1,27 +1,16 @@
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { colors, fonts, rp, rpNum, wideCenter } from '../../theme';
-
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-/** Akun (CoA) kas kecil ala APK — di app nyata dari pull expense-chart-of-accounts. */
-const COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Kas Kecil', 'Lainnya'];
-
-export default function PettyCashFormScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Kas Kecil', 'Lainnya'];interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA kas kecil: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb(); const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}export default function PettyCashFormScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [arus, setArus] = useState<'Keluar' | 'Masuk'>('Keluar');
-  const [coa, setCoa] = useState(COA[0]);
+  const isTablet = width >= TABLET_BP;
+  const { t } = useLang(); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [arus, setArus] = useState<'Keluar' | 'Masuk'>('Keluar');
+  const [coa, setCoa] = useState(FALLBACK_COA[0]);
   const [keterangan, setKeterangan] = useState('');
   const [jumlah, setJumlah] = useState('');
   const [catatan, setCatatan] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); return () => { alive = false; }; }, []);
 
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
-  const ready = keterangan.trim().length >= 3 && jumlahNum > 0;
+  const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
 
   const pickPhoto = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -38,21 +27,20 @@ export default function PettyCashFormScreen({ navigation }: Props) {
     if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
   };
 
-  if (done) {
+  /** Simpan ke tr_branchexpense + dokumen foto, antrekan outbox branch-expenses, lalu tampilkan hasil. */ const save = async () => { if (!ready) return; setSaving(true); const id = `PC-${Date.now()}`; const now = new Date().toISOString(); const signed = arus === 'Masuk' ? jumlahNum : -jumlahNum; const kasir = getSession()?.name ?? ''; const branchId = getTerminal().branchId || 'BR-01'; const note = catatan.trim() ? `${keterangan.trim()} | ${catatan.trim()}` : keterangan.trim(); try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, signed, note, kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [`doc-${Date.now()}`, id, photo], ); } await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo }); }; if (done) {
     return (
       <View style={s.root}>
-        <View style={[s.body, isTablet && wideCenter]}>
+        <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /> <View style={[s.body, isTablet && wideCenter]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
-          <Text style={s.title}>Kas Kecil Tercatat</Text>
-          <Text style={s.sub}>{arus} • {coa} • {rp(jumlahNum)}</Text>
-          {photo ? <Image source={{ uri: photo }} style={s.donePhoto} /> : null}
-          <TouchableOpacity style={s.primary} onPress={() => navigation?.navigate('PettyCash')}>
-            <Text style={s.primaryT}>Lihat Daftar</Text>
+          <Text style={s.title}>{t('petty.doneTitle')}</Text>
+          <Text style={s.sub}>{done.arus} - {done.coa} - {rp(done.jumlah)}</Text> {done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
+          <TouchableOpacity style={s.primary} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString('id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })}> <Text style={s.primaryT}>{t('petty.detailTitle')}</Text> </TouchableOpacity> <TouchableOpacity style={s.ghost} onPress={() => navigation?.navigate('PettyCash')}>
+            <Text style={s.ghostT}>{t('petty.viewList')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.ghost}
-            onPress={() => { setDone(false); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }}>
-            <Text style={s.ghostT}>Catat Lagi</Text>
+            onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }}>
+            <Text style={s.ghostT}>{t('petty.recordAgain')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -61,16 +49,11 @@ export default function PettyCashFormScreen({ navigation }: Props) {
 
   return (
     <View style={s.root}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack?.()} style={s.backBtn}>
-          <Text style={s.backTxt}>‹</Text>
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Form Kas Kecil</Text>
-        <View style={s.backBtn} />
-      </View>
+      <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()}  />
+
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         <View style={s.card}>
-          <Text style={s.cardTitle}>Arus Kas</Text>
+          <Text style={s.cardTitle}>{t('petty.flow')}</Text>
           <View style={s.arusRow}>
             {(['Keluar', 'Masuk'] as const).map((a) => (
               <TouchableOpacity
@@ -78,7 +61,7 @@ export default function PettyCashFormScreen({ navigation }: Props) {
                 style={[s.arusBtn, arus === a && (a === 'Keluar' ? s.arusOut : s.arusIn)]}
                 onPress={() => setArus(a)}>
                 <Text style={[s.arusTxt, arus === a && s.arusTxtOn]}>
-                  {a === 'Keluar' ? '− Keluar' : '+ Masuk'}
+                  {a === 'Keluar' ? '- ' + t('petty.out') : '+ ' + t('petty.in')}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -86,9 +69,9 @@ export default function PettyCashFormScreen({ navigation }: Props) {
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Akun (CoA)</Text>
+          <Text style={s.cardTitle}>{t('petty.account')}</Text>
           <View style={s.chips}>
-            {COA.map((c) => (
+            {coaList.map((c) => (
               <TouchableOpacity
                 key={c}
                 style={[s.chip, coa === c && s.chipOn]}
@@ -100,8 +83,8 @@ export default function PettyCashFormScreen({ navigation }: Props) {
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Nominal & Keterangan</Text>
-          <Text style={s.label}>Jumlah *</Text>
+          <Text style={s.cardTitle}>{t('petty.nominalDesc')}</Text>
+          <Text style={s.label}>{t('petty.amount')}</Text>
           <View style={s.amountBox}>
             <Text style={s.rpPrefix}>Rp</Text>
             <TextInput
@@ -110,21 +93,21 @@ export default function PettyCashFormScreen({ navigation }: Props) {
               placeholder="0"
               placeholderTextColor={colors.faint}
               value={jumlahNum ? rpNum(jumlahNum) : ''}
-              onChangeText={(t) => setJumlah(t.replace(/\D/g, '').slice(0, 12))}
+              onChangeText={(v) => setJumlah(v.replace(/\D/g, '').slice(0, 12))}
             />
           </View>
-          <Text style={s.label}>Keterangan *</Text>
+          <Text style={s.label}>{t('petty.desc')}</Text>
           <TextInput
             style={s.input}
-            placeholder="Contoh: Belanja plastik & tissue"
+            placeholder={t('petty.descPh')}
             placeholderTextColor={colors.faint}
             value={keterangan}
             onChangeText={setKeterangan}
           />
-          <Text style={s.label}>Catatan (opsional)</Text>
+          <Text style={s.label}>{t('petty.note')}</Text>
           <TextInput
             style={s.noteInput}
-            placeholder="Catatan tambahan"
+            placeholder={t('petty.notePh')}
             placeholderTextColor={colors.faint}
             multiline
             value={catatan}
@@ -133,22 +116,22 @@ export default function PettyCashFormScreen({ navigation }: Props) {
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardTitle}>Foto Bukti (opsional)</Text>
+          <Text style={s.cardTitle}>{t('petty.photo')}</Text>
           {photo ? (
             <Image source={{ uri: photo }} style={s.preview} />
           ) : (
-            <Text style={s.hint}>Lampirkan foto struk/nota sebagai bukti kas.</Text>
+            <Text style={s.hintLeft}>{t('petty.photoHint')}</Text>
           )}
           <View style={s.photoRow}>
             <TouchableOpacity style={s.photoBtn} onPress={takePhoto}>
-              <Text style={s.photoBtnT}>📷 Kamera</Text>
+              <Text style={s.photoBtnT}>{t('petty.camera')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
-              <Text style={s.photoBtnT}>🖼 Galeri</Text>
+              <Text style={s.photoBtnT}>{t('petty.gallery')}</Text>
             </TouchableOpacity>
             {photo ? (
               <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={10}>
-                <Text style={s.del}>Hapus</Text>
+                <Text style={s.del}>{t('common.delete')}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -157,35 +140,21 @@ export default function PettyCashFormScreen({ navigation }: Props) {
         <TouchableOpacity
           style={[s.primary, !ready && s.disabled]}
           disabled={!ready}
-          onPress={() => setDone(true)}>
-          <Text style={s.primaryT}>Simpan • {rp(jumlahNum)}</Text>
+          onPress={save}>
+          <Text style={s.primaryT}>{t('petty.save')} - {rp(jumlahNum)}</Text>
         </TouchableOpacity>
         {!ready && (
-          <Text style={s.hint}>Isi keterangan (min. 3 huruf) dan jumlah untuk menyimpan.</Text>
+          <Text style={s.hint}>{t('petty.fillHint')}</Text>
         )}
       </ScrollView>
     </View>
-  );
-}
-
-const s = StyleSheet.create({
+  );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 48,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backBtn: { width: 32, alignItems: 'center' },
-  backTxt: { color: colors.white, fontSize: 28, fontFamily: fonts.medium },
-  headerTitle: { color: colors.white, fontSize: 17, fontFamily: fonts.bold },
+
   body: { padding: 16, paddingBottom: 40, flexGrow: 1 },
-  card: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginBottom: 12 },
+  card: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.line },
   cardTitle: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
-  label: { fontSize: 13, fontFamily: fonts.medium, color: colors.muted, marginTop: 12, marginBottom: 6 },
+  label: { fontSize: 12, fontFamily: fonts.semibold, color: colors.muted, marginTop: 12, marginBottom: 6 },
   arusRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   arusBtn: { flex: 1, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingVertical: 13, alignItems: 'center', backgroundColor: colors.card },
   arusOut: { backgroundColor: colors.red, borderColor: colors.red },
@@ -201,21 +170,21 @@ const s = StyleSheet.create({
   chipTxt: { fontSize: 12, fontFamily: fonts.medium, color: colors.muted },
   chipTxtOn: { color: colors.orangeDark },
   amountBox: {
-    flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.orange,
-    borderRadius: 10, paddingHorizontal: 14, backgroundColor: colors.paleOrange,
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.line,
+    borderRadius: 10, paddingHorizontal: 12, backgroundColor: colors.white,
   },
-  rpPrefix: { fontSize: 18, fontFamily: fonts.bold, color: colors.orange },
-  amountInput: { flex: 1, fontSize: 24, fontFamily: fonts.bold, color: colors.text, paddingVertical: 12, marginLeft: 8, textAlign: 'right' },
+  rpPrefix: { fontSize: 16, fontFamily: fonts.bold, color: colors.muted },
+  amountInput: { flex: 1, fontSize: 20, fontFamily: fonts.bold, color: colors.text, paddingVertical: 10, marginLeft: 8, textAlign: 'right' },
   input: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 12,
-    fontSize: 14, fontFamily: fonts.regular, color: colors.text,
-  },
+    borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12,
+    paddingVertical: 10, fontSize: 14, fontFamily: fonts.regular, color: colors.text,
+  backgroundColor: colors.white, },
   noteInput: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 12,
-    fontSize: 14, fontFamily: fonts.regular, color: colors.text, minHeight: 70, textAlignVertical: 'top',
+    borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12,
+    paddingVertical: 10, fontSize: 14, fontFamily: fonts.regular, color: colors.text, backgroundColor: colors.white, minHeight: 70, textAlignVertical: 'top',
   },
   hint: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted, marginTop: 8, textAlign: 'center' },
-  preview: { width: '100%', height: 200, borderRadius: 10, backgroundColor: colors.line, marginTop: 10 },
+  hintLeft: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted, marginTop: 8 }, preview: { width: '100%', height: 200, borderRadius: 10, backgroundColor: colors.line, marginTop: 10 },
   photoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
   photoBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
@@ -232,5 +201,4 @@ const s = StyleSheet.create({
   checkMark: { color: colors.white, fontSize: 44, fontFamily: fonts.bold },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.text, marginTop: 14, textAlign: 'center' },
   sub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' },
-  donePhoto: { width: '100%', height: 200, borderRadius: 10, backgroundColor: colors.line, marginTop: 14 },
-});
+  donePhoto: { width: '100%', height: 200, borderRadius: 10, backgroundColor: colors.line, marginTop: 14 },});

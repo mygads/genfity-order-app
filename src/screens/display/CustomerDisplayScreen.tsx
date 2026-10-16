@@ -1,30 +1,13 @@
-import { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { colors, fonts, rp, wideCenterLg } from '../../theme';
-import { publishDisplay, subscribeDisplay } from '../../lib/display';
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { publishDisplay, subscribeDisplay } from '../../lib/display';import { onWsMessage, startRealtime } from '../../lib/realtime';import { initDb, query } from '../../lib/db';import { useLang,
 
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
-
-type ViewMode = 'queue' | 'order' | 'success';
-
-/** Item berjalan pada transaksi aktif (mock — nyata via event display/WS). */
-const RUNNING_ITEMS = [
-  { name: 'Nasi Goreng Spesial', qty: 2, price: 25000 },
-  { name: 'Es Teh Manis', qty: 2, price: 8000 },
-];
-const RUNNING_TOTAL = 66000;
-const PAID_TOTAL = 66000;
-
-const READY0 = ['A-01', 'A-03'];
-const PREP0 = ['A-04', 'A-05', 'A-06'];
-
-export default function CustomerDisplayScreen(_props: Props) {
+type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];const PROMO_DISCOUNT = 5000;/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
-  const [mode, setMode] = useState<ViewMode>('queue');
-  const [ready, setReady] = useState<string[]>(READY0);
-  const [prep, setPrep] = useState<string[]>(PREP0);
+  const isTablet = width >= TABLET_BP;
+  const { lang, setLang, t } = useLang(); const [mode, setMode] = useState<ViewMode>('queue');
+  const [ready, setReady] = useState<string[]>(EMPTY_TICKETS);
+  const [prep, setPrep] = useState<string[]>(EMPTY_TICKETS);
+  const [liveItems, setLiveItems] = useState<LiveItem[]>(EMPTY_ITEMS);
+  const runningTotal = liveItems.reduce((s, it) => s + it.qty * it.price, 0);
 
   useEffect(() => subscribeDisplay((e) => {
     if (e.type === 'call') {
@@ -34,6 +17,70 @@ export default function CustomerDisplayScreen(_props: Props) {
       setReady((r) => (r.includes(e.ticket) ? r : [...r, e.ticket].slice(0, 6)));
     }
   }), []);
+
+  /** Order nyata dari event WS (display/order/kitchen/ticket) - kosong jujur bila tak ada. */
+  useEffect(() => {
+    try { startRealtime(); } catch { /* abaikan */ }
+    const off = onWsMessage((msg) => {
+      if (!/display|order|kitchen|ticket|call|ready/i.test(msg.type)) return;
+      const p = (msg.payload ?? {}) as { ticket?: unknown; code?: unknown; no?: unknown; status?: unknown; items?: unknown };
+      const ticket = String(p.ticket ?? p.code ?? p.no ?? '').trim();
+      if (ticket) {
+        const done = /ready|call|done|selesai|paid/i.test(msg.type) || String(p.status ?? '').toLowerCase().includes('ready');
+        if (done) {
+          setPrep((pp) => pp.filter((x) => x !== ticket));
+          setReady((r) => (r.includes(ticket) ? r : [ticket, ...r].slice(0, 6)));
+        } else {
+          setPrep((pp) => (pp.includes(ticket) ? pp : [...pp, ticket].slice(0, 6)));
+        }
+      }
+      if (Array.isArray(p.items) && p.items.length > 0) {
+        const mapped: LiveItem[] = [];
+        for (const raw of p.items) {
+          const it = raw as { name?: unknown; menuName?: unknown; qty?: unknown; price?: unknown; unitPrice?: unknown };
+          const name = String(it.name ?? it.menuName ?? '').trim() || '-';
+          const qty = Math.max(1, Math.round(Number(it.qty) || 0));
+          const price = Math.round(Number(it.price ?? it.unitPrice) || 0);
+          mapped.push({ name, qty, price });
+        }
+        if (mapped.length > 0) setLiveItems(mapped);
+      }
+    });
+    return off;
+  }, []);
+
+  /** Poll status order tiap 10 detik dari SQLite: antrean + item/total berjalan ikut kasir. */
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        await initDb();
+        const heads = await query<{ salesNum: string; tableNo: string | null; queueNumber: string | null; status: string | null }>(
+          'SELECT salesNum, tableNo, queueNumber, status FROM tr_saleshead ORDER BY createdAt DESC LIMIT 20',
+        );
+        if (!alive || heads.length === 0) return;
+        const tag = (h: { salesNum: string; tableNo: string | null; queueNumber: string | null }) =>
+          h.queueNumber || h.tableNo || h.salesNum;
+        const prepLive = heads.filter((h) => (h.status ?? 'open') !== 'paid').map(tag).slice(0, 6);
+        const readyLive = heads.filter((h) => (h.status ?? '') === 'paid').map(tag).slice(0, 6);
+        if (prepLive.length > 0) setPrep(prepLive);
+        if (readyLive.length > 0) setReady(readyLive);
+        const openHead = heads.find((h) => (h.status ?? 'open') !== 'paid');
+        if (!openHead) return;
+        const rows = await query<{ menuName: string | null; qty: number | null; price: number | null }>(
+          'SELECT menuName, qty, price FROM tr_salesmenu WHERE salesNum = ?',
+          [openHead.salesNum],
+        );
+        if (!alive || rows.length === 0) return;
+        setLiveItems(rows.map((r) => ({ name: r.menuName ?? '-', qty: Number(r.qty ?? 0), price: Number(r.price ?? 0) })));
+      } catch {
+        /* DB belum siap - biarkan kosong jujur */
+      }
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 10000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
 
   const callNext = () => {
     if (prep.length === 0) return;
@@ -45,11 +92,11 @@ export default function CustomerDisplayScreen(_props: Props) {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.modeRow}>
+      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View> <View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
           <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive]}>
             <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>
-              {m === 'queue' ? 'Antrean' : m === 'order' ? 'Transaksi' : 'Sukses'}
+              {m === 'queue' ? t('disp_queue') : m === 'order' ? t('disp_order') : t('disp_success')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -58,13 +105,13 @@ export default function CustomerDisplayScreen(_props: Props) {
       {mode === 'queue' ? (
         <>
           <View style={styles.hero}>
-            <Text style={styles.shop}>ESB CABANG PORIS</Text>
-            <Text style={styles.heroSub}>Nomor pesanan Anda tampil di bawah</Text>
+            <Text style={[styles.shop, isTablet && styles.shopBig]}>{t('disp_shop')}</Text>
+            <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('disp_hero_sub')}</Text>
           </View>
           <View style={[styles.cols, !isTablet && styles.colsPhone]}>
             <View style={styles.col}>
-              <Text style={styles.colTitle}>⏳ Disiapkan</Text>
-              {prep.length === 0 && <Text style={styles.empty}>—</Text>}
+              <Text style={[styles.colTitle, isTablet && styles.colTitleBig]}>{t('disp_preparing')}</Text>
+              {prep.length === 0 && <Text style={styles.empty}>{t('disp_empty')}</Text>}
               {prep.map((n) => (
                 <View key={n} style={styles.ticketPrep}>
                   <Text style={[styles.ticketNo, isTablet && styles.ticketNoBig]}>{n}</Text>
@@ -72,8 +119,8 @@ export default function CustomerDisplayScreen(_props: Props) {
               ))}
             </View>
             <View style={styles.col}>
-              <Text style={styles.colTitle}>🔔 Siap Diambil</Text>
-              {ready.length === 0 && <Text style={styles.empty}>—</Text>}
+              <Text style={[styles.colTitle, isTablet && styles.colTitleBig]}>{t('disp_ready')}</Text>
+              {ready.length === 0 && <Text style={styles.empty}>{t('disp_empty')}</Text>}
               {ready.map((n, i) => (
                 <View key={n} style={[styles.ticketReady, i === 0 && styles.ticketFirst]}>
                   <Text style={[styles.ticketNo, styles.ticketNoReady, isTablet && styles.ticketNoBig]}>{n}</Text>
@@ -82,11 +129,11 @@ export default function CustomerDisplayScreen(_props: Props) {
             </View>
           </View>
           <View style={styles.promo}>
-            <Text style={styles.promoT}>Promo: QOQI10 — diskon Rp 5.000 untuk member GOLD</Text>
+            <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${rp(PROMO_DISCOUNT)}${t('disp_promo_post')}`} </Text>
           </View>
           <TouchableOpacity style={styles.primary} onPress={callNext} disabled={prep.length === 0}>
             <Text style={styles.primaryT}>
-              {prep.length === 0 ? 'Semua pesanan siap' : `Panggil ${prep[0]} ›`}
+              {prep.length === 0 ? t('disp_all_ready') : `${t('disp_call_pre')}${prep[0]}${t('disp_call_post')}`}
             </Text>
           </TouchableOpacity>
         </>
@@ -94,10 +141,11 @@ export default function CustomerDisplayScreen(_props: Props) {
 
       {mode === 'order' ? (
         <View style={styles.orderCard}>
-          <Text style={styles.shop}>Pesanan Berjalan · Meja A-01</Text>
-          <Text style={styles.heroSub}>Item terupdate otomatis dari kasir</Text>
+          <Text style={styles.shopDark}>{t('disp_running_title')}</Text>
+          <Text style={styles.orderSub}>{t('disp_running_sub')}</Text>
           <View style={styles.divider} />
-          {RUNNING_ITEMS.map((it) => (
+          {liveItems.length === 0 && <Text style={styles.empty}>{t('disp_empty')}</Text>}
+          {liveItems.map((it) => (
             <View key={it.name} style={styles.itemRow}>
               <Text style={styles.itemName}>{it.qty}x {it.name}</Text>
               <Text style={styles.itemPrice}>{rp(it.qty * it.price)}</Text>
@@ -105,16 +153,16 @@ export default function CustomerDisplayScreen(_props: Props) {
           ))}
           <View style={styles.divider} />
           <View style={styles.itemRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalVal}>{rp(RUNNING_TOTAL)}</Text>
+            <Text style={styles.totalLabel}>{t('disp_total')}</Text>
+            <Text style={[styles.totalVal, isTablet && styles.totalValBig]}>{rp(runningTotal)}</Text>
           </View>
           <View style={styles.qrisBox}>
-            <Text style={styles.qrisTitle}>Bayar via QRIS</Text>
+            <Text style={styles.qrisTitle}>{t('disp_qris_title')}</Text>
             <Image source={require('../../../assets/images/payment_qris.webp')} style={styles.qrisImg} resizeMode="contain" />
-            <Text style={styles.qrisSub}>Pindai untuk membayar {rp(RUNNING_TOTAL)}</Text>
+            <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${rp(runningTotal)}`}</Text>
           </View>
           <TouchableOpacity style={styles.primary} onPress={() => setMode('success')}>
-            <Text style={styles.primaryT}>Simulasikan Bayar Berhasil ›</Text>
+            <Text style={styles.primaryT}>{t('disp_sim_pay')}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -122,37 +170,34 @@ export default function CustomerDisplayScreen(_props: Props) {
       {mode === 'success' ? (
         <View style={styles.successCard}>
           <Text style={styles.successIcon}>✓</Text>
-          <Text style={styles.successTitle}>Pembayaran Berhasil</Text>
-          <Text style={styles.successTotal}>{rp(PAID_TOTAL)}</Text>
-          <Text style={styles.successSub}>Tunai · Kembalian Rp 0 · TRX-20261016-014</Text>
-          <Text style={styles.successSub}>Terima kasih — silakan ambil pesanan di kasir.</Text>
+          <Text style={[styles.successTitle, isTablet && styles.successTitleBig]}>{t('disp_pay_ok')}</Text>
+          <Text style={[styles.successTotal, isTablet && styles.successTotalBig]}>{rp(runningTotal)}</Text>
+          <Text style={styles.successSub}>{t('disp_cash_line')}</Text>
+          <Text style={styles.successSub}>{t('disp_thanks')}</Text>
           <TouchableOpacity style={styles.primaryDark} onPress={() => setMode('queue')}>
-            <Text style={styles.primaryDarkT}>Kembali ke Antrean</Text>
+            <Text style={styles.primaryDarkT}>{t('disp_back_queue')}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
 
-      <Text style={styles.hint}>Tampilan sekunder (presentation display) butuh dev-client — pratinjau di atas Tersinkron antar layar otomatis.</Text>
+      <Text style={styles.hint}>{t('disp_hint')}</Text>
     </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
+  );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.navyDark },
   body: { padding: 16, paddingBottom: 40 },
-  modeRow: { flexDirection: 'row', gap: 6 },
-  modeTab: { flex: 1, borderRadius: 10, paddingVertical: 9, alignItems: 'center', backgroundColor: colors.navy },
+  langWrap: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 },
+  langBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.navy }, langBtnOn: { backgroundColor: colors.white, borderColor: colors.white }, langT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navyTint }, langTOn: { color: colors.navy }, modeRow: { flexDirection: 'row', gap: 6, marginTop: 8 }, modeTab: { flex: 1, borderRadius: 10, paddingVertical: 9, alignItems: 'center', backgroundColor: colors.navy },
   modeTabActive: { backgroundColor: colors.white },
   modeText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navyTint },
   modeTextActive: { color: colors.navy },
   hero: { alignItems: 'center', marginTop: 16 },
   shop: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, textAlign: 'center' },
-  heroSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 4, textAlign: 'center' },
-  cols: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  shopBig: { fontSize: 28 }, heroSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.navyTint, marginTop: 4, textAlign: 'center' },
+  heroSubBig: { fontSize: 15 }, shopDark: { fontFamily: fonts.bold, fontSize: 18, color: colors.navy, textAlign: 'center' }, orderSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' }, cols: { flexDirection: 'row', gap: 12, marginTop: 16 },
   colsPhone: { flexDirection: 'column' },
   col: { flex: 1 },
   colTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.white, marginBottom: 8 },
-  empty: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint },
+  colTitleBig: { fontSize: 19 }, empty: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint },
   ticketPrep: { backgroundColor: colors.navy, borderRadius: 12, padding: 16, marginBottom: 8, alignItems: 'center' },
   ticketReady: { backgroundColor: colors.white, borderRadius: 12, padding: 16, marginBottom: 8, alignItems: 'center' },
   ticketFirst: { borderWidth: 3, borderColor: colors.orange },
@@ -161,7 +206,7 @@ const styles = StyleSheet.create({
   ticketNoBig: { fontSize: 40 },
   promo: { backgroundColor: colors.orange, borderRadius: 12, padding: 14, marginTop: 8 },
   promoT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white, textAlign: 'center' },
-  primary: { backgroundColor: colors.white, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 12 },
+  promoTBig: { fontSize: 16 }, primary: { backgroundColor: colors.white, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 12 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
   primaryDark: { backgroundColor: colors.navy, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 14 },
   primaryDarkT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
@@ -172,14 +217,13 @@ const styles = StyleSheet.create({
   itemPrice: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   totalLabel: { fontFamily: fonts.bold, fontSize: 15, color: colors.text },
   totalVal: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy },
-  qrisBox: { backgroundColor: colors.bg, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 12 },
+  totalValBig: { fontSize: 24 }, qrisBox: { backgroundColor: colors.bg, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 12 },
   qrisTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
   qrisImg: { width: 160, height: 160, marginVertical: 8 },
   qrisSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   successCard: { backgroundColor: colors.white, borderRadius: 16, padding: 28, marginTop: 24, alignItems: 'center' },
   successIcon: { fontSize: 56, color: colors.green, fontFamily: fonts.bold },
   successTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 8 },
-  successTotal: { fontFamily: fonts.bold, fontSize: 28, color: colors.text, marginTop: 6 },
-  successSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' },
-  hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, textAlign: 'center', marginTop: 12 },
-});
+  successTitleBig: { fontSize: 24 }, successTotal: { fontFamily: fonts.bold, fontSize: 28, color: colors.text, marginTop: 6 },
+  successTotalBig: { fontSize: 34 }, successSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' },
+  hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, textAlign: 'center', marginTop: 12 },});

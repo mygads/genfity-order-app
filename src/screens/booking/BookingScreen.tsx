@@ -58,7 +58,7 @@ function canonTableNo(raw: string): string {
   if (m) return `${m[1]}${m[2]}`;
   return t.replace(/-/g, '');
 }
-/** Label chip meja: "A2 · Dalam (2 kursi)" — kode kanonis + section + kapasitas. */
+/** Label chip meja: "A2 · Dalam (2 kursi)" - kode kanonis + section + kapasitas. */
 function tableLabel(tb: { no: string; section: string; kap: number }): string {
   return `${tb.no} · ${tb.section} (${tb.kap} kursi)`;
 }
@@ -126,6 +126,14 @@ export default function BookingScreen({ navigation }: Props) {
     }
     setWarn('');
     const code = canonTableNo(table);
+    // Validasi kapasitas ala POSLite: tamu tak boleh melebihi kursi meja tujuan.
+    // Kunci i18n khusus belum ada (lihat laporan) - pesan ID ringkas di sini.
+    const picked = CANON_TABLES.find((tb) => tb.no === code);
+    const paxNum = Number(tamu) || 2;
+    if (picked && paxNum > picked.kap) {
+      setWarn(`Tamu (${paxNum}) melebihi kapasitas meja ${code} (${picked.kap} kursi).`);
+      return;
+    }
     if (editingId) {
       const next = list.map((r) =>
         r.id === editingId
@@ -227,13 +235,13 @@ export default function BookingScreen({ navigation }: Props) {
 
   const reservasiList = (
     <>
-      <Text style={styles.count}>ESB Cabang Poris · {shown.length} reservasi aktif</Text>
+      <Text style={[styles.count, isTablet && styles.countBig]}>ESB Cabang Poris · {shown.length} reservasi aktif</Text>
       <TouchableOpacity onPress={() => setOnlyToday((v) => !v)} style={styles.todayToggle}>
         <Text style={styles.todayToggleT}>{onlyToday ? '☑ Hari ini saja' : '☐ Hari ini saja'}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.sec}>{t('bok_list')}</Text>
-      <Text style={styles.hint}>{t('bok_open_hint')}</Text>
+      <Text style={[styles.sec, isTablet && styles.secBig]}>{t('bok_list')}</Text>
+      <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('bok_open_hint')}</Text>
       {shown.length === 0 && <Text style={styles.empty}>{t('bok_empty')}</Text>}
       {shown.map((r) => (
         <View key={r.id} style={styles.card}>
@@ -242,9 +250,9 @@ export default function BookingScreen({ navigation }: Props) {
             onPress={() => navigation?.navigate('Cashier', { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu })}>
             <View style={styles.avatar}><Text style={styles.avatarT}>{r.name[0]}</Text></View>
             <View style={styles.info}>
-              <Text style={styles.name}>{r.name} · {r.tamu} tamu · Meja {r.table}</Text>
-              <Text style={styles.meta}>{maskHp(r.phone)} · Catatan: {r.note}</Text>
-              <Text style={styles.meta}>
+              <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} tamu · Meja {r.table}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{maskHp(r.phone)} · Catatan: {r.note}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>
                 {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>
               </Text>
             </View>
@@ -271,12 +279,12 @@ export default function BookingScreen({ navigation }: Props) {
       ))}
 
       <View style={[styles.card, styles.moveCard]}>
-        <Text style={styles.cardTitle}>Pindah item / meja</Text>
-        <Text style={styles.meta}>Pindahan antar meja lewat layar khusus - bukan dari booking.</Text>
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>Pindah item / meja</Text>
+        <Text style={[styles.meta, isTablet && styles.metaBig]}>Pindahan antar meja lewat layar khusus - bukan dari booking.</Text>
         <View style={[styles.links, { flexWrap: 'wrap', gap: 12 }]}>
-          <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}><Text style={styles.link}>Pindah Item ›</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}><Text style={styles.link}>Pindah Meja ›</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('Tables')}><Text style={styles.link}>Denah Meja ›</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>Pindah Item ›</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>Pindah Meja ›</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation?.navigate('Tables')}><Text style={[styles.link, isTablet && styles.linkBig]}>Denah Meja ›</Text></TouchableOpacity>
         </View>
       </View>
     </>
@@ -284,39 +292,39 @@ export default function BookingScreen({ navigation }: Props) {
 
   const bookingForm = (
     <>
-      <Text style={styles.sec}>{editingId ? t('bok_edit') : t('bok_new')}</Text>
-      <Text style={styles.hint}>
+      <Text style={[styles.sec, isTablet && styles.secBig]}>{editingId ? t('bok_edit') : t('bok_new')}</Text>
+      <Text style={[styles.hint, isTablet && styles.hintBig]}>
         {editingId ? t('bok_edit_hint') : t('bok_form_hint')}
       </Text>
-      <Text style={styles.label}>{t('bok_name_label')}</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder={t('bok_name_ph')} placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>{t('bok_phone_label')}</Text>
-      <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder={t('bok_phone_ph')} keyboardType="phone-pad" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>{t('bok_pax_label')}</Text>
-      <TextInput style={styles.input} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>{t('c_table')}</Text>
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_name_label')}</Text>
+      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={name} onChangeText={setName} placeholder={t('bok_name_ph')} placeholderTextColor={colors.faint} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_phone_label')}</Text>
+      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={phone} onChangeText={setPhone} placeholder={t('bok_phone_ph')} keyboardType="phone-pad" placeholderTextColor={colors.faint} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_pax_label')}</Text>
+      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" placeholderTextColor={colors.faint} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('c_table')}</Text>
       <View style={styles.chips}>
         {TABLES_FREE.map((tb) => (
           <TouchableOpacity key={tb} style={[styles.chip, table === tb && styles.chipOn]} onPress={() => setTable(tb)}>
-            <Text style={[styles.chipT, table === tb && styles.chipTOn]}>{tb}</Text>
+            <Text style={[styles.chipT, table === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>{t('hist_f_date')}</Text>
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('hist_f_date')}</Text>
       <View style={styles.chips}>
         {['Hari ini', 'Besok'].map((d) => (
           <TouchableOpacity key={d} style={[styles.chip, date === d && styles.chipOn]} onPress={() => setDate(d)}>
-            <Text style={[styles.chipT, date === d && styles.chipTOn]}>{d === 'Hari ini' ? t('esb_today') : t('bok_tomorrow')}</Text>
+            <Text style={[styles.chipT, date === d && styles.chipTOn, isTablet && styles.chipTBig]}>{d === 'Hari ini' ? t('esb_today') : t('bok_tomorrow')}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>{t('bok_time_label')}</Text>
-      <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder={t('bok_time_ph')} placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>{t('kit_note')}</Text>
-      <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder={t('kit_note')} placeholderTextColor={colors.faint} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_time_label')}</Text>
+      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={time} onChangeText={setTime} placeholder={t('bok_time_ph')} placeholderTextColor={colors.faint} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('kit_note')}</Text>
+      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={note} onChangeText={setNote} placeholder={t('kit_note')} placeholderTextColor={colors.faint} />
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <TouchableOpacity style={styles.primary} onPress={save}>
-        <Text style={styles.primaryT}>{editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}</Text>
+        <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}</Text>
       </TouchableOpacity>
       {editingId ? (
         <TouchableOpacity style={styles.cancelEdit} onPress={resetForm}>
@@ -409,6 +417,18 @@ const styles = StyleSheet.create({
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   chipTOn: { color: colors.orangeDark },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8 },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di panel ganda. */
+  countBig: { fontSize: 14 },
+  secBig: { fontSize: 18 },
+  hintBig: { fontSize: 13 },
+  nameBig: { fontSize: 15 },
+  metaBig: { fontSize: 13 },
+  cardTitleBig: { fontSize: 15 },
+  linkBig: { fontSize: 14 },
+  labelBig: { fontSize: 13 },
+  inputBig: { fontSize: 15 },
+  chipTBig: { fontSize: 13 },
+  primaryTBig: { fontSize: 16 },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 14 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   fine: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginTop: 8 },

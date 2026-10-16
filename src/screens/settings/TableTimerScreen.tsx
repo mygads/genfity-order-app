@@ -167,30 +167,30 @@ export default function TableTimerScreen({ navigation }: Props) {
         <View style={styles.card}>
           <View style={styles.rowBetween}>
             <View style={styles.rowLeft}>
-              <Text style={styles.cardTitle}>{t('tmr_enable')}</Text>
-              <Text style={styles.cardSub}>Timer berjalan {startMode === 'duduk' ? 'sejak pelanggan duduk' : 'sejak order pertama'}.</Text>
+              <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('tmr_enable')}</Text>
+              <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>Timer berjalan {startMode === 'duduk' ? 'sejak pelanggan duduk' : 'sejak order pertama'}.</Text>
             </View>
             <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
-          <Text style={styles.fieldLabel}>Batas waktu (menit)</Text>
-          <TextInput style={styles.input} value={limit} onChangeText={setLimit} keyboardType="numeric" placeholder="90" placeholderTextColor={colors.faint} />
-          <Text style={styles.fieldLabel}>Peringatkan sebelum habis (menit)</Text>
-          <TextInput style={styles.input} value={warnBefore} onChangeText={setWarnBefore} keyboardType="numeric" placeholder="10" placeholderTextColor={colors.faint} />
-          <Text style={styles.fieldLabel}>Timer mulai saat</Text>
+          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Batas waktu (menit)</Text>
+          <TextInput style={[styles.input, isTablet && styles.inputBig]} value={limit} onChangeText={setLimit} keyboardType="numeric" placeholder="90" placeholderTextColor={colors.faint} />
+          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Peringatkan sebelum habis (menit)</Text>
+          <TextInput style={[styles.input, isTablet && styles.inputBig]} value={warnBefore} onChangeText={setWarnBefore} keyboardType="numeric" placeholder="10" placeholderTextColor={colors.faint} />
+          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Timer mulai saat</Text>
           <View style={styles.chipRow}>
             {(['duduk', 'order'] as StartMode[]).map((m) => (
               <Pressable key={m} onPress={() => setStartMode(m)} style={[styles.chip, startMode === m && styles.chipActive]}>
-                <Text style={[styles.chipText, startMode === m && styles.chipTextActive]}>
+                <Text style={[styles.chipText, startMode === m && styles.chipTextActive, isTablet && styles.chipTextBig]}>
                   {m === 'duduk' ? 'Pelanggan duduk' : 'Order pertama'}
                 </Text>
               </Pressable>
             ))}
           </View>
           <View style={styles.rowBetween}>
-            <Text style={styles.rowLabel}>Perpanjang otomatis bila lewat batas (+15 mnt)</Text>
+            <Text style={[styles.rowLabel, isTablet && styles.rowLabelBig]}>Perpanjang otomatis bila lewat batas (+15 mnt)</Text>
             <Switch value={autoExtend} onValueChange={setAutoExtend} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
-          <Text style={styles.modeNote}>
+          <Text style={[styles.modeNote, isTablet && styles.modeNoteBig]}>
             {startMode === 'duduk'
               ? 'Mulai dihitung sejak pelanggan duduk.'
               : 'Mode order pertama: offline disamakan dengan duduk; selisih pencatatan order menyusul.'}
@@ -198,7 +198,7 @@ export default function TableTimerScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        <Text style={styles.groupLabel}>{t('tmr_running')}</Text>
+        <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('tmr_running')}</Text>
         {tables.map((x) => {
           const remain = x.limit - x.elapsed;
           const danger = enabled && remain <= warn;
@@ -208,12 +208,12 @@ export default function TableTimerScreen({ navigation }: Props) {
           return (
             <View key={x.id} style={[styles.card, danger && styles.cardWarn, over && styles.cardOver]}>
               <View style={styles.timerTop}>
-                <Text style={styles.timerId}>Meja {x.id}{SECTION_OF[x.id] ? ` · ${SECTION_OF[x.id]}` : ''}</Text>
-                <Text style={[styles.timerState, over ? styles.over : danger ? styles.warn : styles.ok]}>
+                <Text style={[styles.timerId, isTablet && styles.timerIdBig]}>Meja {x.id}{SECTION_OF[x.id] ? ` · ${SECTION_OF[x.id]}` : ''}</Text>
+                <Text style={[styles.timerState, over ? styles.over : danger ? styles.warn : styles.ok, isTablet && styles.timerStateBig]}>
                   {over ? `Lewat ${lewat} mnt` : `Sisa ${sisa} mnt`}{enabled ? ' • live' : ''}
                 </Text>
               </View>
-              <Text style={styles.timerSub}>
+              <Text style={[styles.timerSub, isTablet && styles.timerSubBig]}>
                 {startMode === 'duduk' ? 'Duduk' : 'Order'} {fmtLive(x.elapsed)} · batas {x.limit} mnt
               </Text>
               <View style={styles.track}>
@@ -221,19 +221,19 @@ export default function TableTimerScreen({ navigation }: Props) {
               </View>
               <View style={styles.timerBtns}>
                 <Pressable style={styles.btnGhost} onPress={() => reset(x.id)}>
-                  <Text style={styles.btnGhostText}>Reset</Text>
+                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>Reset</Text>
                 </Pressable>
                 <Pressable style={styles.btnGhost} onPress={() => extend(x.id, 15)}>
-                  <Text style={styles.btnGhostText}>+15 mnt</Text>
+                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>+15 mnt</Text>
                 </Pressable>
                 <Pressable style={styles.btnGhost} onPress={() => extend(x.id, 30)}>
-                  <Text style={styles.btnGhostText}>+30 mnt</Text>
+                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>+30 mnt</Text>
                 </Pressable>
               </View>
             </View>
           );
         })}
-        <Text style={styles.foot}>Peringatan muncul {warn} menit sebelum batas - tersimpan di perangkat.</Text>
+        <Text style={[styles.foot, isTablet && styles.footBig]}>Peringatan muncul {warn} menit sebelum batas - tersimpan di perangkat.</Text>
       </ScrollView>
       <DrawerMenu
         visible={drawerOpen}
@@ -299,4 +299,18 @@ const styles = StyleSheet.create({
   btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 9, alignItems: 'center' },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
   foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14 },
+  /* Varian tablet (breakpoint 768): teks +1..2pt agar proporsional di layar lebar. */
+  groupLabelBig: { fontSize: 14 },
+  cardTitleBig: { fontSize: 16 },
+  cardSubBig: { fontSize: 13 },
+  fieldLabelBig: { fontSize: 13 },
+  inputBig: { fontSize: 15 },
+  chipTextBig: { fontSize: 12 },
+  rowLabelBig: { fontSize: 14 },
+  modeNoteBig: { fontSize: 12 },
+  timerIdBig: { fontSize: 18 },
+  timerStateBig: { fontSize: 14 },
+  timerSubBig: { fontSize: 13 },
+  btnGhostTextBig: { fontSize: 13 },
+  footBig: { fontSize: 12 },
 });

@@ -1,0 +1,11 @@
+{
+  "request": { "userId": "U07", "pin": "1234", "deviceID": "a91f3c07d2e84b5a" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true, "userId": "U07" }
+  }
+}

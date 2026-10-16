@@ -1,0 +1,21 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 4,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "voucherId": "V001", "code": "HEMAT10K", "name": "Potongan 10000", "amount": 10000, "quota": 50, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-12-31 23:59:59", "status": "available", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "voucherId": "V002", "code": "GRATISONGKIR", "name": "Gratis ongkir s.d. 10000", "amount": 10000, "quota": 100, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-12-31 23:59:59", "status": "available", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "voucherId": "V003", "code": "QOQI10", "name": "Diskon member GOLD", "amount": 15000, "quota": 0, "validFrom": "2026-10-01 00:00:00", "validTo": "2026-10-31 23:59:59", "status": "locked", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "voucherId": "V004", "code": "SEPTCERIA", "name": "Promo September", "amount": 5000, "quota": 0, "validFrom": "2026-09-01 00:00:00", "validTo": "2026-09-30 23:59:59", "status": "expired", "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

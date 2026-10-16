@@ -1,0 +1,11 @@
+{
+  "request": { "code": "HEMAT10K", "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "code": "HEMAT10K", "salesNum": "TRX-20261016-014", "ok": true, "burnedAt": "2026-10-16 12:40:05" }
+  }
+}

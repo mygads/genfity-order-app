@@ -1,4 +1,4 @@
-# ARCH-APK — ESB POSLite v2.31.13 (id.co.esb.esb_pos, Flutter)
+# ARCH-APK - ESB POSLite v2.31.13 (id.co.esb.esb_pos, Flutter)
 > Sumber: strings libapp.so + manifest split APK. Tanpa ubah kode RN.
 
 ## 1. Screen/Activity + navigasi
@@ -18,7 +18,7 @@
 - Transaksi: `tr_saleshead(salesNum PK, billNum, salesDate(In/Out), branchID, memberID/Code, tableID, paxTotal, subtotal, discountTotal, promotionDiscount, voucherDiscountTotal, vatTotal, grandTotal, paymentTotal, statusID, transactionModeID, syncDate)`; item `tr_salesmenu`; bayar `tr_salespayment(paymentMethodID, voucherCode, cardNumber/bank, verificationCode/traceNumber, externalVoucher*)`; `tr_salesvoucherusage`, `tr_salesinfo`, `tr_platformfee`; shift `tr_shiftlog/shiftlogdetail`; expense `tr_branchexpense(+document)`, deposit `tr_memberdeposit/membertransactionlog`, antrean sync `tr_sync`, `tr_esoprocessqueue`, log `tr_applog/transactionlogapi`.
 - User: `ms_posuser(username PK, fullName, posUserRoleID, branchID, posPassword, posSalt)` + `ms_posuserrole`, `ms_posuseraccess`; konfigurasi KV di `ms_setting(key1,key2,value1,value2)` + `ms_terminalsetting(terminalID,key,value,branchId)`.
 
-## 4. Login/session — token, simpan, auto-login/bypass
+## 4. Login/session - token, simpan, auto-login/bypass
 - Login kasir = PIN per user (widget `pin_code_fields`, error "PIN salah", "Lupa PIN?"), validasi ke `ms_posuser` lokal (ada kolom `posPassword/posSalt`); ada `rememberMe/autoLogin/toggleRememberMe`, success-create-PIN, attendance-PIN terpisah.
 - Tidak ditemukan bearer/JWT/OAuth di strings (hanya `_token` internal, `postBearer` milik printer/WS); sesi berupa KV di `ms_setting`/`ms_terminalsetting` + SharedPreferences (instalasi: terminalID/branchID/endpoint). Klaim terminal via QR/login install ke `esb_apiv9`.
-- Bypass lokal: SANGAT MUNGKIN — PIN dicek terhadap SQLite di perangkat (`ms_posuser` + flag rememberMe/autoLogin). Siapa pun dengan akses file DB dapat membaca/tukar PIN-hash atau set flag sesi; tidak ada bukti token server-side yang wajib revalidasi tiap buka. Mitigasi di clone: jangan tiru PIN-lokal-only; pakai PIN+salt kuat/KDF, kunci sesi di secure storage, revalidasi ke server saat online.
+- Bypass lokal: SANGAT MUNGKIN - PIN dicek terhadap SQLite di perangkat (`ms_posuser` + flag rememberMe/autoLogin). Siapa pun dengan akses file DB dapat membaca/tukar PIN-hash atau set flag sesi; tidak ada bukti token server-side yang wajib revalidasi tiap buka. Mitigasi di clone: jangan tiru PIN-lokal-only; pakai PIN+salt kuat/KDF, kunci sesi di secure storage, revalidasi ke server saat online.

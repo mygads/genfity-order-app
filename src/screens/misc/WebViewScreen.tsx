@@ -1,6 +1,6 @@
 import { Linking, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { colors, fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 
 type Nav = { goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { url?: string; title?: string } } };
@@ -11,7 +11,7 @@ type Props = { navigation?: Nav; route?: { params?: { url?: string; title?: stri
  */
 export default function WebViewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+  const isTablet = width >= TABLET_BP;
   const url = route?.params?.url ?? '';
   const title = route?.params?.title ?? 'Halaman Web';
 

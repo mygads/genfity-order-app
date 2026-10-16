@@ -1,0 +1,22 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 5,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "key1": "Tax", "key2": "PPN", "value1": "11", "value2": "persen inklusif", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Rounding", "key2": "Step", "value1": "50", "value2": "rupiah", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Service", "key2": "Charge", "value1": "5", "value2": "persen eksklusif", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Branch", "key2": "Name", "value1": "ESB Cabang Poris", "value2": "B001", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Branch", "key2": "Currency", "value1": "IDR", "value2": "id", "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

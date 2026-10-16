@@ -1,0 +1,18 @@
+{
+  "request": { "deviceID": "a91f3c07d2e84b5a" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "terminalKey": "9f3c2a10-7b4e-4d81-a2c5-0e6f8a2b4c7d",
+      "terminalId": "T001",
+      "terminalCode": "ESB-PORIS-001",
+      "branchId": "B001",
+      "branchName": "ESB Cabang Poris",
+      "claimed": false
+    }
+  }
+}
