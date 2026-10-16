@@ -205,8 +205,10 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const doLogout = () => {
+    try {
+      (navigation as any)?.reset({ index: 0, routes: [{ name: 'Login' as never }] });
+    } catch {}
     logout();
-    navigation?.navigate('Login');
   };
 
   // Baris sinkron: waktu nyata modul sync + jumlah antrean bila ada.
@@ -247,7 +249,10 @@ export default function DashboardScreen({ navigation }: Props) {
 
       <View style={styles.shiftCard}>
         <View style={styles.shiftLeft}>
-          <Text style={[styles.shiftTitle, isTablet && styles.shiftTitleBig]}>{shift.open ? `${t('dash_shift_open')} ✓` : t('dash_shift_closed')}</Text>
+          <View style={styles.shiftTitleRow}>
+            <View style={[styles.shiftDot, !shift.open && styles.shiftDotClosed]} />
+            <Text style={[styles.shiftTitle, isTablet && styles.shiftTitleBig]}>{shift.open ? `${t('dash_shift_open')} ✓` : t('dash_shift_closed')}</Text>
+          </View>
           <Text style={[styles.shiftSub, isTablet && styles.shiftSubBig]}>
             {t('dash_clock_in')} {shift.clockIn} · {t('dash_opening')} {rp(shift.cash)}
           </Text>
@@ -263,7 +268,15 @@ export default function DashboardScreen({ navigation }: Props) {
         <Text style={[styles.salesSub, isTablet && styles.salesSubBig]}>{sales.trx} {t('unit_trx')} · {t('dash_avg')} {rp(avg)} · {deltaTxt}</Text>
       </View>
 
-      <TouchableOpacity style={styles.cta} onPress={() => navigation?.navigate('Cashier')}>
+      <TouchableOpacity style={styles.cta} onPress={() => {
+        if (!shift.open) {
+          setNotice(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+          navigation?.navigate('Shift');
+          return;
+        }
+        setNotice('');
+        navigation?.navigate('Cashier');
+      }}>
         <Text style={[styles.ctaText, isTablet && styles.ctaTextBig]}>{t('dash_new_trx')}</Text>
       </TouchableOpacity>
 
@@ -373,6 +386,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   shiftLeft: { flex: 1 },
+  shiftTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  shiftDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
+  shiftDotClosed: { backgroundColor: colors.red },
   shiftTitle: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   shiftSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 2 },
   shiftBtn: { backgroundColor: colors.white, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },

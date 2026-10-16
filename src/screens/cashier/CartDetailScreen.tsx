@@ -230,12 +230,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                     placeholder="0"
                     placeholderTextColor={colors.faint}
                   />
-                  <Text style={styles.editorLabel}>Catatan item</Text>
+                  <Text style={styles.editorLabel}>{t('itemNotes')}</Text>
                   <TextInput
                     style={styles.editorInput}
                     value={noteDraft}
                     onChangeText={setNoteDraft}
-                    placeholder="cth: Level 3, es sedikit"
+                    placeholder={t('cartNotePh')}
                     placeholderTextColor={colors.faint}
                   />
                   <View style={styles.editorRow}>
@@ -243,7 +243,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                       <Text style={styles.editorVoidT}>Void</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.editorSave} onPress={saveEditor}>
-                      <Text style={styles.editorSaveT}>Simpan</Text>
+                      <Text style={styles.editorSaveT}>{t('save')}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -374,6 +374,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               items: active, total, mode,
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
+              ...(memberId ? { memberId } : {}),
               ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
               discount: discountTotal + voucherAmt,
@@ -383,7 +384,19 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', { ...(table ? { from: table } : {}) })}>
               <Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveItems')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation?.navigate('BillPreview')}>
+            <TouchableOpacity onPress={() => navigation?.navigate('BillPreview', {
+              items: active, total, subtotal, mode,
+              ...(table ? { table } : {}),
+              ...(customer ? { customer } : {}),
+              ...(memberId ? { memberId } : {}),
+              ongkir: ongkirNet,
+              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+              discount: discountTotal + voucherAmt,
+              ...(service > 0 ? { service } : {}),
+              ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+              ...(rounding !== 0 ? { rounding } : {}),
+              ...(feeESB > 0 ? { feeESB } : {}),
+            })}>
               <Text style={[styles.link, isTablet && styles.linkBig]}>{t('billPreview')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { ...(table ? { from: table } : {}) })}>
@@ -459,11 +472,11 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   ...(rounding !== 0 ? { rounding } : {}),
                   ...(feeESB > 0 ? { feeESB } : {}),
                 })}>
-                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>Cetak {t('printReceipt')}</Text>
+                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>{t('printReceipt')}</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.payBtn} onPress={goPay}>
-              <Text style={[styles.payText, isTablet && styles.payTextBig]}>{t('pay')} | {rp(total)} ›</Text>
+              <Text style={[styles.payText, isTablet && styles.payTextBig]} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)} ›</Text>
             </TouchableOpacity>
           </>
         )}

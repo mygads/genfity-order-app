@@ -1,6 +1,6 @@
 import { useWindowDimensions, type ViewStyle } from 'react-native';
 
-/** Breakpoint tablet - SAMA di semua layar ( Cashier/Pay/History pakai literal 768 ). */
+/** Breakpoint tablet - SAMA di semua layar (semua layar via TABLET_BP, tanpa literal 768). */
 export const TABLET_BP = 768;
 
 export function useIsWide(bp: number = TABLET_BP): boolean {
