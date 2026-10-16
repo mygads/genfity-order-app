@@ -15,7 +15,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
         <Text style={styles.heroSub}>{t('about.heroSub')}</Text>
       </View>
       <View style={styles.card}>
-        <Row label={t('about.package')} value="posclone-rn (Expo RN)" />
+        <Row label={t('about.package')} value="Genfity Order (Expo RN)" />
         <Row label={t('about.branch')} value="ESB Cabang Poris - BR-01" />
         <Row label={t('about.terminal')} value="TRM-001" />
         <Row label={t('about.env')} value={t('about.envVal')} />
