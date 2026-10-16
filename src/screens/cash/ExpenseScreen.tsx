@@ -73,7 +73,7 @@ const SEED: Expense[] = [
         <TouchableOpacity onPress={() => setFormOpen((v) => !v)}>
           <Text style={s.headerAction}>{t('common.add')}</Text>
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
         <View style={s.hero}>
@@ -114,6 +114,7 @@ const SEED: Expense[] = [
             <View style={s.photoRow}>
               {photo ? <Image source={{ uri: photo }} style={s.preview} /> : null}
               <AppButton
+                size="sm"
                 title={photo ? t('expense.changePhoto') : t('expense.takePhoto')}
                 variant="secondary"
                 fullWidth={false}
@@ -127,6 +128,7 @@ const SEED: Expense[] = [
               ) : null}
             </View>
             <AppButton
+              size="md"
               title={t('expense.saveBtn')}
               disabled={!ready}
               onPress={() => void tambah()}

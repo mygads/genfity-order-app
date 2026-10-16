@@ -261,21 +261,33 @@ export default function BookingScreen({ navigation }: Props) {
             <Text style={styles.chev}>›</Text>
           </TouchableOpacity>
           {NEXT[r.status] && (
-            <TouchableOpacity style={styles.advBtn} onPress={() => advance(r.id)}>
-              <Text style={styles.advT}>→ {NEXT[r.status]}</Text>
-            </TouchableOpacity>
+            <AppButton
+              size="sm"
+              title={`→ ${NEXT[r.status]}`}
+              onPress={() => advance(r.id)}
+              style={[styles.advBtn, { marginTop: 8 }]}
+              textStyle={styles.advT}
+            />
           )}
           <View style={styles.rowBtns}>
-            <TouchableOpacity style={styles.editBtn} onPress={() => startEdit(r)}>
-              <Text style={styles.editT}>{editingId === r.id ? '● Diedit…' : '✎ Edit'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.delBtn, confirmDel === r.id && styles.delBtnConfirm]}
-              onPress={() => removeResv(r)}>
-              <Text style={[styles.delT, confirmDel === r.id && styles.delTConfirm]}>
-                {confirmDel === r.id ? 'Yakin? Ketuk lagi' : '🗑 Batal/Hapus'}
-              </Text>
-            </TouchableOpacity>
+            <AppButton
+              size="sm"
+              variant="secondary"
+              title={editingId === r.id ? '● Diedit…' : '✎ Edit'}
+              onPress={() => startEdit(r)}
+              fullWidth={false}
+              style={[styles.editBtn, { marginTop: 0, borderColor: colors.navy }]}
+              textStyle={styles.editT}
+            />
+            <AppButton
+              size="sm"
+              variant="secondary"
+              title={confirmDel === r.id ? 'Yakin? Ketuk lagi' : '🗑 Batal/Hapus'}
+              onPress={() => removeResv(r)}
+              fullWidth={false}
+              style={[styles.delBtn, confirmDel === r.id && styles.delBtnConfirm, { marginTop: 0, borderColor: colors.red }]}
+              textStyle={[styles.delT, confirmDel === r.id && styles.delTConfirm]}
+            />
           </View>
         </View>
       ))}
@@ -326,6 +338,7 @@ export default function BookingScreen({ navigation }: Props) {
       <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={note} onChangeText={setNote} placeholder={t('kit_note')} />
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <AppButton
+        size="md"
         title={editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}
         onPress={save}
         style={styles.primary}

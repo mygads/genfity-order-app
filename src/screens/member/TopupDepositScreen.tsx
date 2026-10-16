@@ -173,8 +173,9 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             </View>
           </View>
           <Text style={s.hint}>{t('top_queued')}</Text>
-          <AppButton title={t('top_back_member')} onPress={backToMember} />
+          <AppButton size="md" title={t('top_back_member')} onPress={backToMember} />
           <AppButton
+            size="md"
             title={t('top_new_order')}
             variant="secondary"
             onPress={() => navigation?.navigate('Cashier')}
@@ -272,6 +273,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
         </View>
 
         <AppButton
+          size="md"
           title={saving ? '...' : `${t('top_pay')} - ${rp(nominalNum)}`}
           disabled={!ready}
           onPress={submit}

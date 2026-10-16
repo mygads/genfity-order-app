@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -308,9 +309,13 @@ export default function PromotionListScreen({ navigation, route }: Props) {
               <Text style={styles.code}>{p.code} · potongan {rp(p.amount)}</Text>
               <Text style={styles.desc}>{p.desc}</Text>
               <Text style={styles.min}>{t('minSpend')} {rp(p.minBelanja)}</Text>
-              <TouchableOpacity style={styles.pakai} onPress={() => pakai(p)}>
-                <Text style={styles.pakaiT}>{t('useAction')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                size="sm"
+                title={t('useAction')}
+                onPress={() => pakai(p)}
+                style={[styles.pakai, { marginTop: 10 }]}
+                textStyle={styles.pakaiT}
+              />
             </View>
           ))
         )}

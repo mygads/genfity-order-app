@@ -90,7 +90,7 @@ import React, { useEffect, useState } from 'react';import {
   return (
     <View style={s.root}>
       <ScreenHeader title={t('title_close')} onBack={() => navigation?.goBack?.()} right={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
         } />
 
@@ -121,7 +121,7 @@ import React, { useEffect, useState } from 'react';import {
             textAlign="right"
             value={touched ? rpNum(kasFisikNum) : '0'}
             onChangeText={(tx) => setKasFisik(tx.replace(/\D/g, ''))}
-            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+            boxStyle={{ marginTop: 8, borderColor: colors.orange, backgroundColor: colors.paleOrange }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
           />
           <NumPad
@@ -139,7 +139,7 @@ import React, { useEffect, useState } from 'react';import {
             multiline
             value={catatan}
             onChangeText={setCatatan}
-            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
+            boxStyle={{ marginTop: 8, height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
             style={{ textAlignVertical: 'top' }}
           />
         </View>
@@ -164,7 +164,7 @@ import React, { useEffect, useState } from 'react';import {
           title={t('end_close_btn')}
           variant="danger"
           fullWidth={false}
-          style={{ marginTop: 0, paddingHorizontal: 32 }}
+          style={{ marginTop: 0, paddingHorizontal: 20, flexShrink: 0 }}
           onPress={askClose}
         />
       </View>
@@ -364,9 +364,12 @@ import React, { useEffect, useState } from 'react';import {
     borderTopColor: colors.line,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  footerInfo: { flex: 1 },
+  footerInfo: { flex: 1, minWidth: 0, flexShrink: 1, marginRight: 4 },
   footerLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
   footerValue: { fontSize: 17, fontFamily: fonts.bold, color: colors.navy },
   closeBtn: {

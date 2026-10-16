@@ -395,6 +395,69 @@ export default function VoucherScreen({ navigation }: Props) {
         navigate={(r) => navigation?.navigate(r)}
       />
 
+      {!isTablet ? (
+        <View style={s.searchWrap}>
+          <Text style={s.label}>{t('vou_search_label')}</Text>
+          <View style={s.manualRow}>
+            <View style={s.manualInput}>
+              <AppInput
+                placeholder={t('vou_search_ph')}
+                autoCapitalize="characters"
+                value={kodeManual}
+                onChangeText={(txt) => {
+                  setKodeManual(txt);
+                  setOnlineCode(txt);
+                  setExtCode(txt);
+                  setQ(txt);
+                  setMsg('');
+                  setOnlineMsg('');
+                  setExtMsg('');
+                }}
+                boxStyle={s.inputCompact}
+              />
+            </View>
+            <AppButton
+              title={t('vou_check')}
+              fullWidth={false}
+              style={s.checkCompact}
+              textStyle={s.checkCompactTxt}
+              onPress={validate}
+            />
+          </View>
+          {msg ? <Text style={s.msg}>{msg}</Text> : null}
+          {onlineMsg ? <Text style={s.msg}>{onlineMsg}</Text> : null}
+          {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
+          <View style={s.actCol}>
+            <AppButton
+              title={t('vou_online_claim')}
+              disabled={onlineBusy}
+              style={s.actMd}
+              textStyle={s.actMdTxt}
+              onPress={claimOnline}
+            />
+            <View style={[s.lockRow, s.lockRowPhone]}>
+              <AppButton
+                title={t('vou_unlock')}
+                variant="secondary"
+                disabled={extBusy}
+                fullWidth={false}
+                style={[{ flex: 1 }, s.actRowBtn]}
+                textStyle={s.actMdTxt}
+                onPress={() => void extOp('unburn')}
+              />
+              <AppButton
+                title={t('vou_apply_burn')}
+                disabled={extBusy}
+                fullWidth={false}
+                style={[{ flex: 2 }, s.actRowBtn]}
+                textStyle={s.actMdTxt}
+                onPress={() => void extOp('burn')}
+              />
+            </View>
+          </View>
+        </View>
+      ) : (
+      <>
       <View style={s.searchWrap}>
         <Text style={s.label}>{t('vou_search_label')}</Text>
         <View style={s.manualRow}>
@@ -496,6 +559,12 @@ export default function VoucherScreen({ navigation }: Props) {
         </View>
         {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
       </View>
+      </>
+      )}
+
+      {isTablet && !online && (
+        <Text style={s.offlineBanner}>Offline - data dari cache lokal, perubahan disinkron saat online.</Text>
+      )}
 
       <View style={s.filters}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
@@ -551,25 +620,28 @@ export default function VoucherScreen({ navigation }: Props) {
                   <AppButton
                     title={loading ? t('vou_locking') : t('vou_lock_use')}
                     disabled={loading}
-                    style={{ marginTop: 10 }}
+                    style={[{ marginTop: 10 }, !isTablet && s.actMd]}
+                    textStyle={!isTablet ? s.actMdTxt : undefined}
                     onPress={() => lock(v)}
                   />
                 )}
                 {v.status === 'terkunci' && (
-                  <View style={s.lockRow}>
+                  <View style={[s.lockRow, !isTablet && s.lockRowPhone]}>
                     <AppButton
                       title={loading ? '...' : t('vou_unlock')}
                       variant="secondary"
                       disabled={loading}
                       fullWidth={false}
-                      style={{ flex: 1, marginTop: 0 }}
+                      style={[{ flex: 1, marginTop: 0 }, !isTablet && s.actRowBtn]}
+                      textStyle={!isTablet ? s.actMdTxt : undefined}
                       onPress={() => unlock(v)}
                     />
                     <AppButton
                       title={loading ? '...' : t('vou_apply_burn')}
                       disabled={loading}
                       fullWidth={false}
-                      style={{ flex: 2, marginTop: 0 }}
+                      style={[{ flex: 2, marginTop: 0 }, !isTablet && s.actRowBtn]}
+                      textStyle={!isTablet ? s.actMdTxt : undefined}
                       onPress={() => burn(v)}
                     />
                   </View>
@@ -593,7 +665,8 @@ export default function VoucherScreen({ navigation }: Props) {
             </TouchableOpacity>
             <AppButton
               title={`${t('vou_back_cashier')} ›`}
-              style={{ marginTop: 10 }}
+              style={[{ marginTop: 10 }, !isTablet && s.actMd]}
+              textStyle={!isTablet ? s.actMdTxt : undefined}
               onPress={backToCashier}
             />
           </View>
@@ -662,6 +735,21 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   checkTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
+  /** Phone: input cek compact + tombol cek compact + aksi md (h46, font 14). */
+  inputCompact: { height: 46 },
+  checkCompact: {
+    marginTop: 0,
+    height: 46,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: colors.navy,
+  },
+  checkCompactTxt: { fontSize: 13 },
+  actCol: { marginTop: 2 },
+  actMd: { height: 46, marginTop: 10, borderRadius: 10 },
+  actMdTxt: { fontSize: 14 },
+  actRowBtn: { height: 46, borderRadius: 10 },
+  lockRowPhone: { marginTop: 8 },
   msg: { fontSize: 12, fontFamily: fonts.medium, color: colors.navy, marginTop: 8 },
   offlineBanner: {
     fontSize: 12,

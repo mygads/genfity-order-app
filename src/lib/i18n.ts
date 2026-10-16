@@ -58,6 +58,7 @@ const STR: Record<string, Entry> = {
   hist_title: { id: 'Riwayat Penjualan', en: 'Sales History' },
   hist_search_ph: { id: 'Cari nomor transaksi / tagihan', en: 'Search transaction / bill number' },
   hist_search_label: { id: 'Pencarian transaksi', en: 'Transaction search' },
+  hist_search_btn: { id: 'Cari', en: 'Search' },
   hist_f_date: { id: 'Tanggal', en: 'Date' },
   hist_f_status: { id: 'Status', en: 'Status' },
   hist_f_payment: { id: 'Pembayaran', en: 'Payment' },

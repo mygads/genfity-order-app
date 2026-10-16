@@ -76,11 +76,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       ))}
 
       <View style={styles.actions}>
-        <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.goBack()} fullWidth={false} style={styles.actionBtn} />
-        <AppButton title={confirming ? '...' : `${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} style={styles.actionBtn} />
+        <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.goBack()} fullWidth={false} size="md" style={styles.actionBtn} />
+        <AppButton title={confirming ? '...' : `${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} size="md" style={styles.actionBtn} />
       </View>
       {done && <Text style={styles.done}>{t('cx_done')}</Text>} {done && (
-      <AppButton title={t('cx_void_print')} onPress={printVoid} /> )}<TouchableOpacity onPress={() => navigation?.navigate('History')}>
+      <AppButton title={t('cx_void_print')} onPress={printVoid} size="md" /> )}<TouchableOpacity onPress={() => navigation?.navigate('History')}>
         <Text style={styles.link}>{t('cx_history')}</Text>
       </TouchableOpacity>
     </ScrollView>

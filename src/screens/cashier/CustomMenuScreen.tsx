@@ -105,6 +105,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       <Text style={styles.sub2}>{station === 'Dapur Utama' ? 'gorengan · nasi' : station === 'Bar / Minuman' ? 'kopi · jus' : station === 'Dessert' ? 'cake · es' : 'tanpa routing'} · {rp(priceNum)} × {qtyNum} = {rp(priceNum * qtyNum)}</Text>
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <AppButton
+        size="md"
         title={t('addToOrder')}
         onPress={add}
         style={styles.primary}
@@ -127,12 +128,23 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
         <Text style={styles.prevLine}>1x {targetName} - {[...notes, free].filter(Boolean).join(' · ')}</Text>
       </View>
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Kitchen')}>
-          <Text style={styles.ghostT}>{t('viewKitchen')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.primary2} onPress={saveNotes}>
-          <Text style={styles.primaryT}>{t('saveNotes')}</Text>
-        </TouchableOpacity>
+        <AppButton
+          size="md"
+          variant="secondary"
+          title={t('viewKitchen')}
+          onPress={() => navigation?.navigate('Kitchen')}
+          fullWidth={false}
+          style={[styles.ghost, { marginTop: 0 }]}
+          textStyle={styles.ghostT}
+        />
+        <AppButton
+          size="md"
+          title={t('saveNotes')}
+          onPress={saveNotes}
+          fullWidth={false}
+          style={[styles.primary2, { marginTop: 0 }]}
+          textStyle={styles.primaryT}
+        />
       </View>
       </ScrollView>
     </View>

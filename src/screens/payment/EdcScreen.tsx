@@ -208,10 +208,10 @@ export default function EdcScreen({ navigation, route }: Props) {
             {phase === 'waiting' && <Text style={styles.wait}>{t('edc_waiting').replace('{s}', String(secs))}</Text>}
             {phase === 'error' && <Text style={styles.err}>{t('edc_noresp')}</Text>}
             {phase === 'error' && (
-              <AppButton title={t('edc_retry')} onPress={retry} />
+              <AppButton title={t('edc_retry')} onPress={retry} size="md" />
             )}
             {phase === 'waiting' && (
-              <AppButton title={`${t('edc_cardread')} ›`} variant="secondary" onPress={() => setPhase('approval')} />
+              <AppButton title={`${t('edc_cardread')} ›`} variant="secondary" onPress={() => setPhase('approval')} size="md" />
             )}
             {/* WIRE REA-16: kunci prefs native modul BCA APOS (info status, best-effort) */}
             <Text style={styles.meta}>{NATIVE_PREF_KEYS.bcaApos} / {NATIVE_PREF_KEYS.bcaAposCallback}</Text>
@@ -241,6 +241,7 @@ export default function EdcScreen({ navigation, route }: Props) {
           title={t('edc_save')}
           disabled={!canSave}
           onPress={() => void save()}
+          size="md"
         />
         <TouchableOpacity style={styles.linkBtn} onPress={() => {
           // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay.

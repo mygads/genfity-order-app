@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -341,12 +342,14 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           {doneMsg ? <Text style={[styles.done, isTablet && styles.doneBig]}>{doneMsg}</Text> : null}
         </View>
 
-        <TouchableOpacity
-          style={[styles.primary, (pickedItems.length === 0 || sameTable) && styles.off]}
+        <AppButton
+          size="md"
+          title={`${t('mov_do_items')} ›`}
+          onPress={move}
           disabled={pickedItems.length === 0 || sameTable}
-          onPress={move}>
-          <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{t('mov_do_items')} ›</Text>
-        </TouchableOpacity>
+          style={[styles.primary, (pickedItems.length === 0 || sameTable) && styles.off, { marginTop: 14 }]}
+          textStyle={styles.primaryT}
+        />
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
             <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>

@@ -92,6 +92,7 @@ export function loginEmployee(e: { nama: string; username: string }): Session {
 
 export function logout(): void {
   current = null;
+  postLoginRoute = null;
   persist();
   emit();
   // Matikan realtime + foreground service (pasangan startRealtime saat login).
@@ -107,6 +108,25 @@ export function logout(): void {
   } catch {
     /* abaikan */
   }
+}
+
+/**
+ * Rute tujuan sekali-pakai setelah stack tamu -> authed berganti (mis. QrScan
+ * dari kartu QR Login). Jangan navigate manual tepat setelah login: navigator
+ * tamu tak mengenal rute authed sehingga NAVIGATE sinkron race dan error
+ * "not handled by any navigator". GuardedStacks mengonsumsi ini sekali
+ * saat stack authed mount; logout membuangnya.
+ */
+let postLoginRoute: string | null = null;
+
+export function setPostLoginRoute(name: string): void {
+  postLoginRoute = name;
+}
+
+export function takePostLoginRoute(): string | null {
+  const r = postLoginRoute;
+  postLoginRoute = null;
+  return r;
 }
 
 export function subscribeSession(fn: Listener): () => void {

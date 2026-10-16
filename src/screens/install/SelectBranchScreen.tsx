@@ -85,6 +85,7 @@ import { useEffect, useState } from 'react';import { ActivityIndicator, Image, S
       </ScrollView>
       <View style={[styles.footer, isTablet && wideCenterSm]}>
         <AppButton
+          size="lg"
           title={checking ? t('inst_branch_checking') : t('sel_choose')}
           onPress={goSelect}
           disabled={loading || list.length === 0 || checking}

@@ -433,7 +433,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           <Image source={require('../../../assets/images/member_not_found.webp')} style={s.emptyImg} resizeMode="contain" />
           <Text style={s.emptyTitle}>{t('mem_not_found')}</Text>
           <Text style={s.emptySub}>{t('mem_not_found_sub')}</Text>
-          <AppButton title={t('mem_add_new')} onPress={() => setAddVisible(true)} />
+          <AppButton size="md" title={t('mem_add_new')} onPress={() => setAddVisible(true)} />
         </View>
       ) : (
         hasil.map((m) => (
@@ -525,11 +525,12 @@ export default function MemberScreen({ navigation, route }: Props) {
             <Text style={s.emptySub}>{t('mem_no_history')}</Text>
           )}
           <AppButton
+            size="md"
             title={t('mem_deposit')}
             variant="secondary"
             onPress={() => setDepositVisible(true)}
           />
-          <AppButton title={t('mem_apply')} onPress={applyMember} />
+          <AppButton size="md" title={t('mem_apply')} onPress={applyMember} />
         </ScrollView>
       ) : (
         <View style={s.detailEmpty}>
@@ -635,7 +636,7 @@ export default function MemberScreen({ navigation, route }: Props) {
               value={tglLahir}
               onChangeText={setTglLahir}
             />
-            <AppButton title={t('mem_save')} onPress={saveMember} />
+            <AppButton size="sm" title={t('mem_save')} onPress={saveMember} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setAddVisible(false)}>
@@ -683,8 +684,8 @@ export default function MemberScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               ))}
             </View>
-            <AppButton title={t('mem_quick_btn')} onPress={saveDeposit} />
-            <AppButton title={`${t('mem_full_form')} ›`} variant="secondary" onPress={goTopup} />
+            <AppButton size="sm" title={t('mem_quick_btn')} onPress={saveDeposit} />
+            <AppButton size="sm" title={`${t('mem_full_form')} ›`} variant="secondary" onPress={goTopup} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => {

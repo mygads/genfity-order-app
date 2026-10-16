@@ -14,6 +14,7 @@ import {
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import DrawerMenu from '../../components/DrawerMenu';
+import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
@@ -598,12 +599,23 @@ export default function CashierScreen({ navigation, route }: Props) {
             placeholder={rp(0)}
           />
           <View style={styles.dialogRow}>
-            <TouchableOpacity style={styles.dialogGhost} onPress={() => setOngkirOpen(false)}>
-              <Text style={styles.dialogGhostT}>{t('cancel')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.dialogPrimary} onPress={saveOngkir}>
-              <Text style={styles.dialogPrimaryT}>{t('save')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              size="sm"
+              variant="secondary"
+              title={t('cancel')}
+              onPress={() => setOngkirOpen(false)}
+              fullWidth={false}
+              style={[styles.dialogGhost, { marginTop: 0 }]}
+              textStyle={styles.dialogGhostT}
+            />
+            <AppButton
+              size="sm"
+              title={t('save')}
+              onPress={saveOngkir}
+              fullWidth={false}
+              style={[styles.dialogPrimary, { marginTop: 0 }]}
+              textStyle={styles.dialogPrimaryT}
+            />
           </View>
         </View>
       </View>
@@ -671,12 +683,23 @@ export default function CashierScreen({ navigation, route }: Props) {
           keyboardType="numeric"
         />
         <View style={styles.editorRow}>
-          <TouchableOpacity style={styles.editorVoid} onPress={() => voidItem(c.id)}>
-            <Text style={styles.editorVoidT}>{t('voidItem')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.editorSave} onPress={saveEditor}>
-            <Text style={styles.editorSaveT}>{t('save')}</Text>
-          </TouchableOpacity>
+          <AppButton
+            size="sm"
+            variant="secondary"
+            title={t('voidItem')}
+            onPress={() => voidItem(c.id)}
+            fullWidth={false}
+            style={[styles.editorVoid, { marginTop: 0, backgroundColor: 'transparent', borderColor: colors.red }]}
+            textStyle={styles.editorVoidT}
+          />
+          <AppButton
+            size="sm"
+            title={t('save')}
+            onPress={saveEditor}
+            fullWidth={false}
+            style={[styles.editorSave, { marginTop: 0, backgroundColor: colors.navy }]}
+            textStyle={styles.editorSaveT}
+          />
         </View>
       </View>
     );

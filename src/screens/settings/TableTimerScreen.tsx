@@ -228,9 +228,9 @@ export default function TableTimerScreen({ navigation }: Props) {
                 <View style={[styles.fill, { width: `${Math.min(100, Math.round((x.elapsed / x.limit) * 100))}%`, backgroundColor: over ? colors.red : danger ? colors.orange : colors.green }]} />
               </View>
               <View style={styles.timerBtns}>
-                <AppButton title={t('tmr_reset')} onPress={() => reset(x.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
-                <AppButton title={t('tmr_extend_btn').replace('{n}', '15')} onPress={() => extend(x.id, 15)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
-                <AppButton title={t('tmr_extend_btn').replace('{n}', '30')} onPress={() => extend(x.id, 30)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
+                <AppButton size="sm" title={t('tmr_reset')} onPress={() => reset(x.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
+                <AppButton size="sm" title={t('tmr_extend_btn').replace('{n}', '15')} onPress={() => extend(x.id, 15)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
+                <AppButton size="sm" title={t('tmr_extend_btn').replace('{n}', '30')} onPress={() => extend(x.id, 30)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
               </View>
             </View>
           );

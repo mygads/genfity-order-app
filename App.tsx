@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, useNavigation, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, loginDemo, logout, subscribeSession } from './src/session';
+import { getSession, loginDemo, logout, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
@@ -87,6 +87,19 @@ const screenOptions = {
 /** Guard navigator: belum login hanya bisa buka alur intro/install/Login. */
 function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
   const { t } = useLang();
+  const nav = useNavigation();
+  /** Konsumsi rute pasca-login sekali-pakai (mis. QrScan dari kartu QR):
+   * stack authed baru mount di render ini, dorong target di atas initial
+   * (Dashboard/Shift) setelah navigator siap. */
+  useEffect(() => {
+    if (!loggedIn) return;
+    const target = takePostLoginRoute();
+    if (!target) return;
+    const timer = setTimeout(() => {
+      (nav.navigate as unknown as (name: string) => void)(target);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [loggedIn, nav]);
   /** Soft-guard shift: instalasi fresh (tr_shiftlog kosong) bebas ke Dashboard/Cashier
    * agar demo/screenshot jalan; bila ada riwayat shift tapi tak ada yang open → mulai di Shift. */
   const [shiftClosed, setShiftClosed] = useState(false);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
@@ -254,9 +255,7 @@ export default function LogScreen({ navigation }: Props) {
                 <Text style={styles.detailTime}>{selected.time} - #{selected.tag} - {levelLabel(selected.level)}</Text>
                 <Text style={styles.detailMsg}>{selected.message}</Text>
                 <Text style={styles.detailBody}>{selected.detail}</Text>
-                <Pressable style={styles.btnPrimary} onPress={() => setSelected(null)}>
-                  <Text style={styles.btnPrimaryText}>{t('common.close')}</Text>
-                </Pressable>
+                <AppButton size="sm" title={t('common.close')} onPress={() => setSelected(null)} style={styles.btnPrimary} />
               </>
             ) : null}
           </View>

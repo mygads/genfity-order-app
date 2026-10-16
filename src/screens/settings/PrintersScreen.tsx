@@ -297,7 +297,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
         {/* WIRE REA-16: kunci prefs native printer (info status, best-effort) */}
         <View style={styles.stCard}>
@@ -343,15 +343,15 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             <Switch value={s.autocut} onValueChange={(v) => patchStation(s.id, { autocut: v })} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
           <View style={styles.stBtns}>
-            <AppButton title={t('printers.testPrint')} onPress={() => testPrintStation(s)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton title={t('printers.openDrawer')} onPress={() => openDrawer(s)} variant="secondary" fullWidth={false} style={styles.amberFlex} textStyle={styles.amberText} />
-            <AppButton title={t('printers.setPrimary')} onPress={() => setDefault(s.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton title={t('printers.remove')} onPress={() => removeStation(s.id)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
+            <AppButton size="md" title={t('printers.testPrint')} onPress={() => testPrintStation(s)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size="md" title={t('printers.openDrawer')} onPress={() => openDrawer(s)} variant="secondary" fullWidth={false} style={styles.amberFlex} textStyle={styles.amberText} />
+            <AppButton size="md" title={t('printers.setPrimary')} onPress={() => setDefault(s.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size="md" title={t('printers.remove')} onPress={() => removeStation(s.id)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
           </View>
           {s.connected ? (
-            <AppButton title={t('printers.disconnect')} onPress={() => patchStation(s.id, { connected: !s.connected })} variant="danger" style={styles.paleRedBlock} textStyle={styles.redText} />
+            <AppButton size="md" title={t('printers.disconnect')} onPress={() => patchStation(s.id, { connected: !s.connected })} variant="danger" style={styles.paleRedBlock} textStyle={styles.redText} />
           ) : (
-            <AppButton title={t('printers.connect')} onPress={() => patchStation(s.id, { connected: !s.connected })} style={styles.greenBlock} />
+            <AppButton size="md" title={t('printers.connect')} onPress={() => patchStation(s.id, { connected: !s.connected })} style={styles.greenBlock} />
           )}
         </View>
       ))}
@@ -396,11 +396,11 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.stMeta}>{b.mac} - {b.paired ? t('printers.paired') : t('printers.notPaired')}</Text>
             </View>
             {b.ble ? (
-              <AppButton title={t('printers.useDevice')} onPress={() => useBleDevice(b)} fullWidth={false} style={styles.btnInline} />
+              <AppButton size="sm" title={t('printers.useDevice')} onPress={() => useBleDevice(b)} fullWidth={false} style={styles.btnInline} />
             ) : b.paired ? (
-              <AppButton title={t('printers.forget')} onPress={() => togglePair(b.id)} variant="danger" fullWidth={false} style={styles.btnInlinePale} textStyle={styles.redText} />
+              <AppButton size="sm" title={t('printers.forget')} onPress={() => togglePair(b.id)} variant="danger" fullWidth={false} style={styles.btnInlinePale} textStyle={styles.redText} />
             ) : (
-              <AppButton title={t('printers.pair')} onPress={() => togglePair(b.id)} variant="secondary" fullWidth={false} style={styles.btnInline} />
+              <AppButton size="sm" title={t('printers.pair')} onPress={() => togglePair(b.id)} variant="secondary" fullWidth={false} style={styles.btnInline} />
             )}
           </View>
         ))}
@@ -434,7 +434,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.stName}>{u.name}</Text>
               <Text style={styles.stMeta}>{u.vendorId}/{u.productId}</Text>
             </View>
-            <AppButton title={t('printers.useDevice')} onPress={() => useUsbDevice(u)} fullWidth={false} style={styles.btnInline} />
+            <AppButton size="sm" title={t('printers.useDevice')} onPress={() => useUsbDevice(u)} fullWidth={false} style={styles.btnInline} />
           </View>
         ))}
         <AppButton title={usbScanning ? t('printers.scanning') : t('printers.usbScan')} onPress={scanUsb} disabled={usbScanning} variant="secondary" style={styles.blockGap} />
@@ -475,14 +475,14 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               </View>
               <Text style={styles.cardRole}>{item.role} - {on ? t('printers.connected') : t('printers.disconnected')}</Text>
               <View style={styles.cardBtns}>
-                <AppButton title={t('printers.testPrint')} onPress={() => testPrintStation({
+                <AppButton size="md" title={t('printers.testPrint')} onPress={() => testPrintStation({
                   id: item.id, name: item.name, role: 'Kasir', conn: item.type === 'LAN' ? 'LAN' : 'Bluetooth',
                   address: item.address, cpl: 32, autocut: true, isDefault: false, connected: on,
                 })} variant="secondary" fullWidth={false} style={styles.btnFlex} />
                 {on ? (
-                  <AppButton title={t('printers.disconnect')} onPress={() => setConfirm(item)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
+                  <AppButton size="md" title={t('printers.disconnect')} onPress={() => setConfirm(item)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
                 ) : (
-                  <AppButton title={t('printers.connect')} onPress={() => togglePrinter(item)} fullWidth={false} style={styles.greenFlex} />
+                  <AppButton size="md" title={t('printers.connect')} onPress={() => togglePrinter(item)} fullWidth={false} style={styles.greenFlex} />
                 )}
               </View>
             </View>
@@ -496,8 +496,8 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             <Text style={styles.dialogTitle}>{t('printers.disconnectTitle')}</Text>
             <Text style={styles.dialogSub}>{t('printers.disconnectSub1')} {confirm?.name} {t('printers.disconnectSub2')}</Text>
             <View style={styles.dialogBtns}>
-              <AppButton title={t('common.cancel')} onPress={() => setConfirm(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-              <AppButton title={t('printers.yesDisconnect')} onPress={() => confirm && togglePrinter(confirm)} variant="danger" fullWidth={false} style={styles.btnFlex} />
+              <AppButton size="md" title={t('common.cancel')} onPress={() => setConfirm(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+              <AppButton size="md" title={t('printers.yesDisconnect')} onPress={() => confirm && togglePrinter(confirm)} variant="danger" fullWidth={false} style={styles.btnFlex} />
             </View>
           </View>
         </View>

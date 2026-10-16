@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
-import { loginDemo, loginEmployee } from '../../session';
+import { loginDemo, loginEmployee, setPostLoginRoute } from '../../session';
 import { startRealtime } from '../../lib/realtime';
 import { setWsForeground } from '../../native/printer';
 import { validateEmployee } from '../../lib/apiSource';
@@ -146,7 +146,10 @@ export default function LoginScreen({ navigation }: Props) {
         // best-effort di dev-client/APK agar WS hidup saat layar mati.
         try { startRealtime(); } catch { /* abaikan */ }
         try { void setWsForeground(true); } catch { /* abaikan */ }
-        navigation?.navigate('Dashboard');
+        // JANGAN navigate manual ke Dashboard: GuardedStacks me-render ulang
+        // bersyarat (tamu -> authed) dan stack authed mount dengan initial
+        // Dashboard/Shift sendiri. Navigate sinkron di sini race melawan
+        // setLoggedIn sehingga error "not handled by any navigator" di HP.
       } finally {
         setBusy(false);
       }
@@ -156,8 +159,10 @@ export default function LoginScreen({ navigation }: Props) {
   const scanQr = () => {
     // Kunci sesi demo dulu (guard navigator butuh login), lalu pindai QR asli
     // di layar kamera QrScan; hasil pindaian meneruskan ke alur kasir.
+    // QrScan hanya ada di stack authed: titip via setPostLoginRoute agar
+    // GuardedStacks mendorongnya setelah stack berganti (tanpa race NAVIGATE).
+    setPostLoginRoute('QrScan');
     loginDemo();
-    navigation?.navigate('QrScan');
   };
 
   const card = (which: 'email' | 'qr') => {
@@ -289,6 +294,7 @@ export default function LoginScreen({ navigation }: Props) {
 
             <View style={styles.spacer} />
             <AppButton
+              size="md"
               title={busy ? t('login_verifying') : t('g_login_submit')}
               onPress={submit}
               disabled={!filled || busy}
@@ -302,6 +308,7 @@ export default function LoginScreen({ navigation }: Props) {
             </View>
             <View style={styles.spacer} />
             <AppButton
+              size="md"
               variant="secondary"
               title={t('g_login_how')}
               onPress={() => navigation?.navigate('QrHow')}
@@ -309,6 +316,7 @@ export default function LoginScreen({ navigation }: Props) {
               textStyle={styles.outlineT}
             />
             <AppButton
+              size="md"
               title={t('g_login_scan')}
               onPress={scanQr}
               style={styles.primary}
@@ -349,6 +357,7 @@ export default function LoginScreen({ navigation }: Props) {
               <Text style={styles.helpPhone}>0822-1066-6969</Text>
             </Text>
             <AppButton
+              size="sm"
               title={t('g_login_help_ok')}
               onPress={() => setHelp(false)}
               style={styles.primary}

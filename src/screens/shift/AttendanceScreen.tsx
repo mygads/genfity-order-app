@@ -94,7 +94,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
   const clockedIn = inTime !== null && outTime === null;
 
   const outlet = s?.outlet ?? 'ESB Cabang Poris'; const who = s?.name ?? 'Gista'; return (
-    <View style={styles.root}> <ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
       <Text style={styles.clock}>{fmtClock(now)}</Text>
@@ -134,6 +134,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
       <View style={styles.actions}>
         {!outTime ? (
           <AppButton
+            size="md"
             title={`${t('att_in')} ›`}
             disabled={clockedIn || busy}
             fullWidth={false}
@@ -143,6 +144,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
         ) : null}
         {clockedIn ? (
           <AppButton
+            size="md"
             title={`${t('att_out')} ›`}
             variant="danger"
             disabled={busy}
@@ -152,6 +154,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
           />
         ) : null}
         <AppButton
+          size="md"
           title={t('att_exit')}
           variant="secondary"
           fullWidth={false}
@@ -159,7 +162,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
           onPress={() => navigation?.navigate('Dashboard')}
         />
       </View>
-      {syncNote ? <Text style={styles.syncNote}>{syncNote}</Text> : null} <View style={styles.links}>
+      {syncNote ? <Text style={styles.syncNote}>{syncNote}</Text> : null}<View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Shift')}><Text style={styles.link}>{t('att_after_shift')}</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')}><Text style={styles.link}>{t('att_skip_dash')}</Text></TouchableOpacity>
       </View>
@@ -197,7 +200,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
           style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
         />
         {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
-        <AppButton title={t('att_save_pin')} onPress={changePin} />
+        <AppButton size="md" title={t('att_save_pin')} onPress={changePin} />
       </View>
     </ScrollView>
  </View> );}const styles = StyleSheet.create({

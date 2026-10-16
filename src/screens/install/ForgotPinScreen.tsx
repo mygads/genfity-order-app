@@ -25,6 +25,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
             {t('g_forgot_sent_post')}
           </Text>
           <AppButton
+            size="md"
             title={t('g_forgot_back')}
             onPress={() => navigation?.goBack()}
             style={styles.primary}
@@ -47,6 +48,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
             />
           </View>
           <AppButton
+            size="md"
             title={t('g_forgot_send')}
             onPress={() => setSent(true)}
             disabled={!username.trim()}

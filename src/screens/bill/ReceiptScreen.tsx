@@ -55,15 +55,15 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
       <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
       <View style={styles.div} />
-      {hasItems ? ( cartItems.map((it) => ( <View key={it.id}> <View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View> {(it.modifiers ?? []).map((m) => ( <Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))} </View> )) ) : null}
+      {hasItems ? ( cartItems.map((it) => ( <View key={it.id}><View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View> {(it.modifiers ?? []).map((m) => ( <Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))} </View> )) ) : null}
       <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.item}>{rp(subtotal)}</Text></View> {discount > 0 && (
       <View style={styles.row}><Text style={styles.item}>{t('rc_discount')}</Text><Text style={styles.item}>-{rp(discount)}</Text></View> )} {service > 0 && (
       <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.item}>{rp(service)}</Text></View> )} {feeESB > 0 && (
       <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )} {tax > 0 && (
       <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )} {voucherCode ? (
-      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null} {approvalCode ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null} {edcLine ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null} {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} {rounding !== 0 && ( <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )} <View style={styles.div} />
+      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null} {approvalCode ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null} {edcLine ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null} {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} {rounding !== 0 && ( <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
       <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
-      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View> {hasVoid && ( <> <View style={styles.div} /> <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> {voidLines.map((l) => ( <View key={l.name} style={styles.row}> <Text style={styles.voidItem}>{l.qty}x {l.name}</Text> <Text style={styles.item}>-{rp(l.qty * l.price)}</Text> </View> ))} {voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null} <View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View> </> )}
+      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View> {hasVoid && ( <><View style={styles.div} /> <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> {voidLines.map((l) => ( <View key={l.name} style={styles.row}> <Text style={styles.voidItem}>{l.qty}x {l.name}</Text> <Text style={styles.item}>-{rp(l.qty * l.price)}</Text> </View> ))} {voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View> </> )}
       {isCash && cash > 0 ? (
         <>
           <View style={styles.row}><Text style={styles.item}>{t('rc_cashin')}</Text><Text style={styles.item}>{rp(cash)}</Text></View>
@@ -94,11 +94,11 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
 
   const actions = (
     <View style={[styles.actions, isTablet && styles.actionsStack]}>
-      <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`🖨 ${printing ? '...' : t('rc_print')}`} variant="secondary" onPress={() => void doPrint()} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`✉ ${t('ok_email')}`} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={t('rc_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
+      <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`🖨 ${printing ? '...' : t('rc_print')}`} variant="secondary" onPress={() => void doPrint()} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`✉ ${t('ok_email')}`} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={t('rc_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
     </View>
   );
 
@@ -114,11 +114,12 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
             placeholder={t('hist_mail_ph')}
             keyboardType="email-address"
             autoCapitalize="none"
+            boxStyle={{ marginTop: 8 }}
           />
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
-            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} style={[styles.actionBtn, styles.dBtnFlex]} />
-            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} style={[styles.actionBtn, styles.dBtnFlex]} />
+            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} size="md" style={[styles.actionBtn, styles.dBtnFlex]} />
+            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} size="md" style={[styles.actionBtn, styles.dBtnFlex]} />
           </View>
         </View>
       </View>
@@ -127,7 +128,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
 
   if (isTablet) {
     return (
-      <View style={styles.root}> <ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /> <View style={styles.split}>
+      <View style={styles.root}><ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /><View style={styles.split}>
         <ScrollView style={styles.paperSide} contentContainerStyle={styles.body}>
           {paper}
         </ScrollView>
@@ -137,7 +138,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
             <View style={styles.row}><Text style={styles.item}>{t('rc_no')}</Text><Text style={styles.item}>{no}</Text></View>
             <View style={styles.row}><Text style={styles.item}>{t('rc_mode')}</Text><Text style={styles.item}>{mode}</Text></View>
             <View style={styles.row}><Text style={styles.item}>{t('rc_method')}</Text><Text style={styles.item}>{method}</Text></View>
-            {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} <View style={styles.div} />
+            {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
             <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>
@@ -148,7 +149,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
   }
 
   return (
-    <View style={styles.root}> <ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /> <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
+    <View style={styles.root}><ScreenHeader title={t('rc_title')} sub={no} onBack={() => navigation?.goBack()} /><ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
       {paper}
       {actions}
       {mailModal}

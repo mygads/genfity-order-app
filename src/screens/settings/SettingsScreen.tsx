@@ -163,7 +163,7 @@ export default function SettingsScreen({ navigation }: Props) {
                 autoCapitalize="none"
               />
             </View>
-            <AppButton title={t('common.save')} onPress={saveCustom} fullWidth={false} style={styles.btnInline} />
+            <AppButton size="sm" title={t('common.save')} onPress={saveCustom} fullWidth={false} style={styles.btnInline} />
           </View>
         )}
       </View>
@@ -172,15 +172,13 @@ export default function SettingsScreen({ navigation }: Props) {
         <Text style={styles.cardTitle}>{t('sync.title')}</Text>
         <Text style={styles.cardSub}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
         <View style={styles.syncRow}>
-          <AppButton title={syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!syncBusy} fullWidth={false} style={styles.btnFlexNavy} />
-          <AppButton title={syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!syncBusy} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+          <AppButton size="md" title={syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!syncBusy} fullWidth={false} style={styles.btnFlexNavy} />
+          <AppButton size="md" title={syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!syncBusy} variant="secondary" fullWidth={false} style={styles.btnFlex} />
         </View>
         {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
         {posVer ? <Text style={styles.cardSub}>{t('about.terminal')} - POS {posVer}</Text> : null}
         <View style={styles.syncRow}>
-          <Pressable style={[styles.syncBtn, verifyBusy && styles.syncBtnDisabled]} onPress={doVerify} disabled={verifyBusy}>
-            <Text style={styles.syncBtnText}>{t('vou_check')}</Text>
-          </Pressable>
+          <AppButton size="sm" title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.syncBtn} />
         </View>
         {verifyMsg ? <Text style={styles.syncMsg}>{verifyMsg}</Text> : null}
       </View>
@@ -245,6 +243,7 @@ export default function SettingsScreen({ navigation }: Props) {
       <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 
       <AppButton
+        size="lg"
         title={t('settings.logout')}
         variant="danger"
         onPress={() => {
@@ -265,8 +264,8 @@ export default function SettingsScreen({ navigation }: Props) {
             <AppInput label={t('settings.branchId')} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="BR-01" />
             <AppInput label={t('settings.branchName')} value={draftBranchName} onChangeText={setDraftBranchName} placeholder="Cabang Poris" />
             <View style={styles.dialogBtns}>
-              <AppButton title={t('common.cancel')} onPress={() => setTerminalOpen(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-              <AppButton title={t('common.save')} onPress={saveTerminal} fullWidth={false} style={styles.btnFlexNavy} />
+              <AppButton size="sm" title={t('common.cancel')} onPress={() => setTerminalOpen(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+              <AppButton size="sm" title={t('common.save')} onPress={saveTerminal} fullWidth={false} style={styles.btnFlexNavy} />
             </View>
           </View>
         </View>

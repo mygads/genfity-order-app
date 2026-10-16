@@ -96,7 +96,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       {level !== 'ok' ? (
         <View style={[styles.alert, level === 'block7' ? styles.alertBlock : styles.alertWarn]}>
@@ -105,7 +105,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
             <Text style={[styles.alertTitle, isTablet && { fontSize: 16 }]}>
               {level === 'block7' ? t('sync.blocked') : t('sync.warn')}
             </Text>
-            <Text style={styles.alertCode}> {level === 'block7' ? t('sync_code_block') : t('sync_code_warn')} </Text> <Text style={styles.alertSub}>
+            <Text style={styles.alertCode}> {level === 'block7' ? t('sync_code_block') : t('sync_code_warn')} </Text><Text style={styles.alertSub}>
               {level === 'block7'
                 ? t('sync.blockedMsg')
                 : t('sync.warnMsg')}
@@ -125,8 +125,8 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           <Text style={styles.wmVal}>{lastPull}</Text>
         </View>
         <View style={styles.btnRow}>
-          <AppButton title={busy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!busy} fullWidth={false} style={styles.greenFlex} />
-          <AppButton title={busy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!busy} fullWidth={false} style={styles.navyFlex} />
+          <AppButton size="md" title={busy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!busy} fullWidth={false} style={styles.greenFlex} />
+          <AppButton size="md" title={busy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!busy} fullWidth={false} style={styles.navyFlex} />
         </View>
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       </View>
@@ -140,7 +140,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           </View>
         ) : null}
         <View style={styles.btnRow}>
-          <AppButton title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.greenFlex} />
+          <AppButton size="sm" title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.greenFlex} />
         </View>
         {verifyMsg ? <Text style={styles.msg}>{verifyMsg}</Text> : null}
       </View>
@@ -174,7 +174,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         </View>
       ))}
 
-      <AppButton title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
+      <AppButton size="md" title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
       <Text style={styles.foot}>{t('sync_foot')}</Text>
     </ScrollView>
   );}const styles = StyleSheet.create({

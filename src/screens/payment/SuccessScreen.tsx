@@ -253,8 +253,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
           />
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
-            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} style={styles.dBtn} />
-            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} style={styles.dBtn} />
+            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} size="md" style={styles.dBtn} />
+            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} size="md" style={styles.dBtn} />
           </View>
         </View>
       </View>
@@ -275,10 +275,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.footer}>
-          <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} style={styles.footBtnFlex} />
-          <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} style={styles.footBtnFlex} />
-          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} style={styles.footBtnFlex} />
-          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={styles.footBtnWide} />
+          <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={styles.footBtnFlex} />
+          <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={styles.footBtnFlex} />
+          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={styles.footBtnFlex} />
+          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={styles.footBtnWide} />
         </View>
         {mailModal}
       </View>
@@ -298,10 +298,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
       </View>
 
       <View style={[styles.footer, styles.footerGrid]}>
-        <AppButton title={t('ok_print')} variant="secondary" onPress={() => navigation?.navigate('Receipt', receiptParams)} fullWidth={false} style={styles.footGridBtn} />
-        <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} style={styles.footGridBtn} />
-        <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} style={styles.footGridBtn} />
-        <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={styles.footGridBtn} />
+        <AppButton title={t('ok_print')} variant="secondary" onPress={() => navigation?.navigate('Receipt', receiptParams)} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={styles.footGridBtn} />
       </View>
       {mailModal}
     </View>

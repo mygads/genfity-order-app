@@ -277,7 +277,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
         <View style={styles.formFlex}>
           <AppInput value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} />
         </View>
-        <AppButton title={t('menu.downloadImages')} onPress={downloadAll} fullWidth={false} style={styles.navyInline} />
+        <AppButton size="sm" title={t('menu.downloadImages')} onPress={downloadAll} fullWidth={false} style={styles.navyInline} />
       </View>
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
@@ -323,7 +323,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
           ) : null}
           <View style={styles.itemBtns}>
             {m.imageState !== 'ok' && m.imageState !== 'downloading' ? (
-              <AppButton title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+              <AppButton size="sm" title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             ) : null}
             <AppButton title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             <View style={styles.soldRow}>

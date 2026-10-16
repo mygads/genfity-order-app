@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -213,9 +214,13 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         ) : null}
         {warn ? <Text style={styles.warn}>{warn}</Text> : null}
 
-        <TouchableOpacity style={styles.primary} onPress={move}>
-          <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{t('mov_do_table')} ›</Text>
-        </TouchableOpacity>
+        <AppButton
+          size="md"
+          title={`${t('mov_do_table')} ›`}
+          onPress={move}
+          style={[styles.primary, { marginTop: 16 }]}
+          textStyle={styles.primaryT}
+        />
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
             <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>

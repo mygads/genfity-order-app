@@ -236,9 +236,14 @@ export default function DineInScreen({ navigation, route }: Props) {
         {active.length === 0 ? (
           <View style={styles.billEmpty}>
             <Text style={[styles.billEmptyT, isTablet && styles.billEmptyTBig]}>{t('cartEmpty')}</Text>
-            <TouchableOpacity style={styles.billEmptyBtn} onPress={goCashier}>
-              <Text style={[styles.billEmptyBtnT, isTablet && styles.billEmptyBtnTBig]}>＋ {t('addMenu')} ›</Text>
-            </TouchableOpacity>
+            <AppButton
+              size="sm"
+              title={`＋ ${t('addMenu')} ›`}
+              onPress={goCashier}
+              fullWidth={false}
+              style={[styles.billEmptyBtn, { marginTop: 10 }]}
+              textStyle={styles.billEmptyBtnT}
+            />
           </View>
         ) : (
           active.map((it) => (
@@ -270,6 +275,7 @@ export default function DineInScreen({ navigation, route }: Props) {
 
       <View style={styles.actions}>
         <AppButton
+          size="md"
           variant="secondary"
           title={t('save')}
           onPress={goSave}
@@ -278,6 +284,7 @@ export default function DineInScreen({ navigation, route }: Props) {
           textStyle={styles.ghostT}
         />
         <AppButton
+          size="md"
           variant="secondary"
           title={t('printReceipt')}
           onPress={goPrint}
@@ -286,6 +293,7 @@ export default function DineInScreen({ navigation, route }: Props) {
           textStyle={styles.ghostT}
         />
         <AppButton
+          size="lg"
           title={`${t('pay')} | ${rp(total)} ›`}
           onPress={active.length > 0 ? goPay : goCashier}
           fullWidth={false}

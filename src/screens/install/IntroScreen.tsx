@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
@@ -67,23 +68,28 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
       <View style={[styles.footer, isTablet && wideCenterSm]}>
         {last ? (
           <>
-            <TouchableOpacity
-              style={styles.outline}
-              onPress={() => navigation?.navigate('Install')}>
-              <Text style={styles.outlineT}>{t('g_intro_create')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.primary}
-              onPress={() => navigation?.navigate('Login')}>
-              <Text style={styles.primaryT}>{t('g_intro_login')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              size="lg"
+              variant="secondary"
+              title={t('g_intro_create')}
+              onPress={() => navigation?.navigate('Install')}
+              style={[styles.outline, { marginTop: 0 }]}
+              textStyle={styles.outlineT}
+            />
+            <AppButton
+              size="lg"
+              title={t('g_intro_login')}
+              onPress={() => navigation?.navigate('Login')}
+              style={[styles.primary, { marginTop: 0 }]}
+            />
           </>
         ) : (
-          <TouchableOpacity
-            style={styles.primary}
-            onPress={() => setPage((p) => Math.min(p + 1, PAGES.length - 1))}>
-            <Text style={styles.primaryT}>{t('g_intro_next')}</Text>
-          </TouchableOpacity>
+          <AppButton
+            size="lg"
+            title={t('g_intro_next')}
+            onPress={() => setPage((p) => Math.min(p + 1, PAGES.length - 1))}
+            style={[styles.primary, { marginTop: 0 }]}
+          />
         )}
       </View>
     </View>

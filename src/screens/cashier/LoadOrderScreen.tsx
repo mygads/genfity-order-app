@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
+import { useEffect, useRef, useState } from 'react';import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
 
 }; };};interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string; }const SEED: Saved[] = [
   {
@@ -78,17 +78,13 @@ import { useEffect, useRef, useState } from 'react';import { Alert, Image, Scrol
             <Text style={styles.title}>{o.salesNum ? `${o.salesNum} · ${o.title}` : o.title}</Text>
             <Text style={styles.detail}>{o.salesNum ? `${o.salesNum} · ${o.mode} · ${o.detail}` : `${o.mode} · ${o.detail}`}</Text>
           </View>
-          <TouchableOpacity style={styles.load} onPress={() => muat(o)}>
-            <Text style={styles.loadT}>{t('loadAction')}</Text>
-          </TouchableOpacity>
+          <AppButton size="sm" title={t('loadAction')} onPress={() => muat(o)} fullWidth={false} style={[styles.load, { marginTop: 0 }]} textStyle={styles.loadT} />
           <TouchableOpacity onPress={() => setOrders((l) => l.filter((x) => x.id !== o.id))}>
             <Text style={styles.del}>{t('delete')}</Text>
           </TouchableOpacity>
         </View>
       ))}
-      <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Cashier')}>
-        <Text style={styles.primaryT}>{t('newTx')}</Text>
-      </TouchableOpacity>
+      <AppButton size="md" title={t('newTx')} onPress={() => navigation?.navigate('Cashier')} style={[styles.primary, { marginTop: 16, backgroundColor: colors.navy }]} textStyle={styles.primaryT} />
     </ScrollView>
   </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },

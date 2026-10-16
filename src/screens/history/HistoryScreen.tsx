@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
   Image, Modal,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -128,22 +129,38 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> {langToggle} <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> {langToggle}<Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </Pressable>
         </View>
-      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
 
-      <View style={styles.searchRow}>
-        <Text style={styles.searchIcon}>⌕</Text>
+      <View style={[styles.searchRow, !isTablet && styles.searchRowPhone]}>
+        {isTablet && <Text style={styles.searchIcon}>⌕</Text>}
         <View style={{ flex: 1 }}>
           <AppInput
             label={t('hist_search_label')}
             placeholder={t('hist_search_ph')}
             value={query}
             onChangeText={setQuery}
+            boxStyle={!isTablet ? styles.searchBoxPhone : undefined}
+            style={!isTablet ? styles.searchFieldPhone : undefined}
           />
+          {!isTablet && (
+            <View pointerEvents="none" style={styles.searchAdorn}>
+              <Text style={styles.searchAdornIcon}>⌕</Text>
+            </View>
+          )}
         </View>
-      </View> <View style={styles.filterRow}>
+        {!isTablet && (
+          <AppButton
+            title={t('hist_search_btn')}
+            fullWidth={false}
+            style={styles.searchBtnPhone}
+            textStyle={styles.searchBtnTxtPhone}
+            onPress={() => Keyboard.dismiss()}
+          />
+        )}
+      </View><View style={styles.filterRow}>
         <Pressable style={styles.filterBtn} onPress={() => setPicker('date')}>
           <Text style={styles.filterIcon}>▦</Text>
           <Text style={styles.filterText} numberOfLines={1}>
@@ -170,12 +187,12 @@ import { useEffect, useMemo, useState } from 'react';import {
         )}
       </View>
 
-      <View style={styles.recapCard}> <View style={styles.recapTop}> <View style={{ flex: 1 }}>
+      <View style={styles.recapCard}><View style={styles.recapTop}><View style={{ flex: 1 }}>
         <Text style={styles.recapLabel}>{t('hist_omzet')}</Text> <Text style={styles.recapValue}>{rp(recap.omzet)}</Text> <Text style={styles.recapSub}> {recap.count} {t('hist_trx')} - {t('hist_sales_on')} : {fDate ?? t('c_all')} </Text> {Object.entries(recap.byPay).slice(0, 4).map(([m, v]) => (
         <Text key={m} style={styles.recapLine}> {m} - {rp(v)} </Text> ))}
       </View>
 
-      <View style={styles.onlinePill}> <View style={styles.onlineDot} /> <Text style={styles.onlineText}>{t('hist_online')}</Text> </View> </View> <View style={styles.recapBtns}> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}> <Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text> </Pressable> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}> <Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text> </Pressable> <Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}> <Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text> </Pressable> </View> </View> {isTablet ? (
+      <View style={[styles.onlinePill, !isTablet && styles.onlinePillPhone]}><View style={styles.onlineDot} /> <Text style={[styles.onlineText, !isTablet && styles.onlineTextPhone]}>{t('hist_online')}</Text> </View> </View><View style={styles.recapBtns}><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}> <Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text> </Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}> <Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text> </Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}> <Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text> </Pressable> </View> </View> {isTablet ? (
         <View style={styles.split}>
           <View style={styles.splitList}>
             <TxnList
@@ -446,7 +463,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
         <Text style={styles.rowValue}>{payment}</Text>
       </View>
 
-      <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('hist_mode')}</Text> <Text style={styles.rowValue}>{txn.mode}</Text> </View> <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_table')}</Text> <Text style={styles.rowValue}>{txn.table ?? '-'}</Text> </View> <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_cashier')}</Text> <Text style={styles.rowValue}>{txn.cashier}</Text> </View> <View style={styles.divider} />
+      <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('hist_mode')}</Text> <Text style={styles.rowValue}>{txn.mode}</Text> </View><View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_table')}</Text> <Text style={styles.rowValue}>{txn.table ?? '-'}</Text> </View><View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_cashier')}</Text> <Text style={styles.rowValue}>{txn.cashier}</Text> </View><View style={styles.divider} />
       {txn.items.map((it, idx) => (
         <View key={idx} style={styles.itemRow}>
           <View style={styles.qtyCircle}>
@@ -470,7 +487,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
       </View>
       <View style={styles.row}>
         <Text style={styles.rowLabel}>{t('c_subtotal')}</Text>
-        <Text style={styles.rowValue}>{rp(txn.subtotal)}</Text> </View> <View style={styles.row}> <Text style={styles.totalLabel}>{t('c_total')}</Text> <Text style={styles.totalValue}>{rp(txn.total)}</Text>
+        <Text style={styles.rowValue}>{rp(txn.subtotal)}</Text> </View><View style={styles.row}> <Text style={styles.totalLabel}>{t('c_total')}</Text> <Text style={styles.totalValue}>{rp(txn.total)}</Text>
       </View>
 
       <View style={styles.detailBtns}>
@@ -524,6 +541,37 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     paddingHorizontal: 12,
   paddingVertical: 6, },
   searchIcon: { fontSize: 16, color: colors.faint, marginRight: 8 },
+  /** Phone: baris polos tanpa kotak ganda - ikon di dalam input + tombol compact. */
+  searchRowPhone: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  searchBoxPhone: { height: 46, borderRadius: 10 },
+  searchFieldPhone: { paddingLeft: 26, fontSize: 13 },
+  searchAdorn: {
+    position: 'absolute',
+    left: 12,
+    bottom: 0,
+    height: 46,
+    justifyContent: 'center',
+  },
+  searchAdornIcon: { fontSize: 15, color: colors.faint },
+  searchBtnPhone: {
+    marginTop: 0,
+    height: 46,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: colors.navy,
+  },
+  searchBtnTxtPhone: { fontSize: 13 },
+  /** Phone: label Online compact - tidak memenuhi tinggi kartu rekap. */
+  onlinePillPhone: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4 },
+  onlineTextPhone: { fontSize: 12 },
   search: {
     flex: 1,
     paddingVertical: 9,

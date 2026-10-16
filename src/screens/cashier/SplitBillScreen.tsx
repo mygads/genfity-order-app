@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
@@ -461,12 +462,15 @@ export default function SplitBillScreen({ navigation, route }: Props) {
               </View>
               <View style={styles.billActs}>
                 {!paid[i] && (
-                  <TouchableOpacity
-                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff]}
+                  <AppButton
+                    size="sm"
+                    title={`${t('sp_pay').replace('{m}', methods[i] as string)} ›`}
+                    onPress={() => payBill(i)}
                     disabled={val <= 0 || nominalBlocked}
-                    onPress={() => payBill(i)}>
-                    <Text style={styles.payT}>{t('sp_pay').replace('{m}', methods[i] as string)} ›</Text>
-                  </TouchableOpacity>
+                    fullWidth={false}
+                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff, { marginTop: 0 }]}
+                    textStyle={styles.payT}
+                  />
                 )}
                 <TouchableOpacity
                   onPress={() => setPaid((p) => p.map((v, j) => (j === i ? !v : v)))}
@@ -480,9 +484,13 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         {paidCount === splits && (
           <Text style={styles.done}>{t('sp_allpaid')}</Text>
         )}
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation?.navigate('Cashier')}>
-          <Text style={styles.backBtnT}>{t('sp_back')}</Text>
-        </TouchableOpacity>
+        <AppButton
+          size="md"
+          title={t('sp_back')}
+          onPress={() => navigation?.navigate('Cashier')}
+          style={[styles.backBtn, { marginTop: 16 }]}
+          textStyle={styles.backBtnT}
+        />
       </ScrollView>
     </View>
   );

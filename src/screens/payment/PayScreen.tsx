@@ -601,7 +601,7 @@ export default function PayScreen({ navigation, route }: Props) {
               autoCapitalize="characters"
             />
           </View>
-          <AppButton title={voucherBusy ? '…' : t('pay_voucher_use')} disabled={voucherBusy} onPress={() => void applyVoucher()} fullWidth={false} style={styles.voucherAction} />
+          <AppButton title={voucherBusy ? '…' : t('pay_voucher_use')} disabled={voucherBusy} onPress={() => void applyVoucher()} fullWidth={false} size="sm" style={styles.voucherAction} />
           <AppButton
             title={`${t('pay_voucher_pick')} ›`}
             onPress={() => {
@@ -609,6 +609,7 @@ export default function PayScreen({ navigation, route }: Props) {
               navigation?.navigate('Voucher');
             }}
             fullWidth={false}
+            size="sm"
             style={styles.voucherAction}
           />
         </View>
@@ -743,8 +744,8 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
 
       <View style={styles.footer}>
-        <AppButton title={cashPayLabel} disabled={!cashLanjutReady} onPress={onCashLanjut} fullWidth={false} style={styles.footerBtn} />
-        <AppButton title={t('pay_add')} variant="secondary" disabled={!cashTambahReady} onPress={onCashTambah} fullWidth={false} style={styles.footerBtn} />
+        <AppButton title={cashPayLabel} disabled={!cashLanjutReady} onPress={onCashLanjut} fullWidth={false} size="md" style={styles.footerBtn} />
+        <AppButton title={t('pay_add')} variant="secondary" disabled={!cashTambahReady} onPress={onCashTambah} fullWidth={false} size="md" style={styles.footerBtn} />
       </View>
     </View>
   );
@@ -798,7 +799,7 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
 
       <View style={styles.footer}>
-        <AppButton title={`${t('pay_cash_pay').replace('{t}', rp(remaining))} ›`} disabled={edcCode.length !== 6} onPress={onCardLanjut} fullWidth={false} style={styles.footerBtn} />
+        <AppButton title={`${t('pay_cash_pay').replace('{t}', rp(remaining))} ›`} disabled={edcCode.length !== 6} onPress={onCardLanjut} fullWidth={false} size="md" style={styles.footerBtn} />
       </View>
       {edcCode.length !== 6 && (
         <Text style={styles.ctaHint}>{t('pay_need_approval')}</Text>
@@ -874,6 +875,7 @@ export default function PayScreen({ navigation, route }: Props) {
           title={wallet ? `${t('pay_via').replace('{t}', rp(remaining)).replace('{w}', WALLET_LABEL[wallet] ?? wallet)} ›` : t('pay_pick_method').replace('{t}', rp(remaining))}
           disabled={!wallet || !ovoPhoneOk}
           onPress={onOnlineLanjut}
+          size="md"
         />
       </View>
     </View>
@@ -937,6 +939,7 @@ export default function PayScreen({ navigation, route }: Props) {
             : t('pay_dep_pick').replace('{t}', rp(remaining))}
           disabled={!memberPicked || memberPicked.saldo <= 0}
           onPress={onDepositLanjut}
+          size="md"
         />
       </View>
       {memberPicked && memberPicked.saldo < remaining && (
@@ -975,8 +978,8 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
       {tenderMsg ? <Text style={styles.ctaHint}>{tenderMsg}</Text> : null}
       <View style={styles.footer}>
-        <AppButton title={tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`} disabled={!tenderReady} onPress={() => void onTenderLunas()} fullWidth={false} style={styles.footerBtn} />
-        <AppButton title={t('pay_add')} variant="secondary" disabled={!tenderReady} onPress={() => void onTenderTambah()} fullWidth={false} style={styles.footerBtn} />
+        <AppButton title={tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`} disabled={!tenderReady} onPress={() => void onTenderLunas()} fullWidth={false} size="md" style={styles.footerBtn} />
+        <AppButton title={t('pay_add')} variant="secondary" disabled={!tenderReady} onPress={() => void onTenderTambah()} fullWidth={false} size="md" style={styles.footerBtn} />
       </View>
       <Text style={styles.ctaHint}>{t('pay_tender_burn')}</Text>
       {tenderNum > remaining && remaining > 0 && (
@@ -1037,7 +1040,7 @@ export default function PayScreen({ navigation, route }: Props) {
           <View>
             <Text style={styles.lanjutTextPrimary}>{t('sync.blocked')}</Text>
             <Text style={styles.ctaHint}>{t('sync.blockedMsg')}</Text>
-            <AppButton title={`${t('sync.openSync')} ›`} onPress={() => navigation?.navigate('Sync')} />
+            <AppButton title={`${t('sync.openSync')} ›`} onPress={() => navigation?.navigate('Sync')} size="md" />
           </View>
         ) : (
           <>

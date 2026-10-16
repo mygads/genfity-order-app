@@ -96,12 +96,13 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
             />
             {msg ? <Text style={styles.msg}>{msg}</Text> : null}
             <View style={styles.btns}>
-              <AppButton title={t('xp_cancel')} variant="secondary" disabled={busy} onPress={() => setAuthFor(null)} fullWidth={false} style={styles.modalBtn} />
+              <AppButton title={t('xp_cancel')} variant="secondary" disabled={busy} onPress={() => setAuthFor(null)} fullWidth={false} size="md" style={styles.modalBtn} />
               <AppButton
                 title={busy ? t('xp_checking') : t('xp_approve')}
                 disabled={pin.length !== 6 || busy}
                 onPress={() => { void approve(); }}
                 fullWidth={false}
+                size="md"
                 style={styles.modalBtn}
               />
             </View>
@@ -122,12 +123,13 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
             />
             {refMsg ? <Text style={styles.msg}>{refMsg}</Text> : null}
             <View style={styles.btns}>
-              <AppButton title={t('xp_cancel')} variant="secondary" onPress={() => setRefFor(null)} fullWidth={false} style={styles.modalBtn} />
+              <AppButton title={t('xp_cancel')} variant="secondary" onPress={() => setRefFor(null)} fullWidth={false} size="md" style={styles.modalBtn} />
               <AppButton
                 title={t('xp_ref_done')}
                 disabled={refNo.trim().length < 3}
                 onPress={submitRef}
                 fullWidth={false}
+                size="md"
                 style={styles.modalBtn}
               />
             </View>

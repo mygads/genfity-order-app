@@ -92,7 +92,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View> <View style={styles.modeRow}>
+      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View><View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
           <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive]}>
             <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>
@@ -132,6 +132,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
             <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${rp(PROMO_DISCOUNT)}${t('disp_promo_post')}`} </Text>
           </View>
           <AppButton
+            size="md"
             title={prep.length === 0 ? t('disp_all_ready') : `${t('disp_call_pre')}${prep[0]}${t('disp_call_post')}`}
             onPress={callNext}
             disabled={prep.length === 0}
@@ -161,7 +162,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
             <Image source={require('../../../assets/images/payment_qris.webp')} style={styles.qrisImg} resizeMode="contain" />
             <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${rp(runningTotal)}`}</Text>
           </View>
-          <AppButton title={t('disp_sim_pay')} onPress={() => setMode('success')} />
+          <AppButton size="md" title={t('disp_sim_pay')} onPress={() => setMode('success')} />
         </View>
       ) : null}
 
@@ -172,7 +173,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={[styles.successTotal, isTablet && styles.successTotalBig]}>{rp(runningTotal)}</Text>
           <Text style={styles.successSub}>{t('disp_cash_line')}</Text>
           <Text style={styles.successSub}>{t('disp_thanks')}</Text>
-          <AppButton title={t('disp_back_queue')} onPress={() => setMode('queue')} />
+          <AppButton size="md" title={t('disp_back_queue')} onPress={() => setMode('queue')} />
         </View>
       ) : null}
 

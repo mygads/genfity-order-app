@@ -186,11 +186,11 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   <Text style={styles.rowVal}>{rp(tt.rounding)}</Text>
                 </View>
                 ) : null}
-                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /></View></>) : null}<View style={styles.sheetBtns}>
+                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /></View></>) : null}<View style={styles.sheetBtns}>
                   {selected.status === 'Baru' && (
                     <>
-                      <AppButton title={t('esb_reject')} variant="danger" onPress={() => { setRejectText(''); setRejectFor(selected); }} fullWidth={false} style={styles.sheetBtn} />
-                      <AppButton title={t('esb_accept')} onPress={() => setStatus(selected.id, 'Diproses')} fullWidth={false} style={styles.sheetBtnWide} />
+                      <AppButton title={t('esb_reject')} variant="danger" onPress={() => { setRejectText(''); setRejectFor(selected); }} fullWidth={false} size="md" style={styles.sheetBtn} />
+                      <AppButton title={t('esb_accept')} onPress={() => setStatus(selected.id, 'Diproses')} fullWidth={false} size="md" style={styles.sheetBtnWide} />
                     </>
                   )}
                   {selected.status === 'Diproses' && (
@@ -204,14 +204,15 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                           navigation?.navigate('Receipt', esbReceipt(s, tt.grand, liveOngkir[s.id], tt.fee));
                         }}
                         fullWidth={false}
+                        size="md"
                         style={styles.sheetBtn}
                       />
-                      <AppButton title={t('esb_complete')} onPress={() => setStatus(selected.id, 'Selesai')} fullWidth={false} style={styles.sheetBtnWide} />
+                      <AppButton title={t('esb_complete')} onPress={() => setStatus(selected.id, 'Selesai')} fullWidth={false} size="md" style={styles.sheetBtnWide} />
                     </>
                   )}
                   {(selected.status === 'Selesai' || selected.status === 'Batal') && (
                     <>
-                      <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} style={styles.sheetBtn} />
+                      <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} size="md" style={styles.sheetBtn} />
                       <AppButton
                         title={t('c_print')}
                         onPress={() => {
@@ -220,6 +221,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                           navigation?.navigate('Receipt', esbReceipt(s, tt.grand, liveOngkir[s.id], tt.fee));
                         }}
                         fullWidth={false}
+                        size="md"
                         style={styles.sheetBtn}
                       />
                     </>
@@ -238,8 +240,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
             <Text style={styles.detailMeta}>{rejectFor?.code}</Text>
             <AppInput value={rejectText} onChangeText={setRejectText} placeholder={t('esb_reject_ph')} multiline boxStyle={styles.rejectBox} style={styles.rejectField} />
             <View style={styles.sheetBtns}>
-              <AppButton title={t('c_close')} variant="secondary" onPress={() => setRejectFor(null)} fullWidth={false} style={styles.sheetBtn} />
-              <AppButton title={t('esb_reject')} variant="danger" disabled={!rejectText.trim()} onPress={() => { const target = rejectFor; const reason = rejectText.trim(); if (!target || !reason) return; setRejectFor(null); setRejectText(''); setStatus(target.id, 'Batal', reason); }} fullWidth={false} style={styles.sheetBtn} />
+              <AppButton title={t('c_close')} variant="secondary" onPress={() => setRejectFor(null)} fullWidth={false} size="md" style={styles.sheetBtn} />
+              <AppButton title={t('esb_reject')} variant="danger" disabled={!rejectText.trim()} onPress={() => { const target = rejectFor; const reason = rejectText.trim(); if (!target || !reason) return; setRejectFor(null); setRejectText(''); setStatus(target.id, 'Batal', reason); }} fullWidth={false} size="md" style={styles.sheetBtn} />
             </View>
           </View>
         </View>

@@ -76,6 +76,7 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
       />
 
       <AppButton
+        size="md"
         title={checking ? t('inst_claim_checking') : `${t('inst_claim_btn')} ›`}
         onPress={claim}
         disabled={checking}
@@ -83,6 +84,7 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
       />
 
       <AppButton
+        size="md"
         variant="secondary"
         title={`${t('inst_web_btn')} ›`}
         onPress={() => navigation?.navigate('WebView', { url: WEB_URLS.register, title: t('inst_web_title') })}

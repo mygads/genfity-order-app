@@ -143,7 +143,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
                   <Text style={styles.detailPrice}>{rp(priceOf(it.name, livePrice) * it.qty)}</Text> </View>
                 ))}
                 <View style={styles.divider} /><View style={styles.totalRow}> <Text style={styles.totalLabel}>{t('kit_total')}</Text> <Text style={styles.totalValue}>{rp(ticketTotal(selected, livePrice))}</Text> </View><View style={styles.sheetBtns}>
-                  <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} style={styles.sheetBtn} />
+                  <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} size="md" style={styles.sheetBtn} />
                   <AppButton
                     title={t('c_reprint')}
                     variant="secondary"
@@ -153,6 +153,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
                       navigation?.navigate('Receipt', { no: s?.no, total: s ? ticketTotal(s, livePrice) : 0, items: s ? s.items.map((it) => ({ id: it.name, name: it.name, basePrice: priceOf(it.name, livePrice), qty: it.qty, ...(it.note ? { note: it.note } : {}) })) : [], mode: s?.mode, table: s?.table, discount: 0 });
                     }}
                     fullWidth={false}
+                    size="md"
                     style={styles.sheetBtn}
                   />
                   <AppButton
@@ -176,10 +177,11 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
                       }).then((res) => setLiveNotice(res.ok ? t('kit_print_ok') : t('kit_print_fail')));
                     }}
                     fullWidth={false}
+                    size="md"
                     style={styles.sheetBtn}
                   />
                   {NEXT[selected.status] && (
-                    <AppButton title={NEXT_LABEL[selected.status]} onPress={() => advance(selected)} fullWidth={false} style={styles.sheetBtn} />
+                    <AppButton title={NEXT_LABEL[selected.status]} onPress={() => advance(selected)} fullWidth={false} size="md" style={styles.sheetBtn} />
                   )}
                 </View>
               </>

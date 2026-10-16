@@ -184,6 +184,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
             ...breakdownCtx,
           })}
           fullWidth={false}
+          size="md"
           style={styles.actionBtn}
         />
         <AppButton
@@ -195,6 +196,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
             ...breakdownCtx,
           })}
           fullWidth={false}
+          size="md"
           style={styles.actionBtn}
         />
       </View>
@@ -289,6 +291,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
                     // pembulatan, tanpa diskon/voucher ganda.
                     onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) })}
                     fullWidth={false}
+                    size="sm"
                     style={styles.payBtn}
                   />
                 )}
@@ -298,7 +301,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
               </View>
             );
           })}
-          <AppButton title={t('bill_cancel_split')} variant="secondary" onPress={() => setMode('none')} />
+          <AppButton title={t('bill_cancel_split')} variant="secondary" onPress={() => setMode('none')} size="md" />
         </View>
       )}
 
@@ -360,7 +363,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
     marginTop: 6,
   },
-  payBtn: { paddingHorizontal: 12, paddingVertical: 8, height: 'auto', marginTop: 0 },
+  payBtn: { paddingHorizontal: 12, marginTop: 0 },
   payBtnOff: { opacity: 0.45 },
   payBtnT: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },

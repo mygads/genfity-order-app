@@ -241,12 +241,23 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                     placeholder={t('cartNotePh')}
                   />
                   <View style={styles.editorRow}>
-                    <TouchableOpacity style={styles.editorVoid} onPress={() => voidItem(c.id)}>
-                      <Text style={styles.editorVoidT}>Void</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.editorSave} onPress={saveEditor}>
-                      <Text style={styles.editorSaveT}>{t('save')}</Text>
-                    </TouchableOpacity>
+                    <AppButton
+                      size="sm"
+                      variant="secondary"
+                      title="Void"
+                      onPress={() => voidItem(c.id)}
+                      fullWidth={false}
+                      style={[styles.editorVoid, { marginTop: 0, backgroundColor: 'transparent', borderColor: colors.red }]}
+                      textStyle={styles.editorVoidT}
+                    />
+                    <AppButton
+                      size="sm"
+                      title={t('save')}
+                      onPress={saveEditor}
+                      fullWidth={false}
+                      style={[styles.editorSave, { marginTop: 0, backgroundColor: colors.navy }]}
+                      textStyle={styles.editorSaveT}
+                    />
                   </View>
                 </View>
               )}
@@ -268,9 +279,14 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             />
             <Text style={[styles.emptyTitle, isTablet && styles.emptyTitleBig]}>{t('cartEmpty')}</Text>
             <Text style={[styles.emptySub, isTablet && styles.emptySubBig]}>{t('cartEmptyHint')}</Text>
-            <TouchableOpacity style={styles.emptyCta} onPress={() => navigation?.navigate('Cashier')}>
-              <Text style={styles.emptyCtaText}>＋ {t('addMenu')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              size="md"
+              title={`＋ ${t('addMenu')}`}
+              onPress={() => navigation?.navigate('Cashier')}
+              fullWidth={false}
+              style={[styles.emptyCta, { marginTop: 16 }]}
+              textStyle={styles.emptyCtaText}
+            />
           </View>
         )}
 
@@ -289,9 +305,13 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity style={styles.promoBtn} onPress={goPromo}>
-                <Text style={styles.promoBtnT}>＋ {t('usePromo')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                size="sm"
+                title={`＋ ${t('usePromo')}`}
+                onPress={goPromo}
+                style={[styles.promoBtn, { marginTop: 8 }]}
+                textStyle={styles.promoBtnT}
+              />
             )}
             {voucher ? (
               <TouchableOpacity onPress={goPromo}>
@@ -423,12 +443,23 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               placeholder={rp(0)}
             />
             <View style={styles.modalRow}>
-              <TouchableOpacity style={styles.modalGhost} onPress={() => setShowOngkir(false)}>
-                <Text style={styles.modalGhostT}>{t('cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalPrimary} onPress={saveOngkir}>
-                <Text style={styles.modalPrimaryT}>{t('save')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                size="sm"
+                variant="secondary"
+                title={t('cancel')}
+                onPress={() => setShowOngkir(false)}
+                fullWidth={false}
+                style={[styles.modalGhost, { marginTop: 0 }]}
+                textStyle={styles.modalGhostT}
+              />
+              <AppButton
+                size="sm"
+                title={t('save')}
+                onPress={saveOngkir}
+                fullWidth={false}
+                style={[styles.modalPrimary, { marginTop: 0, backgroundColor: colors.navy }]}
+                textStyle={styles.modalPrimaryT}
+              />
             </View>
           </View>
         </View>
@@ -445,13 +476,18 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           <Text style={[styles.footerNote, isTablet && styles.footerNoteBig]}>{t('orderSavedNote')}</Text>
         )}
         {items.length === 0 ? (
-          <TouchableOpacity style={styles.payBtn} onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={[styles.payText, isTablet && styles.payTextBig]}>＋ {t('addMenu')} ›</Text>
-          </TouchableOpacity>
+          <AppButton
+            size="lg"
+            title={`＋ ${t('addMenu')} ›`}
+            onPress={() => navigation?.navigate('Cashier')}
+            style={[styles.payBtn, { marginTop: 0 }]}
+            textStyle={styles.payText}
+          />
         ) : (
           <>
             <View style={styles.footerRow}>
               <AppButton
+                size="md"
                 variant="secondary"
                 title={t('save')}
                 onPress={goSave}
@@ -460,6 +496,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 textStyle={styles.saveText}
               />
               <AppButton
+                size="md"
                 variant="secondary"
                 title={t('load')}
                 onPress={() => navigation?.navigate('LoadOrder')}
@@ -468,6 +505,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 textStyle={styles.printText}
               />
               <AppButton
+                size="md"
                 variant="secondary"
                 title={t('printReceipt')}
                 onPress={() => navigation?.navigate('Receipt', {
@@ -489,6 +527,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               />
             </View>
             <AppButton
+              size="lg"
               title={`${t('pay')} | ${rp(total)} ›`}
               onPress={goPay}
               style={styles.payBtn}
