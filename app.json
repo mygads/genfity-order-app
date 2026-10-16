@@ -29,6 +29,11 @@
       "expo-notifications",
       "expo-camera",
       "./modules/genfity-printer/app.plugin.js"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "067c7c8e-1fcd-4c7b-9380-055bfd242cd9"
+      }
+    }
   }
 }
