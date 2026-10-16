@@ -149,6 +149,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <Text style={styles.primaryT}>{t('bill_pay')} ›</Text>
         </TouchableOpacity>
       </View>
+      <Text style={styles.hint}>{t('bill_qr_after_pay')}</Text>
 
       <Text style={styles.sec}>{t('bill_split_sec')}</Text>
       <Text style={styles.hint}>{t('bill_split_hint')}</Text>

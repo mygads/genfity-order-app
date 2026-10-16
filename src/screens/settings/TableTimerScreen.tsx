@@ -155,7 +155,7 @@ export default function TableTimerScreen({ navigation }: Props) {
     <View style={styles.root}>
       <ScreenHeader
         title={t('title_timer')}
-        sub="Batas waktu duduk + peringatan sebelum habis"
+        sub={t('tmr_sub')}
         onBack={() => navigation?.goBack()}
         right={
           <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>

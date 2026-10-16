@@ -14,6 +14,11 @@ import {
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import DrawerMenu from '../../components/DrawerMenu';
+import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
+import { getSession } from '../../session';
+import { ApiPath, getTerminal } from '../../config/server';
+import { apiFetch, unwrap } from '../../lib/apiSource';
+import { totals } from '../../lib/totals';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -51,7 +56,7 @@ export type CartItem = {
   voided?: boolean;
 };
 
-type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean };
+type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean; soldOut?: boolean };
 
 const CATEGORIES: { name: string; subs: string[] }[] = [
   { name: 'Favorit', subs: [] },
@@ -81,6 +86,32 @@ const PRODUCTS: Product[] = [
 ];
 
 const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
+
+/** Cabang aktif: terminal yang diklaim, default B001 (selaras dummy pull + Stock). */
+const CASHIER_BRANCH_FALLBACK = 'B001';
+
+/** Petakan categoryId master (C01.. / nama grup lokal) ke chip kategori kasir.
+ * TODO: bangun chip kategori dinamis dari ms_category bila backend menambah grup baru. */
+const CATEGORY_OF: Record<string, string> = {
+  C01: 'Makanan',
+  C02: 'Makanan',
+  C03: 'Minuman',
+  C04: 'Makanan',
+  'Makanan Utama': 'Makanan',
+  'Makanan Ringan': 'Makanan',
+  Minuman: 'Minuman',
+  Dessert: 'Dessert',
+  Cake: 'Cake',
+  Pasta: 'Pasta',
+};
+
+function mapCategory(raw: string | null): string {
+  const v = (raw ?? '').trim();
+  if (!v) return 'Makanan';
+  if (CATEGORY_OF[v]) return CATEGORY_OF[v];
+  if (CATEGORIES.some((c) => c.name === v)) return v;
+  return 'Makanan';
+}
 
 /** Item void tidak dihitung ke total. */
 export const itemTotal = (c: CartItem) =>
@@ -171,6 +202,132 @@ export default function CashierScreen({ navigation, route }: Props) {
   // Guard agar customItem yang sama tidak double-apply saat params di-merge ulang.
   const appliedCustom = useRef('');
 
+  /** Katalog dari SQLite (ms_menu + ms_branchmenu.flagSoldOut cabang aktif).
+   * null = DB kosong (offline awal) -> fallback ke PRODUCTS hardcoded. */
+  const [dbProducts, setDbProducts] = useState<Product[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const branchId = getTerminal().branchId || CASHIER_BRANCH_FALLBACK;
+        let rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
+          'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
+        );
+        let sold = await queryDb<{ menuId: string; flagSoldOut: number | null }>(
+          'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
+          [branchId],
+        );
+        if (rows.length === 0) {
+          // Seed awal dari dummy pull master (main-get-menu + main-get-branch-menu).
+          try {
+            const at = new Date().toISOString();
+            const res = await apiFetch(ApiPath.pullMenu, { method: 'GET' });
+            const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
+            const items = Array.isArray(data?.items) ? data.items : [];
+            for (const it of items) {
+              const id = String(it.menuId ?? it.id ?? '').trim();
+              if (!id) continue;
+              const price = Number(it.price);
+              await run(
+                'INSERT OR REPLACE INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                  id,
+                  it.name === undefined || it.name === null ? null : String(it.name),
+                  it.categoryId === undefined || it.categoryId === null ? null : String(it.categoryId),
+                  Number.isFinite(price) ? Math.round(price) : 0,
+                  it.imageUrl === undefined || it.imageUrl === null ? null : String(it.imageUrl),
+                  it.stationId === undefined || it.stationId === null ? null : String(it.stationId),
+                  it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0,
+                  at,
+                ],
+              );
+            }
+            const resB = await apiFetch(ApiPath.pullBranchMenu, { method: 'GET' });
+            const { data: dataB } = unwrap<{ items?: Record<string, unknown>[] }>(resB.data);
+            const itemsB = Array.isArray(dataB?.items) ? dataB.items : [];
+            for (const it of itemsB) {
+              const menuId = String(it.menuId ?? '').trim();
+              if (!menuId) continue;
+              const qty = Number(it.qty);
+              await run(
+                'INSERT OR REPLACE INTO ms_branchmenu (branchId, menuId, stationId, qty, flagSoldOut, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                  String(it.branchId ?? branchId),
+                  menuId,
+                  it.stationId === undefined || it.stationId === null ? null : String(it.stationId),
+                  Number.isFinite(qty) ? Math.round(qty) : 0,
+                  it.flagSoldOut === undefined || it.flagSoldOut === null ? 0 : Number(it.flagSoldOut) ? 1 : 0,
+                  it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0,
+                  at,
+                ],
+              );
+            }
+          } catch {
+            /* seed gagal - fallback PRODUCTS di bawah tetap jalan */
+          }
+          rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
+            'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
+          );
+          sold = await queryDb<{ menuId: string; flagSoldOut: number | null }>(
+            'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
+            [branchId],
+          );
+        }
+        if (!alive || rows.length === 0) return;
+        const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
+        setDbProducts(
+          rows.map((r) => ({
+            id: r.id,
+            name: r.menuName ?? r.id,
+            price: Math.max(0, Math.round(Number(r.price) || 0)),
+            category: mapCategory(r.categoryId),
+            tags: [],
+            soldOut: soldMap.get(r.id) ?? false,
+          })),
+        );
+      } catch {
+        /* DB belum siap - fallback PRODUCTS */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /** Katalog aktif: SQLite bila ada, PRODUCTS bila DB kosong. */
+  const catalog = dbProducts ?? PRODUCTS;
+
+  /** Status shift nyata dari tr_shiftlog untuk header (open bila status open / belum clockOut).
+   * null = DB kosong → fallback menganggap buka agar demo/screenshot tetap jalan. */
+  const [shiftInfo, setShiftInfo] = useState<{ open: boolean } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
+          'SELECT clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+        );
+        if (!alive || !row) return;
+        setShiftInfo({ open: row.status === 'open' || !row.clockOut });
+      } catch {
+        /* DB belum siap — fallback buka */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /** Header ala DashboardScreen: outlet dinamis + nama kasir sesi + status shift nyata. */
+  const sess = getSession();
+  const outletName = sess?.outlet || getTerminal().branchName || 'ESB Cabang Poris';
+  const shiftOpen = shiftInfo?.open ?? true;
+  const shiftLabel = `${sess?.name ?? 'Gista'} | ${shiftOpen ? t('dash_shift_open') : t('dash_shift_closed')}`;
+
   /** Terima kiriman layar lain: voucher, item custom, notes, hasil muat order, mode. */
   useEffect(() => {
     const p = route?.params;
@@ -227,13 +384,13 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return PRODUCTS.filter((p) => {
+    return catalog.filter((p) => {
       const matchCat = activeCategory === 'Favorit' ? p.fav : p.category === activeCategory;
       const matchSub = !activeSub || p.tags.includes(activeSub);
       const matchQuery = q.length === 0 || p.name.toLowerCase().includes(q);
       return matchCat && matchSub && matchQuery;
     });
-  }, [activeCategory, activeSub, query]);
+  }, [activeCategory, activeSub, query, catalog]);
 
   /** Tablet 2-kolom strict: ganjil → tambah spacer agar item terakhir tidak melebar. */
   const gridData = useMemo<(Product | null)[]>(
@@ -249,9 +406,10 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   /** D4: count produk per kategori untuk label chip `Nama (Npcs)` ala ref. */
   const catCount = (name: string) =>
-    name === 'Favorit' ? PRODUCTS.filter((p) => p.fav).length : PRODUCTS.filter((p) => p.category === name).length;
+    name === 'Favorit' ? catalog.filter((p) => p.fav).length : catalog.filter((p) => p.category === name).length;
 
   const addToCart = (p: Product) => {
+    if (p.soldOut) return;
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
       if (found)
@@ -300,34 +458,32 @@ export default function CashierScreen({ navigation, route }: Props) {
     0,
   );
   const discountTotal = activeCart.reduce((s, c) => s + c.discount, 0);
-  /** Voucher ongkir (GRATISONGKIR) memotong ongkir bila ongkir > 0, selain itu diskon flat. */
+  /** Rumus kanonis via helper - nama variabel render dipertahankan agar diff minimal. */
+  const {
+    voucherAmt,
+    subtotal,
+    service,
+    ppnIncl,
+    ongkirCut: ongkirDiscount,
+    ongkirNet,
+    bruto,
+    total,
+    rounding,
+  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
-  const ongkirDiscount = useOngkirCut ? Math.min(voucher?.amount ?? 0, ongkir) : 0;
-  const ongkirNet = ongkir - ongkirDiscount;
-  const voucherAmt = useOngkirCut
-    ? 0
-    : Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
-  const subtotal = subtotalGross - discountTotal - voucherAmt;
-  const service = Math.round(subtotal * 0.05);
-  /** PPN 11% inclusive (info-only): dasar sudah termasuk pajak. */
-  const ppnIncl = Math.round((subtotal * 11) / 111);
-  const bruto = subtotal + service + ongkirNet;
-  /** Pembulatan ke kelipatan Rp 100 terdekat. */
-  const total = Math.round(bruto / 100) * 100;
-  const rounding = total - bruto;
   const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
 
   /** Qty cart per kategori - badge di chip agar footer lintas-kategori bisa diaudit sekilas. */
   const cartQtyByCat = useMemo(() => {
     const map: Record<string, number> = {};
     for (const c of activeCart) {
-      const p = PRODUCTS.find((x) => x.id === c.id);
+      const p = catalog.find((x) => x.id === c.id);
       const cats = p ? [p.category, ...(p.fav ? ['Favorit'] : [])] : [];
       for (const k of cats) map[k] = (map[k] ?? 0) + c.qty;
     }
     return map;
-  }, [activeCart]);
+  }, [activeCart, catalog]);
 
   const goCart = () =>
     navigation?.navigate('CartDetail', {
@@ -389,7 +545,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const goSaved = () =>
     navigation?.navigate('LoadOrder', {
       newOrder: {
-        title: `${mode}${table ? ` · ${t('table')} ${table}` : ''} · ${customer.trim() || 'QoQi'}`,
+        title: `${mode}${table ? ` · ${t('table')} ${table}` : ''} · ${customer.trim() || t('guestFallback')}`,
         mode,
         ...(table ? { table } : {}),
         items: cart,
@@ -445,10 +601,10 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
-          <Text style={styles.outletName}>ESB Cabang Poris</Text>
+          <Text style={styles.outletName}>{outletName}</Text>
           <View style={styles.shiftRow}>
-            <View style={styles.shiftDot} />
-            <Text style={styles.shiftText}>Gista | Shift Open</Text>
+            <View style={[styles.shiftDot, !shiftOpen && styles.shiftDotClosed]} />
+            <Text style={styles.shiftText}>{shiftLabel}</Text>
           </View>
         </View>
       </View>
@@ -616,13 +772,17 @@ export default function CashierScreen({ navigation, route }: Props) {
         const inCart = cart.find((c) => c.id === item.id);
         if (isWide) {
           return (
-            <View style={styles.card}>
-              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7}>
+            <View style={[styles.card, item.soldOut && styles.cardSoldOut]}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} disabled={item.soldOut}>
                 <MenuThumb size={64} />
                 <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                 <View style={styles.cardFoot}>
                   <Text style={styles.cardPrice}>{rp(item.price)}</Text>
-                  {qty > 0 ? (
+                  {item.soldOut ? (
+                    <View style={styles.soldBadge}>
+                      <Text style={styles.soldText}>{t('menu.soldOut')}</Text>
+                    </View>
+                  ) : qty > 0 ? (
                     <View style={styles.qtyBadge}>
                       <Text style={styles.qtyBadgeText}>{qty}</Text>
                     </View>
@@ -652,8 +812,8 @@ export default function CashierScreen({ navigation, route }: Props) {
         }
         return (
           <View>
-            <View style={styles.row}>
-              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} style={styles.rowMain}>
+            <View style={[styles.row, item.soldOut && styles.rowSoldOut]}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} style={styles.rowMain} disabled={item.soldOut}>
                 <MenuThumb size={48} />
                 <View style={styles.rowInfo}>
                   <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
@@ -665,7 +825,11 @@ export default function CashierScreen({ navigation, route }: Props) {
                   {inCart?.voided ? <Text style={styles.voidBadge}>Void</Text> : null}
                 </View>
               </TouchableOpacity>
-              {qty > 0 ? (
+              {item.soldOut ? (
+                <View style={styles.soldBadge}>
+                  <Text style={styles.soldText}>{t('menu.soldOut')}</Text>
+                </View>
+              ) : qty > 0 ? (
                 <View style={styles.stepperInline}>
                   <TouchableOpacity style={styles.stepBtnSm} onPress={() => decQty(item.id)}>
                     <Text style={styles.stepTxtSm}>-</Text>
@@ -718,7 +882,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
-          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || 'QoQi'}
+          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || t('guestFallback')}
         </Text>
       </View>
       <FlatList
@@ -838,7 +1002,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           </View>
         )}
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Rounding</Text>
+          <Text style={styles.totalLabel}>{t('rounding')}</Text>
           <Text style={styles.totalVal}>{rp(rounding)}</Text>
         </View>
         <View style={[styles.totalRow, styles.grandRow]}>
@@ -877,6 +1041,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           visible={drawerOpen}
           onClose={() => setDrawerOpen(false)}
           navigate={(r) => navigation?.navigate(r)}
+          outlet={outletName}
+          user={shiftLabel}
         />
         <View style={styles.bodyRow}>
           <View style={styles.catalog}>
@@ -931,6 +1097,8 @@ export default function CashierScreen({ navigation, route }: Props) {
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         navigate={(r) => navigation?.navigate(r)}
+        outlet={outletName}
+        user={shiftLabel}
       />
       {renderToolbar()}
       {showModes && (
@@ -958,7 +1126,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           <SearchGlyph size={15} color={colors.faint} />
           <TextInput
             style={styles.search}
-            placeholder="Cari menu…"
+            placeholder={t('searchMenu')}
             placeholderTextColor={colors.faint}
             value={query}
             onChangeText={setQuery}
@@ -1026,6 +1194,7 @@ const styles = StyleSheet.create({
   outletName: { color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
   shiftRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
   shiftDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
+  shiftDotClosed: { backgroundColor: colors.red },
   shiftText: { color: colors.navyTint, fontFamily: fonts.regular, fontSize: 12 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   headerDateWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -1248,6 +1417,18 @@ const styles = StyleSheet.create({
   stepQtySm: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 24, textAlign: 'center' },
   addBtnLg: { borderWidth: 1, borderColor: colors.orange, borderRadius: 20, paddingHorizontal: 14, minHeight: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   addBtnLgText: { color: colors.orange, fontFamily: fonts.bold, fontSize: 13 },
+  soldBadge: {
+    backgroundColor: colors.red,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    flexShrink: 0,
+  },
+  soldText: { fontFamily: fonts.bold, fontSize: 10, color: colors.white },
+  cardSoldOut: { opacity: 0.75, borderColor: colors.red },
+  rowSoldOut: { opacity: 0.75 },
   qtyBadge: {
     minWidth: 24,
     height: 24,

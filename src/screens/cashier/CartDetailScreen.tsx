@@ -3,6 +3,7 @@ import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
+import { totals } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = {
@@ -61,22 +62,20 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     [active],
   );
   const discountTotal = useMemo(() => active.reduce((s, c) => s + c.discount, 0), [active]);
-  /** Voucher ongkir (GRATISONGKIR) memotong ongkir bila ongkir > 0, selain itu diskon flat. */
-  const isOngkirVoucher = voucher?.code === 'GRATISONGKIR' || voucher?.kind === 'Ongkir';
+  /** Kanonis via helper: voucher GRATISONGKIR/kind Ongkir, service 5%, PPN incl info-only, rounding 100. */
+  const {
+    subtotal,
+    service,
+    ppnIncl,
+    ongkirCut,
+    ongkirNet,
+    bruto,
+    total,
+    rounding,
+    voucherAmt,
+  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, voucher: voucher ?? undefined });
+  const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
-  const voucherAmt = useOngkirCut
-    ? 0
-    : Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
-  const subtotal = subtotalGross - discountTotal - voucherAmt;
-  const service = Math.round(subtotal * 0.05);
-  /** PPN 11% inclusive (info-only): dasar sudah termasuk pajak. */
-  const ppnIncl = Math.round((subtotal * 11) / 111);
-  const ongkirCut = useOngkirCut ? Math.min(voucher?.amount ?? 0, ongkir) : 0;
-  const ongkirNet = ongkir - ongkirCut;
-  const bruto = subtotal + service + ongkirNet;
-  /** Pembulatan ke kelipatan Rp 100 terdekat. */
-  const total = Math.round(bruto / 100) * 100;
-  const rounding = total - bruto;
   const itemCount = active.reduce((s, c) => s + c.qty, 0);
 
   const incQty = (id: string) =>
@@ -173,7 +172,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               {c.discount > 0 && <Text style={styles.discount}>- Diskon {rp(c.discount)}</Text>}
               {c.voided ? (
                 <TouchableOpacity onPress={() => unvoidItem(c.id)}>
-                  <Text style={styles.restoreT}>Kembalikan item</Text>
+                  <Text style={styles.restoreT}>{t('cart_restore')}</Text>
                 </TouchableOpacity>
               ) : (
                 <View style={styles.rowActs}>
@@ -261,7 +260,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   <Text style={styles.promoDesc}>{useOngkirCut ? `Potongan ongkir ${rp(ongkirCut)}` : `Potongan ${rp(voucherAmt)}`}</Text>
                 </View>
                 <TouchableOpacity onPress={() => setVoucher(null)} hitSlop={10}>
-                  <Text style={styles.promoRemove}>Hapus ✕</Text>
+                  <Text style={styles.promoRemove}>{t('promo_remove')}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -329,7 +328,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               </View>
             )}
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Rounding</Text>
+              <Text style={styles.sumLabel}>{t('rounding')}</Text>
               <Text style={styles.sumValue}>{rp(rounding)}</Text>
             </View>
             <View style={styles.totalRow}>

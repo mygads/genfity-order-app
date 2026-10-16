@@ -233,8 +233,8 @@ export default function BookingScreen({ navigation }: Props) {
       </TouchableOpacity>
 
       <Text style={styles.sec}>{t('bok_list')}</Text>
-      <Text style={styles.hint}>Ketuk untuk buka di kasir (meja + nama + tamu ikut) · tombol status memajukan Terjadwal → Datang → Selesai.</Text>
-      {shown.length === 0 && <Text style={styles.empty}>Belum ada reservasi - buat baru di bawah.</Text>}
+      <Text style={styles.hint}>{t('bok_open_hint')}</Text>
+      {shown.length === 0 && <Text style={styles.empty}>{t('bok_empty')}</Text>}
       {shown.map((r) => (
         <View key={r.id} style={styles.card}>
           <TouchableOpacity
