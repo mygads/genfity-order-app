@@ -11,7 +11,7 @@
         "salesNum": "TRX-20261016-010-A",
         "subtotal": 90000, "discount": 0, "tax": 8919,
         "serviceCharge": 4500, "rounding": 0,
-        "grandTotal": 90000, "paidAmount": 100000, "changeAmount": 10000,
+        "grandTotal": 94500, "paidAmount": 100000, "changeAmount": 5500,
         "paymentMethod": "Tunai",
         "items": [
           { "menuId": "M001", "name": "Ayam Geprek", "qty": 2, "unitPrice": 45000, "discount": 0 }
@@ -23,13 +23,13 @@
         "subtotal": 60000, "discount": 5000, "tax": 5450,
         "voucherAmount": 10000, "voucherCode": "GRATISONGKIR",
         "serviceCharge": 2750, "ongkir": 12000, "ongkirNet": 2000, "rounding": 0,
-        "grandTotal": 64250, "paidAmount": 64250, "changeAmount": 0,
+        "grandTotal": 59750, "paidAmount": 59750, "changeAmount": 0,
         "paymentMethod": "QRIS",
         "items": [
           { "menuId": "M002", "name": "Nasi Goreng Spesial", "qty": 2, "unitPrice": 25000, "discount": 5000 },
           { "menuId": "M009", "name": "Es Jeruk", "qty": 1, "unitPrice": 10000, "discount": 0 }
         ],
-        "payments": [{ "method": "QRIS", "amount": 64250 }]
+        "payments": [{ "method": "QRIS", "amount": 59750 }]
       }
     ]
   },
