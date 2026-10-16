@@ -26,6 +26,8 @@ type Props = {
     params?: {
       table?: string;
       mode?: string;
+      customer?: string;
+      tamu?: number;
       ongkir?: number;
       voucher?: { code: string; amount: number; kind?: string };
       customItem?: { name: string; price: number; qty: number; note?: string };
@@ -134,7 +136,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [activeCategory, setActiveCategory] = useState('Makanan');
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [customer, setCustomer] = useState('');
+  const [customer, setCustomer] = useState(route?.params?.customer ?? '');
   const [mode, setMode] = useState('DINE IN');
   const [showModes, setShowModes] = useState(false);
   const catScrollRef = useRef<ScrollView>(null);
@@ -175,6 +177,12 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (!p) return;
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
+    /** Booking oper nama + jumlah tamu - gabung ke kolom info (bisa diedit kasir). */
+    if (p.customer !== undefined || p.tamu !== undefined) {
+      const nm = (p.customer ?? '').trim();
+      const nx = Math.max(0, Number(p.tamu) || 0);
+      setCustomer(nx > 0 ? (nm ? `${nm} (${nx} tamu)` : `${nx} tamu`) : nm);
+    }
     if (p.ongkir !== undefined) setOngkir(Math.max(0, Number(p.ongkir) || 0));
     if (p.mode && MODES.includes(p.mode)) {
       setMode(p.mode);
