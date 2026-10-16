@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
+  applyAutoSyncPrefs,
 
-type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
+type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
@@ -24,11 +25,43 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const [daysAgo, setDaysAgo] = useState(0);
   const [busy, setBusy] = useState<'push' | 'pull' | null>(null);
   const [msg, setMsg] = useState('');
+  // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
+  // kosong = dummy/offline, push/pull tetap jalan tanpa server).
+  const [posVer, setPosVer] = useState('');
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const v = await fetchPosVersion();
+        if (!live || v.fromDummy || !v.latestVersion) return;
+        setPosVer(`v${v.latestVersion} / min v${v.minVersion}`);
+      } catch { /* offline - tanpa info versi */ }
+    })();
+    return () => { live = false; };
+  }, []);
+  const doVerify = async () => {
+    if (verifyBusy) return;
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const r = await notifyTerminalVerification('verified');
+      if (r.ok && !r.fromDummy) setVerifyMsg(t('term_verify_ok'));
+    } catch { /* offline - panel tetap jalan */ } finally {
+      setVerifyBusy(false);
+    }
+  };
   const [tick, setTick] = useState(0);
 
   const level = warnLevel(daysAgo);
   const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(LS_OPTS, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
     void setJSON(LS_OPTS, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
+  // Toggle sync otomatis benar-benar menjadwalkan push berkala (5 mnt) via
+  // applyAutoSyncPrefs; sebelumnya toggle hanya tersimpan tanpa efek.
+  useEffect(() => {
+    try { applyAutoSyncPrefs({ auto: autoSync, wifiOnly: syncOnWifi }); } catch { /* abaikan */ }
+  }, [autoSync, syncOnWifi]);
   // Hitung umur sync nyata dari timestamp sukses terakhir agar banner E00043
   // (>3 hari) dan E00044 (>7 hari) mencerminkan kondisi sebenarnya.
   useEffect(() => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); }, []); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
@@ -51,7 +84,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
 
   const simulateOld = () => {
     setDaysAgo(5);
-    const fiveAgo = fmtTime(new Date(Date.now() - 5 * 86400000).toISOString());
+    const fiveAgo = fmtDate(new Date(Date.now() - 5 * 86400000), lang);
     setLastPush(fiveAgo);
     setLastPull(fiveAgo);
     setMsg(t('sync_sim_msg'));
@@ -59,7 +92,11 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       {level !== 'ok' ? (
         <View style={[styles.alert, level === 'block7' ? styles.alertBlock : styles.alertWarn]}>
@@ -88,14 +125,24 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           <Text style={styles.wmVal}>{lastPull}</Text>
         </View>
         <View style={styles.btnRow}>
-          <Pressable style={[styles.btnPush, busy && styles.btnDisabled]} onPress={doPush} disabled={!!busy}>
-            <Text style={styles.btnPushText}>{busy === 'push' ? t('sync.pushing') : t('sync.pushNow')}</Text>
-          </Pressable>
-          <Pressable style={[styles.btnPull, busy && styles.btnDisabled]} onPress={doPull} disabled={!!busy}>
-            <Text style={styles.btnPullText}>{busy === 'pull' ? t('sync.pulling') : t('sync.pullNow')}</Text>
-          </Pressable>
+          <AppButton title={busy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!busy} fullWidth={false} style={styles.greenFlex} />
+          <AppButton title={busy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!busy} fullWidth={false} style={styles.navyFlex} />
         </View>
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('about.terminal')}</Text>
+        {posVer ? (
+          <View style={styles.wmRow}>
+            <Text style={styles.wmLabel}>POS</Text>
+            <Text style={styles.wmVal}>{posVer}</Text>
+          </View>
+        ) : null}
+        <View style={styles.btnRow}>
+          <AppButton title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.greenFlex} />
+        </View>
+        {verifyMsg ? <Text style={styles.msg}>{verifyMsg}</Text> : null}
       </View>
 
       <View style={styles.card}>
@@ -127,12 +174,11 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         </View>
       ))}
 
-      <Pressable style={styles.btnGhost} onPress={simulateOld}>
-        <Text style={styles.btnGhostText}>{t('sync.simOld')}</Text>
-      </Pressable>
+      <AppButton title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
       <Text style={styles.foot}>{t('sync_foot')}</Text>
     </ScrollView>
   );}const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
 
@@ -159,6 +205,10 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   wmLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   wmVal: { fontFamily: fonts.bold, fontSize: 13, color: colors.text },
   btnRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  greenFlex: { marginTop: 0, flex: 1, backgroundColor: colors.green },
+  navyFlex: { marginTop: 0, flex: 1, backgroundColor: colors.navy },
+  simBtn: { marginTop: 12, marginHorizontal: 16, borderColor: colors.line },
+  simBtnText: { color: colors.muted },
   btnPush: { flex: 1, borderRadius: 10, backgroundColor: colors.green, paddingVertical: 12, alignItems: 'center' },
   btnPushText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   btnPull: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 12, alignItems: 'center' },

@@ -5,15 +5,18 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';
+import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
+import { initDb, run } from '../../lib/db';
+import { getSession } from '../../session';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -28,19 +31,31 @@ const QUICK = [50000, 100000, 200000, 500000, 1000000];
 const METHODS = ['Tunai', 'QRIS', 'EDC', 'Transfer'];
 const MIN_TOPUP = 10000;
 
-/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
-const RP_PREFIX = rp(0).replace(/\d/g, '').trim();
-
 /**
  * Simpan top up deposit ikut kontrak §5.2: POST member-deposit-withdrawal/topup
  * {memberId, amount, paymentMethod, note}. Catat ke outbox + antrean sync
  * agar aman offline; inquiry-deposit hanya untuk cek saldo, bukan top up.
  */
-async function persistTopup(memberId: string, nominal: number, method: string, note?: string): Promise<void> {
+async function persistTopup(memberId: string, nominal: number, method: string, note?: string, balanceAfter?: number): Promise<void> {
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
   } catch {
     /* abaikan */
+  }
+  // FIX2-5: baris ledger lokal tr_memberdeposit (jenis 'topup') agar tiap mutasi
+  // tercatat offline-first + ikut outbox/push, bukan hanya update ms_member.
+  try {
+    await initDb();
+    const nowIso = new Date().toISOString();
+    const depId = `dep-${Date.now()}`;
+    const userId = getSession()?.username ?? getSession()?.name ?? null;
+    await run(
+      `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
+      [depId, memberId, getTerminal().branchId || null, nominal, balanceAfter ?? null, userId, nowIso],
+    );
+    await enqueueOutbox('tr_memberdeposit', depId, 'insert');
+  } catch {
+    /* abaikan: outbox ms_member di atas tetap jalan */
   }
   try {
     enqueueSync('other', { kind: 'deposit-topup', memberId, nominal, method });
@@ -79,6 +94,28 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
     return () => { live = false; };
   }, []);
 
+  // WIRE REA-3: saldo server via erp/member balance-deposit (best-effort -
+  // null = dummy/offline, saldo param route tetap dipakai sebagai fallback).
+  const [erpBalance, setErpBalance] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await memberErpApi('balance-deposit', { memberId, branchId: getTerminal().branchId });
+        if (!live || res.fromDummy) return;
+        const { data } = unwrap<Record<string, unknown>>(res.data);
+        const echo = String(data.memberId ?? '');
+        if (echo && echo !== memberId) return;
+        const saldo = Number(data.saldo ?? data.balance ?? data.depositBalance ?? NaN);
+        if (!live || !Number.isFinite(saldo)) return;
+        setErpBalance(Math.max(0, Math.round(saldo)));
+      } catch {
+        /* offline - fallback saldo route */
+      }
+    })();
+    return () => { live = false; };
+  }, [memberId]);
+
   const nominalNum = Number(nominal.replace(/\D/g, '')) || 0;
   const ready = nominalNum >= MIN_TOPUP && method !== '' && !saving;
   const saldoAkhir = saldoAwal + nominalNum;
@@ -87,7 +124,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const submit = () => {
     if (!ready) return;
     setSaving(true);
-    void persistTopup(memberId, nominalNum, method, catatan).finally(() => {
+    void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).finally(() => {
       setSaving(false);
       setDone(true);
     });
@@ -136,12 +173,12 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             </View>
           </View>
           <Text style={s.hint}>{t('top_queued')}</Text>
-          <TouchableOpacity style={s.primary} onPress={backToMember}>
-            <Text style={s.primaryT}>{t('top_back_member')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.ghost} onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={s.ghostT}>{t('top_new_order')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('top_back_member')} onPress={backToMember} />
+          <AppButton
+            title={t('top_new_order')}
+            variant="secondary"
+            onPress={() => navigation?.navigate('Cashier')}
+          />
         </View>
       </View>
     );
@@ -173,6 +210,9 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
         <View style={s.memberBar}>
           <Text style={s.memberName}>{nama}</Text>
           <Text style={s.memberMeta}>{memberId} - {t('top_balance_before')} {rp(saldoAwal)}</Text>
+          {erpBalance != null ? (
+            <Text style={s.memberMeta}>{t('mem_erp_balance')}: {rp(erpBalance)}</Text>
+          ) : null}
         </View>
         {!online && (
           <Text style={s.offlineBanner}>{t('top_queued')}</Text>
@@ -190,18 +230,15 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={s.label}>{t('top_custom_label')}</Text>
-          <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
-            <TextInput
-              style={s.amountInput}
-              keyboardType="number-pad"
-              placeholder="0"
-              placeholderTextColor={colors.faint}
-              value={nominalNum ? rpNum(nominalNum) : ''}
-              onChangeText={(txt) => setNominal(txt.replace(/\D/g, '').slice(0, 12))}
-            />
-          </View>
+          <AppInput
+            label={t('top_custom_label')}
+            keyboardType="number-pad"
+            placeholder="0"
+            value={nominalNum ? rpNum(nominalNum) : ''}
+            onChangeText={(txt) => setNominal(txt.replace(/\D/g, '').slice(0, 12))}
+            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+            style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 20 }}
+          />
         </View>
 
         <View style={s.card}>
@@ -216,11 +253,9 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={s.label}>{t('c_note_opt')}</Text>
-          <TextInput
-            style={s.noteInput}
+          <AppInput
+            label={t('c_note_opt')}
             placeholder={t('top_note_ph')}
-            placeholderTextColor={colors.faint}
             value={catatan}
             onChangeText={setCatatan}
           />
@@ -236,14 +271,11 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[s.primary, !ready && s.disabled]}
+        <AppButton
+          title={saving ? '...' : `${t('top_pay')} - ${rp(nominalNum)}`}
           disabled={!ready}
-          onPress={submit}>
-          <Text style={s.primaryT}>
-            {saving ? '...' : `${t('top_pay')} - ${rp(nominalNum)}`}
-          </Text>
-        </TouchableOpacity>
+          onPress={submit}
+        />
         {!ready && !saving && (
           <Text style={s.hint}>{t('top_hint')}</Text>
         )}

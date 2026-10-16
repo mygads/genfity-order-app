@@ -1,3 +1,5 @@
+import { fmtDate } from '../lib/datefmt';
+
 export interface TxnItem {
   name: string;
   qty: number;
@@ -24,11 +26,19 @@ export interface Transaction {
   status: TxnStatus;
 }
 
+/**
+ * Tanggal seed sebagai Date + formatter (dulu string hardcode 'ID').
+ * Keluaran identik ('13 Okt 2026') tapi bebas salah ketik bulan.
+ */
+const SEED_DAY_13 = new Date(2026, 9, 13);
+const SEED_DAY_12 = new Date(2026, 9, 12);
+const seedDate = (d: Date): string => fmtDate(d, 'id');
+
 export const transactions: Transaction[] = [
   {
     id: 'tx1',
     no: 'TRX-20261013-001',
-    date: '13 Okt 2026',
+    date: seedDate(SEED_DAY_13),
     time: '12:04',
     cashier: 'Andi',
     table: 'A-01',
@@ -47,7 +57,7 @@ export const transactions: Transaction[] = [
   {
     id: 'tx2',
     no: 'TRX-20261013-002',
-    date: '13 Okt 2026',
+    date: seedDate(SEED_DAY_13),
     time: '11:47',
     cashier: 'Andi',
     table: 'B-03',
@@ -66,7 +76,7 @@ export const transactions: Transaction[] = [
   {
     id: 'tx3',
     no: 'TRX-20261013-003',
-    date: '13 Okt 2026',
+    date: seedDate(SEED_DAY_13),
     time: '11:20',
     cashier: 'Sinta',
     mode: 'Take Away',
@@ -81,7 +91,7 @@ export const transactions: Transaction[] = [
   {
     id: 'tx4',
     no: 'TRX-20261013-004',
-    date: '13 Okt 2026',
+    date: seedDate(SEED_DAY_13),
     time: '10:58',
     cashier: 'Sinta',
     table: 'A-05',
@@ -100,7 +110,7 @@ export const transactions: Transaction[] = [
   {
     id: 'tx5',
     no: 'TRX-20261012-031',
-    date: '12 Okt 2026',
+    date: seedDate(SEED_DAY_12),
     time: '20:15',
     cashier: 'Andi',
     mode: 'Take Away',
@@ -118,7 +128,7 @@ export const transactions: Transaction[] = [
   {
     id: 'tx6',
     no: 'TRX-20261012-030',
-    date: '12 Okt 2026',
+    date: seedDate(SEED_DAY_12),
     time: '19:40',
     cashier: 'Sinta',
     table: 'C-02',

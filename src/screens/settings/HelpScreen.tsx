@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** 8 FAQ lewat key kamus (help_faqN_q/a) agar ikut bahasa aktif. */const FAQS: { q: string; a: string }[] = [
+import { useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** 8 FAQ lewat key kamus (help_faqN_q/a) agar ikut bahasa aktif. */const FAQS: { q: string; a: string }[] = [
   { q: 'help_faq1_q', a: 'help_faq1_a' },
   { q: 'help_faq2_q', a: 'help_faq2_a' },
   { q: 'help_faq3_q', a: 'help_faq3_a' },
@@ -14,7 +14,11 @@ import { useState } from 'react';import { Pressable, ScrollView, StyleSheet, Tex
 
   const go = (route: string) => navigation?.navigate(route); return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <ScreenHeader title={t('help.title')} sub={t('help.sub')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('help.title')} sub={t('help.sub')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
       {FAQS.map((f, i) => {
         const isOpen = open === i;
         return (
@@ -33,6 +37,7 @@ import { useState } from 'react';import { Pressable, ScrollView, StyleSheet, Tex
       </View>
     </ScrollView>
   );}const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
 

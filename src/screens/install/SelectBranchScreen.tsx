@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { checkBranch } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';type Nav = {
+import { useEffect, useState } from 'react';import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { checkBranch } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';const BRANCHES = [
   { id: 'B001', name: 'ESB Cabang Poris', addr: 'Jl. Poris Raya No. 8, Tangerang', device: 'Terminal 01 · Kasir' },
@@ -84,11 +84,12 @@ import { useEffect, useState } from 'react';import { ActivityIndicator, Image, S
         )}
       </ScrollView>
       <View style={[styles.footer, isTablet && wideCenterSm]}>
-        <TouchableOpacity
-          style={[styles.primary, (loading || list.length === 0 || checking) && styles.primaryIdle]}
-          disabled={loading || list.length === 0 || checking} onPress={goSelect}>
-          <Text style={styles.primaryT}> {checking ? t('inst_branch_checking') : t('sel_choose')} </Text>
-        </TouchableOpacity>
+        <AppButton
+          title={checking ? t('inst_branch_checking') : t('sel_choose')}
+          onPress={goSelect}
+          disabled={loading || list.length === 0 || checking}
+          style={styles.primary}
+        />
       </View>
     </View>
   );}const styles = StyleSheet.create({

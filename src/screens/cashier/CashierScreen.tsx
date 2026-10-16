@@ -14,11 +14,14 @@ import {
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import DrawerMenu from '../../components/DrawerMenu';
+import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { syncWarnLevel } from '../../lib/sync';
+import { nextSalesNum } from '../../lib/sales';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -39,6 +42,7 @@ type Props = {
       customItem?: { name: string; price: number; qty: number; note?: string };
       itemNote?: { id: string; note: string };
       loadItems?: CartItem[];
+      salesNum?: string;
     };
   };
 };
@@ -183,8 +187,21 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [ongkirDraft, setOngkirDraft] = useState(String(defaultOngkirForMode('DINE IN')));
   /** Member terpilih - diteruskan ke CartDetail/Pay agar poin + deposit nempel. */
   const [memberId, setMemberId] = useState(route?.params?.memberId ?? '');
+  /** Nomor struk draft: bawaan LoadOrder saat muat ulang, atau diterbitkan saat Simpan. */
+  const [salesNum, setSalesNum] = useState<string>(
+    typeof route?.params?.salesNum === 'string' ? route.params.salesNum : '',
+  );
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Gate E00044 (kontrak §2/§10.4): >7 hari tanpa sync → banner + tombol
+   * Bayar mati (bangun keranjang tetap boleh; Pay mengunci final). */
+  const syncBlocked = syncWarnLevel() === 'block7';
+  const renderSyncBlock = () =>
+    syncBlocked ? (
+      <TouchableOpacity style={styles.modeNote} onPress={() => navigation?.navigate('Sync')}>
+        <Text style={styles.modeNoteT}>{t('sync.blocked')} - {t('sync.openSync')} ›</Text>
+      </TouchableOpacity>
+    ) : null;
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
@@ -291,12 +308,23 @@ export default function CashierScreen({ navigation, route }: Props) {
         }
         if (!alive || rows.length === 0) return;
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
+        // Kamus id -> nama kategori (pola MenuManagementScreen) agar chip/label
+        // memakai nama ramah; jatuh ke id mentah bila kamus kosong.
+        let catName = new Map<string, string>();
+        try {
+          const cats = await queryDb<{ id: string; categoryName: string | null }>(
+            'SELECT id, categoryName FROM ms_category',
+          );
+          catName = new Map(cats.map((c) => [c.id, c.categoryName ?? c.id]));
+        } catch {
+          /* kamus kosong - pakai id apa adanya */
+        }
         setDbProducts(
           rows.map((r) => ({
             id: r.id,
             name: r.menuName ?? r.id,
             price: Math.max(0, Math.round(Number(r.price) || 0)),
-            category: mapCategory(r.categoryId),
+            category: mapCategory(r.categoryId ? (catName.get(r.categoryId) ?? r.categoryId) : null),
             tags: [],
             soldOut: soldMap.get(r.id) ?? false,
           })),
@@ -310,8 +338,36 @@ export default function CashierScreen({ navigation, route }: Props) {
     };
   }, []);
 
-  /** Katalog aktif: SQLite bila ada, PRODUCTS bila DB kosong. */
+  /** Katalog aktif: SQLite bila ada, PRODUCTS const sebagai FALLBACK bila DB kosong. */
   const catalog = dbProducts ?? PRODUCTS;
+
+  /** Chip kategori diderivasi dari baris live (distinct category); CATEGORIES
+   * const hanya sebagai FALLBACK bila rows kosong. Subs live kosong (tags []). */
+  const categories = useMemo(() => {
+    if (dbProducts && dbProducts.length > 0) {
+      const seen: string[] = [];
+      for (const p of dbProducts) {
+        if (p.category && !seen.includes(p.category)) seen.push(p.category);
+      }
+      if (seen.length === 0) return CATEGORIES;
+      const hasFav = dbProducts.some((p) => p.fav);
+      return [
+        ...(hasFav ? [{ name: 'Favorit', subs: [] as string[] }] : []),
+        ...seen.map((name) => ({ name, subs: [] as string[] })),
+      ];
+    }
+    return CATEGORIES;
+  }, [dbProducts]);
+
+  /** Bila katalog live tidak memuat kategori aktif lama, pindah ke chip pertama. */
+  useEffect(() => {
+    if (!dbProducts || dbProducts.length === 0) return;
+    if (!categories.some((c) => c.name === activeCategory)) {
+      setActiveCategory(categories[0]?.name ?? 'Makanan');
+      setActiveSub(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbProducts]);
 
   /** Status shift nyata dari tr_shiftlog untuk header (open bila status open / belum clockOut).
    * null = DB kosong → fallback menganggap buka agar demo/screenshot tetap jalan. */
@@ -349,6 +405,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
     if (p.memberId !== undefined) setMemberId(p.memberId ?? '');
+    if (typeof p.salesNum === 'string' && p.salesNum.trim()) setSalesNum(p.salesNum.trim());
     /** Booking oper nama + jumlah tamu - gabung ke kolom info (bisa diedit kasir). */
     if (p.customer !== undefined || p.tamu !== undefined) {
       const nm = (p.customer ?? '').trim();
@@ -393,8 +450,8 @@ export default function CashierScreen({ navigation, route }: Props) {
   }, [route?.params]);
 
   const subs = useMemo(
-    () => CATEGORIES.find((c) => c.name === activeCategory)?.subs ?? [],
-    [activeCategory],
+    () => categories.find((c) => c.name === activeCategory)?.subs ?? [],
+    [activeCategory, categories],
   );
 
   const filtered = useMemo(() => {
@@ -511,6 +568,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       customer: customer.trim(),
       ...(memberId.trim() ? { memberId: memberId.trim() } : {}),
       ...(voucher ? { voucher } : {}),
+      ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
     });
   /** Dialog nominal ongkir - dibuka dari tombol Ongkir di toolbar. */
   const openOngkir = () => {
@@ -531,13 +589,13 @@ export default function CashierScreen({ navigation, route }: Props) {
         <View style={styles.dialogCard}>
           <Text style={styles.dialogTitle}>{t('ongkirTitle')}</Text>
           <Text style={styles.dialogSub}>{t('ongkirNominal')}</Text>
-          <TextInput
-            style={styles.dialogInput}
+          <AppInput
+            boxStyle={styles.dialogInput}
+            style={styles.fieldText}
             value={ongkirDraft}
             onChangeText={setOngkirDraft}
             keyboardType="numeric"
             placeholder={rp(0)}
-            placeholderTextColor={colors.faint}
           />
           <View style={styles.dialogRow}>
             <TouchableOpacity style={styles.dialogGhost} onPress={() => setOngkirOpen(false)}>
@@ -558,17 +616,30 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Text style={styles.modeNoteT}>{t('modeMarketplaceNoteA')}{mode}{t('modeMarketplaceNoteB')}</Text>
       </View>
     ) : null;
-  /** Simpan membawa payload agar muncul di Muat Order (dulu navigate tanpa params). */
-  const goSaved = () =>
-    navigation?.navigate('LoadOrder', {
-      newOrder: {
-        title: `${mode}${table ? ` · ${t('table')} ${table}` : ''} · ${customer.trim() || t('guestFallback')}`,
-        mode,
-        ...(table ? { table } : {}),
-        items: cart,
-        ongkir,
-      },
-    });
+  /** Simpan membawa payload + salesNum agar muncul di Muat Order (dulu navigate tanpa params). */
+  const goSaved = () => {
+    void (async () => {
+      let num = salesNum.trim();
+      if (!num) {
+        try {
+          num = await nextSalesNum();
+        } catch {
+          num = `TRX-${Date.now()}`; /* TODO-i18n:saved-fallback-num */
+        }
+        setSalesNum(num);
+      }
+      navigation?.navigate('LoadOrder', {
+        newOrder: {
+          title: `${mode}${table ? ` · ${t('table')} ${table}` : ''} · ${customer.trim() || t('guestFallback')}`,
+          mode,
+          ...(table ? { table } : {}),
+          items: cart,
+          ongkir,
+          salesNum: num,
+        },
+      });
+    })();
+  };
 
   const today = new Date().toLocaleDateString('id-ID', {
     weekday: 'long',
@@ -583,20 +654,20 @@ export default function CashierScreen({ navigation, route }: Props) {
     return (
       <View style={styles.editor}>
         <Text style={styles.editorLabel}>{t('noteKitchen')}</Text>
-        <TextInput
-          style={styles.editorInput}
+        <AppInput
+          boxStyle={styles.editorInput}
+          style={styles.fieldText}
           value={noteDraft}
           onChangeText={setNoteDraft}
           placeholder={t('notePh')}
-          placeholderTextColor={colors.faint}
         />
         <Text style={styles.editorLabel}>{t('discItemRp')}</Text>
-        <TextInput
-          style={styles.editorInput}
+        <AppInput
+          boxStyle={styles.editorInput}
+          style={styles.fieldText}
           value={discDraft}
           onChangeText={setDiscDraft}
           placeholder={rp(0)}
-          placeholderTextColor={colors.faint}
           keyboardType="numeric"
         />
         <View style={styles.editorRow}>
@@ -654,10 +725,10 @@ export default function CashierScreen({ navigation, route }: Props) {
       </TouchableOpacity>
       {isWide && (
         <View style={styles.customerWrap}>
-          <TextInput
+          <AppInput
+            boxStyle={styles.customerBox}
             style={styles.customerInput}
             placeholder="Info tambahan / nama customer"
-            placeholderTextColor={colors.faint}
             value={customer}
             onChangeText={setCustomer}
           />
@@ -705,7 +776,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         }}
         contentContainerStyle={[styles.catRow, !isWide && styles.catRowPhone]}
         style={styles.catScroll}>
-        {CATEGORIES.map((c) => {
+        {categories.map((c) => {
           const active = c.name === activeCategory;
           // Favorit virtual (overlap) - tanpa badge agar jumlah badge = Jumlah footer.
           const inCart = c.name === 'Favorit' ? 0 : (cartQtyByCat[c.name] ?? 0);
@@ -899,7 +970,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
-          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || t('guestFallback')}
+          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || t('guestFallback')}{salesNum.trim() ? ` · ${salesNum.trim()}` : ''}
         </Text>
       </View>
       <FlatList
@@ -1058,11 +1129,11 @@ export default function CashierScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={[styles.btnPay, activeCart.length === 0 && styles.ctaDisabled]}
-          disabled={activeCart.length === 0}
+          style={[styles.btnPay, (activeCart.length === 0 || syncBlocked) && styles.ctaDisabled]}
+          disabled={activeCart.length === 0 || syncBlocked}
           onPress={goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
-          <Text style={styles.btnPayText}>{t('pay')} | {rp(total)}</Text>
+          <Text style={styles.btnPayText} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)}</Text>
           <Text style={styles.btnPayArrow}>›</Text>
         </TouchableOpacity>
       </View>
@@ -1073,6 +1144,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     return (
       <View style={styles.root}>
         {renderHeader()}
+        {renderSyncBlock()}
         <DrawerMenu
           visible={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1129,6 +1201,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
+      {renderSyncBlock()}
       <DrawerMenu
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -1293,6 +1366,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     outlineStyle: 'none' as never,
   },
+  /** Kotak AppInput di toolbar customer: transparan tanpa border (bungkus luar yg membingkai). */
+  customerBox: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    height: 40,
+  },
+  /** Teks di dalam AppInput: medium ala form lama. */
+  fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   toolBtn: {
     width: 38,
     height: 38,

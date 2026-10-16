@@ -6,6 +6,7 @@ import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { enqueueSync } from '../../lib/sync';
 import { initDb, query } from '../../lib/db';
+import { moveSaleItems } from '../../lib/sales';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { from?: string } } };
@@ -175,30 +176,82 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
 
   const move = () => {
     if (pickedItems.length === 0 || sameTable) return;
-    // Catat pindah item ke antrean sync agar diteruskan ke server (offline-first).
-    // Catatan dan diskon per baris ikut agar dapur/struk tujuan tetap sama.
-    try {
-      enqueueSync('other', {
-        op: 'move-items', from, to,
-        items: pickedItems.map((it) => ({
-          id: it.id, name: it.name, qty: it.move, price: it.price,
-          ...(it.note ? { note: it.note } : {}),
-          ...(it.discount ? { discount: Math.round((it.discount * it.move) / Math.max(1, it.qty)) } : {}),
-        })),
-        total: pickedTotal, merge: destOccupied, at: new Date().toISOString(),
+    const snapshot = pickedItems.map((it) => ({ ...it }));
+    const totalSnap = pickedTotal;
+    const countSnap = pickedCount;
+    const toTable = destCode;
+    const mergeSnap = destOccupied;
+    const markMoved = () => {
+      setMovedQty((m) => {
+        const next = { ...m };
+        for (const it of snapshot) next[it.id] = (next[it.id] ?? 0) + it.move;
+        return next;
       });
-    } catch {
-      /* antrean belum siap - status lokal di bawah tetap diubah */
-    }
-    setMovedQty((m) => {
-      const next = { ...m };
-      for (const it of pickedItems) next[it.id] = (next[it.id] ?? 0) + it.move;
-      return next;
-    });
-    setDoneMsg(
-      `${pickedCount} pcs (${rp(pickedTotal)}) dipindahkan ${from} ke ${to}${destOccupied ? ' - digabung ke bill yang sudah ada' : ''}.`,
-    );
-    setPickedQty({});
+      setDoneMsg(
+        `${countSnap} pcs (${rp(totalSnap)}) dipindahkan ${from} ke ${to}${mergeSnap ? ' - digabung ke bill yang sudah ada' : ''}.`,
+      );
+      setPickedQty({});
+    };
+    // Coba belah fisik di SQLite dulu (kontrak §5.2); bila gagal, fallback ke
+    // antrean manual + status lokal seperti sebelumnya (offline-first).
+    (async () => {
+      try {
+        await initDb();
+        const heads = await query<{ salesNum: string }>(
+          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid' ORDER BY salesDate`,
+          [from],
+        );
+        if (heads.length === 0) throw new Error('no-head');
+        const fromSalesNum = heads[0].salesNum;
+        const destHeads = await query<{ salesNum: string }>(
+          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid' ORDER BY salesDate LIMIT 1`,
+          [toTable],
+        );
+        const moves: { id: string; qty: number }[] = [];
+        for (const it of snapshot) {
+          const menuId = it.id.includes('#') ? it.id.split('#')[0] : it.id;
+          let need = it.move;
+          const rows = await query<{ id: string; qty: number }>(
+            `SELECT m.id AS id, m.qty AS qty FROM tr_salesmenu m
+             WHERE m.salesNum = ? AND m.menuId = ? AND COALESCE(m.note,'') = ? AND m.price = ?
+             ORDER BY m.rowid`,
+            [fromSalesNum, menuId, it.note ?? '', it.price],
+          );
+          for (const r of rows) {
+            if (need <= 0) break;
+            const take = Math.min(need, Math.max(0, Math.round(Number(r.qty) || 0)));
+            if (take > 0) { moves.push({ id: r.id, qty: take }); need -= take; }
+          }
+        }
+        if (moves.length === 0) throw new Error('no-rows');
+        await moveSaleItems({
+          fromSalesNum,
+          toTableNo: toTable,
+          moves,
+          ...(destHeads.length > 0 ? { toSalesNum: destHeads[0].salesNum } : {}),
+        });
+        markMoved();
+        return;
+      } catch {
+        /* DB tak cocok (fallback konstanta / multi-bill) - pakai antrean manual */
+      }
+      // Catat pindah item ke antrean sync agar diteruskan ke server (offline-first).
+      // Catatan dan diskon per baris ikut agar dapur/struk tujuan tetap sama.
+      try {
+        enqueueSync('other', {
+          op: 'move-items', from, to,
+          items: snapshot.map((it) => ({
+            id: it.id, name: it.name, qty: it.move, price: it.price,
+            ...(it.note ? { note: it.note } : {}),
+            ...(it.discount ? { discount: Math.round((it.discount * it.move) / Math.max(1, it.qty)) } : {}),
+          })),
+          total: totalSnap, merge: mergeSnap, at: new Date().toISOString(),
+        });
+      } catch {
+        /* antrean belum siap - status lokal di bawah tetap diubah */
+      }
+      markMoved();
+    })();
   };
 
   return (

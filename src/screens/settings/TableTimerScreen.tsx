@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
+import { getRoundingSetting, type RoundingSetting } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -27,6 +30,8 @@ interface TimerConfig {
 
 const CFG_KEY = 'genfity.tabletimer.config';
 const TIM_KEY = 'genfity.tabletimer.timers';
+/** Diekspor untuk F2: TablesScreen membaca persist ini sebagai sumber utama. */
+export { CFG_KEY as TABLE_TIMER_CFG_KEY, TIM_KEY as TABLE_TIMER_TIM_KEY };
 
 /** Kanonis mengikuti TablesScreen: no tanpa strip (A1/A2/B1) + section Dalam/Teras/VIP. */
 const SECTION_OF: Record<string, string> = {
@@ -35,8 +40,8 @@ const SECTION_OF: Record<string, string> = {
   C1: 'VIP', C2: 'VIP',
 };
 const CANON_IDS = new Set(Object.keys(SECTION_OF));
-/** Kode lama ber-strip ("A-01" → "A1", "VIP-2" → "C2") ke kanonis. */
-function canonTableNo(raw: string): string {
+/** Kode lama ber-strip ("A-01" → "A1", "VIP-2" → "C2") ke kanonis. Diekspor untuk F2. */
+export function canonTableNo(raw: string): string {
   const t = (raw || '').trim().toUpperCase();
   if (t === 'VIP-1' || t === 'VIP1') return 'C1';
   if (t === 'VIP-2' || t === 'VIP2') return 'C2';
@@ -45,14 +50,14 @@ function canonTableNo(raw: string): string {
   return t.replace(/-/g, '');
 }
 /** Tampilkan elapsed live: menit + detik (tick 10 detik) agar tak diam 60 detik. */
-function fmtLive(elapsedMin: number): string {
+function fmtLive(elapsedMin: number, u: { min: string; sec: string; hour: string }): string {
   const totalSec = Math.max(0, Math.round(elapsedMin * 60));
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
-  if (m < 60) return `${m} mnt ${s} dtk`;
+  if (m < 60) return `${m} ${u.min} ${s} ${u.sec}`;
   const h = Math.floor(m / 60);
   const mm = m % 60;
-  return mm === 0 ? `${h} jam ${s} dtk` : `${h} jam ${mm} mnt`;
+  return mm === 0 ? `${h} ${u.hour} ${s} ${u.sec}` : `${h} ${u.hour} ${mm} ${u.min}`;
 }
 
 const DEFAULT_TABLES: TableTimer[] = [
@@ -77,14 +82,17 @@ export default function TableTimerScreen({ navigation }: Props) {
   const [autoExtend, setAutoExtend] = useState(DEFAULT_CFG.autoExtend);
   const [tables, setTables] = useState<TableTimer[]>(DEFAULT_TABLES);
   const [loaded, setLoaded] = useState(false);
+  // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
+  const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
 
   // Muat konfigurasi + snapshot timer; migrasi id lama ber-strip ke kanonis.
   useEffect(() => {
     let on = true;
     (async () => {
-      const [cfg, tim] = await Promise.all([
+      const [cfg, tim, rnd] = await Promise.all([
         getJSON<TimerConfig>(CFG_KEY, DEFAULT_CFG),
         getJSON<TableTimer[]>(TIM_KEY, DEFAULT_TABLES),
+        getRoundingSetting(),
       ]);
       if (!on) return;
       setEnabled(cfg.enabled);
@@ -92,6 +100,7 @@ export default function TableTimerScreen({ navigation }: Props) {
       setWarnBefore(cfg.warnBefore);
       setStartMode(cfg.startMode === 'order' ? 'order' : 'duduk');
       setAutoExtend(!!cfg.autoExtend);
+      setRounding(rnd);
       if (Array.isArray(tim) && tim.length > 0) {
         const seen = new Set<string>();
         const migrated = tim
@@ -168,33 +177,29 @@ export default function TableTimerScreen({ navigation }: Props) {
           <View style={styles.rowBetween}>
             <View style={styles.rowLeft}>
               <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('tmr_enable')}</Text>
-              <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>Timer berjalan {startMode === 'duduk' ? 'sejak pelanggan duduk' : 'sejak order pertama'}.</Text>
+              <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{startMode === 'duduk' ? t('tmr_run_seated') : t('tmr_run_order')}</Text>
             </View>
             <Switch value={enabled} onValueChange={setEnabled} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
-          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Batas waktu (menit)</Text>
-          <TextInput style={[styles.input, isTablet && styles.inputBig]} value={limit} onChangeText={setLimit} keyboardType="numeric" placeholder="90" placeholderTextColor={colors.faint} />
-          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Peringatkan sebelum habis (menit)</Text>
-          <TextInput style={[styles.input, isTablet && styles.inputBig]} value={warnBefore} onChangeText={setWarnBefore} keyboardType="numeric" placeholder="10" placeholderTextColor={colors.faint} />
-          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>Timer mulai saat</Text>
+          <AppInput label={t('tmr_limit_label')} value={limit} onChangeText={setLimit} keyboardType="numeric" placeholder="90" style={isTablet ? styles.inputBig : undefined} />
+          <AppInput label={t('tmr_warn_label')} value={warnBefore} onChangeText={setWarnBefore} keyboardType="numeric" placeholder="10" style={isTablet ? styles.inputBig : undefined} />
+          <Text style={[styles.fieldLabel, isTablet && styles.fieldLabelBig]}>{t('tmr_start_label')}</Text>
           <View style={styles.chipRow}>
             {(['duduk', 'order'] as StartMode[]).map((m) => (
               <Pressable key={m} onPress={() => setStartMode(m)} style={[styles.chip, startMode === m && styles.chipActive]}>
                 <Text style={[styles.chipText, startMode === m && styles.chipTextActive, isTablet && styles.chipTextBig]}>
-                  {m === 'duduk' ? 'Pelanggan duduk' : 'Order pertama'}
+                  {m === 'duduk' ? t('tmr_mode_seated') : t('tmr_mode_order')}
                 </Text>
               </Pressable>
             ))}
           </View>
           <View style={styles.rowBetween}>
-            <Text style={[styles.rowLabel, isTablet && styles.rowLabelBig]}>Perpanjang otomatis bila lewat batas (+15 mnt)</Text>
+            <Text style={[styles.rowLabel, isTablet && styles.rowLabelBig]}>{t('tmr_extend_label')}</Text>
             <Switch value={autoExtend} onValueChange={setAutoExtend} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
           <Text style={[styles.modeNote, isTablet && styles.modeNoteBig]}>
-            {startMode === 'duduk'
-              ? 'Mulai dihitung sejak pelanggan duduk.'
-              : 'Mode order pertama: offline disamakan dengan duduk; selisih pencatatan order menyusul.'}
-            {autoExtend ? ' Auto-extend aktif: limit +15 otomatis saat lewat batas.' : ''}
+            {startMode === 'duduk' ? t('tmr_note_seated') : t('tmr_note_order')}
+            {autoExtend ? ` ${t('tmr_note_extend')}` : ''}
           </Text>
         </View>
 
@@ -205,35 +210,39 @@ export default function TableTimerScreen({ navigation }: Props) {
           const over = enabled && remain < 0;
           const sisa = Math.max(0, Math.ceil(remain));
           const lewat = Math.max(1, Math.floor(-remain));
+          const secRaw = SECTION_OF[x.id] ?? '';
+          const sec = secRaw === 'Dalam' ? t('tmr_sec_dalam') : secRaw === 'Teras' ? t('tmr_sec_teras') : secRaw === 'VIP' ? t('tmr_sec_vip') : secRaw;
+          const units = { min: t('tmr_u_min'), sec: t('tmr_u_sec'), hour: t('tmr_u_hour') };
           return (
             <View key={x.id} style={[styles.card, danger && styles.cardWarn, over && styles.cardOver]}>
               <View style={styles.timerTop}>
-                <Text style={[styles.timerId, isTablet && styles.timerIdBig]}>Meja {x.id}{SECTION_OF[x.id] ? ` · ${SECTION_OF[x.id]}` : ''}</Text>
+                <Text style={[styles.timerId, isTablet && styles.timerIdBig]}>{t('c_table')} {x.id}{sec ? ` · ${sec}` : ''}</Text>
                 <Text style={[styles.timerState, over ? styles.over : danger ? styles.warn : styles.ok, isTablet && styles.timerStateBig]}>
-                  {over ? `Lewat ${lewat} mnt` : `Sisa ${sisa} mnt`}{enabled ? ' • live' : ''}
+                  {over ? t('tmr_over').replace('{n}', String(lewat)) : t('tmr_left').replace('{n}', String(sisa))}{enabled ? ` • ${t('tmr_live')}` : ''}
                 </Text>
               </View>
               <Text style={[styles.timerSub, isTablet && styles.timerSubBig]}>
-                {startMode === 'duduk' ? 'Duduk' : 'Order'} {fmtLive(x.elapsed)} · batas {x.limit} mnt
+                {startMode === 'duduk' ? t('tmr_elapsed_seated') : t('tmr_elapsed_order')} {fmtLive(x.elapsed, units)} · {t('tmr_limit_is').replace('{n}', String(x.limit))}
               </Text>
               <View style={styles.track}>
                 <View style={[styles.fill, { width: `${Math.min(100, Math.round((x.elapsed / x.limit) * 100))}%`, backgroundColor: over ? colors.red : danger ? colors.orange : colors.green }]} />
               </View>
               <View style={styles.timerBtns}>
-                <Pressable style={styles.btnGhost} onPress={() => reset(x.id)}>
-                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>Reset</Text>
-                </Pressable>
-                <Pressable style={styles.btnGhost} onPress={() => extend(x.id, 15)}>
-                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>+15 mnt</Text>
-                </Pressable>
-                <Pressable style={styles.btnGhost} onPress={() => extend(x.id, 30)}>
-                  <Text style={[styles.btnGhostText, isTablet && styles.btnGhostTextBig]}>+30 mnt</Text>
-                </Pressable>
+                <AppButton title={t('tmr_reset')} onPress={() => reset(x.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
+                <AppButton title={t('tmr_extend_btn').replace('{n}', '15')} onPress={() => extend(x.id, 15)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
+                <AppButton title={t('tmr_extend_btn').replace('{n}', '30')} onPress={() => extend(x.id, 30)} variant="secondary" fullWidth={false} style={styles.btnFlex} textStyle={isTablet ? styles.btnGhostTextBig : undefined} />
               </View>
             </View>
           );
         })}
-        <Text style={[styles.foot, isTablet && styles.footBig]}>Peringatan muncul {warn} menit sebelum batas - tersimpan di perangkat.</Text>
+        <Text style={[styles.foot, isTablet && styles.footBig]}>{t('tmr_foot').replace('{n}', String(warn))}</Text>
+        {/* REA-14: tampilkan info pembulatan hanya bila ms_setting menyimpang
+            dari default (hardcode ID sementara; kunci i18n: tmr_round_info). */}
+        {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
+          <Text style={[styles.foot, isTablet && styles.footBig]}>
+            {`Pembulatan: ${rounding.mode !== '' ? rounding.mode : 'default'} · terdekat ${rounding.nearest} · langkah ${rounding.step}`}
+          </Text>
+        ) : null}
       </ScrollView>
       <DrawerMenu
         visible={drawerOpen}
@@ -296,6 +305,7 @@ const styles = StyleSheet.create({
   track: { height: 8, borderRadius: 4, backgroundColor: colors.bg, marginTop: 8, overflow: 'hidden' },
   fill: { height: 8, borderRadius: 4 },
   timerBtns: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  btnFlex: { marginTop: 0, flex: 1 },
   btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 9, alignItems: 'center' },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
   foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14 },

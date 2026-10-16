@@ -3,10 +3,9 @@ import React, { useEffect, useRef, useState } from 'react';import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -20,10 +19,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
     if (x < 1000000000) return `${sebut(Math.floor(x / 1000000))} juta ${sebut(x % 1000000)}`.trim();
     return `${sebut(Math.floor(x / 1000000000))} miliar ${sebut(x % 1000000000)}`.trim();
   };
-  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
-const RP_PREFIX = rp(0).replace(/\d/g, '').trim();
-
-/** Batas kas awal sesuai hint chip di bawah. */
+  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Batas kas awal sesuai hint chip di bawah. */
 const MAX_KAS_AWAL = 10000000;
 /** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift. */const fmtShift = (iso: string | null): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const tgl = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }); const jam = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -51,8 +47,10 @@ const MAX_KAS_AWAL = 10000000;
 
   const confirmOpen = async () => {
     if (openingRef.current) return;
-    if (pin.length < 4) {
-      setError('Masukkan PIN (min. 4 digit)');
+    // FIX2-4a: authorizeSupervisor butuh tepat 6 digit (titik PIN dan pad sudah 6);
+    // guard disamakan agar pesan jujur.
+    if (pin.length < 6) {
+      setError('Masukkan PIN (6 digit)');
       return;
     }
     openingRef.current = true;
@@ -164,18 +162,15 @@ const MAX_KAS_AWAL = 10000000;
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_cash_open')}</Text>
           <Text style={s.hint}>{t('shf_cash_hint')}</Text>
-          <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
-            <TextInput
-              style={s.amountInput}
-              keyboardType="number-pad"
-              placeholder="0"
-              placeholderTextColor={colors.faint}
-              textAlign="right"
-              value={kasAwalNum ? rpNum(kasAwalNum) : '0'}
-              onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
-            />
-          </View>
+          <AppInput
+            keyboardType="number-pad"
+            placeholder="0"
+            textAlign="right"
+            value={kasAwalNum ? rpNum(kasAwalNum) : '0'}
+            onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
+            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+            style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
+          />
           <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : 'Nol rupiah - masukkan nominal kas awal'}</Text>
           <Text style={s.chipHint}>Ketuk nominal untuk menambah ke Kas Awal · maks. {rp(MAX_KAS_AWAL)}</Text>
           <View style={s.chips}>
@@ -194,13 +189,13 @@ const MAX_KAS_AWAL = 10000000;
 
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_note_open')}</Text>
-          <TextInput
-            style={s.noteInput}
-            placeholder="Catatan (opsional)"
-            placeholderTextColor={colors.faint}
+          <AppInput
+            placeholder={t('c_note_opt')}
             multiline
             value={catatan}
             onChangeText={setCatatan}
+            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
+            style={{ textAlignVertical: 'top' }}
           />
         </View>
 
@@ -215,12 +210,12 @@ const MAX_KAS_AWAL = 10000000;
       </ScrollView>
 
       <View style={s.footer}>
-        <TouchableOpacity
-          style={[s.openBtn, kasAwalNum <= 0 && s.openBtnDisabled]}
+        <AppButton
+          title={kasAwalNum > 0 ? `${t('shf_open_btn')} · ${rp(kasAwalNum)}` : t('shf_fill_cash')}
+          disabled={kasAwalNum <= 0}
+          style={{ marginTop: 0 }}
           onPress={openPin}
-          accessibilityState={{ disabled: kasAwalNum <= 0 }}>
-          <Text style={s.openBtnTxt}>{kasAwalNum > 0 ? `${t('shf_open_btn')} · ${rp(kasAwalNum)}` : t('shf_fill_cash')}</Text>
-        </TouchableOpacity>
+        />
       </View>
 
       <Modal visible={pinVisible} transparent animationType="slide">

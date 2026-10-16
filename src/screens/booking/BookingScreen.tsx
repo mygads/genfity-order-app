@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
@@ -297,11 +299,11 @@ export default function BookingScreen({ navigation }: Props) {
         {editingId ? t('bok_edit_hint') : t('bok_form_hint')}
       </Text>
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_name_label')}</Text>
-      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={name} onChangeText={setName} placeholder={t('bok_name_ph')} placeholderTextColor={colors.faint} />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={name} onChangeText={setName} placeholder={t('bok_name_ph')} />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_phone_label')}</Text>
-      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={phone} onChangeText={setPhone} placeholder={t('bok_phone_ph')} keyboardType="phone-pad" placeholderTextColor={colors.faint} />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={phone} onChangeText={setPhone} placeholder={t('bok_phone_ph')} keyboardType="phone-pad" />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_pax_label')}</Text>
-      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" placeholderTextColor={colors.faint} />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('c_table')}</Text>
       <View style={styles.chips}>
         {TABLES_FREE.map((tb) => (
@@ -319,13 +321,15 @@ export default function BookingScreen({ navigation }: Props) {
         ))}
       </View>
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_time_label')}</Text>
-      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={time} onChangeText={setTime} placeholder={t('bok_time_ph')} placeholderTextColor={colors.faint} />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={time} onChangeText={setTime} placeholder={t('bok_time_ph')} />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('kit_note')}</Text>
-      <TextInput style={[styles.input, isTablet && styles.inputBig]} value={note} onChangeText={setNote} placeholder={t('kit_note')} placeholderTextColor={colors.faint} />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={note} onChangeText={setNote} placeholder={t('kit_note')} />
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
-      <TouchableOpacity style={styles.primary} onPress={save}>
-        <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}</Text>
-      </TouchableOpacity>
+      <AppButton
+        title={editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}
+        onPress={save}
+        style={styles.primary}
+      />
       {editingId ? (
         <TouchableOpacity style={styles.cancelEdit} onPress={resetForm}>
           <Text style={styles.cancelEditT}>{t('bok_cancel_edit')}</Text>
@@ -408,6 +412,8 @@ const styles = StyleSheet.create({
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 12, marginBottom: 6 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
+  /** Teks di dalam AppInput: medium ala form lama. */
+  fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   split: { flex: 1, flexDirection: 'row' },
   listSide: { flex: 1 },

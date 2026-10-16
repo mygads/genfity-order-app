@@ -1,0 +1,11 @@
+{
+  "request": { "terminalCode": "ESB-PORIS-001", "branchId": "B001", "deviceID": "a91f3c07d2e84b5a", "status": "verified" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true, "terminalCode": "ESB-PORIS-001", "verifiedAt": "2026-10-16 09:00:00" }
+  }
+}

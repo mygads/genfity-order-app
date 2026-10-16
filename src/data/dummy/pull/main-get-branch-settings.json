@@ -7,15 +7,23 @@
     "status": 200,
     "success": true,
     "data": {
-      "totalRecords": 5,
+      "totalRecords": 13,
       "pageCount": 1,
       "page": 1,
       "items": [
         { "key1": "Tax", "key2": "PPN", "value1": "11", "value2": "persen inklusif", "lastSyncDate": "2026-10-16 08:00:00" },
-        { "key1": "Rounding", "key2": "Step", "value1": "50", "value2": "rupiah", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Rounding", "key2": "Step", "value1": "100", "value2": "rupiah", "lastSyncDate": "2026-10-16 08:00:00" },
         { "key1": "Service", "key2": "Charge", "value1": "5", "value2": "persen eksklusif", "lastSyncDate": "2026-10-16 08:00:00" },
         { "key1": "Branch", "key2": "Name", "value1": "ESB Cabang Poris", "value2": "B001", "lastSyncDate": "2026-10-16 08:00:00" },
-        { "key1": "Branch", "key2": "Currency", "value1": "IDR", "value2": "id", "lastSyncDate": "2026-10-16 08:00:00" }
+        { "key1": "Branch", "key2": "Currency", "value1": "IDR", "value2": "id", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "CustomerDisplay", "key2": "Logo", "value1": "https://cdn.milik-sendiri/display-logo.webp", "value2": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "EsbOrder", "key2": "EnableWebSocket", "value1": "1", "value2": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Queue", "key2": "EnablePrefix", "value1": "1", "value2": "A", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Stock", "key2": "EnableRealtime", "value1": "1", "value2": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "EsbOrder", "key2": "EnableSound", "value1": "1", "value2": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Device", "key2": "EnableWakelock", "value1": "1", "value2": "", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Rounding", "key2": "Mode", "value1": "NEAREST", "value2": "NEAREST|UP|DOWN", "lastSyncDate": "2026-10-16 08:00:00" },
+        { "key1": "Rounding", "key2": "NearestValue", "value1": "100", "value2": "rupiah", "lastSyncDate": "2026-10-16 08:00:00" }
       ]
     }
   }

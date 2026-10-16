@@ -94,6 +94,19 @@ export function logout(): void {
   current = null;
   persist();
   emit();
+  // Matikan realtime + foreground service (pasangan startRealtime saat login).
+  try {
+    const { stopRealtime } = require('./lib/realtime') as typeof import('./lib/realtime');
+    stopRealtime();
+  } catch {
+    /* abaikan */
+  }
+  try {
+    const { setWsForeground } = require('./native/printer') as typeof import('./native/printer');
+    void setWsForeground(false);
+  } catch {
+    /* abaikan */
+  }
 }
 
 export function subscribeSession(fn: Listener): () => void {

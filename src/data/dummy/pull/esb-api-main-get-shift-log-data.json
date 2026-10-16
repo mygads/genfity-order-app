@@ -1,0 +1,19 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 2,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "shiftId": "S20261016P", "branchId": "B001", "terminalId": "T001", "userId": "U07", "shiftName": "Shift Pagi", "clockIn": "2026-10-16 08:57:00", "clockOut": null, "cashInDrawer": 200000, "totalSales": 693000, "cashActual": 0, "cashDiff": 0, "status": "OPEN", "lastSyncDate": "2026-10-16 08:57:00" },
+        { "shiftId": "S20261015M", "branchId": "B001", "terminalId": "T001", "userId": "U07", "shiftName": "Shift Malam", "clockIn": "2026-10-15 16:00:00", "clockOut": "2026-10-15 23:58:00", "cashInDrawer": 200000, "totalSales": 812500, "cashActual": 1012500, "cashDiff": 0, "status": "CLOSED", "lastSyncDate": "2026-10-15 23:58:00" }
+      ]
+    }
+  }
+}

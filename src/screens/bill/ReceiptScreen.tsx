@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { printReceiptData, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printReceiptData, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const no = route?.params?.no ?? '#148';
@@ -46,8 +46,10 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
   const shopAddr = route?.params?.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
   const customFooter = route?.params?.footer ?? '';
   const [printing, setPrinting] = useState(false);
-  /** Cetak nyata: ESC/POS → printer default; sukses = printedCount+1 + dirty. */
-  const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: 'ESB CABANG PORIS', addr: 'Jl. Poris Raya No. 8', trx: `No: ${no} - ${mode}`, cashier: cashierLine, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), total: Math.round(total), method, }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } } } finally { setPrinting(false); } };
+  /** Cetak nyata: ESC/POS rincian penuh (selaras tampilan kertas) → printer
+   * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
+   * kas ala POSLite (best-effort). */
+  const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${mode}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
   const paper = ( <View style={styles.paper}>
       <Text style={styles.shop}>{shopName}</Text> <Text style={styles.addr}>{shopAddr}</Text> <Text style={styles.line}>No: {no}    {mode}</Text>
       <Text style={styles.line}>{cashierLine}</Text>
@@ -92,21 +94,11 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
 
   const actions = (
     <View style={[styles.actions, isTablet && styles.actionsStack]}>
-      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => navigation?.navigate('Dashboard')}>
-        <Text style={styles.ghostT}>{t('c_back')}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => void doPrint()}>
-        <Text style={styles.ghostT}>🖨 {printing ? '...' : t('rc_print')}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => { void shareReceipt(shareText); }}>
-        <Text style={styles.ghostT}>⤴ {t('rc_share')}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => { setMailMsg(''); setMailOpen(true); }}>
-        <Text style={styles.ghostT}>✉ {t('ok_email')}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.primary, isTablet ? styles.actionCol : styles.actionFull]} onPress={() => navigation?.navigate('Cashier')}>
-        <Text style={styles.primaryT}>{t('rc_new')}</Text>
-      </TouchableOpacity>
+      <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`🖨 ${printing ? '...' : t('rc_print')}`} variant="secondary" onPress={() => void doPrint()} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`✉ ${t('ok_email')}`} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={t('rc_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
     </View>
   );
 
@@ -116,23 +108,17 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
         <View style={[styles.dialog, styles.dialogNarrow]}>
           <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
           <Text style={styles.dSub}>{t('rc_title')} {no} • {rp(total)}</Text>
-          <TextInput
-            style={styles.input}
+          <AppInput
             value={mailTo}
             onChangeText={setMailTo}
             placeholder={t('hist_mail_ph')}
-            placeholderTextColor={colors.faint}
             keyboardType="email-address"
             autoCapitalize="none"
           />
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
-            <TouchableOpacity style={[styles.ghost, styles.dBtnFlex]} onPress={() => setMailOpen(false)}>
-              <Text style={styles.ghostT}>{t('c_close')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.primary, styles.dBtnFlex]} onPress={sendMail}>
-              <Text style={styles.primaryT}>{t('hist_mail_send')}</Text>
-            </TouchableOpacity>
+            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} style={[styles.actionBtn, styles.dBtnFlex]} />
+            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} style={[styles.actionBtn, styles.dBtnFlex]} />
           </View>
         </View>
       </View>
@@ -183,7 +169,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
   footerNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   actionsStack: { flexDirection: 'column' },
   actionCol: { flex: 0, width: '100%' },
-  actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+  actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, actionBtn: { marginTop: 0 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
   paperSide: { flex: 1.2 },
   summarySide: { flex: 1, backgroundColor: colors.card, borderLeftWidth: 1, borderLeftColor: colors.line }, summarySideBody: { padding: 20, paddingBottom: 32 },
   summaryTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },

@@ -100,13 +100,22 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     return ApiPath.clockIn;
   }
   if (kind === 'other') {
-    // Shift punya endpoint sendiri (dummy push/shift-open+close sudah ada):
+    // Shift punya endpoint sendiri (dummy push/v1-push-shift sudah ada):
     // JANGAN dilempar ke pushOrderFinish (endpoint salah).
     const op = String(payload?.op ?? '');
     if (op === 'shift-open') return ApiPath.pushShiftOpen;
     if (op === 'shift-close') return ApiPath.pushShiftClose;
     if (op === 'move-items') return ApiPath.moveItems;
     if (op === 'move-table') return ApiPath.moveTable;
+    // REA-FIX-A: op push baru (kontrak §5.2/§5.3/§5.6).
+    if (op === 'voucher-online-claim') return ApiPath.voucherOnlineClaim;
+    if (op === 'voucher-online-validate') return ApiPath.voucherOnlineValidate;
+    if (op === 'external-voucher-burn') return ApiPath.extVoucherBurn;
+    if (op === 'external-voucher-unburn') return ApiPath.extVoucherUnburn;
+    if (op === 'external-voucher-validate') return ApiPath.extVoucherValidate;
+    if (op === 'order-error-log') return ApiPath.orderErrorLog;
+    if (op === 'delivery-push') return ApiPath.deliveryPushData;
+    if (op === 'terminal-verify') return ApiPath.terminalVerifyNotify;
     // Deposit / voucher memakai field `kind` di payload (bukan `op`).
     const k = String(payload?.kind ?? '');
     if (k === 'deposit-topup' || k === 'member-deposit') return ApiPath.depositTopup;
@@ -445,4 +454,76 @@ export function shouldForceSync(last?: string | number): boolean {
   }
   if (!Number.isFinite(ms) || ms <= 0) return true;
   return Date.now() - ms > FORCE_SYNC_DAYS * 24 * 3600 * 1000;
+}
+
+/**
+ * Level umur sync dari timestamp sukses terakhir (kontrak §2/§10.4):
+ * 'ok' | 'warn3' (>3 hari, E00043) | 'block7' (>7 hari/tak diketahui, E00044).
+ * Dipakai SyncScreen (banner) + gate kasir/Pay (blokir transaksi).
+ */
+export function syncWarnLevel(lastMs?: number): 'ok' | 'warn3' | 'block7' {
+  hydrate();
+  const ms =
+    typeof lastMs === 'number' && lastMs > 0
+      ? lastMs
+      : lastSyncMs || Date.parse(lastSync);
+  if (!Number.isFinite(ms) || ms <= 0) return 'block7';
+  const age = Date.now() - ms;
+  if (age > FORCE_SYNC_DAYS * 24 * 3600 * 1000) return 'block7';
+  if (age > WARN_SYNC_DAYS * 24 * 3600 * 1000) return 'warn3';
+  return 'ok';
+}
+
+// ---------------------------------------------------------------------------
+// Sinkronisasi otomatis (toggle di SyncScreen - sebelumnya toggle hanya
+// tersimpan tanpa efek). Interval 5 menit, diam-diam: pushAll() + menelan
+// galat (bukan Custom env / offline = lewati). wifiOnly = cek tipe jaringan
+// via expo-network bila tersedia.
+// ---------------------------------------------------------------------------
+
+let autoTimer: ReturnType<typeof setInterval> | null = null;
+
+async function wifiOk(wifiOnly: boolean): Promise<boolean> {
+  if (!wifiOnly) return true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Net = require('expo-network') as {
+      getNetworkStateAsync?: () => Promise<{ type?: string; isConnected?: boolean }>;
+    };
+    if (!Net?.getNetworkStateAsync) return true;
+    const st = await Net.getNetworkStateAsync();
+    if (st.isConnected === false) return false;
+    const t = String(st.type ?? '').toUpperCase();
+    // UNKNOWN = tak bisa diklasifikasi (mis. web) → izinkan, bukan blokir.
+    if (!t || t === 'UNKNOWN' || t === 'NONE') return t !== 'NONE';
+    return t === 'WIFI' || t === 'ETHERNET';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Terapkan preferensi sync otomatis dari SyncScreen. Panggil tiap toggle
+ * berubah (dan sekali saat layar dibuka). Idempoten: timer lama dibersihkan.
+ */
+export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): void {
+  if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+  if (!opts.auto) return;
+  const wifiOnly = opts.wifiOnly;
+  autoTimer = setInterval(() => {
+    void (async () => {
+      try {
+        if (getServerEnv() !== 'custom') return;
+        if (!(await wifiOk(wifiOnly))) return;
+        // Tanpa gate pendingCount: antrean fisik (tr_esoprocessqueue) hanya
+        // terlihat di dalam pushAll, bukan di outbox ringan.
+        await pushAll();
+      } catch {
+        /* diam: coba lagi interval berikut */
+      }
+    })();
+  }, 5 * 60 * 1000);
 }

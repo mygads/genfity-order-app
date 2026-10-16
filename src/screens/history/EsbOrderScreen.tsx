@@ -3,11 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import {
   Image,
   Modal,
   Pressable,
-  TextInput,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { esbOrders, type EsbOrder, type EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: mock hanya kenal Baru/Diproses/Selesai, penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal (Omit agar status mock yang sempit tertimpa). */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Hari mock per order: esb1-2 hari ini, esb3 kemarin, esb4 dalam 7 hari. */const ORDER_DAY: Record<string, 'today' | 'yesterday' | 'older'> = { esb1: 'today', esb2: 'today', esb3: 'yesterday', esb4: 'older',};/** Jadwal mock per order (waktu diminta pelanggan). */const SCHEDULE: Record<string, string> = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { esbOrders, type EsbOrder, type EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: mock hanya kenal Baru/Diproses/Selesai, penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal (Omit agar status mock yang sempit tertimpa). */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Hari mock per order: esb1-2 hari ini, esb3 kemarin, esb4 dalam 7 hari. */const ORDER_DAY: Record<string, 'today' | 'yesterday' | 'older'> = { esb1: 'today', esb2: 'today', esb3: 'yesterday', esb4: 'older',};/** Jadwal mock per order (waktu diminta pelanggan). */const SCHEDULE: Record<string, string> = {
   esb1: 'Segera - maks 13:00',
   esb2: 'Terjadwal - 13:30',
   esb3: 'Segera - maks 12:15',
@@ -31,6 +30,9 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
   const [rejectFor, setRejectFor] = useState<EsbRow | null>(null); const [rejectText, setRejectText] = useState(''); const [rejectOf, setRejectOf] = useState<Record<string, string>>({});
 
   const [liveNew, setLiveNew] = useState(0); const [notice, setNotice] = useState('');
+  // WIRE REA-2: status/schedule delivery via helper deliveryApi (best-effort,
+  // offline-first - mock/ESB lokal tetap jalan tanpa server).
+  const [dlvMsg, setDlvMsg] = useState(''); const [dlvBusy, setDlvBusy] = useState(false); const queryDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); setDlvMsg(''); try { const term = getTerminal(); const res = await deliveryApi('search-ongoing', { orderNo: orderCode, branchId: term.branchId }); const { data } = unwrap<Record<string, unknown>>(res.data); const info = String((data as { status?: unknown })?.status ?? (data as { state?: unknown })?.state ?? ''); setDlvMsg(info ? `${t('dlv_title')}: ${orderCode} - ${info}` : `${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]); const scheduleDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); try { const term = getTerminal(); await deliveryApi('schedule-order', { orderNo: orderCode, branchId: term.branchId, schedule: scheduleOf({ id: orderCode } as EsbRow) }); setDlvMsg(`${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]);
   // T9: order live dari pull sales (apiSource: backend asli bila env terisi,
   // dummy lokal saat offline). Null/kosong = fallback mock tetap jalan.
   const [liveOrders, setLiveOrders] = useState<EsbRow[] | null>(null); const [liveOngkir, setLiveOngkir] = useState<Record<string, number>>({}); const pullLive = useCallback(async () => { try { const res = await apiFetch(ApiPath.pullSales, { method: 'GET' }); const { data } = unwrap<{ items?: SalePull[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; if (items.length === 0) return; const rows: EsbRow[] = []; const ong: Record<string, number> = {}; for (const s of items) { const code = String(s.salesNum ?? '').trim(); if (!code) continue; const mode = String(s.salesMode ?? '').toUpperCase(); const type = mode.includes('DELIVER') || mode.includes('DIANTAR') ? 'Diantar' : 'Ambil Sendiri'; const mapped = (Array.isArray(s.items) ? s.items : []).map((it) => ({ name: String(it.name ?? '-'), qty: Math.max(1, Math.round(Number(it.qty) || 0)), price: Math.round(Number(it.unitPrice ?? it.price) || 0), ...(it.note ? { note: String(it.note) } : {}), })); const sub = Number(s.subtotal); const total = Number.isFinite(sub) && sub > 0 ? Math.round(sub) : mapped.reduce((a, it) => a + it.qty * it.price, 0); const time = String(s.salesDate ?? '').slice(11, 16) || '--:--'; rows.push({ id: code, code, customer: String(s.customerName ?? s.tableNo ?? '-'), phone: '', type, time, items: mapped, total, status: 'Baru', }); const fee = Number(s.ongkirNet ?? s.ongkir); ong[code] = Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0; } if (rows.length === 0) return; setLiveOrders(rows); setLiveOngkir(ong); } catch { /* offline / pull gagal - mock tetap jalan */ } }, []); useEffect(() => { void pullLive(); }, [pullLive]); /** Notifikasi live: channel self-order → banner lokal + badge dalam aplikasi. */ useEffect(() => { try { startRealtime(); } catch { /* abaikan */ } const off = onWsMessage((msg) => { if (!/order|esb|self/i.test(msg.type)) return; const code = String(msg.payload?.code ?? msg.payload?.no ?? ''); setLiveNew((n) => n + 1); void pullLive(); setNotice(code ? `${t('esb_push_title')} ${code}` : t('esb_push_body')); void notifyLocal(t('esb_push_title'), code ? `${code}` : t('esb_push_body'), { code }); }); return off; }, [t, pullLive]); const base = liveOrders ?? esbOrders; const withMoved: EsbRow[] = useMemo(
@@ -171,7 +173,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   <Text style={styles.rowVal}>{rp(tt.fee)}</Text>
                 </View>
                 <View style={styles.row}>
-                  <Text style={styles.rowLabel}>PPN (termasuk){/* TODO-i18n:esb_tax_incl */}</Text>
+                  <Text style={styles.rowLabel}>{t('esb_tax_incl')}</Text>
                   <Text style={styles.rowVal}>{rp(tt.ppnIncl)}</Text>
                 </View>
                 <View style={styles.row}>
@@ -180,51 +182,46 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                 </View>
                 {tt.rounding !== 0 ? (
                 <View style={styles.row}>
-                  <Text style={styles.rowLabel}>Pembulatan{/* TODO-i18n:esb_rounding */}</Text>
+                  <Text style={styles.rowLabel}>{t('esb_rounding')}</Text>
                   <Text style={styles.rowVal}>{rp(tt.rounding)}</Text>
                 </View>
                 ) : null}
-                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} <View style={styles.sheetBtns}>
+                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} style={styles.sheetBtn} /></View></>) : null} <View style={styles.sheetBtns}>
                   {selected.status === 'Baru' && (
                     <>
-                      <Pressable style={styles.btnReject} onPress={() => { setRejectText(''); setRejectFor(selected); }}>
-                        <Text style={styles.btnRejectText}>{t('esb_reject')}</Text>
-                      </Pressable>
-                      <Pressable style={styles.btnAccept} onPress={() => setStatus(selected.id, 'Diproses')}>
-                        <Text style={styles.btnAcceptText}>{t('esb_accept')}</Text>
-                      </Pressable>
+                      <AppButton title={t('esb_reject')} variant="danger" onPress={() => { setRejectText(''); setRejectFor(selected); }} fullWidth={false} style={styles.sheetBtn} />
+                      <AppButton title={t('esb_accept')} onPress={() => setStatus(selected.id, 'Diproses')} fullWidth={false} style={styles.sheetBtnWide} />
                     </>
                   )}
                   {selected.status === 'Diproses' && (
                     <>
-                      <Pressable
-                        style={styles.btnGhost}
+                      <AppButton
+                        title={t('c_print')}
+                        variant="secondary"
                         onPress={() => {
                           const s = selected;
                           const tt = totalsOf(s, liveOngkir[s.id]); setSelected(null);
                           navigation?.navigate('Receipt', esbReceipt(s, tt.grand, liveOngkir[s.id], tt.fee));
-                        }}>
-                        <Text style={styles.btnGhostText}>{t('c_print')}</Text>
-                      </Pressable>
-                      <Pressable style={styles.btnAccept} onPress={() => setStatus(selected.id, 'Selesai')}>
-                        <Text style={styles.btnAcceptText}>{t('esb_complete')}</Text>
-                      </Pressable>
+                        }}
+                        fullWidth={false}
+                        style={styles.sheetBtn}
+                      />
+                      <AppButton title={t('esb_complete')} onPress={() => setStatus(selected.id, 'Selesai')} fullWidth={false} style={styles.sheetBtnWide} />
                     </>
                   )}
                   {(selected.status === 'Selesai' || selected.status === 'Batal') && (
                     <>
-                      <Pressable style={styles.btnGhost} onPress={() => setSelected(null)}>
-                        <Text style={styles.btnGhostText}>{t('c_close')}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.btnPrint}
+                      <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} style={styles.sheetBtn} />
+                      <AppButton
+                        title={t('c_print')}
                         onPress={() => {
                           const s = selected;
                           const tt = totalsOf(s, liveOngkir[s.id]); setSelected(null);
                           navigation?.navigate('Receipt', esbReceipt(s, tt.grand, liveOngkir[s.id], tt.fee));
-                        }}>
-                        <Text style={styles.btnPrintText}>{t('c_print')}</Text>
-                      </Pressable>
+                        }}
+                        fullWidth={false}
+                        style={styles.sheetBtn}
+                      />
                     </>
                   )}
                 </View>
@@ -237,16 +234,12 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
         <View style={styles.sheetWrap}>
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Alasan penolakan{/* TODO-i18n:esb_reject_reason_title */}</Text>
+            <Text style={styles.sheetTitle}>{t('esb_reject_title')}</Text>
             <Text style={styles.detailMeta}>{rejectFor?.code}</Text>
-            <TextInput style={styles.rejectInput} value={rejectText} onChangeText={setRejectText} placeholder="Tulis alasan penolakan..." multiline />{/* TODO-i18n:esb_reject_placeholder */}
+            <AppInput value={rejectText} onChangeText={setRejectText} placeholder={t('esb_reject_ph')} multiline boxStyle={styles.rejectBox} style={styles.rejectField} />
             <View style={styles.sheetBtns}>
-              <Pressable style={styles.btnGhost} onPress={() => setRejectFor(null)}>
-                <Text style={styles.btnGhostText}>{t('c_close')}</Text>
-              </Pressable>
-              <Pressable style={[styles.btnReject, !rejectText.trim() && styles.btnDisabled]} disabled={!rejectText.trim()} onPress={() => { const target = rejectFor; const reason = rejectText.trim(); if (!target || !reason) return; setRejectFor(null); setRejectText(''); setStatus(target.id, 'Batal', reason); }}>
-                <Text style={styles.btnRejectText}>{t('esb_reject')}</Text>
-              </Pressable>
+              <AppButton title={t('c_close')} variant="secondary" onPress={() => setRejectFor(null)} fullWidth={false} style={styles.sheetBtn} />
+              <AppButton title={t('esb_reject')} variant="danger" disabled={!rejectText.trim()} onPress={() => { const target = rejectFor; const reason = rejectText.trim(); if (!target || !reason) return; setRejectFor(null); setRejectText(''); setStatus(target.id, 'Batal', reason); }} fullWidth={false} style={styles.sheetBtn} />
             </View>
           </View>
         </View>
@@ -307,6 +300,10 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
   rowVal: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },
   rowTotal: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   sheetBtns: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  sheetBtn: { flex: 1, marginTop: 0 },
+  sheetBtnWide: { flex: 2, marginTop: 0 },
+  rejectBox: { minHeight: 88, height: 'auto', alignItems: 'flex-start', paddingVertical: 10 },
+  rejectField: { textAlignVertical: 'top' },
   btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 12, alignItems: 'center' },
   btnGhostText: { fontFamily: fonts.bold, fontSize: 13, color: colors.muted },
   btnAccept: { flex: 2, borderRadius: 10, backgroundColor: colors.green, paddingVertical: 12, alignItems: 'center' },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
   id: string;
   name: string;
   group: string;
@@ -17,8 +17,10 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   const [opts, setOpts] = useState<StockOpts>(DEFAULT_OPTS);
   const [items, setItems] = useState<StockItem[]>(DEFAULT_ITEMS);
   const [queryText, setQueryText] = useState('');
+  // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
+  const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
 
-  useEffect(() => { let alive = true; (async () => { const [cachedItems, cachedOpts] = await Promise.all([ getJSON<StockItem[]>(LS_STOCK, DEFAULT_ITEMS), getJSON<StockOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; setOpts({ ...DEFAULT_OPTS, ...cachedOpts }); try { await initDb(); const rows = await query<{ menuId: string; qty: number | null; flagSoldOut: number | null }>( 'SELECT menuId, qty, flagSoldOut FROM ms_branchmenu WHERE branchId = ?', [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems(cachedItems); return; } const byId = new Map(rows.map((r) => [r.menuId, r])); setItems( cachedItems.map((it) => { const r = byId.get(it.id); if (!r) return it; const qty = Number(r.qty ?? it.stock); return { ...it, stock: Number.isFinite(qty) ? Math.max(0, Math.round(qty)) : it.stock }; }), ); } catch { if (alive) setItems(cachedItems); } })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STOCK, items); }, [items]); useEffect(() => { void setJSON(LS_OPTS, opts); }, [opts]); const patch = (id: string, p: Partial<StockItem>) =>
+  useEffect(() => { let alive = true; (async () => { const [cachedItems, cachedOpts, rnd] = await Promise.all([ getJSON<StockItem[]>(LS_STOCK, DEFAULT_ITEMS), getJSON<StockOpts>(LS_OPTS, DEFAULT_OPTS), getRoundingSetting(), ]); if (!alive) return; setOpts({ ...DEFAULT_OPTS, ...cachedOpts }); setRounding(rnd); try { await initDb(); const rows = await query<{ menuId: string; qty: number | null; flagSoldOut: number | null }>( 'SELECT menuId, qty, flagSoldOut FROM ms_branchmenu WHERE branchId = ?', [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems(cachedItems); return; } const byId = new Map(rows.map((r) => [r.menuId, r])); setItems( cachedItems.map((it) => { const r = byId.get(it.id); if (!r) return it; const qty = Number(r.qty ?? it.stock); return { ...it, stock: Number.isFinite(qty) ? Math.max(0, Math.round(qty)) : it.stock }; }), ); } catch { if (alive) setItems(cachedItems); } })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STOCK, items); }, [items]); useEffect(() => { void setJSON(LS_OPTS, opts); }, [opts]); const patch = (id: string, p: Partial<StockItem>) =>
     { setItems((xs) => { const next = xs.map((x) => (x.id === id ? { ...x, ...p } : x));
 
   const changed = next.find((x) => x.id === id); if (changed) void persistItemStock(changed.id, changed.stock, changed.online, { track: changed.track, trackStock: opts.trackStock, allowSellEmpty: opts.allowSellEmpty }); return next; }); }; const bump = (id: string, d: number) =>
@@ -30,7 +32,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('stock.tracking')}</Text>
@@ -42,12 +48,18 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Text style={styles.rowLabel}>{t('stock.lowWarn')}</Text>
           <Switch value={opts.lowWarn} onValueChange={(v) => setOpt('lowWarn', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
-        <Text style={styles.fieldLabel}>{t('stock.lowLimit')}</Text>
-        <TextInput style={styles.input} value={opts.lowLimit} onChangeText={(v) => setOpt('lowLimit', v.replace(/\D/g, '').slice(0, 4))} keyboardType="numeric" placeholder="5" placeholderTextColor={colors.faint} />
+        <AppInput label={t('stock.lowLimit')} value={opts.lowLimit} onChangeText={(v) => setOpt('lowLimit', v.replace(/\D/g, '').slice(0, 4))} keyboardType="numeric" placeholder="5" />
         <View style={styles.rowBetween}>
           <Text style={styles.rowLabel}>{t('stock.sellEmpty')}</Text>
           <Switch value={opts.allowSellEmpty} onValueChange={(v) => setOpt('allowSellEmpty', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
+        {/* REA-14: tampilkan info pembulatan hanya bila ms_setting menyimpang
+            dari default (hardcode ID sementara; kunci i18n: stock.roundInfo). */}
+        {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
+          <Text style={styles.cardSub}>
+            {`Pembulatan: ${rounding.mode !== '' ? rounding.mode : 'default'} · terdekat ${rounding.nearest} · langkah ${rounding.step}`}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -60,7 +72,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       </View>
 
       <View style={styles.searchWrap}>
-        <TextInput style={styles.input} value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} placeholderTextColor={colors.faint} />
+        <AppInput value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} />
       </View>
 
       {list.map((x) => {
@@ -99,6 +111,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
     </ScrollView>
   );}const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
 

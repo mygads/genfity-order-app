@@ -3,13 +3,11 @@ import React, { useEffect, useState } from 'react';import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
-/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
-const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
+/** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
@@ -46,12 +44,17 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
   };
 
   const confirmClose = async () => {
-    if (pin.length < 4) {
-      setError('Masukkan PIN supervisor (min. 4 digit)');
+    // FIX2-4b: samakan dengan ShiftScreen - verifikasi ke server dulu via
+    // authorizeSupervisor (tepat 6 digit); PIN lokal (lib/pin.ts) hanya fallback
+    // saat server tak terjangkau (offline/unconfigured), bukan satu-satunya cek.
+    if (pin.length < 6) {
+      setError('Masukkan PIN supervisor (6 digit)');
       return;
     }
-    // Verifikasi PIN ke data user via hash (bukan PIN-lokal-only / plaintext).
-    try { await initDb(); const v = await verifyAttendancePin(pin); if (v.ok === false) { setError('PIN supervisor tidak dikenal - hubungi supervisor.'); return; } } catch { /* DB belum siap - lanjut dengan gerbang panjang-PIN */ }
+    try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
+    const auth = await authorizeSupervisor(pin);
+    if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') { setError(auth.message); return; }
+    if (!auth.ok) { try { const v = await verifyAttendancePin(pin); if (v.ok === false) { setError('PIN supervisor tidak dikenal - hubungi supervisor.'); return; } } catch { /* DB belum siap - lanjut dengan gerbang panjang-PIN */ } }
     // Tutup shift di SQLite + rincian per metode (tr_shiftlogdetail) + selisih,
 // lalu antre sync dan kembali ke layar Shift.
     const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? 'Kasir'; let shiftId: string | null = summary.openId; try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); } else { const term = getTerminal(); shiftId = `shift-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, cashActual, cashDiff, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'closed', NULL)`, [shiftId, term.branchId || null, term.terminalCode || null, nm, 'Shift', since, nowIso, Math.round(modalAwal), Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih)], ); }
@@ -66,8 +69,8 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
     if (selisih === 0) {
       return (
         <View style={[s.banner, s.bannerOk]}>
-          <Text style={[s.bannerTitle, s.bannerOkTxt]}>Selisih {rp(0)} - Kas Pas ✓</Text>
-          <Text style={s.bannerSub}>Kas fisik sama dengan kas seharusnya</Text>
+          <Text style={[s.bannerTitle, s.bannerOkTxt]}>{t('shf_diff_ok').replace('{z}', rp(0))}</Text>
+          <Text style={s.bannerSub}>{t('shf_diff_ok_sub')}</Text>
         </View>
       );
     }
@@ -75,12 +78,10 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
     return (
       <View style={[s.banner, lebih ? s.bannerMore : s.bannerLess]}>
         <Text style={[s.bannerTitle, lebih ? s.bannerMoreTxt : s.bannerLessTxt]}>
-          {lebih ? 'Selisih Lebih' : 'Selisih Kurang'}: {rp(Math.abs(selisih))}
+          {(lebih ? t('shf_diff_over') : t('shf_diff_short'))}: {rp(Math.abs(selisih))}
         </Text>
         <Text style={s.bannerSub}>
-          {lebih
-            ? 'Kas fisik melebihi perhitungan sistem'
-            : 'Kas fisik kurang dari perhitungan sistem'}
+          {lebih ? t('shf_diff_over_sub') : t('shf_diff_short_sub')}
         </Text>
       </View>
     );
@@ -114,18 +115,15 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
 
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('end_cash_real')}</Text>
-          <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
-            <TextInput
-              style={s.amountInput}
-              keyboardType="number-pad"
-              placeholder="0"
-              placeholderTextColor={colors.faint}
-              textAlign="right"
-              value={touched ? rpNum(kasFisikNum) : '0'}
-              onChangeText={(tx) => setKasFisik(tx.replace(/\D/g, ''))}
-            />
-          </View>
+          <AppInput
+            keyboardType="number-pad"
+            placeholder="0"
+            textAlign="right"
+            value={touched ? rpNum(kasFisikNum) : '0'}
+            onChangeText={(tx) => setKasFisik(tx.replace(/\D/g, ''))}
+            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+            style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
+          />
           <NumPad
             onKey={(k) => {
               if (k === 'C') setKasFisik(kasFisik.slice(0, -1));
@@ -136,13 +134,13 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
 
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('end_note_out')}</Text>
-          <TextInput
-            style={s.noteInput}
-            placeholder="Catatan (opsional)"
-            placeholderTextColor={colors.faint}
+          <AppInput
+            placeholder={t('c_note_opt')}
             multiline
             value={catatan}
             onChangeText={setCatatan}
+            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
+            style={{ textAlignVertical: 'top' }}
           />
         </View>
 
@@ -162,9 +160,13 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
           <Text style={s.footerLabel}>Kas seharusnya</Text>
           <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
         </View>
-        <TouchableOpacity style={s.closeBtn} onPress={askClose}>
-          <Text style={s.closeBtnTxt}>{t('end_close_btn')}</Text>
-        </TouchableOpacity>
+        <AppButton
+          title={t('end_close_btn')}
+          variant="danger"
+          fullWidth={false}
+          style={{ marginTop: 0, paddingHorizontal: 32 }}
+          onPress={askClose}
+        />
       </View>
 
       <Modal visible={confirmVisible} transparent animationType="fade">
@@ -177,14 +179,20 @@ const RP_PREFIX = rp(0).replace(/\d/g, '').trim();/** Tutup shift: hitung kas se
               {rpNum(Math.abs(selisih))}
             </Text>
             <View style={s.dialogRow}>
-              <TouchableOpacity
-                style={s.dialogCancel}
-                onPress={() => setConfirmVisible(false)}>
-                <Text style={s.dialogCancelTxt}>{t('cm_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.dialogOk} onPress={askPin}>
-                <Text style={s.dialogOkTxt}>Lanjut</Text>
-              </TouchableOpacity>
+              <AppButton
+                title={t('cm_cancel')}
+                variant="secondary"
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginRight: 8 }}
+                onPress={() => setConfirmVisible(false)}
+              />
+              <AppButton
+                title="Lanjut"
+                variant="danger"
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginLeft: 8 }}
+                onPress={askPin}
+              />
             </View>
           </View>
         </View>

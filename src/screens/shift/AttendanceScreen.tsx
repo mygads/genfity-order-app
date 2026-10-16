@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
   d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const s = getSession();
-  const [drawerOpen, setDrawerOpen] = useState(false); const [pin, setPin] = useState('');
+  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [inTime, setInTime] = useState<string | null>(null);
   const [outTime, setOutTime] = useState<string | null>(null);
@@ -27,7 +27,10 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
     else if (pin.length < 4) setPin(pin + k);
   };
 
-  /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out') => { const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? s?.name ?? 'Kasir'; const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 'open', NULL)`, [id, term.branchId || null, term.terminalCode || null, nm, s?.shift ?? 'Shift', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [nm, nm], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', user: nm, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
+  // FIX2-3: baris absensi ditandai status 'absen' + shiftName 'Absensi' agar
+  // TIDAK mencemari guard shift (ShiftScreen/EndShiftScreen/Recap hanya baca
+  // status 'open'/'closed'); clock-out juga hanya menutup baris 'absen'.
+  /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out') => { const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? s?.name ?? 'Kasir'; const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, nm, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [nm, nm], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', user: nm, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
     if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try { const ok = (await verifyAttendancePin(pin)).ok; if (ok === false) { setError(t('att_pin_wrong')); return; }
     await recordClock('in'); setInTime(fmtClock(new Date()).slice(0, 5));
     setSyncNote(t('att_queued')); setPin('');
@@ -57,7 +60,7 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
   const clockedIn = inTime !== null && outTime === null;
 
   const outlet = s?.outlet ?? 'ESB Cabang Poris'; const who = s?.name ?? 'Gista'; return (
-    <View style={styles.root}> <ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} right={ <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </TouchableOpacity> } /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}> <ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /> <ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
       <Text style={styles.clock}>{fmtClock(now)}</Text>
@@ -95,18 +98,31 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
 
       <View style={styles.actions}>
         {!outTime ? (
-          <TouchableOpacity style={[styles.primary, (clockedIn || busy) && styles.disabled]} onPress={clockIn} disabled={clockedIn || busy}>
-            <Text style={styles.primaryT}>{t('att_in')} ›</Text>
-          </TouchableOpacity>
+          <AppButton
+            title={`${t('att_in')} ›`}
+            disabled={clockedIn || busy}
+            fullWidth={false}
+            style={{ flex: 1, marginTop: 0 }}
+            onPress={clockIn}
+          />
         ) : null}
         {clockedIn ? (
-          <TouchableOpacity style={styles.danger} onPress={clockOut} disabled={busy}>
-            <Text style={styles.primaryT}>{t('att_out')} ›</Text>
-          </TouchableOpacity>
+          <AppButton
+            title={`${t('att_out')} ›`}
+            variant="danger"
+            disabled={busy}
+            fullWidth={false}
+            style={{ flex: 1, marginTop: 0 }}
+            onPress={clockOut}
+          />
         ) : null}
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Dashboard')}>
-          <Text style={styles.ghostT}>{t('att_exit')}</Text>
-        </TouchableOpacity>
+        <AppButton
+          title={t('att_exit')}
+          variant="secondary"
+          fullWidth={false}
+          style={{ flex: 1, marginTop: 0 }}
+          onPress={() => navigation?.navigate('Dashboard')}
+        />
       </View>
       {syncNote ? <Text style={styles.syncNote}>{syncNote}</Text> : null} <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Shift')}><Text style={styles.link}>{t('att_after_shift')}</Text></TouchableOpacity>
@@ -115,48 +131,43 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
 
       <Text style={styles.sec}>{t('att_change_pin')}</Text>
       <View style={styles.card}>
-        <Text style={styles.fieldLabel}>{t('att_old_label')}</Text>
-        <TextInput
-          style={styles.input}
+        <AppInput
+          label={t('att_old_label')}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
           placeholder={t('att_old_ph')}
-          placeholderTextColor={colors.faint}
           value={oldPin}
           onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
         />
-        <Text style={styles.fieldLabel}>{t('att_new_label')}</Text>
-        <TextInput
-          style={styles.input}
+        <AppInput
+          label={t('att_new_label')}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
           placeholder={t('att_new_ph')}
-          placeholderTextColor={colors.faint}
           value={newPin}
           onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
         />
-        <Text style={styles.fieldLabel}>{t('att_confirm_label')}</Text>
-        <TextInput
-          style={styles.input}
+        <AppInput
+          label={t('att_confirm_label')}
           keyboardType="numeric"
           secureTextEntry
           maxLength={6}
           placeholder={t('att_confirm_ph')}
-          placeholderTextColor={colors.faint}
           value={confirmPin}
           onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
         />
         {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
-        <TouchableOpacity style={styles.primary} onPress={changePin}>
-          <Text style={styles.primaryT}>{t('att_save_pin')}</Text>
-        </TouchableOpacity>
+        <AppButton title={t('att_save_pin')} onPress={changePin} />
       </View>
     </ScrollView>
-  <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate(r); }} /> </View> );}const styles = StyleSheet.create({
+ </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  burger: { width: 22, height: 22 }, body: { padding: 16, paddingBottom: 40 },
+  body: { padding: 16, paddingBottom: 40 },
   hint: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   sec: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginTop: 16 },
   clock: { fontFamily: fonts.bold, fontSize: 34, color: colors.navy, marginTop: 6 },

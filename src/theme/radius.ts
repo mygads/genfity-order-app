@@ -1,5 +1,5 @@
 /**
- * Token radius terpusat — konsolidasi pemakaian `borderRadius` di repo.
+ * Token radius terpusat - konsolidasi pemakaian `borderRadius` di repo.
  *
  * Sebaran aktual (grep `borderRadius` di `src`, Okt 2026):
  * - 10 → ±190 pakai (terbanyak: sel, kartu kecil, bungkus ikon 40)
@@ -16,7 +16,7 @@
  * - `cta` (28) = stadium khusus CTA h56 Login (radius = tinggi / 2).
  *   CTA h52 IntroScreen memakai 26 dgn rumus yg sama (tinggi / 2).
  * - Literal ganjil yg tersisa (3, 4, 5, 15, 125, …) adalah warisan
- *   khas satu layar — biarkan apa adanya sampai layar itu dimigrasi.
+ *   khas satu layar - biarkan apa adanya sampai layar itu dimigrasi.
  */
 export const radius = {
   /** Badge mini, statusBadge, chip kecil. */

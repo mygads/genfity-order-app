@@ -1,0 +1,19 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "terminalId": "T001",
+      "branchId": "B001",
+      "settings": [
+        { "key": "TerminalName", "value": "Kasir 1" },
+        { "key": "ReceiptHeader", "value": "ESB Cabang Poris" },
+        { "key": "AutoPrintKitchen", "value": "1" }
+      ]
+    }
+  }
+}

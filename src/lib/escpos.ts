@@ -21,7 +21,7 @@ export interface EscReceipt {
   discount?: number;
   /** Service charge eksklusif (Rp). Label cetak "Service 5%". */
   service?: number;
-  /** PPN inklusif 11/111 — info-only, TIDAK menambah total. */
+  /** PPN inklusif 11/111 - info-only, TIDAK menambah total. */
   tax?: number;
   /** Fee platform ESB/marketplace 5% (kontrak §5). */
   feeESB?: number;

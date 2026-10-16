@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { recordSale,
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
 type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale } from '../../lib/sales';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number; orderNo?: string; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
+  route?: { params?: { total?: number; orderNo?: string; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
 };};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
@@ -12,7 +12,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const total = route?.params?.total ?? 101200;
-  const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
+  const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
   const [pollCount, setPollCount] = useState(0);
@@ -22,6 +22,12 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
   }, [total]);
+  // WIRE REA-17: label acquirer deterministik dari QRIS_ACQUIRERS + key i18n
+  // qris_acq_* (mock FauxQr tetap dipakai - hanya label yang dilengkapi).
+  const acq = QRIS_ACQUIRERS[Math.abs(Math.floor(total)) % QRIS_ACQUIRERS.length] ?? 'qrisesb';
+  const acqKey = `qris_acq_${acq}`;
+  let acqLabel = 'QRIS';
+  try { const s = t(acqKey); if (s && s !== acqKey) acqLabel = s; } catch { /* fallback QRIS */ }
 
   useEffect(() => {
     if (status === 'paid') return;
@@ -48,7 +54,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 
   /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja). */ const settlePaid = async () => {
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
-    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS: Real Mode tanya order/view (status PAID = lunas); * Dummy Mode simulasi realistis (lunas pada cek ke-3 ≈ ±30 dtk); * offline/gagal = tetap menunggu. Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
+    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS: Real Mode tanya order/view (status PAID = lunas); * Dummy Mode simulasi realistis (lunas pada cek ke-3 ≈ ±30 dtk); * offline/gagal = tetap menunggu. Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
     setStatus('checking'); pollRef.current += 1; setPollCount(pollRef.current); let paid = false; try { const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
 
   const { data } = unwrap<Record<string, unknown>>(r.data); paid = r.fromDummy ? pollRef.current >= 3 : String(data.status ?? '').toUpperCase() === 'PAID'; } catch {
@@ -83,6 +89,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           <Text style={styles.totalLabel}>{t('qris_total')}</Text>
           <Text style={styles.totalValue}>{rp(total)}</Text>
           <Text style={styles.refCode}>{refCode} - {t('qris_valid')}</Text>
+          <Text style={styles.refCode}>{acqLabel}</Text>
 
           <View style={styles.qrBox}>
             <Image
@@ -127,7 +134,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
             </View>
             <View style={styles.sideRow}>
               <Text style={styles.sideLabel}>{t('qris_method')}</Text>
-              <Text style={styles.sideValue}>QRIS</Text>
+              <Text style={styles.sideValue}>{acqLabel}</Text>
             </View>
             <View style={styles.sideRow}>
               <Text style={styles.sideLabel}>{t('qris_status')}</Text>

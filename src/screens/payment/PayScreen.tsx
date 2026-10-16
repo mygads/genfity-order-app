@@ -4,18 +4,20 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import ExtraPaySection from './ExtraPaySection';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { nextSalesNum, saveSale } from '../../lib/sales';
 import { validateVoucherCode } from '../../lib/apiSource';
+import { syncWarnLevel } from '../../lib/sync';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -89,6 +91,8 @@ type Props = {
       rounding?: number;
       /** Fee platform order ESB/marketplace (info-only, kontrak §5: platformFee). */
       feeESB?: number;
+      /** Nomor struk bawaan (dari Simpan/LoadOrder via kasir) - pakai ulang bila ada. */
+      salesNum?: string;
     };
   };
 };
@@ -138,12 +142,18 @@ const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 export default function PayScreen({ navigation, route }: Props) {
+  /** Gate E00044 (kontrak §2/§10.4): >7 hari tanpa sync blokir SEMUA jalur
+   * bayar di layar ini (tunai/nontunai/online/member/lainnya + ExtraPay +
+   * Qris/Edc yang hanya bisa dicapai dari sini). */
+  const syncBlocked = syncWarnLevel() === 'block7';
   const total = route?.params?.total ?? 266000;
   const orderMode = route?.params?.mode;
   const tableNo = route?.params?.table;
   const ongkir = route?.params?.ongkir ?? 0;
   const customerName = route?.params?.customer;
   const memberIdParam = route?.params?.memberId;
+  /** Nomor struk bawaan draft (Simpan/LoadOrder): pakai ulang agar struk = arsip. */
+  const paramSalesNum = (route?.params?.salesNum ?? '').trim();
   /** Rincian struk bawaan pemanggil untuk diteruskan (bukan dihitung ulang). */
   const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0));
   const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0));
@@ -314,7 +324,7 @@ export default function PayScreen({ navigation, route }: Props) {
    * memakai L-timestamp yang beda dari yang tersimpan di DB).
    */
   const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string }) => {
-    const orderNo = await nextSalesNum();
+    const orderNo = paramSalesNum || (await nextSalesNum());
     const saleMemberId = detail?.memberId ?? memberIdParam;
     const input: SaleInput = {
       method,
@@ -402,12 +412,14 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
         ...(serviceParam > 0 ? { service: serviceParam } : {}),
         ...(taxParam > 0 ? { tax: taxParam } : {}),
+        ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
         ...(ongkir > 0 ? { ongkir } : {}),
         ...(customerName ? { customer: customerName } : {}),
         ...(memberIdParam ? { memberId: memberIdParam } : {}),
+        ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
       });
       return;
     }
@@ -581,25 +593,24 @@ export default function PayScreen({ navigation, route }: Props) {
       )}
       {voucherOpen && !boxVoucher && !orderVoucher && (
         <View style={styles.voucherRow}>
-          <TextInput
-            style={styles.input}
-            placeholder={t('pay_voucher_ph')}
-            placeholderTextColor={colors.faint}
-            value={boxCode}
-            onChangeText={setBoxCode}
-            autoCapitalize="characters"
-          />
-          <TouchableOpacity style={[styles.voucherBtn, voucherBusy && styles.btnDisabled]} disabled={voucherBusy} onPress={() => void applyVoucher()}>
-            <Text style={styles.voucherBtnText}>{voucherBusy ? '…' : t('pay_voucher_use')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.voucherBtn}
+          <View style={styles.voucherField}>
+            <AppInput
+              placeholder={t('pay_voucher_ph')}
+              value={boxCode}
+              onChangeText={setBoxCode}
+              autoCapitalize="characters"
+            />
+          </View>
+          <AppButton title={voucherBusy ? '…' : t('pay_voucher_use')} disabled={voucherBusy} onPress={() => void applyVoucher()} fullWidth={false} style={styles.voucherAction} />
+          <AppButton
+            title={`${t('pay_voucher_pick')} ›`}
             onPress={() => {
               setVoucherOpen(false);
               navigation?.navigate('Voucher');
-            }}>
-            <Text style={styles.voucherBtnText}>{t('pay_voucher_pick')} ›</Text>
-          </TouchableOpacity>
+            }}
+            fullWidth={false}
+            style={styles.voucherAction}
+          />
         </View>
       )}
       {voucherMsg ? <Text style={styles.ctaHint}>{voucherMsg}</Text> : null}
@@ -704,12 +715,10 @@ export default function PayScreen({ navigation, route }: Props) {
 
       {customMode && (
         <View style={styles.customRow}>
-          <Text style={styles.fieldLabel}>{t('pay_other_label')}</Text>
-          <TextInput
-            style={styles.input}
+          <AppInput
+            label={t('pay_other_label')}
             keyboardType="numeric"
             placeholder="0"
-            placeholderTextColor={colors.faint}
             value={customAmt}
             onChangeText={setCustomAmt}
           />
@@ -734,18 +743,8 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
 
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.lanjutBtn, styles.lanjutBtnPrimary, !cashLanjutReady && styles.btnDisabled]}
-          disabled={!cashLanjutReady}
-          onPress={onCashLanjut}>
-          <Text style={styles.lanjutTextPrimary}>{cashPayLabel}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tambahBtn, !cashTambahReady && styles.tambahBtnDisabled]}
-          disabled={!cashTambahReady}
-          onPress={onCashTambah}>
-          <Text style={styles.tambahText}>{t('pay_add')}</Text>
-        </TouchableOpacity>
+        <AppButton title={cashPayLabel} disabled={!cashLanjutReady} onPress={onCashLanjut} fullWidth={false} style={styles.footerBtn} />
+        <AppButton title={t('pay_add')} variant="secondary" disabled={!cashTambahReady} onPress={onCashTambah} fullWidth={false} style={styles.footerBtn} />
       </View>
     </View>
   );
@@ -787,26 +786,19 @@ export default function PayScreen({ navigation, route }: Props) {
         <Text style={styles.lockedBadge}>{t('pay_locked_badge')}</Text>
       </View>
 
-      <Text style={styles.fieldLabel}>{t('pay_approval')}</Text>
-      <TextInput
-        style={styles.input}
+      <AppInput
+        label={t('pay_approval')}
         keyboardType="numeric"
         placeholder={t('pay_approval_ph')}
-        placeholderTextColor={colors.faint}
         value={edcCode}
-        onChangeText={(t) => setEdcCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
+        onChangeText={(v) => setEdcCode(v.replace(/[^0-9]/g, '').slice(0, 6))}
         maxLength={6}
       />
 
       {renderSplits()}
 
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.lanjutBtn, styles.lanjutBtnPrimary, edcCode.length !== 6 && styles.btnDisabled]}
-          disabled={edcCode.length !== 6}
-          onPress={onCardLanjut}>
-          <Text style={styles.lanjutTextPrimary}>{t('pay_cash_pay').replace('{t}', rp(remaining))} ›</Text>
-        </TouchableOpacity>
+        <AppButton title={`${t('pay_cash_pay').replace('{t}', rp(remaining))} ›`} disabled={edcCode.length !== 6} onPress={onCardLanjut} fullWidth={false} style={styles.footerBtn} />
       </View>
       {edcCode.length !== 6 && (
         <Text style={styles.ctaHint}>{t('pay_need_approval')}</Text>
@@ -820,12 +812,14 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
           ...(serviceParam > 0 ? { service: serviceParam } : {}),
           ...(taxParam > 0 ? { tax: taxParam } : {}),
+          ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
           ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
           ...(orderMode ? { mode: orderMode } : {}),
           ...(tableNo ? { table: tableNo } : {}),
           ...(ongkir > 0 ? { ongkir } : {}),
           ...(customerName ? { customer: customerName } : {}),
           ...(memberIdParam ? { memberId: memberIdParam } : {}),
+          ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
         })}>
         <Text style={styles.edcLinkText}>{t('pay_edc_guide')} ›</Text>
       </TouchableOpacity>
@@ -862,14 +856,12 @@ export default function PayScreen({ navigation, route }: Props) {
 
       {wallet === 'ovo' && (
         <View style={styles.customRow}>
-          <Text style={styles.fieldLabel}>{t('pay_ovo_label')}</Text>
-          <TextInput
-            style={styles.input}
+          <AppInput
+            label={t('pay_ovo_label')}
             keyboardType="phone-pad"
             placeholder={t('pay_ovo_ph')}
-            placeholderTextColor={colors.faint}
             value={ovoPhone}
-            onChangeText={(t) => setOvoPhone(t.replace(/[^0-9]/g, '').slice(0, 14))}
+            onChangeText={(v) => setOvoPhone(v.replace(/[^0-9]/g, '').slice(0, 14))}
           />
           <Text style={styles.ctaHint}>{t('pay_ovo_hint')}</Text>
         </View>
@@ -878,14 +870,11 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
 
       <View style={styles.footerSingle}>
-        <TouchableOpacity
-          style={[styles.lanjutBtnFull, styles.lanjutBtnPrimary, (!wallet || !ovoPhoneOk) && styles.btnDisabled]}
+        <AppButton
+          title={wallet ? `${t('pay_via').replace('{t}', rp(remaining)).replace('{w}', WALLET_LABEL[wallet] ?? wallet)} ›` : t('pay_pick_method').replace('{t}', rp(remaining))}
           disabled={!wallet || !ovoPhoneOk}
-          onPress={onOnlineLanjut}>
-          <Text style={styles.lanjutTextPrimary}>
-            {wallet ? `${t('pay_via').replace('{t}', rp(remaining)).replace('{w}', WALLET_LABEL[wallet] ?? wallet)} ›` : t('pay_pick_method').replace('{t}', rp(remaining))}
-          </Text>
-        </TouchableOpacity>
+          onPress={onOnlineLanjut}
+        />
       </View>
     </View>
   );
@@ -893,10 +882,8 @@ export default function PayScreen({ navigation, route }: Props) {
   const renderMember = () => (
     <View>
       <Text style={styles.panelTitle}>{t('pay_dep_title')}</Text>
-      <TextInput
-        style={styles.input}
+      <AppInput
         placeholder={t('pay_dep_search')}
-        placeholderTextColor={colors.faint}
         value={memberQ}
         onChangeText={setMemberQ}
       />
@@ -924,21 +911,33 @@ export default function PayScreen({ navigation, route }: Props) {
       </View>
       <TouchableOpacity
         style={styles.memberLink}
-        onPress={() => navigation?.navigate('Member')}>
+        onPress={() => navigation?.navigate('Member', {
+          ...(memberIdParam ? { memberId: memberIdParam } : {}),
+          total,
+          ...(route?.params?.items ? { items: route.params.items } : {}),
+          ...(orderMode ? { mode: orderMode } : {}),
+          ...(tableNo ? { table: tableNo } : {}),
+          ...(ongkir ? { ongkir } : {}),
+          ...(customerName ? { customer: customerName } : {}),
+          ...(route?.params?.voucher != null ? { voucher: route.params.voucher } : {}),
+          ...(route?.params?.voucherCode ? { voucherCode: route.params.voucherCode } : {}),
+          ...(route?.params?.discount != null ? { discount: route.params.discount } : {}),
+          service: serviceParam,
+          tax: taxParam,
+          rounding: roundingParam,
+          feeESB: feeESBParam,
+        })}>
         <Text style={styles.edcLinkText}>{t('pay_dep_find')} ›</Text>
       </TouchableOpacity>
       {renderSplits()}
       <View style={styles.footerSingle}>
-        <TouchableOpacity
-          style={[styles.lanjutBtnFull, styles.lanjutBtnPrimary, (!memberPicked || memberPicked.saldo <= 0) && styles.btnDisabled]}
+        <AppButton
+          title={memberPicked
+            ? `${t('pay_dep_use').replace('{t}', rp(Math.min(memberPicked.saldo, remaining))).replace('{n}', memberPicked.nama)} ›`
+            : t('pay_dep_pick').replace('{t}', rp(remaining))}
           disabled={!memberPicked || memberPicked.saldo <= 0}
-          onPress={onDepositLanjut}>
-          <Text style={styles.lanjutTextPrimary}>
-            {memberPicked
-              ? `${t('pay_dep_use').replace('{t}', rp(Math.min(memberPicked.saldo, remaining))).replace('{n}', memberPicked.nama)} ›`
-              : t('pay_dep_pick').replace('{t}', rp(remaining))}
-          </Text>
-        </TouchableOpacity>
+          onPress={onDepositLanjut}
+        />
       </View>
       {memberPicked && memberPicked.saldo < remaining && (
         <Text style={styles.ctaHint}>{t('pay_dep_short')}</Text>
@@ -959,39 +958,25 @@ export default function PayScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.fieldLabel}>{t('pay_tender_code').replace('{k}', tenderKind)} *</Text>
-      <TextInput
-        style={styles.input}
+      <AppInput
+        label={`${t('pay_tender_code').replace('{k}', tenderKind)} *`}
         placeholder={t('pay_tender_code_ph')}
-        placeholderTextColor={colors.faint}
         value={tenderCode}
-        onChangeText={(t) => setTenderCode(t.toUpperCase())}
+        onChangeText={(v) => setTenderCode(v.toUpperCase())}
         autoCapitalize="characters"
       />
-      <Text style={styles.fieldLabel}>{t('pay_tender_amt')}</Text>
-      <TextInput
-        style={styles.input}
+      <AppInput
+        label={t('pay_tender_amt')}
         keyboardType="numeric"
         placeholder="0"
-        placeholderTextColor={colors.faint}
         value={tenderAmt}
         onChangeText={setTenderAmt}
       />
       {renderSplits()}
       {tenderMsg ? <Text style={styles.ctaHint}>{tenderMsg}</Text> : null}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.lanjutBtn, styles.lanjutBtnPrimary, !tenderReady && styles.btnDisabled]}
-          disabled={!tenderReady}
-          onPress={() => void onTenderLunas()}>
-          <Text style={styles.lanjutTextPrimary}>{tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tambahBtn, !tenderReady && styles.tambahBtnDisabled]}
-          disabled={!tenderReady}
-          onPress={() => void onTenderTambah()}>
-          <Text style={styles.tambahText}>{t('pay_add')}</Text>
-        </TouchableOpacity>
+        <AppButton title={tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`} disabled={!tenderReady} onPress={() => void onTenderLunas()} fullWidth={false} style={styles.footerBtn} />
+        <AppButton title={t('pay_add')} variant="secondary" disabled={!tenderReady} onPress={() => void onTenderTambah()} fullWidth={false} style={styles.footerBtn} />
       </View>
       <Text style={styles.ctaHint}>{t('pay_tender_burn')}</Text>
       {tenderNum > remaining && remaining > 0 && (
@@ -1048,8 +1033,18 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderHeader()}
       <ScrollView contentContainerStyle={styles.body}>
         {renderBanner()}
-        {renderBody()}
-        <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
+        {syncBlocked ? (
+          <View>
+            <Text style={styles.lanjutTextPrimary}>{t('sync.blocked')}</Text>
+            <Text style={styles.ctaHint}>{t('sync.blockedMsg')}</Text>
+            <AppButton title={`${t('sync.openSync')} ›`} onPress={() => navigation?.navigate('Sync')} />
+          </View>
+        ) : (
+          <>
+            {renderBody()}
+            <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -1120,6 +1115,9 @@ const styles = StyleSheet.create({
   voucherBarText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
   voucherBarTextActive: { color: colors.white },
   voucherRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  voucherField: { flex: 1 },
+  voucherAction: { marginTop: 0 },
+  footerBtn: { flex: 1, marginTop: 0 },
   input: {
     flex: 1,
     backgroundColor: colors.card,

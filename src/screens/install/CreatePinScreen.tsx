@@ -29,7 +29,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       if (next.length === 4 && active === 'confirm') {
         if (next === pin) void submitPin(next);
         else {
-          setError('Konfirmasi PIN tidak sama. Ulangi.');
+          setError(t('inst_pin_mismatch'));
           setPin('');
           setConfirm('');
         }
@@ -41,12 +41,12 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
     return (
       <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
         <Image source={require('../../../assets/images/process_success.webp')} style={styles.hero} resizeMode="contain" />
-        <Text style={styles.title}>Terminal Siap!</Text>
-        <Text style={styles.desc}>{branch} berhasil ditautkan. PIN kasir tersimpan di perangkat ini - gunakan untuk masuk.</Text>
+        <Text style={styles.title}>{t('inst_pin_done_title')}</Text>
+        <Text style={styles.desc}>{t('inst_pin_done_desc').replace('{b}', branch)}</Text>
         <TouchableOpacity
           style={styles.primary}
           onPress={() => { loginDemo(); navigation?.navigate('Login'); }}>
-          <Text style={styles.primaryT}>Masuk ke POS ›</Text>
+          <Text style={styles.primaryT}>{t('inst_pin_enter')}</Text>
         </TouchableOpacity>
       </ScrollView>
     );
@@ -54,9 +54,9 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
-      <Text style={styles.title}>Buat PIN Kasir</Text>
+      <Text style={styles.title}>{t('inst_pin_title')}</Text>
       <Text style={styles.desc}>
-        {branch} · {active === 'pin' ? 'Masukkan 4 digit PIN baru.' : 'Ulangi PIN untuk konfirmasi.'}
+        {branch} · {active === 'pin' ? t('inst_pin_new') : t('inst_pin_confirm')}
       </Text>
       <View style={styles.pinRow}>
         {[0, 1, 2, 3].map((i) => (

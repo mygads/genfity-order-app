@@ -1,0 +1,29 @@
+{
+  "request": { "queueNumber": "QS-014", "branchId": "B001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "salesNum": "QS-20261016-014",
+      "queueNumber": "QS-014",
+      "branchId": "B001", "terminalId": "T001", "userId": "U07",
+      "shiftId": "S20261016P", "salesDate": "2026-10-16 12:45:00",
+      "salesMode": "QUICK_SERVICE", "tableNo": "", "status": "PAID",
+      "subtotal": 50000, "discount": 0, "tax": 4955,
+      "serviceCharge": 2500,
+      "voucherAmount": 0, "platformFee": 0, "rounding": 0,
+      "grandTotal": 52500, "paidAmount": 52500, "changeAmount": 0,
+      "paymentMethod": "QRIS",
+      "items": [
+        { "menuId": "M002", "name": "Nasi Goreng Spesial", "qty": 2,
+          "unitPrice": 25000, "discount": 0, "note": "",
+          "extras": [], "voided": 0 }
+      ],
+      "payments": [{ "method": "QRIS", "amount": 52500 }],
+      "vouchers": []
+    }
+  }
+}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Arus = 'Masuk' | 'Keluar';type Txn = {
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { fmtDate, fmtTime } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import { initDb, query } from '../../lib/db';
+import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Arus = 'Masuk' | 'Keluar';type Txn = {
   id: string;
   tanggal: string;
   keterangan: string;
@@ -7,15 +8,22 @@ import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView,
   jumlah: number;
   kasir: string;
   disetujui: boolean;
-photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const LS_APPROVAL = 'genfity.petty.approved';const SEED: Txn[] = [
-  { id: 'PC-001', tanggal: '16 Okt 2026  08:10', keterangan: 'Modal awal petty cash', coa: 'Kas Kecil', arus: 'Masuk', jumlah: 500000, kasir: 'Gista', disetujui: true },
-  { id: 'PC-002', tanggal: '16 Okt 2026  10:20', keterangan: 'Belanja plastik dan tissue', coa: 'Operasional', arus: 'Keluar', jumlah: 45000, kasir: 'Gista', disetujui: true },
-  { id: 'PC-003', tanggal: '16 Okt 2026  12:05', keterangan: 'Bensin antar online', coa: 'Operasional', arus: 'Keluar', jumlah: 20000, kasir: 'Bimo', disetujui: false },];function fmtDate(iso: string | null): string { if (!iso) return '16 Okt 2026'; try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return d.toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return iso; }}export default function PettyCashScreen({ navigation }: Props) {
+photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};/** Tanggal seed lewat fmtDate/fmtTime agar ikut locale, bukan string hardcode. */
+function seedDateTime(y: number, m: number, d: number, h: number, mi: number): string {
+  const dt = new Date(y, m - 1, d, h, mi);
+  return `${fmtDate(dt)} ${fmtTime(dt)}`;
+}
+const SEED: Txn[] = [
+  { id: 'PC-001', tanggal: seedDateTime(2026, 10, 16, 8, 10), keterangan: 'Modal awal petty cash', coa: 'Kas Kecil', arus: 'Masuk', jumlah: 500000, kasir: 'Gista', disetujui: true },
+  { id: 'PC-002', tanggal: seedDateTime(2026, 10, 16, 10, 20), keterangan: 'Belanja plastik dan tissue', coa: 'Operasional', arus: 'Keluar', jumlah: 45000, kasir: 'Gista', disetujui: true },
+  { id: 'PC-003', tanggal: seedDateTime(2026, 10, 16, 12, 5), keterangan: 'Bensin antar online', coa: 'Operasional', arus: 'Keluar', jumlah: 20000, kasir: 'Bimo', disetujui: false },];function fmtTxn(iso: string | null): string { if (!iso) return fmtDate(new Date()); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return `${fmtDate(d)} ${fmtTime(d)}`; } catch { return iso; }}export default function PettyCashScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<'Semua' | Arus>('Semua');
 
-  const [items, setItems] = useState<Txn[]>(SEED); useEffect(() => { let alive = true; (async () => { const approved = await getJSON<Record<string, boolean>>(LS_APPROVAL, {}); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'PC-%' ORDER BY createdAt DESC", ); if (!alive) return; if (rows.length === 0) { setItems(SEED); return; } setItems( rows.map((r) => { const amt = Number(r.amount ?? 0); return { id: r.id, tanggal: fmtDate(r.expenseDate ?? r.createdAt), keterangan: r.note ?? '-', coa: r.coaName ?? 'Operasional', arus: (amt >= 0 ? 'Masuk' : 'Keluar') as Arus, jumlah: Math.abs(amt), kasir: r.userId ?? '-', disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, }; }), ); } catch { if (alive) setItems(SEED); } })(); return () => { alive = false; }; }, []); const list = useMemo(
+  // F7: muat ulang tiap layar jadi fokus agar approve dari Detail langsung
+  // terlihat di daftar (focus-listener; aman: guard addListener + alive).
+  const [items, setItems] = useState<Txn[]>(SEED); useEffect(() => { let alive = true; const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'PC-%' ORDER BY createdAt DESC", ); if (!alive) return; if (rows.length === 0) { setItems(SEED); return; } setItems( rows.map((r) => { const amt = Number(r.amount ?? 0); return { id: r.id, tanggal: fmtTxn(r.expenseDate ?? r.createdAt), keterangan: r.note ?? '-', coa: r.coaName ?? 'Operasional', arus: (amt >= 0 ? 'Masuk' : 'Keluar') as Arus, jumlah: Math.abs(amt), kasir: r.userId ?? '-', disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, }; }), ); } catch { if (alive) setItems(SEED); } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x))); }), []); const list = useMemo(
     () => items.filter((x) => filter === 'Semua' || x.arus === filter),
     [items, filter],
   );
@@ -24,9 +32,13 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
     [items],
   );
 
-  const approve = async (id: string) => { setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x))); try { const approved = await getJSON<Record<string, boolean>>(LS_APPROVAL, {}); approved[id] = true; await setJSON(LS_APPROVAL, approved); await enqueueOutbox('tr_branchexpense', id, 'update'); } catch { /* abaikan: status lokal tetap tersimpan di state */ } }; const go = (route: string) => navigation?.navigate(route); return (
+  const approve = async (id: string) => { setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x))); await markApproved(id); }; const go = (route: string) => navigation?.navigate(route); return (
     <View style={s.root}>
-      <ScreenHeader title={t('petty.title')} onBack={() => setDrawerOpen(true)} backLabel="☰" right={
+      <ScreenHeader title={t('petty.title')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } right={
         <TouchableOpacity onPress={() => navigation?.navigate('PettyCashForm')}>
           <Text style={s.headerAction}>{t('common.add')}</Text>
         </TouchableOpacity>
@@ -85,14 +97,17 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
       </ScrollView>
 
       <View style={s.footer}>
-        <TouchableOpacity style={s.primary} onPress={() => navigation?.navigate('PettyCashForm')}>
-          <Text style={s.primaryT}>{t('petty.recordBtn')}</Text>
-        </TouchableOpacity>
+        <AppButton
+          title={t('petty.recordBtn')}
+          style={{ marginTop: 0 }}
+          onPress={() => navigation?.navigate('PettyCashForm')}
+        />
       </View>
     </View>
   );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
+  burger: { width: 22, height: 22 },
   headerAction: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
   body: { padding: 16, paddingBottom: 110 },
   hero: { backgroundColor: colors.navy, borderRadius: 14, padding: 18 },

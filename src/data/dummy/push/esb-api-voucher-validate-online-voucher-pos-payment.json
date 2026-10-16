@@ -1,0 +1,17 @@
+{
+  "request": { "code": "ONLINE-QOQI10", "grandTotal": 69300 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "code": "ONLINE-QOQI10",
+      "valid": true,
+      "amount": 10000,
+      "minSpend": 40000,
+      "validTo": "2026-12-31 23:59:59"
+    }
+  }
+}

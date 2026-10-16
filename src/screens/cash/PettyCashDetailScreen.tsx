@@ -1,11 +1,11 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
   navigation?: Nav;
   route?: {
     params?: {
       id?: string; tanggal?: string; keterangan?: string; coa?: string;
       arus?: string; jumlah?: number; kasir?: string; disetujui?: boolean; photo?: string | null;
     };
-  };};const LS_APPROVAL = 'genfity.petty.approved';export default function PettyCashDetailScreen({ navigation, route }: Props) {
+  };};export default function PettyCashDetailScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const p = route?.params ?? {};
@@ -19,7 +19,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const photo = p.photo ?? null;
   const [disetujui, setDisetujui] = useState(p.disetujui ?? true);
 
-  const approve = async () => { setDisetujui(true); try { const approved = await getJSON<Record<string, boolean>>(LS_APPROVAL, {}); approved[id] = true; await setJSON(LS_APPROVAL, approved); await enqueueOutbox('tr_branchexpense', id, 'update'); } catch { /* abaikan */ } }; return (
+  const approve = async () => { setDisetujui(true); await markApproved(id); }; return (
     <View style={s.root}>
       <ScreenHeader title={t('petty.detailTitle')} onBack={() => navigation?.goBack?.()}  />
 

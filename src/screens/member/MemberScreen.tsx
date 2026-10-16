@@ -6,15 +6,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
+import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';
+import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -60,35 +62,25 @@ const DUMMY: Member[] = [
   { id: 'M003', nama: 'Andi Pratama', noHp: '082112233445', tipe: 'Regular', saldo: 0, poin: 30 },
 ];
 
-/** Riwayat awal per member: nominal angka (rp()) bukan string hardcode. */
+/** Riwayat awal per member: tanggal lewat fmtDate (ikut locale id/en),
+ * nominal angka (rp()) bukan string hardcode. */
 const SEED_RIWAYAT: Record<string, Riwayat[]> = {
   M001: [
-    { id: 'r1', tanggal: '14 Okt 2026', keterangan: 'Top up deposit (Tunai)', nominal: 100000 },
-    { id: 'r2', tanggal: '12 Okt 2026', keterangan: 'Bayar TRX-041 (Deposit)', nominal: -86400 },
-    { id: 'r3', tanggal: '10 Okt 2026', keterangan: 'Poin dari TRX-038', poin: 86 },
+    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 14)), keterangan: 'Top up deposit (Tunai)', nominal: 100000 },
+    { id: 'r2', tanggal: fmtDate(new Date(2026, 9, 12)), keterangan: 'Bayar TRX-041 (Deposit)', nominal: -86400 },
+    { id: 'r3', tanggal: fmtDate(new Date(2026, 9, 10)), keterangan: 'Poin dari TRX-038', poin: 86 },
   ],
   M002: [
-    { id: 'r1', tanggal: '15 Okt 2026', keterangan: 'Top up deposit (QRIS)', nominal: 500000 },
-    { id: 'r2', tanggal: '13 Okt 2026', keterangan: 'Bayar TRX-040 (Deposit)', nominal: -124000 },
+    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 15)), keterangan: 'Top up deposit (QRIS)', nominal: 500000 },
+    { id: 'r2', tanggal: fmtDate(new Date(2026, 9, 13)), keterangan: 'Bayar TRX-040 (Deposit)', nominal: -124000 },
   ],
   M003: [
-    { id: 'r1', tanggal: '11 Okt 2026', keterangan: 'Poin dari TRX-035', poin: 30 },
+    { id: 'r1', tanggal: fmtDate(new Date(2026, 9, 11)), keterangan: 'Poin dari TRX-035', poin: 30 },
   ],
 };
 
 /** Deposit cepat minimal 10000 rupiah (lihat MIN_TOPUP) - sama dengan layar Top Up Deposit. */
 const MIN_TOPUP = 10000;
-
-/** Prefix mata uang dari helper rp() agar tidak hardcode "Rp". */
-const RP_PREFIX = rp(0).replace(/\d/g, '').trim();
-
-function todayStr(): string {
-  try {
-    return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch {
-    return '';
-  }
-}
 
 /** Samarkan nomor HP di daftar: 0812---7890 (privasi kasir). */
 function maskHp(hp: string): string {
@@ -159,6 +151,9 @@ export default function MemberScreen({ navigation, route }: Props) {
   const [depositErr, setDepositErr] = useState('');
   // Saldo inquiry server untuk member terpilih (null = belum ada / hanya dummy).
   const [inquiry, setInquiry] = useState<{ saldo: number; poin: number } | null>(null);
+  // WIRE REA-3: saldo via erp/member balance-deposit di samping inquiry-deposit
+  // (best-effort - null = belum ada / hanya dummy, cache lokal tetap dipakai).
+  const [erpBalance, setErpBalance] = useState<number | null>(null);
   // Riwayat server per member (kosong = fallback cache lokal `riwayat`).
   const [serverHistory, setServerHistory] = useState<Riwayat[]>([]);
 
@@ -244,6 +239,33 @@ export default function MemberScreen({ navigation, route }: Props) {
     return () => { live = false; };
   }, [selected]);
 
+  // WIRE REA-3: saldo ERP (erp/member balance-deposit) sebagai jalur kedua di
+  // samping inquiry-deposit. Guard sama: hanya backend asli + memberId cocok.
+  useEffect(() => {
+    if (!selected) {
+      setErpBalance(null);
+      return;
+    }
+    let live = true;
+    const mid = selected.id;
+    setErpBalance(null);
+    (async () => {
+      try {
+        const res = await memberErpApi('balance-deposit', { memberId: mid, branchId: getTerminal().branchId });
+        if (!live || res.fromDummy) return;
+        const { data } = unwrap<Record<string, unknown>>(res.data);
+        const echo = String(data.memberId ?? '');
+        if (echo && echo !== mid) return;
+        const saldo = Number(data.saldo ?? data.balance ?? data.depositBalance ?? NaN);
+        if (!live || !Number.isFinite(saldo)) return;
+        setErpBalance(Math.max(0, Math.round(saldo)));
+      } catch {
+        /* offline - fallback inquiry/cache lokal */
+      }
+    })();
+    return () => { live = false; };
+  }, [selected]);
+
   // Riwayat deposit server: BE belum menyediakan endpoint riwayat deposit per
   // member (§5 hanya punya inquiry-deposit + topup), jadi jujur: coba saring
   // pullSales (main/get-sales) yang menyebut member ini; hasilnya sering kosong
@@ -296,7 +318,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...rw,
       [mid]: [
         // Riwayat mencatat nominal top up-nya, bukan saldo akhir.
-        { id: `r-${Date.now()}`, tanggal: todayStr(), keterangan: 'Top up deposit (Top Up)', nominal: typeof topup === 'number' ? topup : baru },
+        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: 'Top up deposit (Top Up)', nominal: typeof topup === 'number' ? topup : baru },
         ...(rw[mid] ?? []),
       ],
     }));
@@ -360,7 +382,7 @@ export default function MemberScreen({ navigation, route }: Props) {
     setRiwayat((rw) => ({
       ...rw,
       [selected.id]: [
-        { id: `r-${Date.now()}`, tanggal: todayStr(), keterangan: 'Top up deposit (Cepat)', nominal: n },
+        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: 'Top up deposit (Cepat)', nominal: n },
         ...(rw[selected.id] ?? []),
       ],
     }));
@@ -411,9 +433,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           <Image source={require('../../../assets/images/member_not_found.webp')} style={s.emptyImg} resizeMode="contain" />
           <Text style={s.emptyTitle}>{t('mem_not_found')}</Text>
           <Text style={s.emptySub}>{t('mem_not_found_sub')}</Text>
-          <TouchableOpacity style={s.primaryBtn} onPress={() => setAddVisible(true)}>
-            <Text style={s.primaryTxt}>{t('mem_add_new')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('mem_add_new')} onPress={() => setAddVisible(true)} />
         </View>
       ) : (
         hasil.map((m) => (
@@ -477,7 +497,11 @@ export default function MemberScreen({ navigation, route }: Props) {
           </View>
           {inquiry ? (
             <Text style={s.serverSaldo}>
-              Saldo server: {rp(inquiry.saldo)} {/* TODO-i18n:mem_server_balance */}
+              {t('mem_erp_balance')}: {rp(inquiry.saldo)}
+            </Text>
+          ) : erpBalance != null ? (
+            <Text style={s.serverSaldo}>
+              {t('mem_erp_balance')}: {rp(erpBalance)}
             </Text>
           ) : null}
           <Text style={s.riwayatTitle}>{t('mem_history')}</Text>
@@ -500,16 +524,12 @@ export default function MemberScreen({ navigation, route }: Props) {
           {historyList.length === 0 && (
             <Text style={s.emptySub}>{t('mem_no_history')}</Text>
           )}
-          <TouchableOpacity
-            style={s.ghostBtnFull}
-            onPress={() => setDepositVisible(true)}>
-            <Text style={s.ghostTxt}>{t('mem_deposit')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.applyBtnFull}
-            onPress={applyMember}>
-            <Text style={s.applyTxt}>{t('mem_apply')}</Text>
-          </TouchableOpacity>
+          <AppButton
+            title={t('mem_deposit')}
+            variant="secondary"
+            onPress={() => setDepositVisible(true)}
+          />
+          <AppButton title={t('mem_apply')} onPress={applyMember} />
         </ScrollView>
       ) : (
         <View style={s.detailEmpty}>
@@ -544,11 +564,9 @@ export default function MemberScreen({ navigation, route }: Props) {
       />
 
       <View style={s.searchWrap}>
-        <Text style={s.label}>{t('mem_search_label')}</Text>
-        <TextInput
-          style={s.search}
+        <AppInput
+          label={t('mem_search_label')}
           placeholder={t('mem_search_ph')}
-          placeholderTextColor={colors.faint}
           value={q}
           onChangeText={setQ}
         />
@@ -575,16 +593,19 @@ export default function MemberScreen({ navigation, route }: Props) {
           {list}
           {selected ? (
             <View style={s.footer}>
-              <TouchableOpacity
-                style={s.ghostBtn}
-                onPress={() => setDepositVisible(true)}>
-                <Text style={s.ghostTxt}>{t('mem_deposit')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.applyBtn}
-                onPress={applyMember}>
-                <Text style={s.applyTxt}>{t('mem_apply')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                title={t('mem_deposit')}
+                variant="secondary"
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginRight: 8 }}
+                onPress={() => setDepositVisible(true)}
+              />
+              <AppButton
+                title={t('mem_apply')}
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginLeft: 8 }}
+                onPress={applyMember}
+              />
             </View>
           ) : null}
         </>
@@ -595,34 +616,26 @@ export default function MemberScreen({ navigation, route }: Props) {
         <View style={s.modalBg}>
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>{t('mem_add_new')}</Text>
-            <Text style={s.label}>{t('mem_name_label')}</Text>
-            <TextInput
-              style={s.input}
+            <AppInput
+              label={t('mem_name_label')}
               placeholder={t('mem_name_ph')}
-              placeholderTextColor={colors.faint}
               value={nama}
               onChangeText={setNama}
             />
-            <Text style={s.label}>{t('mem_phone_label')}</Text>
-            <TextInput
-              style={s.input}
+            <AppInput
+              label={t('mem_phone_label')}
               placeholder={t('mem_phone_ph')}
-              placeholderTextColor={colors.faint}
               keyboardType="phone-pad"
               value={noHp}
               onChangeText={setNoHp}
             />
-            <Text style={s.label}>{t('mem_dob_label')}</Text>
-            <TextInput
-              style={s.input}
+            <AppInput
+              label={t('mem_dob_label')}
               placeholder={t('mem_dob_ph')}
-              placeholderTextColor={colors.faint}
               value={tglLahir}
               onChangeText={setTglLahir}
             />
-            <TouchableOpacity style={s.primaryBtn} onPress={saveMember}>
-              <Text style={s.primaryTxt}>{t('mem_save')}</Text>
-            </TouchableOpacity>
+            <AppButton title={t('mem_save')} onPress={saveMember} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setAddVisible(false)}>
@@ -642,25 +655,19 @@ export default function MemberScreen({ navigation, route }: Props) {
                 {selected.nama} - {t('mem_balance')} {rp(selected.saldo)}
               </Text>
             ) : null}
-            <Text style={s.label}>{t('mem_nominal_label')}</Text>
-            <View style={s.amountBox}>
-              <Text style={s.rpPrefix}>{RP_PREFIX}</Text>
-              <TextInput
-                style={s.amountInput}
-                keyboardType="number-pad"
-                placeholder="0"
-                placeholderTextColor={colors.faint}
-                value={
-                  depositNominal
-                    ? rpNum(Number(depositNominal))
-                    : ''
-                }
-                onChangeText={(txt) => {
-                  setDepositNominal(txt.replace(/\D/g, ''));
-                  setDepositErr('');
-                }}
-              />
-            </View>
+            <AppInput
+              label={t('mem_nominal_label')}
+              keyboardType="number-pad"
+              placeholder="0"
+              value={depositNominal ? rpNum(Number(depositNominal)) : ''}
+              onChangeText={(txt) => {
+                setDepositNominal(txt.replace(/\D/g, ''));
+                setDepositErr('');
+              }}
+              error={depositErr || undefined}
+              boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+              style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 20 }}
+            />
             <View style={s.chips}>
               {[50000, 100000, 200000, 500000].map((n) => (
                 <TouchableOpacity
@@ -676,13 +683,8 @@ export default function MemberScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               ))}
             </View>
-            {depositErr ? <Text style={s.minErr}>{depositErr}</Text> : null}
-            <TouchableOpacity style={s.primaryBtn} onPress={saveDeposit}>
-              <Text style={s.primaryTxt}>{t('mem_quick_btn')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.primaryBtnOutline} onPress={goTopup}>
-              <Text style={s.primaryOutlineTxt}>{t('mem_full_form')} ›</Text>
-            </TouchableOpacity>
+            <AppButton title={t('mem_quick_btn')} onPress={saveDeposit} />
+            <AppButton title={`${t('mem_full_form')} ›`} variant="secondary" onPress={goTopup} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => {

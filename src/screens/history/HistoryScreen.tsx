@@ -5,9 +5,8 @@ import { useEffect, useMemo, useState } from 'react';import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import {
   useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -135,15 +134,14 @@ import { useEffect, useMemo, useState } from 'react';import {
 
       <View style={styles.searchRow}>
         <Text style={styles.searchIcon}>⌕</Text>
-        <View style={{ flex: 1 }}> <Text style={styles.fieldLabel}>{t('hist_search_label')}</Text> <TextInput
-          style={styles.search}
-          placeholder={t('hist_search_ph')}
-          placeholderTextColor={colors.faint}
-          value={query}
-          onChangeText={setQuery}
-        />
-      </View>
-
+        <View style={{ flex: 1 }}>
+          <AppInput
+            label={t('hist_search_label')}
+            placeholder={t('hist_search_ph')}
+            value={query}
+            onChangeText={setQuery}
+          />
+        </View>
       </View> <View style={styles.filterRow}>
         <Pressable style={styles.filterBtn} onPress={() => setPicker('date')}>
           <Text style={styles.filterIcon}>▦</Text>
@@ -227,17 +225,12 @@ import { useEffect, useMemo, useState } from 'react';import {
                 </Text>
               </Pressable>
             ))}
-            <Pressable
-              style={styles.btnGhost}
-              onPress={() => {
+            <AppButton title={t('c_all')} variant="secondary" onPress={() => {
                 if (picker === 'date') setFDate(null);
                 else if (picker === 'status') setFStatus(null);
                 else if (picker === 'payment') setFPayment(null);
                 setPicker(null);
-              }}
-            >
-              <Text style={styles.btnGhostText}>{t('c_all')}</Text>
-            </Pressable>
+              }} />
           </View>
         </View>
       </Modal>
@@ -256,9 +249,7 @@ import { useEffect, useMemo, useState } from 'react';import {
                 <Text style={styles.optText}>{o}</Text>
               </Pressable>
             ))}
-            <Pressable style={styles.btnGhost} onPress={() => setPayModal(false)}>
-              <Text style={styles.btnGhostText}>{t('c_cancel')}</Text>
-            </Pressable>
+            <AppButton title={t('c_cancel')} variant="secondary" onPress={() => setPayModal(false)} />
           </View>
         </View>
       </Modal>
@@ -270,33 +261,36 @@ import { useEffect, useMemo, useState } from 'react';import {
             <Text style={styles.dialogSub}>
               {t('hist_void_title')} {selected?.no}
             </Text>
-            <Text style={styles.fieldLabel}>{t('hist_void_reason_ph')}</Text> <TextInput
-              style={styles.noteInput}
+            <AppInput
+              label={t('hist_void_reason_ph')}
               placeholder={t('hist_void_reason_ph')}
-              placeholderTextColor={colors.faint}
               value={voidNote}
               onChangeText={setVoidNote}
               multiline
+              boxStyle={styles.noteBox}
+              style={styles.noteField}
             />
             <View style={styles.dialogBtns}>
-              <Pressable
-                style={styles.btnGhost}
+              <AppButton
+                title={t('c_cancel')}
+                variant="secondary"
                 onPress={() => {
                   setConfirmVoid(false);
                   setVoidNote('');
                 }}
-              >
-                <Text style={styles.btnGhostText}>{t('c_cancel')}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.btnVoid, !voidNote.trim() && styles.btnDisabled]}
+                fullWidth={false}
+                style={styles.dialogBtn}
+              />
+              <AppButton
+                title={t('hist_void_yes')}
+                variant="danger"
                 disabled={!voidNote.trim()}
                 onPress={doVoid}
-              >
-                <Text style={styles.btnVoidText}>{t('hist_void_yes')}</Text>
-              </Pressable>
+                fullWidth={false}
+                style={styles.dialogBtn}
+              />
             </View>
-          <Pressable style={[styles.btnPrint, (!voidNote.trim()) && styles.btnDisabled]} disabled={!voidNote.trim()} onPress={doVoidAndPrint} > <Text style={styles.btnPrintText}>{t('hist_void_print')}</Text> </Pressable> </View>
+          <AppButton title={t('hist_void_print')} disabled={!voidNote.trim()} onPress={doVoidAndPrint} /> </View>
         </View>
       </Modal>
 
@@ -305,10 +299,9 @@ import { useEffect, useMemo, useState } from 'react';import {
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>{t('hist_mail_title')}</Text>
             <Text style={styles.dialogSub}>{selected?.no} - {selected ? rp(selected.total) : ''}</Text>
-            <Text style={styles.fieldLabel}>{t('hist_email')}</Text> <TextInput
-              style={styles.mailInput}
+            <AppInput
+              label={t('hist_email')}
               placeholder={t('hist_mail_ph')}
-              placeholderTextColor={colors.faint}
               keyboardType="email-address"
               autoCapitalize="none"
               value={mailTo}
@@ -316,12 +309,8 @@ import { useEffect, useMemo, useState } from 'react';import {
             />
             {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
             <View style={styles.dialogBtns}>
-              <Pressable style={styles.btnGhost} onPress={() => setMailOpen(false)}>
-                <Text style={styles.btnGhostText}>{t('c_close')}</Text>
-              </Pressable>
-              <Pressable style={styles.btnPrint} onPress={sendMail}>
-                <Text style={styles.btnPrintText}>{t('hist_mail_send')}</Text>
-              </Pressable>
+              <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} style={styles.dialogBtn} />
+              <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} style={styles.dialogBtn} />
             </View>
           </View>
         </View>
@@ -472,31 +461,19 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
       </View>
 
       <View style={styles.detailBtns}>
-        <Pressable style={styles.btnPrint} onPress={onPrint}>
-          <Text style={styles.btnPrintText}>{t('c_reprint')}</Text>
-        </Pressable>
-        <Pressable style={styles.btnPrint} onPress={onEmail}>
-          <Text style={styles.btnPrintText}>{t('hist_email')}</Text>
-        </Pressable>
+        <AppButton title={t('c_reprint')} variant="secondary" onPress={onPrint} fullWidth={false} style={styles.detailBtn} />
+        <AppButton title={t('hist_email')} variant="secondary" onPress={onEmail} fullWidth={false} style={styles.detailBtn} />
         {txn.status === 'Selesai' && (
-          <Pressable style={styles.btnChange} onPress={onChangePay}>
-            <Text style={styles.btnChangeText}>{t('hist_change_pay')}</Text>
-          </Pressable>
+          <AppButton title={t('hist_change_pay')} onPress={onChangePay} fullWidth={false} style={styles.detailBtn} />
         )}
         {txn.status === 'Selesai' && (
-          <Pressable style={styles.btnVoid} onPress={onVoid}>
-            <Text style={styles.btnVoidText}>{t('hist_void')}</Text>
-          </Pressable>
+          <AppButton title={t('hist_void')} variant="danger" onPress={onVoid} fullWidth={false} style={styles.detailBtn} />
         )}
         {txn.status === 'Selesai' && (
-          <Pressable style={styles.btnGhost} onPress={onVoidItem}>
-            <Text style={styles.btnGhostText}>{t('hist_void_item')} ›</Text>
-          </Pressable>
+          <AppButton title={`${t('hist_void_item')} ›`} variant="secondary" onPress={onVoidItem} fullWidth={false} style={styles.detailBtn} />
         )}
         {showClose && (
-          <Pressable style={styles.btnGhost} onPress={onClose}>
-            <Text style={styles.btnGhostText}>{t('c_close')}</Text>
-          </Pressable>
+          <AppButton title={t('c_close')} variant="secondary" onPress={onClose} fullWidth={false} style={styles.detailBtn} />
         )}
       </View>
     </View>
@@ -751,4 +728,8 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     marginTop: 6,
   },
   mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
-  dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },});
+  dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  dialogBtn: { flex: 1, marginTop: 0 },
+  detailBtn: { flex: 1, minWidth: 100, marginTop: 8 },
+  noteBox: { minHeight: 72, height: 'auto', alignItems: 'flex-start', paddingVertical: 10 },
+  noteField: { textAlignVertical: 'top' },});

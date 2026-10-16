@@ -10,11 +10,14 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { loginDemo, loginEmployee } from '../../session';
+import { startRealtime } from '../../lib/realtime';
+import { setWsForeground } from '../../native/printer';
 import { validateEmployee } from '../../lib/apiSource';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
 import { useLang } from '../../lib/i18n';
+import AppButton from '../../components/AppButton';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -138,6 +141,11 @@ export default function LoginScreen({ navigation }: Props) {
           /* hash lokal opsional - server tetap sumber benar */
         }
         loginEmployee({ nama: s.nama, username: username.trim() });
+        // Realtime global nyala sekali saat login (sebelumnya hanya nyala bila
+        // pengguna membuka layar Dapur/ESB/Display). Foreground service
+        // best-effort di dev-client/APK agar WS hidup saat layar mati.
+        try { startRealtime(); } catch { /* abaikan */ }
+        try { void setWsForeground(true); } catch { /* abaikan */ }
         navigation?.navigate('Dashboard');
       } finally {
         setBusy(false);
@@ -180,12 +188,12 @@ export default function LoginScreen({ navigation }: Props) {
     );
   };
 
-  return (
-    <View style={styles.root}>
-      <ScrollView
-        contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
+  /**
+   * Isi kolom form (satu sumber untuk phone 1-kolom dan panel kiri tablet).
+   * Logika login tidak berubah - hanya pembungkus layout yang berbeda.
+   */
+  const formBody = (
+    <>
         <View style={styles.header}>
           <TouchableOpacity onPress={goBack} hitSlop={12}>
             <Text style={styles.back}>←</Text>
@@ -280,11 +288,12 @@ export default function LoginScreen({ navigation }: Props) {
             </TouchableOpacity>
 
             <View style={styles.spacer} />
-            <TouchableOpacity
-              style={[styles.primary, (!filled || busy) && styles.primaryIdle]}
-              onPress={submit}>
-              <Text style={styles.primaryT}>{busy ? t('login_verifying') : t('g_login_submit')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              title={busy ? t('login_verifying') : t('g_login_submit')}
+              onPress={submit}
+              disabled={!filled || busy}
+              style={styles.primary}
+            />
           </View>
         ) : (
           <View style={styles.form}>
@@ -292,16 +301,38 @@ export default function LoginScreen({ navigation }: Props) {
               <QrTabletArt />
             </View>
             <View style={styles.spacer} />
-            <TouchableOpacity style={styles.outline} onPress={() => navigation?.navigate('QrHow')}>
-              <Text style={styles.outlineT}>{t('g_login_how')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.primary, styles.scanGlow]} onPress={scanQr}>
-              <Text style={styles.primaryT}>{t('g_login_scan')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              variant="secondary"
+              title={t('g_login_how')}
+              onPress={() => navigation?.navigate('QrHow')}
+              style={styles.outline}
+              textStyle={styles.outlineT}
+            />
+            <AppButton
+              title={t('g_login_scan')}
+              onPress={scanQr}
+              style={styles.primary}
+            />
           </View>
         )}
-      </ScrollView>
+    </>
+  );
 
+  /**
+   * Panel ilustrasi/info kanan khusus tablet (ala split statusSide+receiptSide
+   * SuccessScreen). Phone tidak memakai panel ini.
+   */
+  const infoPanel = (
+    <View style={styles.infoSide}>
+      <QrTabletArt />
+      <Text style={styles.infoTitle}>Login Kasir ESB {/* TODO-i18n:login_info_title */}</Text>
+      <Text style={styles.infoItem}>Masuk dengan Username dan PIN {/* TODO-i18n:login_info_user */}</Text>
+      <Text style={styles.infoItem}>atau pindai QR dari aplikasi owner {/* TODO-i18n:login_info_qr */}</Text>
+      <Text style={styles.infoHelp}>Butuh bantuan? Hubungi 0822-1066-6969 {/* TODO-i18n:login_info_help */}</Text>
+    </View>
+  );
+
+  const helpModal = (
       <Modal visible={help} transparent animationType="fade" onRequestClose={() => setHelp(false)}>
         <View style={styles.overlay}>
           <View style={styles.helpCard}>
@@ -317,12 +348,42 @@ export default function LoginScreen({ navigation }: Props) {
               {t('g_login_help_body')}{' '}
               <Text style={styles.helpPhone}>0822-1066-6969</Text>
             </Text>
-            <TouchableOpacity style={styles.primary} onPress={() => setHelp(false)}>
-              <Text style={styles.primaryT}>{t('g_login_help_ok')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              title={t('g_login_help_ok')}
+              onPress={() => setHelp(false)}
+              style={styles.primary}
+            />
           </View>
         </View>
-      </Modal>
+    </Modal>
+  );
+
+  if (isTablet) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.split}>
+          <ScrollView
+            contentContainerStyle={styles.formSide}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            {formBody}
+          </ScrollView>
+          {infoPanel}
+        </View>
+        {helpModal}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.root}>
+      <ScrollView
+        contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        {formBody}
+      </ScrollView>
+      {helpModal}
     </View>
   );
 }
@@ -330,6 +391,15 @@ export default function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 28, flexGrow: 1 },
+  split: { flex: 1, flexDirection: 'row' },
+  formSide: { paddingHorizontal: 32, paddingTop: 24, paddingBottom: 28, flexGrow: 1 },
+  infoSide: {
+    flex: 1, backgroundColor: colors.navy,
+    alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10,
+  },
+  infoTitle: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, textAlign: 'center', marginTop: 18 },
+  infoItem: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, textAlign: 'center' },
+  infoHelp: { fontFamily: fonts.medium, fontSize: 13, color: colors.white, textAlign: 'center', marginTop: 8 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { fontSize: 28, color: '#4A4A4A', fontFamily: fonts.bold, paddingRight: 12 },
   helpCircle: {

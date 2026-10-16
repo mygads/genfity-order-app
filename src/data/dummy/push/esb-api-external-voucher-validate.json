@@ -1,0 +1,18 @@
+{
+  "request": { "code": "ESBEXT-77881", "grandTotal": 69300 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "code": "ESBEXT-77881",
+      "valid": true,
+      "amount": 15000,
+      "minSpend": 50000,
+      "source": "external",
+      "validTo": "2026-12-31 23:59:59"
+    }
+  }
+}

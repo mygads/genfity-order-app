@@ -1,0 +1,20 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T001", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 3,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "terminalId": "T001", "settingKey": "printerDefault", "settingValue": "ST-KASIR", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T001", "settingKey": "receiptFooter", "settingValue": "Terima kasih atas kunjungan Anda", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T001", "settingKey": "autoPrintKitchen", "settingValue": "1", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

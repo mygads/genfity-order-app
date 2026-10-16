@@ -1,0 +1,11 @@
+{
+  "request": { "memberId": "MBR-001", "branchId": "B001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "memberId": "MBR-001", "name": "QoQi", "saldo": 250000, "poin": 342 }
+  }
+}

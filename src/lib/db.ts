@@ -88,7 +88,7 @@ const SCHEMA: string[] = [
     salesDate TEXT, salesMode TEXT, tableNo TEXT, customerName TEXT,
     subtotal REAL DEFAULT 0, discount REAL DEFAULT 0, discountName TEXT,
     tax REAL DEFAULT 0, serviceCharge REAL DEFAULT 0,
-    voucherAmount REAL DEFAULT 0, voucherCode TEXT,
+    voucherAmount REAL DEFAULT 0, voucherCode TEXT, promotionVoucherCode TEXT,
     platformFee REAL DEFAULT 0, rounding REAL DEFAULT 0, grandTotal REAL DEFAULT 0,
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
@@ -100,7 +100,7 @@ const SCHEMA: string[] = [
     id TEXT PRIMARY KEY, salesNum TEXT, menuId TEXT, menuName TEXT,
     qty REAL DEFAULT 0, price REAL DEFAULT 0, discount REAL DEFAULT 0,
     subtotal REAL DEFAULT 0, note TEXT, stationId TEXT, status TEXT,
-    syncDate TEXT, createdAt TEXT)`,
+    promotionVoucherCode TEXT, syncDate TEXT, createdAt TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_salesmenuextra (
     id TEXT PRIMARY KEY, salesMenuId TEXT, salesNum TEXT, extraId TEXT, extraName TEXT,
     qty REAL DEFAULT 0, price REAL DEFAULT 0, subtotal REAL DEFAULT 0, syncDate TEXT)`,
@@ -161,13 +161,63 @@ const SCHEMA: string[] = [
     status TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_paymentmethod (
     id TEXT PRIMARY KEY, methodName TEXT, methodType TEXT,
-    flagActive INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0, syncDate TEXT)`,
+    flagActive INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0,
+    voucherCategoryID TEXT, voucherSourceID TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_member (
     id TEXT PRIMARY KEY, memberName TEXT, phone TEXT,
     depositBalance REAL DEFAULT 0, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_voucher (
     id TEXT PRIMARY KEY, voucherCode TEXT, voucherName TEXT, amount REAL DEFAULT 0,
     quota INTEGER DEFAULT 0, validFrom TEXT, validTo TEXT, status TEXT, syncDate TEXT)`,
+
+  // --- REA-15 prioritas murah (dossier Lampiran F.4 antrean 9) ---
+  // Catatan jujur: tabel relasional detail gofood/grab (6 tabel) +
+  // template/package + 8 tabel promosi + 4 special-price SENGAJA tidak dibuat
+  // di sini (berat, butuh kontrak pull dan relasi ke master lain; lihat TODO
+  // di bawah). Agregat minimal F9 (ms_promotion, ms_coa, ms_menuonline)
+  // dibuat di akhir SCHEMA karena dummy pull + path-nya tersedia.
+  `CREATE TABLE IF NOT EXISTS ms_notes (
+    id TEXT PRIMARY KEY, noteName TEXT, categoryId TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_notescategory (
+    id TEXT PRIMARY KEY, categoryName TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_posuseraccess (
+    userId TEXT NOT NULL, accessKey TEXT NOT NULL, flagAllow INTEGER DEFAULT 1,
+    syncDate TEXT, PRIMARY KEY (userId, accessKey))`,
+  `CREATE TABLE IF NOT EXISTS ms_posuserrole (
+    id TEXT PRIMARY KEY, roleName TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_cashmethod (
+    id TEXT PRIMARY KEY, methodName TEXT,
+    flagActive INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS tr_membertransactionlog (
+    id TEXT PRIMARY KEY, memberId TEXT, trxType TEXT, amount REAL DEFAULT 0,
+    balanceAfter REAL DEFAULT 0, userId TEXT, trxDate TEXT, syncDate TEXT)`,
+  // Tiket dapur minimal (REA-FIX-B kitchen): id + salesNum + status + waktu.
+  // Sumber mock tetap di data/mock.ts; tabel ini hanya menimpa STATUS
+  // yang sudah di-advance agar bertahan saat aplikasi dibuka ulang.
+  `CREATE TABLE IF NOT EXISTS tr_kitchenticket (
+    id TEXT PRIMARY KEY, ticketNo TEXT, salesNum TEXT, status TEXT,
+    createdAt TEXT, updatedAt TEXT, syncDate TEXT)`,
+  // F9: tabel agregat minimal untuk 3 domain pull kontrak §4 (dummy JSON
+  // tersedia). Server menang untuk master (§4): hanya ditulis via pullMaster,
+  // tidak pernah di-push (lihat tablePushPath di sync.ts).
+  `CREATE TABLE IF NOT EXISTS ms_promotion (
+    id TEXT PRIMARY KEY, promoCode TEXT, promoName TEXT, promoType TEXT,
+    value REAL DEFAULT 0, maxAmount REAL DEFAULT 0, minSpend REAL DEFAULT 0,
+    validFrom TEXT, validTo TEXT, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_coa (
+    id TEXT PRIMARY KEY, coaName TEXT, coaType TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_menuonline (
+    menuId TEXT PRIMARY KEY, menuName TEXT, price REAL DEFAULT 0,
+    stock REAL DEFAULT 0, gofoodId TEXT, grabId TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  // Log aplikasi lokal (LogScreen): tulis-lokal saja, tanpa syncDate/push.
+  `CREATE TABLE IF NOT EXISTS tr_applog (
+    id TEXT PRIMARY KEY, level TEXT, tag TEXT, message TEXT, detail TEXT,
+    time TEXT, createdAt TEXT)`,
 ];
 
 /**
@@ -180,6 +230,12 @@ const MIGRATIONS: string[] = [
   'ALTER TABLE tr_salesvoucherusage ADD COLUMN voucherAmount REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashActual REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashDiff REAL DEFAULT 0',
+  // REA-15: kolom promo + autocut untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE tr_saleshead ADD COLUMN promotionVoucherCode TEXT',
+  'ALTER TABLE tr_salesmenu ADD COLUMN promotionVoucherCode TEXT',
+  'ALTER TABLE ms_paymentmethod ADD COLUMN voucherCategoryID TEXT',
+  'ALTER TABLE ms_paymentmethod ADD COLUMN voucherSourceID TEXT',
+  'ALTER TABLE ms_station ADD COLUMN flagAutocut INTEGER DEFAULT 1',
 ];
 
 /**
@@ -236,6 +292,13 @@ const DIRTY_PK: Record<string, string | string[]> = {
   ms_paymentmethod: 'id',
   ms_member: 'id',
   ms_voucher: 'id',
+  ms_notes: 'id',
+  ms_notescategory: 'id',
+  ms_posuseraccess: ['userId', 'accessKey'],
+  ms_posuserrole: 'id',
+  ms_cashmethod: 'id',
+  tr_membertransactionlog: 'id',
+  tr_kitchenticket: 'id',
 };
 
 /**
@@ -280,5 +343,51 @@ export async function countDirty(table: string): Promise<number> {
     return row?.n ?? 0;
   } catch {
     return 0;
+  }
+}
+
+export interface RoundingSetting {
+  /** Nilai mentah ms_setting(Rounding, Mode), '' bila tak ada. */
+  mode: string;
+  /** Nilai numerik Rounding Nearest Value, 0 bila tak ada/tak valid. */
+  nearest: number;
+  /** Nilai numerik Rounding Step, 100 bila tak ada/tak valid. */
+  step: number;
+}
+
+/**
+ * Baca setting pembulatan REA-14 (display-only, tanpa menyentuh rumus
+ * totals.ts). Aman untuk instalasi lama: baris ms_setting boleh tak ada,
+ * nilai tak valid jatuh ke default. Membaca semua baris key1 LIKE
+ * 'Rounding%' agar tahan dua layout (key1='Rounding'/key2='Mode' maupun
+ * key1='Rounding Mode' satu kunci).
+ */
+export async function getRoundingSetting(): Promise<RoundingSetting> {
+  const fallback: RoundingSetting = { mode: '', nearest: 0, step: 100 };
+  try {
+    const rows = await query<{ key1: string | null; key2: string | null; value1: string | null }>(
+      `SELECT key1, key2, value1 FROM ms_setting WHERE key1 LIKE 'Rounding%' LIMIT 20`,
+    );
+    if (rows.length === 0) return fallback;
+    const out = { ...fallback };
+    for (const r of rows) {
+      const k1 = (r.key1 ?? '').trim().toLowerCase();
+      const k2 = (r.key2 ?? '').trim().toLowerCase();
+      const v = (r.value1 ?? '').trim();
+      // Layout satu kunci: key1='rounding mode' / 'rounding nearest value'.
+      const k = k1 === 'rounding' ? k2 : k1.replace(/^rounding\s+/, '');
+      if (k === 'mode') {
+        out.mode = v;
+      } else if (k === 'nearest value' || k === 'nearestvalue' || k === 'nearest') {
+        const n = Number(v);
+        if (Number.isFinite(n) && n >= 0) out.nearest = n;
+      } else if (k === 'step') {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) out.step = Math.round(n);
+      }
+    }
+    return out;
+  } catch {
+    return fallback;
   }
 }

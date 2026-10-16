@@ -1,0 +1,11 @@
+{
+  "request": { "terminalId": "T001", "branchId": "B001", "errorCode": "E-PUSH-01", "errorMessage": "Push order/finish gagal: timeout 30 dtk", "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "ok": true, "logId": "LOG-20261016-001" }
+  }
+}

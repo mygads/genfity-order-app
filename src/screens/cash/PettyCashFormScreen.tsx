@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Kas Kecil', 'Lainnya'];interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA kas kecil: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb(); const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}export default function PettyCashFormScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Kas Kecil', 'Lainnya'];
+
+interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA kas kecil: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb(); const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}export default function PettyCashFormScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [arus, setArus] = useState<'Keluar' | 'Masuk'>('Keluar');
@@ -34,14 +36,9 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('petty.doneTitle')}</Text>
           <Text style={s.sub}>{done.arus} - {done.coa} - {rp(done.jumlah)}</Text> {done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
-          <TouchableOpacity style={s.primary} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString('id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })}> <Text style={s.primaryT}>{t('petty.detailTitle')}</Text> </TouchableOpacity> <TouchableOpacity style={s.ghost} onPress={() => navigation?.navigate('PettyCash')}>
-            <Text style={s.ghostT}>{t('petty.viewList')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.ghost}
-            onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }}>
-            <Text style={s.ghostT}>{t('petty.recordAgain')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('petty.detailTitle')} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString('id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })} />
+          <AppButton title={t('petty.viewList')} variant="secondary" onPress={() => navigation?.navigate('PettyCash')} />
+          <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }} />
         </View>
       </View>
     );
@@ -84,34 +81,28 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
 
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('petty.nominalDesc')}</Text>
-          <Text style={s.label}>{t('petty.amount')}</Text>
-          <View style={s.amountBox}>
-            <Text style={s.rpPrefix}>Rp</Text>
-            <TextInput
-              style={s.amountInput}
-              keyboardType="number-pad"
-              placeholder="0"
-              placeholderTextColor={colors.faint}
-              value={jumlahNum ? rpNum(jumlahNum) : ''}
-              onChangeText={(v) => setJumlah(v.replace(/\D/g, '').slice(0, 12))}
-            />
-          </View>
-          <Text style={s.label}>{t('petty.desc')}</Text>
-          <TextInput
-            style={s.input}
+          <AppInput
+            label={t('petty.amount')}
+            keyboardType="number-pad"
+            placeholder="0"
+            value={jumlahNum ? rpNum(jumlahNum) : ''}
+            onChangeText={(v) => setJumlah(v.replace(/\D/g, '').slice(0, 12))}
+            style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 20 }}
+          />
+          <AppInput
+            label={t('petty.desc')}
             placeholder={t('petty.descPh')}
-            placeholderTextColor={colors.faint}
             value={keterangan}
             onChangeText={setKeterangan}
           />
-          <Text style={s.label}>{t('petty.note')}</Text>
-          <TextInput
-            style={s.noteInput}
+          <AppInput
+            label={t('petty.note')}
             placeholder={t('petty.notePh')}
-            placeholderTextColor={colors.faint}
             multiline
             value={catatan}
             onChangeText={setCatatan}
+            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
+            style={{ textAlignVertical: 'top' }}
           />
         </View>
 
@@ -123,12 +114,20 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
             <Text style={s.hintLeft}>{t('petty.photoHint')}</Text>
           )}
           <View style={s.photoRow}>
-            <TouchableOpacity style={s.photoBtn} onPress={takePhoto}>
-              <Text style={s.photoBtnT}>{t('petty.camera')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
-              <Text style={s.photoBtnT}>{t('petty.gallery')}</Text>
-            </TouchableOpacity>
+            <AppButton
+              title={t('petty.camera')}
+              variant="secondary"
+              fullWidth={false}
+              style={{ marginTop: 0 }}
+              onPress={takePhoto}
+            />
+            <AppButton
+              title={t('petty.gallery')}
+              variant="secondary"
+              fullWidth={false}
+              style={{ marginTop: 0 }}
+              onPress={pickPhoto}
+            />
             {photo ? (
               <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={10}>
                 <Text style={s.del}>{t('common.delete')}</Text>
@@ -137,12 +136,11 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[s.primary, !ready && s.disabled]}
+        <AppButton
+          title={`${t('petty.save')} - ${rp(jumlahNum)}`}
           disabled={!ready}
-          onPress={save}>
-          <Text style={s.primaryT}>{t('petty.save')} - {rp(jumlahNum)}</Text>
-        </TouchableOpacity>
+          onPress={() => void save()}
+        />
         {!ready && (
           <Text style={s.hint}>{t('petty.fillHint')}</Text>
         )}

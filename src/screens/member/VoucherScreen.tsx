@@ -6,15 +6,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
+import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath } from '../../config/server';import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
+import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -35,13 +37,9 @@ type Voucher = {
   status: VoucherStatus;
 };
 
-/** Tanggal seed dari objek Date (format id-ID) agar tidak hardcode string tampilan. */
+/** Tanggal seed lewat fmtDate agar ikut locale (id/en), bukan string hardcode. */
 function seedDate(y: number, m: number, d: number): string {
-  try {
-    return new Date(y, m - 1, d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch {
-    return '';
-  }
+  return fmtDate(new Date(y, m - 1, d));
 }
 
 const SEED: Voucher[] = [
@@ -103,6 +101,13 @@ export default function VoucherScreen({ navigation }: Props) {
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // WIRE REA-7/REA-6: jalur server voucher online + eksternal di samping mock.
+  const [onlineCode, setOnlineCode] = useState('');
+  const [onlineMsg, setOnlineMsg] = useState('');
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [extCode, setExtCode] = useState('');
+  const [extMsg, setExtMsg] = useState('');
+  const [extBusy, setExtBusy] = useState(false);
 
   // Guard online seperti Member: offline tampilkan banner, operasi antre via outbox.
   const [online, setOnline] = useState(true);
@@ -140,7 +145,7 @@ export default function VoucherScreen({ navigation }: Props) {
           try {
             const d = new Date(String(it.validTo ?? ''));
             if (!Number.isNaN(d.getTime())) {
-              hingga = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+              hingga = fmtDate(d, lang);
             }
           } catch {
             /* pakai potongan tanggal mentah */
@@ -229,9 +234,74 @@ export default function VoucherScreen({ navigation }: Props) {
     }
   };
 
+  /** Validasi voucher online via helper REA-7. Best-effort, UI tetap jalan offline. */
+  const validateOnline = async () => {
+    const kode = onlineCode.trim().toUpperCase();
+    if (kode.length < 3) {
+      setOnlineMsg(t('vou_short'));
+      return;
+    }
+    setOnlineBusy(true);
+    try {
+      const r = await validateOnlineVoucher(kode, 0);
+      if (r.ok) {
+        setOnlineMsg(`Kode ${kode} ${t('vou_valid')} - ${rp(r.amount)}. Min. belanja ${rp(r.minSpend)}.`);
+      } else {
+        setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
+      }
+    } catch {
+      setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
+    } finally {
+      setOnlineBusy(false);
+    }
+  };
+
+  /** Klaim voucher online ke transaksi berjalan via helper REA-7. Best-effort. */
+  const claimOnline = async () => {
+    const kode = onlineCode.trim().toUpperCase();
+    if (kode.length < 3) {
+      setOnlineMsg(t('vou_short'));
+      return;
+    }
+    setOnlineBusy(true);
+    try {
+      const r = await claimOnlineVoucher(kode, `TRX-${Date.now()}`);
+      setOnlineMsg(r.ok ? t('vou_online_claim_ok') : `Kode ${kode} ${t('vou_unknown')}`);
+    } catch {
+      setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
+    } finally {
+      setOnlineBusy(false);
+    }
+  };
+
+  /** Voucher eksternal validate/burn/unburn via helper REA-6. Best-effort. */
+  const extOp = async (op: 'validate' | 'burn' | 'unburn') => {
+    const kode = extCode.trim().toUpperCase();
+    if (kode.length < 3) {
+      setExtMsg(t('vou_short'));
+      return;
+    }
+    setExtBusy(true);
+    try {
+      const r = await externalVoucher(op, kode);
+      if (op === 'burn') {
+        setExtMsg(r.ok ? t('vou_ext_burn_ok') : `Kode ${kode} ${t('vou_unknown')}`);
+      } else if (op === 'unburn') {
+        setExtMsg(r.ok ? t('vou_ext_unburn_ok') : `Kode ${kode} ${t('vou_unknown')}`);
+      } else if (r.ok) {
+        setExtMsg(`Kode ${kode} ${t('vou_valid')} - ${rp(r.amount)}.`);
+      } else {
+        setExtMsg(`Kode ${kode} ${t('vou_unknown')}`);
+      }
+    } catch {
+      setExtMsg(`Kode ${kode} ${t('vou_unknown')}`);
+    } finally {
+      setExtBusy(false);
+    }
+  };
+
   /** Kunci voucher agar tidak dipakai transaksi lain. */
-  const lock = (v: Voucher) => {
-    if (v.status !== 'tersedia' || busy) return;
+  const lock = (v: Voucher) => {    if (v.status !== 'tersedia' || busy) return;
     setBusy(v.id);
     void persistVoucherOp('lock', v).finally(() => {
       setStatus(v.id, 'terkunci');
@@ -328,21 +398,24 @@ export default function VoucherScreen({ navigation }: Props) {
       <View style={s.searchWrap}>
         <Text style={s.label}>{t('vou_search_label')}</Text>
         <View style={s.manualRow}>
-          <TextInput
-            style={[s.search, s.manualInput]}
-            placeholder={t('vou_search_ph')}
-            placeholderTextColor={colors.faint}
-            autoCapitalize="characters"
-            value={kodeManual}
-            onChangeText={(txt) => {
-              setKodeManual(txt);
-              setQ(txt);
-              setMsg('');
-            }}
+          <View style={s.manualInput}>
+            <AppInput
+              placeholder={t('vou_search_ph')}
+              autoCapitalize="characters"
+              value={kodeManual}
+              onChangeText={(txt) => {
+                setKodeManual(txt);
+                setQ(txt);
+                setMsg('');
+              }}
+            />
+          </View>
+          <AppButton
+            title={t('vou_check')}
+            fullWidth={false}
+            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
+            onPress={validate}
           />
-          <TouchableOpacity style={s.checkBtn} onPress={validate}>
-            <Text style={s.checkTxt}>{t('vou_check')}</Text>
-          </TouchableOpacity>
         </View>
         {msg ? <Text style={s.msg}>{msg}</Text> : null}
       </View>
@@ -350,6 +423,79 @@ export default function VoucherScreen({ navigation }: Props) {
       {!online && (
         <Text style={s.offlineBanner}>Offline - data dari cache lokal, perubahan disinkron saat online.</Text>
       )}
+
+      <View style={s.searchWrap}>
+        <Text style={s.label}>{t('vou_online_title')}</Text>
+        <View style={s.manualRow}>
+          <View style={s.manualInput}>
+            <AppInput
+              placeholder={t('vou_search_ph')}
+              autoCapitalize="characters"
+              value={onlineCode}
+              onChangeText={(txt) => {
+                setOnlineCode(txt);
+                setOnlineMsg('');
+              }}
+            />
+          </View>
+          <AppButton
+            title={onlineBusy ? '...' : t('vou_check')}
+            disabled={onlineBusy}
+            fullWidth={false}
+            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
+            onPress={validateOnline}
+          />
+        </View>
+        <View style={s.lockRow}>
+          <AppButton
+            title={t('vou_online_claim')}
+            disabled={onlineBusy}
+            fullWidth={false}
+            style={{ flex: 2, marginTop: 0 }}
+            onPress={claimOnline}
+          />
+        </View>
+        {onlineMsg ? <Text style={s.msg}>{onlineMsg}</Text> : null}
+        <Text style={s.label}>{t('vou_title')}</Text>
+        <View style={s.manualRow}>
+          <View style={s.manualInput}>
+            <AppInput
+              placeholder={t('vou_search_ph')}
+              autoCapitalize="characters"
+              value={extCode}
+              onChangeText={(txt) => {
+                setExtCode(txt);
+                setExtMsg('');
+              }}
+            />
+          </View>
+          <AppButton
+            title={extBusy ? '...' : t('vou_check')}
+            disabled={extBusy}
+            fullWidth={false}
+            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
+            onPress={() => void extOp('validate')}
+          />
+        </View>
+        <View style={s.lockRow}>
+          <AppButton
+            title={t('vou_unlock')}
+            variant="secondary"
+            disabled={extBusy}
+            fullWidth={false}
+            style={{ flex: 1, marginTop: 0 }}
+            onPress={() => void extOp('unburn')}
+          />
+          <AppButton
+            title={t('vou_apply_burn')}
+            disabled={extBusy}
+            fullWidth={false}
+            style={{ flex: 2, marginTop: 0 }}
+            onPress={() => void extOp('burn')}
+          />
+        </View>
+        {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
+      </View>
 
       <View style={s.filters}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
@@ -402,27 +548,30 @@ export default function VoucherScreen({ navigation }: Props) {
                 ) : null}
                 <Text style={s.voucherMeta}>{t('vou_valid_until')} {v.berlakuHingga}</Text>
                 {v.status === 'tersedia' && (
-                  <TouchableOpacity
-                    style={[s.applyBtn, loading && s.applyDisabled]}
+                  <AppButton
+                    title={loading ? t('vou_locking') : t('vou_lock_use')}
                     disabled={loading}
-                    onPress={() => lock(v)}>
-                    <Text style={s.applyTxt}>{loading ? t('vou_locking') : t('vou_lock_use')}</Text>
-                  </TouchableOpacity>
+                    style={{ marginTop: 10 }}
+                    onPress={() => lock(v)}
+                  />
                 )}
                 {v.status === 'terkunci' && (
                   <View style={s.lockRow}>
-                    <TouchableOpacity
-                      style={[s.unlockBtn, loading && s.applyDisabled]}
+                    <AppButton
+                      title={loading ? '...' : t('vou_unlock')}
+                      variant="secondary"
                       disabled={loading}
-                      onPress={() => unlock(v)}>
-                      <Text style={s.unlockTxt}>{loading ? '...' : t('vou_unlock')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[s.burnBtn, loading && s.applyDisabled]}
+                      fullWidth={false}
+                      style={{ flex: 1, marginTop: 0 }}
+                      onPress={() => unlock(v)}
+                    />
+                    <AppButton
+                      title={loading ? '...' : t('vou_apply_burn')}
                       disabled={loading}
-                      onPress={() => burn(v)}>
-                      <Text style={s.applyTxt}>{loading ? '...' : t('vou_apply_burn')}</Text>
-                    </TouchableOpacity>
+                      fullWidth={false}
+                      style={{ flex: 2, marginTop: 0 }}
+                      onPress={() => burn(v)}
+                    />
                   </View>
                 )}
                 {(v.status === 'terpakai' || v.status === 'kadaluwarsa') && (
@@ -442,9 +591,11 @@ export default function VoucherScreen({ navigation }: Props) {
                 {t('ok_voucher')} {applied.kode} {t('vou_used').toLowerCase()} - {t('vou_cancel_promo')}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.backCashierBtn} onPress={backToCashier}>
-              <Text style={s.backCashierTxt}>{t('vou_back_cashier')} ›</Text>
-            </TouchableOpacity>
+            <AppButton
+              title={`${t('vou_back_cashier')} ›`}
+              style={{ marginTop: 10 }}
+              onPress={backToCashier}
+            />
           </View>
         ) : null}
       </ScrollView>
@@ -457,16 +608,20 @@ export default function VoucherScreen({ navigation }: Props) {
               {applied ? `Voucher ${applied.kode} - ${applied.nama}` : ''}
             </Text>
             <View style={s.dialogRow}>
-              <TouchableOpacity
-                style={s.dialogGhost}
-                onPress={() => setCancelVisible(false)}>
-                <Text style={s.dialogGhostTxt}>{t('vou_keep')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.dialogDanger}
-                onPress={cancelPromo}>
-                <Text style={s.dialogDangerTxt}>{t('vou_cancel_promo')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                title={t('vou_keep')}
+                variant="secondary"
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginRight: 8 }}
+                onPress={() => setCancelVisible(false)}
+              />
+              <AppButton
+                title={t('vou_cancel_promo')}
+                variant="danger"
+                fullWidth={false}
+                style={{ flex: 1, marginTop: 0, marginLeft: 8 }}
+                onPress={cancelPromo}
+              />
             </View>
           </View>
         </View>

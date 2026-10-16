@@ -96,6 +96,12 @@ const DOMAINS: Domain[] = [
     table: 'ms_station',
     cols: ['id', 'stationName', 'printerName', 'connection', 'printerType', 'charPerLine', 'flagDefault', 'flagActive'],
     map: (r) => [str(r.stationId ?? r.id) ?? '', str(r.stationName), str(r.printerName), str(r.connection), str(r.printerType), num(r.charPerLine, 32), flag(r.flagDefault, 0), flag(r.flagActive)],
+    // Upsert parsial: alamat printer (printerPort = MAC BT / IP:port LAN) dan
+    // pilihan connection/autocut adalah konfigurasi PER-TERMINAL milik layar
+    // Printer (PrintersScreen.persistStation) - server tak tahu MAC BT tablet
+    // ini. Pull hanya memperbarui kolom milik server agar alamat lokal tak
+    // terhapus (INSERT OR REPLACE polos akan me-NULL-kan printerPort).
+    upsert: 'ON CONFLICT(id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagActive = excluded.flagActive, syncDate = excluded.syncDate',
   },
   {
     key: 'paymentmethod',
@@ -124,8 +130,7 @@ const DOMAINS: Domain[] = [
   },
   {
     key: 'sales',
-    path: ApiPath.pullSales,
-    table: 'tr_saleshead',
+    path: ApiPath.pullSales,    table: 'tr_saleshead',
     cols: ['salesNum', 'branchId', 'terminalId', 'userId', 'salesDate', 'salesMode', 'tableNo',
       'customerName', 'subtotal', 'discount', 'tax', 'serviceCharge', 'voucherAmount', 'voucherCode',
       'platformFee', 'rounding', 'grandTotal', 'paidAmount', 'changeAmount', 'paymentMethod',
@@ -167,16 +172,114 @@ const DOMAINS: Domain[] = [
       }
     },
   },
+  {
+    // REA-11: log shift dari server (kontrak §4.1).
+    key: 'shiftlog',
+    path: ApiPath.pullShiftLog,
+    table: 'tr_shiftlog',
+    cols: ['id', 'branchId', 'terminalId', 'userId', 'shiftName', 'clockIn', 'clockOut',
+      'cashInDrawer', 'totalSales', 'cashActual', 'cashDiff', 'status'],
+    map: (r) => [
+      str(r.shiftId ?? r.id) ?? '', str(r.branchId), str(r.terminalId), str(r.userId),
+      str(r.shiftName), str(r.clockIn), str(r.clockOut),
+      num(r.cashInDrawer ?? r.startCash), num(r.totalSales),
+      num(r.cashActual ?? r.endCash), num(r.cashDiff ?? r.diff),
+      str(r.status) ?? 'OPEN',
+    ],
+    requireFirst: true,
+    // INSERT OR IGNORE seperti sales: baris shift lokal (terutama yang masih
+    // OPEN / syncDate NULL) tidak boleh tertimpa riwayat pull.
+    ignoreExisting: true,
+  },
+  {
+    // REA-12: setting per terminal (kontrak §4.2). Server menang; baris klaim
+    // lokal ('flagClaimed') aman karena server tak mengirim settingKey itu.
+    key: 'terminalsettings',
+    path: ApiPath.pullTerminalSettings,
+    table: 'ms_terminalsetting',
+    cols: ['terminalId', 'settingKey', 'settingValue', 'flag'],
+    map: (r) => [
+      str(r.terminalId) ?? '', str(r.settingKey) ?? '',
+      str(r.settingValue), flag(r.flag, 0),
+    ],
+    requireFirst: true,
+  },
+  {
+    // F9: promosi (kontrak §4; path FAKTA main/get-promotion + dummy tersedia).
+    // Server menang; kolom type/value/maxAmount/minSpend/validitas dipakai
+    // layar kasir untuk validasi voucher/promo lokal.
+    key: 'promotion',
+    path: ApiPath.pullPromotion,
+    table: 'ms_promotion',
+    cols: ['id', 'promoCode', 'promoName', 'promoType', 'value', 'maxAmount',
+      'minSpend', 'validFrom', 'validTo', 'flagActive'],
+    map: (r) => [
+      str(r.promoId) ?? '', str(r.code), str(r.name), str(r.type),
+      num(r.value), num(r.maxAmount), num(r.minSpend),
+      str(r.validFrom), str(r.validTo), flag(r.flagActive),
+    ],
+    requireFirst: true,
+  },
+  {
+    // F9: bagan akun biaya (path FAKTA v1/pull/expense-chart-of-accounts +
+    // dummy tersedia). Dipakai ExpenseScreen sebagai daftar akun.
+    key: 'expensecoa',
+    path: ApiPath.pullExpenseCoa,
+    table: 'ms_coa',
+    cols: ['id', 'coaName', 'coaType', 'flagActive'],
+    map: (r) => [str(r.coaId) ?? '', str(r.coaName), str(r.type), flag(r.flagActive)],
+    requireFirst: true,
+  },
+  {
+    // F9: mapping menu online gofood/grab (path FAKTA
+    // v1/pull/get-menu-online + dummy tersedia).
+    key: 'menuonline',
+    path: ApiPath.pullMenuOnline,
+    table: 'ms_menuonline',
+    cols: ['menuId', 'menuName', 'price', 'stock', 'gofoodId', 'grabId', 'flagActive'],
+    map: (r) => [
+      str(r.menuId) ?? '', str(r.name), num(r.price), num(r.stock),
+      str(r.gofoodId), str(r.grabId), flag(r.flagActive),
+    ],
+    requireFirst: true,
+  },
 ];
 
-// TODO(M9-4): domain kontrak §4 berikut belum ditarik karena tabelnya tidak
-// ada di skema db.ts dan M9 melarang skema baru tanpa migrasi aman:
-// - promotion (8 tabel ms_promotion_* - skema belum ada)
-// - expense-chart-of-accounts (ms_coa - skema belum ada)
-// - menu-online (mapping gofood/grab - skema belum ada)
-// Bila tabelnya ditambahkan via migrasi aman, daftarkan Domain di atas memakai
-// ApiPath.pullPromotion / pullExpenseCoa / pullMenuOnline (path + dummy JSON
-// sudah tersedia) dan FORCE_PULL akan menjemputnya otomatis.
+// ---------------------------------------------------------------------------
+// Referensi REA-16/REA-17 untuk pemilik layar (tidak dipakai master.ts).
+// ---------------------------------------------------------------------------
+
+/** [FAKTA] 9 acquirer QRIS dari string pool APK (REA-17). */
+export const QRIS_ACQUIRERS = [
+  'qrisbni', 'qrisbri', 'qriscimb', 'qrisdki', 'qrisesb',
+  'qrisgpay', 'qrisnobu', 'qrisshopee', 'qrisyukk',
+] as const;
+
+/** [FAKTA] kunci prefs native dari classes.dex (REA-16). */
+export const NATIVE_PREF_KEYS = {
+  bluetoothPrinter: 'bluetooth_printer',
+  usbPrinter: 'usb_printer',
+  bcaApos: 'bca_apos',
+  bcaAposCallback: 'bca_apos_callback',
+  cameraCheck: 'camera_check',
+  autoTimeCheck: 'check_auto_time_setting',
+  uvcScanner: 'usb_uvc_scanner',
+} as const;
+// TODO(QrisScreen, pemilik layar payment): pakai QRIS_ACQUIRERS + key i18n
+// qris_acq_* untuk label metode bayar.
+// TODO(PrintersScreen/EdcScreen, pemilik layar settings/payment): pakai
+// NATIVE_PREF_KEYS untuk modul EDC/printer native.
+
+// F9 SELESAI: 3 domain kontrak §4 yang tabelnya belum ada kini ditarik via
+// tabel agregat minimal (CREATE TABLE IF NOT EXISTS di db.ts, aman untuk DB
+// lama tanpa migrasi kolom):
+// - promotion -> ms_promotion (path FAKTA main/get-promotion)
+// - expense-chart-of-accounts -> ms_coa (path FAKTA
+//   v1/pull/expense-chart-of-accounts)
+// - menu-online -> ms_menuonline (path FAKTA v1/pull/get-menu-online)
+// FORCE_PULL {domains: ['promotion'|'expensecoa'|'menuonline']} menjemputnya
+// otomatis. Tabel relasional detail (8 ms_promotion_*, 6 gofood/grab,
+// template/package, 4 special-price) tetap SENGAJA tidak dibuat (REA-15).
 
 function rowsOf(body: unknown): Row[] {
   if (Array.isArray(body)) return body as Row[];

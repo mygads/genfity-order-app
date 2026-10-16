@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { startEdcPayment } from '../../native/edc';
+import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { saveSale, nextSalesNum } from '../../lib/sales';
 
@@ -18,6 +20,7 @@ type Props = {
       voucherCode?: string;
       service?: number;
       tax?: number;
+      feeESB?: number;
       rounding?: number;
       mode?: string;
       table?: string;
@@ -84,6 +87,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     const orderNo = await nextSalesNum();
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
+    const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
     const input: SaleInput = {
       method,
@@ -96,6 +100,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       discountTotal: p.discount ?? 0,
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
+      ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(p.memberId ? { memberId: p.memberId } : {}),
@@ -124,6 +129,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       discount: p.discount ?? 0,
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
+      ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(p.memberId ? { memberId: p.memberId } : {}),
@@ -184,14 +190,13 @@ export default function EdcScreen({ navigation, route }: Props) {
             <Text style={styles.big}>{rp(total)}</Text>
             <Text style={styles.meta}>{t('edc_swipe').replace('{b}', bank).replace('{t}', terminal)}</Text>
             <Text style={styles.fieldLabel}>{t('edc_card4')}</Text>
-            <TextInput
-              style={styles.inputSmall}
+            <AppInput
               value={cardNo}
-              onChangeText={(t2) => setCardNo(t2.replace(/[^0-9]/g, '').slice(0, 4))}
+              onChangeText={(v) => setCardNo(v.replace(/[^0-9]/g, '').slice(0, 4))}
               placeholder={t('edc_card4_ph')}
-              placeholderTextColor={colors.faint}
               keyboardType="numeric"
               maxLength={4}
+              style={styles.centerField}
             />
             {cardNo.length === 4 && (
               <Text style={styles.meta}>{t('edc_card4_show').replace('{c}', cardNo).replace('{b}', bank)}</Text>
@@ -203,15 +208,13 @@ export default function EdcScreen({ navigation, route }: Props) {
             {phase === 'waiting' && <Text style={styles.wait}>{t('edc_waiting').replace('{s}', String(secs))}</Text>}
             {phase === 'error' && <Text style={styles.err}>{t('edc_noresp')}</Text>}
             {phase === 'error' && (
-              <TouchableOpacity style={styles.primary} onPress={retry}>
-                <Text style={styles.primaryT}>{t('edc_retry')}</Text>
-              </TouchableOpacity>
+              <AppButton title={t('edc_retry')} onPress={retry} />
             )}
             {phase === 'waiting' && (
-              <TouchableOpacity style={styles.ghost} onPress={() => setPhase('approval')}>
-                <Text style={styles.ghostT}>{t('edc_cardread')} ›</Text>
-              </TouchableOpacity>
+              <AppButton title={`${t('edc_cardread')} ›`} variant="secondary" onPress={() => setPhase('approval')} />
             )}
+            {/* WIRE REA-16: kunci prefs native modul BCA APOS (info status, best-effort) */}
+            <Text style={styles.meta}>{NATIVE_PREF_KEYS.bcaApos} / {NATIVE_PREF_KEYS.bcaAposCallback}</Text>
           </View>
         </View>
         {isTablet && (
@@ -233,13 +236,12 @@ export default function EdcScreen({ navigation, route }: Props) {
       <View style={[styles.card, isTablet && styles.approvalTablet]}>
         <Text style={styles.cardTitle}>{t('edc_approval_title')}</Text>
         <Text style={styles.meta}>{t('edc_approval_ex')}</Text>
-        <TextInput style={styles.input} value={approval} onChangeText={(t) => setApproval(t.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="482913" placeholderTextColor={colors.faint} keyboardType="numeric" maxLength={6} />
-        <TouchableOpacity
-          style={[styles.primary, !canSave && styles.disabled]}
+        <AppInput value={approval} onChangeText={(v) => setApproval(v.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="482913" keyboardType="numeric" maxLength={6} style={styles.centerField} />
+        <AppButton
+          title={t('edc_save')}
           disabled={!canSave}
-          onPress={save}>
-          <Text style={styles.primaryT}>{t('edc_save')}</Text>
-        </TouchableOpacity>
+          onPress={() => void save()}
+        />
         <TouchableOpacity style={styles.linkBtn} onPress={() => {
           // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay.
           const p = route?.params ?? {};
@@ -297,6 +299,7 @@ const styles = StyleSheet.create({
   ghostT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
   linkBtn: { marginTop: 12, alignItems: 'center' },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
+  centerField: { textAlign: 'center', letterSpacing: 4 },
   split: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   main: { flex: 1 },
   mainTablet: { flex: 1.6 },

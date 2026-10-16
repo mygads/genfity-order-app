@@ -150,7 +150,7 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
 
 /**
  * Tendang laci kas via printer default. Best-effort (false = tak ada
- * printer native / gagal) — pemanggil (struk tunai) boleh abaikan.
+ * printer native / gagal) - pemanggil (struk tunai) boleh abaikan.
  */
 export async function openDefaultDrawer(): Promise<boolean> {
   if (Platform.OS === 'web') return false;

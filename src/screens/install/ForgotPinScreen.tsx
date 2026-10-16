@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { goBack: () => void };
@@ -22,9 +24,11 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
             {t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}
             {t('g_forgot_sent_post')}
           </Text>
-          <TouchableOpacity style={styles.primary} onPress={() => navigation?.goBack()}>
-            <Text style={styles.primaryT}>{t('g_forgot_back')}</Text>
-          </TouchableOpacity>
+          <AppButton
+            title={t('g_forgot_back')}
+            onPress={() => navigation?.goBack()}
+            style={styles.primary}
+          />
         </>
       ) : (
         <>
@@ -32,20 +36,22 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
             {t('g_forgot_desc')}
           </Text>
           <Text style={styles.label}>{t('g_forgot_label')}</Text>
-          <TextInput
-            style={styles.input}
-            value={username}
-            onChangeText={setUsername}
-            placeholder={t('g_forgot_ph')}
-            placeholderTextColor={colors.faint}
-            autoCapitalize="none"
-          />
-          <TouchableOpacity
-            style={[styles.primary, !username.trim() && styles.disabled]}
+          <View style={styles.inputWrap}>
+            <AppInput
+              boxStyle={styles.input}
+              style={styles.inputText}
+              value={username}
+              onChangeText={setUsername}
+              placeholder={t('g_forgot_ph')}
+              autoCapitalize="none"
+            />
+          </View>
+          <AppButton
+            title={t('g_forgot_send')}
             onPress={() => setSent(true)}
-            disabled={!username.trim()}>
-            <Text style={styles.primaryT}>{t('g_forgot_send')}</Text>
-          </TouchableOpacity>
+            disabled={!username.trim()}
+            style={styles.primary}
+          />
         </>
       )}
     </ScrollView>
@@ -64,6 +70,10 @@ const styles = StyleSheet.create({
     width: '100%', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
     borderRadius: 10, padding: 12, fontFamily: fonts.medium, fontSize: 14, color: colors.text,
   },
+  /** Teks di dalam AppInput: medium ala form lama. */
+  inputText: { fontFamily: fonts.medium },
+  /** Pembungkus AppInput agar selebar form di container tengah. */
+  inputWrap: { width: '100%' },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 15, alignItems: 'center', marginTop: 16, width: '100%' },
   disabled: { opacity: 0.5 },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },

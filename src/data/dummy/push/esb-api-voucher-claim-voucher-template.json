@@ -1,0 +1,11 @@
+{
+  "request": { "templateId": "TPL-QOQI10", "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "templateId": "TPL-QOQI10", "code": "QOQI10-88121", "claimed": true, "amount": 10000 }
+  }
+}

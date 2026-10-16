@@ -1,0 +1,21 @@
+{
+  "request": { "branchId": "B001", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 1,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "orderId": "ESO-88121", "bookingId": "EZO-88121", "customerName": "Budi Santoso",
+          "subtotal": 52000, "discount": 2000, "tax": 4955, "serviceCharge": 2500,
+          "ongkir": 12000, "grandTotal": 64500, "status": "ONGOING",
+          "lastSyncDate": "2026-10-16 12:50:00" }
+      ]
+    }
+  }
+}

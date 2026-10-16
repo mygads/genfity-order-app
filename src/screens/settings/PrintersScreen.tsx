@@ -7,9 +7,9 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Switch,
   Text,
-  TextInput,
+  TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { printers, type PrinterDevice } from '../../data/mock';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBondedBtPrinters, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -35,17 +35,18 @@ import { useEffect, useMemo, useState } from 'react';import {
   if (r === 'Checker') return colors.blue;
   return colors.green;}/** Susun teks pratinjau struk uji per station. Rupiah selalu via rp(). Baris
  *  catatan dev-client hanya ditambah bila modul native tak tersedia (teks via
- *  kunci printers.detectedHint dari pemanggil agar ikut bahasa aktif). */function previewText(s: Station, hint: string | null): string {
+ *  kunci printers.detectedHint dari pemanggil agar ikut bahasa aktif). */
+function previewText(s: Station, hint: string | null, L: { test: string; role: string; cols: string; cut: string; total: string }): string {
   const bar = '-'.repeat(s.cpl);
   return [
-    `UJI CETAK - ${s.name}`,
-    `${s.role} - ${s.conn}${s.address ? ` - ${s.address}` : ''}`,
-    `${s.cpl} kolom - ${s.autocut ? 'autocut' : 'tanpa autocut'}`,
+    `${L.test} - ${s.name}`,
+    `${L.role} - ${s.conn}${s.address ? ` - ${s.address}` : ''}`,
+    `${L.cols} - ${L.cut}`,
     bar,
     '1x Ayam Geprek Pelakor',
     '2x Es Teh Manis',
     bar,
-    `TOTAL ${rp(64050)}`,
+    `${L.total} ${rp(64050)}`,
     ...(hint ? [hint] : []),
   ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. */function stationTarget(s: Station): PrinterTarget { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
 }
@@ -70,6 +71,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   // Modul native ada = jalan di dev-client/APK produksi; tidak ada = Expo Go/web.
   // Dipakai untuk menyembunyikan catatan dev-client bila sudah tidak relevan.
   const [nativeReady] = useState(hasNativePrinter);
+
+  /** Label peran station ikut bahasa aktif (nilai kanonis tetap ID di state). */
+  const roleLabel = (r: StationRole) =>
+    r === 'Kasir' ? t('printers.role_kasir') : r === 'Dapur' ? t('printers.role_dapur') : r === 'Checker' ? t('printers.role_checker') : t('printers.role_label');
 
   useEffect(() => { let alive = true; void getJSON<Station[]>(LS_STATIONS, DEFAULT_STATIONS).then((cached) => { if (alive && cached.length > 0) setStations(cached); }); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]); const list = useMemo(
     () => printers.filter((p) => filter === 'Semua' || p.type === filter),
@@ -131,9 +136,9 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             .filter((f) => !bb.some((b) => b.mac === f.mac))
             .map((f, i) => ({ id: `bt-live-${i}`, name: f.name, mac: f.mac, paired: true })),
         ]);
-        setStatusMsg(`${found.length} printer BT bonded terdeteksi.`);
+        setStatusMsg(t('printers.btFound').replace('{n}', String(found.length)));
       } else {
-        setStatusMsg('Tak ada printer BT bonded terdeteksi - perlu dev-client + izin Bluetooth.');
+        setStatusMsg(t('printers.btNone'));
       }
     } finally {
       setPairing(false);
@@ -148,10 +153,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     const ipOk = /^\d{1,3}(\.\d{1,3}){3}$/.test(lanIp.trim());
     const port = Number(lanPort);
     if (!ipOk || !Number.isInteger(port) || port < 1 || port > 65535) {
-      setLanMsg('IP/port tidak valid - contoh 192.168.1.50:9100.');
+      setLanMsg(t('printers.lanInvalid'));
       return;
     }
-    setLanMsg(`Menghubungi ${lanIp.trim()}:${port}...`);
+    setLanMsg(t('printers.lanCalling').replace('{x}', `${lanIp.trim()}:${port}`));
     // ESC @ = reset printer, aman dikirim sebagai probe koneksi.
     const res = await printBytes(
       { transport: 'lan', host: lanIp.trim(), port },
@@ -159,10 +164,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     );
     setLanMsg(
       res.ok
-        ? `Terhubung - printer menjawab (${res.bytes} byte terkirim).`
+        ? t('printers.lanOk').replace('{n}', String(res.bytes))
         : res.reason === 'connect-failed'
-          ? `Koneksi gagal: ${res.detail ?? 'pastikan satu jaringan Wi-Fi'}.`
-          : 'Kirim butuh dev-client / modul TCP.',
+          ? t('printers.lanFail').replace('{x}', res.detail ?? t('printers.lanSameWifi'))
+          : t('printers.lanNeedClient'),
     );
   };
 
@@ -171,8 +176,8 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     const ok = await openCashDrawer(stationTarget(s));
     setStatusMsg(
       ok
-        ? `Perintah buka drawer dikirim ke ${s.name}.`
-        : `Gagal buka drawer ${s.name} - perlu dev-client (modul native).`,
+        ? t('printers.drawerOk').replace('{x}', s.name)
+        : t('printers.drawerFail').replace('{x}', s.name),
     );
   };
 
@@ -180,8 +185,8 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   const testPrintStation = async (s: Station) => {
     const bytes = buildReceiptBytes({
       shop: 'ESB CABANG PORIS',
-      addr: `Uji cetak - ${s.name}`,
-      trx: `${s.role} - ${s.conn} - ${s.cpl} kolom`,
+      addr: `${t('printers.receiptTest')} - ${s.name}`,
+      trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
       items: [
         { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
         { name: 'Es Teh Manis', qty: 2, price: 8000 },
@@ -189,16 +194,16 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
       subtotal: 61000,
       service: 3050,
       total: 64050,
-      method: 'Tunai',
+      method: t('pay_tab_cash'),
     });
-    setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint')), hex: toHex(bytes).slice(0, 240) + '...' });
+    setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint'), { test: t('printers.receiptTest'), role: roleLabel(s.role), cols: t('printers.receiptCols').replace('{n}', String(s.cpl)), cut: s.autocut ? t('printers.receiptCut') : t('printers.receiptNoCut'), total: t('c_total') }), hex: toHex(bytes).slice(0, 240) + '...' });
     const res = await printBytes(stationTarget(s), bytes);
     setStatusMsg(
       res.ok
-        ? `Uji cetak ${s.name} terkirim (${res.bytes} byte).`
+        ? t('printers.testOk').replace('{x}', s.name).replace('{n}', String(res.bytes))
         : res.reason === 'need-dev-client'
-          ? `Pratinjau uji cetak ${s.name} siap (${bytes.length} byte). Kirim nyata butuh dev-client.`
-          : `Kirim ke ${s.name} gagal: ${res.detail ?? res.reason}.`,
+          ? t('printers.testPreview').replace('{x}', s.name).replace('{n}', String(bytes.length))
+          : t('printers.testFail').replace('{x}', s.name).replace('{e}', String(res.detail ?? res.reason)),
     );
     if (res.ok) {
       setStations((ss) => ss.map((x) => (x.id === s.id ? { ...x, connected: true } : x)));
@@ -212,8 +217,18 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
 
   const go = (route: string) => navigation?.navigate(route); return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <ScreenHeader title={t('printers.title')} sub={t('printers.sub')} onBack={() => setDrawerOpen(true)} backLabel="☰" /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('printers.title')} sub={t('printers.sub')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } /> <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
+        {/* WIRE REA-16: kunci prefs native printer (info status, best-effort) */}
+        <View style={styles.stCard}>
+          <Text style={styles.stName}>native</Text>
+          <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.bluetoothPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
+          <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.usbPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
+        </View>
       {stations.map((s) => (
         <View key={s.id} style={styles.stCard}>
           <View style={styles.stTop}>
@@ -224,13 +239,13 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               </Text>
             </View>
             <View style={[styles.roleBadge, { backgroundColor: roleColor(s.role) }]}>
-              <Text style={styles.roleText}>{s.role}</Text>
+              <Text style={styles.roleText}>{roleLabel(s.role)}</Text>
             </View>
           </View>
           <View style={styles.chipRow}>
             {(['Kasir', 'Dapur', 'Checker', 'Label'] as StationRole[]).map((r) => (
               <Pressable key={r} onPress={() => patchStation(s.id, { role: r })} style={[styles.chip, s.role === r && styles.chipActive]}>
-                <Text style={[styles.chipText, s.role === r && styles.chipTextActive]}>{r}</Text>
+                <Text style={[styles.chipText, s.role === r && styles.chipTextActive]}>{roleLabel(r)}</Text>
               </Pressable>
             ))}
           </View>
@@ -242,7 +257,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             ))}
             {([32, 48] as const).map((c) => (
               <Pressable key={c} onPress={() => patchStation(s.id, { cpl: c })} style={[styles.chip, s.cpl === c && styles.chipActive]}>
-                <Text style={[styles.chipText, s.cpl === c && styles.chipTextActive]}>{c} kol</Text>
+                <Text style={[styles.chipText, s.cpl === c && styles.chipTextActive]}>{t('printers.cols').replace('{n}', String(c))}</Text>
               </Pressable>
             ))}
           </View>
@@ -251,35 +266,25 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             <Switch value={s.autocut} onValueChange={(v) => patchStation(s.id, { autocut: v })} trackColor={{ true: colors.green, false: colors.stroke }} />
           </View>
           <View style={styles.stBtns}>
-            <Pressable style={styles.btnTest} onPress={() => testPrintStation(s)}>
-              <Text style={styles.btnTestText}>{t('printers.testPrint')}</Text>
-            </Pressable>
-            <Pressable style={styles.btnDrawer} onPress={() => openDrawer(s)}>
-              <Text style={styles.btnDrawerText}>{t('printers.openDrawer')}</Text>
-            </Pressable>
-            <Pressable style={styles.btnMini} onPress={() => setDefault(s.id)}>
-              <Text style={styles.btnMiniText}>{t('printers.setPrimary')}</Text>
-            </Pressable>
-            <Pressable style={styles.btnMiniDanger} onPress={() => removeStation(s.id)}>
-              <Text style={styles.btnMiniDangerText}>{t('printers.remove')}</Text>
-            </Pressable>
+            <AppButton title={t('printers.testPrint')} onPress={() => testPrintStation(s)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton title={t('printers.openDrawer')} onPress={() => openDrawer(s)} variant="secondary" fullWidth={false} style={styles.amberFlex} textStyle={styles.amberText} />
+            <AppButton title={t('printers.setPrimary')} onPress={() => setDefault(s.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton title={t('printers.remove')} onPress={() => removeStation(s.id)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
           </View>
-          <Pressable
-            style={[styles.btnConn, s.connected && styles.btnConnOff]}
-            onPress={() => patchStation(s.id, { connected: !s.connected })}>
-            <Text style={[styles.btnConnText, s.connected && styles.btnConnOffText]}>
-              {s.connected ? t('printers.disconnect') : t('printers.connect')}
-            </Text>
-          </Pressable>
+          {s.connected ? (
+            <AppButton title={t('printers.disconnect')} onPress={() => patchStation(s.id, { connected: !s.connected })} variant="danger" style={styles.paleRedBlock} textStyle={styles.redText} />
+          ) : (
+            <AppButton title={t('printers.connect')} onPress={() => patchStation(s.id, { connected: !s.connected })} style={styles.greenBlock} />
+          )}
         </View>
       ))}
       <View style={styles.stCard}>
         <Text style={styles.stName}>{t('printers.addStation')}</Text>
-        <TextInput style={styles.input} value={stName} onChangeText={setStName} placeholder={t('printers.stationNamePh')} placeholderTextColor={colors.faint} />
+        <AppInput value={stName} onChangeText={setStName} placeholder={t('printers.stationNamePh')} />
         <View style={styles.chipRow}>
           {(['Kasir', 'Dapur', 'Checker', 'Label'] as StationRole[]).map((r) => (
             <Pressable key={r} onPress={() => setStRole(r)} style={[styles.chip, stRole === r && styles.chipActive]}>
-              <Text style={[styles.chipText, stRole === r && styles.chipTextActive]}>{r}</Text>
+              <Text style={[styles.chipText, stRole === r && styles.chipTextActive]}>{roleLabel(r)}</Text>
             </Pressable>
           ))}
         </View>
@@ -290,9 +295,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             </Pressable>
           ))}
         </View>
-        <Pressable style={[styles.btnPrimary, !stName.trim() && styles.btnDisabled]} disabled={!stName.trim()} onPress={addStation}>
-          <Text style={styles.btnPrimaryText}>{t('printers.addStation')}</Text>
-        </Pressable>
+        <AppButton title={t('printers.addStation')} onPress={addStation} disabled={!stName.trim()} style={styles.navyBlock} />
       </View>
 
       {preview ? (
@@ -300,9 +303,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
           <Text style={styles.previewTitle}>{preview.station}</Text>
           <Text style={styles.previewText}>{preview.text}</Text>
           <Text style={styles.previewHex} numberOfLines={2}>{preview.hex}</Text>
-          <Pressable style={[styles.btnTest, { marginTop: 8 }]} onPress={() => shareReceipt(preview.text)}>
-            <Text style={styles.btnTestText}>{t('printers.sharePreview')}</Text>
-          </Pressable>
+          <AppButton title={t('printers.sharePreview')} onPress={() => shareReceipt(preview.text)} variant="secondary" style={styles.blockGap} />
         </View>
       ) : null}
       {statusMsg ? <Text style={styles.statusMsg}>{statusMsg}</Text> : null}
@@ -317,16 +318,14 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.stName}>{b.name}</Text>
               <Text style={styles.stMeta}>{b.mac} - {b.paired ? t('printers.paired') : t('printers.notPaired')}</Text>
             </View>
-            <Pressable style={b.paired ? styles.btnMiniDanger : styles.btnMini} onPress={() => togglePair(b.id)}>
-              <Text style={b.paired ? styles.btnMiniDangerText : styles.btnMiniText}>
-                {b.paired ? t('printers.forget') : t('printers.pair')}
-              </Text>
-            </Pressable>
+            {b.paired ? (
+              <AppButton title={t('printers.forget')} onPress={() => togglePair(b.id)} variant="danger" fullWidth={false} style={styles.btnInlinePale} textStyle={styles.redText} />
+            ) : (
+              <AppButton title={t('printers.pair')} onPress={() => togglePair(b.id)} variant="secondary" fullWidth={false} style={styles.btnInline} />
+            )}
           </View>
         ))}
-        <Pressable style={[styles.btnPrimary, pairing && styles.btnDisabled]} onPress={startPairing} disabled={pairing}>
-          <Text style={styles.btnPrimaryText}>{pairing ? t('printers.scanning') : t('printers.scanBt')}</Text>
-        </Pressable>
+        <AppButton title={pairing ? t('printers.scanning') : t('printers.scanBt')} onPress={startPairing} disabled={pairing} style={styles.navyBlock} />
       </View>
 
       <Text style={styles.groupLabel}>{t('printers.lan')}</Text>
@@ -334,12 +333,14 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
         <Text style={styles.cardTitle}>{t('printers.lanTitle')}</Text>
         <Text style={styles.cardSub}>{t('printers.lanSub')}</Text>
         <View style={styles.lanRow}>
-          <TextInput style={styles.input} value={lanIp} onChangeText={setLanIp} placeholder="192.168.1.50" placeholderTextColor={colors.faint} autoCapitalize="none" />
-          <TextInput style={[styles.input, styles.portInput]} value={lanPort} onChangeText={setLanPort} placeholder="9100" placeholderTextColor={colors.faint} keyboardType="numeric" />
+          <View style={styles.formFlex}>
+            <AppInput value={lanIp} onChangeText={setLanIp} placeholder="192.168.1.50" autoCapitalize="none" />
+          </View>
+          <View style={styles.portWrap}>
+            <AppInput value={lanPort} onChangeText={setLanPort} placeholder="9100" keyboardType="numeric" />
+          </View>
         </View>
-        <Pressable style={[styles.btnTest, { marginTop: 8 }]} onPress={testLan}>
-          <Text style={styles.btnTestText}>{t('printers.testLan')}</Text>
-        </Pressable>
+        <AppButton title={t('printers.testLan')} onPress={testLan} variant="secondary" style={styles.blockGap} />
         {lanMsg ? <Text style={styles.statusMsg}>{lanMsg}</Text> : null}
       </View>
 
@@ -378,15 +379,15 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               </View>
               <Text style={styles.cardRole}>{item.role} - {on ? t('printers.connected') : t('printers.disconnected')}</Text>
               <View style={styles.cardBtns}>
-                <Pressable style={styles.btnTest} onPress={() => testPrintStation({
+                <AppButton title={t('printers.testPrint')} onPress={() => testPrintStation({
                   id: item.id, name: item.name, role: 'Kasir', conn: item.type === 'LAN' ? 'LAN' : 'Bluetooth',
                   address: item.address, cpl: 32, autocut: true, isDefault: false, connected: on,
-                })}>
-                  <Text style={styles.btnTestText}>{t('printers.testPrint')}</Text>
-                </Pressable>
-                <Pressable style={on ? styles.btnOff : styles.btnOn} onPress={() => (on ? setConfirm(item) : togglePrinter(item))}>
-                  <Text style={on ? styles.btnOffText : styles.btnOnText}>{on ? t('printers.disconnect') : t('printers.connect')}</Text>
-                </Pressable>
+                })} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+                {on ? (
+                  <AppButton title={t('printers.disconnect')} onPress={() => setConfirm(item)} variant="danger" fullWidth={false} style={styles.paleRedFlex} textStyle={styles.redText} />
+                ) : (
+                  <AppButton title={t('printers.connect')} onPress={() => togglePrinter(item)} fullWidth={false} style={styles.greenFlex} />
+                )}
               </View>
             </View>
           );
@@ -399,12 +400,8 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             <Text style={styles.dialogTitle}>{t('printers.disconnectTitle')}</Text>
             <Text style={styles.dialogSub}>{t('printers.disconnectSub1')} {confirm?.name} {t('printers.disconnectSub2')}</Text>
             <View style={styles.dialogBtns}>
-              <Pressable style={styles.btnGhost} onPress={() => setConfirm(null)}>
-                <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
-              </Pressable>
-              <Pressable style={styles.btnDanger} onPress={() => confirm && togglePrinter(confirm)}>
-                <Text style={styles.btnDangerText}>{t('printers.yesDisconnect')}</Text>
-              </Pressable>
+              <AppButton title={t('common.cancel')} onPress={() => setConfirm(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+              <AppButton title={t('printers.yesDisconnect')} onPress={() => confirm && togglePrinter(confirm)} variant="danger" fullWidth={false} style={styles.btnFlex} />
             </View>
           </View>
         </View>
@@ -413,10 +410,25 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
 
     </ScrollView>
   );}const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
 
   groupLabel: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy, marginTop: 18, marginBottom: 6, paddingHorizontal: 16 },
+  formFlex: { flex: 1 },
+  portWrap: { flex: 1, maxWidth: 100 },
+  btnInline: { marginTop: 0 },
+  btnInlinePale: { marginTop: 0, backgroundColor: colors.paleRed },
+  btnFlex: { marginTop: 0, flex: 1 },
+  navyBlock: { marginTop: 10, backgroundColor: colors.navy },
+  blockGap: { marginTop: 8 },
+  greenFlex: { marginTop: 0, flex: 1, backgroundColor: colors.green },
+  greenBlock: { marginTop: 8, backgroundColor: colors.green },
+  paleRedFlex: { marginTop: 0, flex: 1, backgroundColor: colors.paleRed },
+  paleRedBlock: { marginTop: 8, backgroundColor: colors.paleRed },
+  redText: { color: colors.red },
+  amberFlex: { marginTop: 0, flex: 1, backgroundColor: colors.paleAmber, borderColor: colors.paleAmber },
+  amberText: { color: colors.amberDark },
   stCard: {
     backgroundColor: colors.card,
     borderRadius: 12,

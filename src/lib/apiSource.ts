@@ -94,11 +94,16 @@ const DUMMY: Record<string, unknown> = {
   'main/get-voucher': require('../data/dummy/pull/main-get-voucher.json') as unknown,
   'main/get-member': require('../data/dummy/pull/main-get-member.json') as unknown,
   'main/get-sales': require('../data/dummy/pull/main-get-sales.json') as unknown,
-  'main/get-expense-chart-of-accounts': require('../data/dummy/pull/main-get-expense-chart-of-accounts.json') as unknown,
-  'main/get-menu-online': require('../data/dummy/pull/main-get-menu-online.json') as unknown,
-  'esb_api/pull/pos-version': require('../data/dummy/pull/esb-api-pull-pos-version.json') as unknown,
+  // REA-18: path tebakan diganti padanan APK (lihat ApiPath).
+  'v1/pull/get-menu-online': require('../data/dummy/pull/v1-pull-get-menu-online.json') as unknown,
+  'v1/pull/expense-chart-of-accounts': require('../data/dummy/pull/v1-pull-expense-chart-of-accounts.json') as unknown,
+  'esb_api/pull/pull-pos-version': require('../data/dummy/pull/esb-api-pull-pull-pos-version.json') as unknown,
+  'esb_api/pull/pull-station-data': require('../data/dummy/pull/esb-api-pull-pull-station-data.json') as unknown,
+  'esb_api/pull/pull-terminal-settings': require('../data/dummy/pull/esb-api-pull-pull-terminal-settings.json') as unknown,
+  'esb_api/main/get-shift-log-data': require('../data/dummy/pull/esb-api-main-get-shift-log-data.json') as unknown,
+  'esb_apiv11/main/get-terminal-settings': require('../data/dummy/pull/esb-apiv11-main-get-terminal-settings.json') as unknown,
+  'esb_apiv9/terminal/verification-notify': require('../data/dummy/pull/esb-apiv9-terminal-verification-notify.json') as unknown,
   'main/get-payment-method': require('../data/dummy/pull/main-get-payment-method.json') as unknown,
-  'main/get-station': require('../data/dummy/pull/main-get-station.json') as unknown,
   'terminal/get-terminal': require('../data/dummy/pull/terminal-get-terminal.json') as unknown,
   'terminal/update': require('../data/dummy/pull/terminal-update.json') as unknown,
   'order/finish': require('../data/dummy/push/order-finish.json') as unknown,
@@ -106,9 +111,23 @@ const DUMMY: Record<string, unknown> = {
   'order/move-items': require('../data/dummy/push/order-move-items.json') as unknown,
   'order/move-table': require('../data/dummy/push/order-move-table.json') as unknown,
   'order/view': require('../data/dummy/push/order-view.json') as unknown,
-  'shift/open': require('../data/dummy/push/shift-open.json') as unknown,
-  'shift/close': require('../data/dummy/push/shift-close.json') as unknown,
-  'branch-expenses/push': require('../data/dummy/push/branch-expenses-push.json') as unknown,
+  'posv1/order/view-by-qr': require('../data/dummy/push/posv1-order-view-by-qr.json') as unknown,
+  'posv1/order/view-quick-service': require('../data/dummy/push/posv1-order-view-quick-service.json') as unknown,
+  'posv1/order/pos-error-log': require('../data/dummy/push/posv1-order-pos-error-log.json') as unknown,
+  // REA-18: satu path v1/push/shift untuk buka + tutup (beda body.op).
+  'v1/push/shift': require('../data/dummy/push/v1-push-shift.json') as unknown,
+  'v1/push/branch-expenses': require('../data/dummy/push/v1-push-branch-expenses.json') as unknown,
+  'erp/member': require('../data/dummy/push/erp-member.json') as unknown,
+  'erp/member/balance-deposit': require('../data/dummy/push/erp-member-balance-deposit.json') as unknown,
+  'erp/member/deposit': require('../data/dummy/push/erp-member-deposit.json') as unknown,
+  'erp/member/sales': require('../data/dummy/push/erp-member-sales.json') as unknown,
+  'erp/ezo-delivery/approve': require('../data/dummy/push/erp-ezo-delivery-approve.json') as unknown,
+  'erp/ezo-delivery/create-booking': require('../data/dummy/push/erp-ezo-delivery-create-booking.json') as unknown,
+  'erp/ezo-delivery/finish-by-outlet': require('../data/dummy/push/erp-ezo-delivery-finish-by-outlet.json') as unknown,
+  'erp/ezo-delivery/push-data': require('../data/dummy/push/erp-ezo-delivery-push-data.json') as unknown,
+  'erp/ezo-delivery/schedule-order': require('../data/dummy/push/erp-ezo-delivery-schedule-order.json') as unknown,
+  'erp/ezo-delivery/search-ongoing': require('../data/dummy/push/erp-ezo-delivery-search-ongoing.json') as unknown,
+  'erp/ezo-delivery/search-outstanding': require('../data/dummy/push/erp-ezo-delivery-search-outstanding.json') as unknown,
   'member-deposit-withdrawal/inquiry-deposit': require('../data/dummy/push/member-deposit-withdrawal-inquiry-deposit.json') as unknown,
   'member-deposit-withdrawal/topup': require('../data/dummy/push/member-deposit-withdrawal-topup.json') as unknown,
   'sales/receipt-email': require('../data/dummy/push/sales-receipt-email.json') as unknown,
@@ -116,10 +135,15 @@ const DUMMY: Record<string, unknown> = {
   'posv1/esb-voucher/lock': require('../data/dummy/push/posv1-esb-voucher-lock.json') as unknown,
   'posv1/esb-voucher/unlock': require('../data/dummy/push/posv1-esb-voucher-unlock.json') as unknown,
   'posv1/esb-voucher/burn': require('../data/dummy/push/posv1-esb-voucher-burn.json') as unknown,
+  'esb_api/external-voucher/validate': require('../data/dummy/push/esb-api-external-voucher-validate.json') as unknown,
+  'esb_api/external-voucher/burn': require('../data/dummy/push/esb-api-external-voucher-burn.json') as unknown,
+  'esb_api/external-voucher/unburn': require('../data/dummy/push/esb-api-external-voucher-unburn.json') as unknown,
+  'esb_api/voucher/validate-online-voucher-pos-payment': require('../data/dummy/push/esb-api-voucher-validate-online-voucher-pos-payment.json') as unknown,
+  'esb_api/voucher/claim-online-voucher-pos-payment': require('../data/dummy/push/esb-api-voucher-claim-online-voucher-pos-payment.json') as unknown,
+  'esb_api/voucher/claim-voucher-template': require('../data/dummy/push/esb-api-voucher-claim-voucher-template.json') as unknown,
   'auth/cashier-login': require('../data/dummy/push/auth-cashier-login.json') as unknown,
   'auth/supervisor-approve': require('../data/dummy/push/auth-supervisor-approve.json') as unknown,
   'device/register-push': require('../data/dummy/push/device-register-push.json') as unknown,
-  'member/register': require('../data/dummy/push/member-register.json') as unknown,
   'esb/update/pos-lite-minimum-version-v2': require('../data/dummy/ota/pos-lite-minimum-version-v2.json') as unknown,
 };
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -379,4 +403,183 @@ export function describeSource(): string {
   const mode = getApiMode();
   const who = t.terminalCode || 'tanpa-terminal';
   return `${mode}:${who}`;
+}
+
+// ---------------------------------------------------------------------------
+// Helper REA-FIX-A: voucher online + eksternal, versi POS, verify terminal,
+// delivery EZO, member ERP. Dipakai pemilik layar (VoucherScreen, EsbOrder,
+// Member, Shift) - kontrak di docs/API-CONTRACT.md §4.1/§5.3/§5.5/§5.6.
+// ---------------------------------------------------------------------------
+
+export interface OnlineVoucherCheck {
+  ok: boolean;
+  amount: number;
+  minSpend: number;
+  fromDummy: boolean;
+}
+
+/** Validasi voucher online (REA-7) {code, grandTotal} → {valid, amount}. */
+export async function validateOnlineVoucher(
+  code: string,
+  grandTotal: number,
+): Promise<OnlineVoucherCheck> {
+  const r = await apiFetch(ApiPath.voucherOnlineValidate, {
+    body: { code, grandTotal: Math.round(grandTotal) },
+  });
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const d = data as { valid?: unknown; amount?: unknown; minSpend?: unknown };
+  const amount = Math.round(Number(d.amount ?? 0)) || 0;
+  return {
+    ok: d.valid === true && amount > 0,
+    amount,
+    minSpend: Math.round(Number(d.minSpend ?? 0)) || 0,
+    fromDummy: r.fromDummy,
+  };
+}
+
+export interface OnlineVoucherClaim {
+  ok: boolean;
+  amount: number;
+  fromDummy: boolean;
+}
+
+/** Klaim voucher online ke transaksi berjalan (REA-7). */
+export async function claimOnlineVoucher(
+  code: string,
+  salesNum: string,
+): Promise<OnlineVoucherClaim> {
+  const r = await apiFetch(ApiPath.voucherOnlineClaim, {
+    body: { code, salesNum },
+  });
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const d = data as { claimed?: unknown; amount?: unknown };
+  const amount = Math.round(Number(d.amount ?? 0)) || 0;
+  return { ok: d.claimed === true, amount, fromDummy: r.fromDummy };
+}
+
+export type ExtVoucherOp = 'validate' | 'burn' | 'unburn';
+
+const EXT_VOUCHER_PATH: Record<ExtVoucherOp, string> = {
+  validate: ApiPath.extVoucherValidate,
+  burn: ApiPath.extVoucherBurn,
+  unburn: ApiPath.extVoucherUnburn,
+};
+
+export interface ExtVoucherResult {
+  ok: boolean;
+  amount: number;
+  fromDummy: boolean;
+}
+
+/**
+ * Voucher eksternal (REA-6): validate → {valid, amount},
+ * burn → {burned}, unburn → {unburned}.
+ */
+export async function externalVoucher(
+  op: ExtVoucherOp,
+  code: string,
+  salesNum?: string,
+): Promise<ExtVoucherResult> {
+  const r = await apiFetch(EXT_VOUCHER_PATH[op], {
+    body: salesNum ? { code, salesNum } : { code },
+  });
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const d = data as {
+    valid?: unknown;
+    burned?: unknown;
+    unburned?: unknown;
+    amount?: unknown;
+  };
+  const ok =
+    op === 'burn' ? d.burned === true
+    : op === 'unburn' ? d.unburned === true
+    : d.valid === true;
+  return {
+    ok,
+    amount: Math.round(Number(d.amount ?? 0)) || 0,
+    fromDummy: r.fromDummy,
+  };
+}
+
+export interface PosVersionInfo {
+  minVersion: number;
+  latestVersion: number;
+  fromDummy: boolean;
+}
+
+/** Versi POS dari server (REA-12 pull-pos-version). */
+export async function fetchPosVersion(): Promise<PosVersionInfo> {
+  const t = getTerminal();
+  const r = await apiFetch(ApiPath.pullPosVersion, {
+    body: { branchId: t.branchId, terminalId: t.terminalCode, platform: 'android' },
+  });
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const d = data as { minVersion?: unknown; latestVersion?: unknown };
+  return {
+    minVersion: Math.round(Number(d.minVersion ?? 0)) || 0,
+    latestVersion: Math.round(Number(d.latestVersion ?? 0)) || 0,
+    fromDummy: r.fromDummy,
+  };
+}
+
+/** Notifikasi verifikasi terminal (REA-9). */
+export async function notifyTerminalVerification(
+  status: string,
+): Promise<{ ok: boolean; fromDummy: boolean }> {
+  const t = getTerminal();
+  const deviceID = await getDeviceId();
+  const r = await apiFetch(ApiPath.terminalVerifyNotify, {
+    body: { terminalCode: t.terminalCode, branchId: t.branchId, deviceID, status },
+  });
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return { ok: (data as { ok?: boolean }).ok === true, fromDummy: r.fromDummy };
+}
+
+export type DeliveryOp =
+  | 'approve'
+  | 'create-booking'
+  | 'finish-by-outlet'
+  | 'push-data'
+  | 'schedule-order'
+  | 'search-ongoing'
+  | 'search-outstanding';
+
+const DELIVERY_PATH: Record<DeliveryOp, string> = {
+  approve: ApiPath.deliveryApprove,
+  'create-booking': ApiPath.deliveryCreateBooking,
+  'finish-by-outlet': ApiPath.deliveryFinishByOutlet,
+  'push-data': ApiPath.deliveryPushData,
+  'schedule-order': ApiPath.deliveryScheduleOrder,
+  'search-ongoing': ApiPath.deliverySearchOngoing,
+  'search-outstanding': ApiPath.deliverySearchOutstanding,
+};
+
+/**
+ * Delivery EZO (REA-2, kontrak §5.6). TODO(pemilik layar EsbOrder): panggil
+ * dari dashboard delivery saat UI batch lain siap.
+ */
+export async function deliveryApi<T = Record<string, unknown>>(
+  op: DeliveryOp,
+  body: Record<string, unknown>,
+): Promise<ApiResult<T>> {
+  return apiFetch<T>(DELIVERY_PATH[op], { body });
+}
+
+export type MemberErpOp = 'balance-deposit' | 'deposit' | 'sales';
+
+const MEMBER_ERP_PATH: Record<MemberErpOp, string> = {
+  'balance-deposit': ApiPath.memberErpBalance,
+  'deposit': ApiPath.memberErpDeposit,
+  'sales': ApiPath.memberErpSales,
+};
+
+/**
+ * Member via erp/member/* (REA-3, kontrak §5.5).
+ * TODO(pemilik layar Member): alihkan inquiry/topup/register ke helper ini.
+ */
+export async function memberErpApi<T = Record<string, unknown>>(
+  op: MemberErpOp,
+  body: Record<string, unknown>,
+): Promise<ApiResult<T>> {
+  return apiFetch<T>(MEMBER_ERP_PATH[op], { body });
 }

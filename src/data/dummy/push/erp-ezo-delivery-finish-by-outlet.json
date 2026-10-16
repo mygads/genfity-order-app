@@ -1,0 +1,11 @@
+{
+  "request": { "bookingId": "EZO-88121", "branchId": "B001", "userId": "U07" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "bookingId": "EZO-88121", "finished": true, "status": "DELIVERED" }
+  }
+}

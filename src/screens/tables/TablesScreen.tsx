@@ -3,10 +3,9 @@ import React, { useEffect, useState } from 'react';import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueSync } from '../../lib/sync';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -24,22 +23,43 @@ import React, { useEffect, useState } from 'react';import {
   { id: '6', no: 'B2', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
   { id: '7', no: 'B3', section: 'Teras', kapasitas: 6, status: 'gabung', namaTamu: 'B2+B3 · 12 tamu', seatedMin: 70 },
   { id: '8', no: 'C1', section: 'VIP', kapasitas: 2, status: 'kosong' },
-  { id: '9', no: 'C2', section: 'VIP', kapasitas: 8, status: 'dipesan', namaTamu: 'Rapat · 20:00' },];const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { label: string; bg: string; fg: string }> = {
-  kosong: { label: 'Tersedia', bg: colors.paleGreen, fg: colors.green },
-  terisi: { label: 'Terisi', bg: colors.paleRed, fg: colors.red },
-  dipesan: { label: 'Dipesan', bg: colors.paleOrange, fg: colors.orange },
-  gabung: { label: 'Gabung', bg: colors.paleBlue, fg: colors.navy },};/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */function fmtDurasi(min?: number): string {
+  { id: '9', no: 'C2', section: 'VIP', kapasitas: 8, status: 'dipesan', namaTamu: 'Rapat · 20:00' },];const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { bg: string; fg: string }> = {
+  kosong: { bg: colors.paleGreen, fg: colors.green },
+  terisi: { bg: colors.paleRed, fg: colors.red },
+  dipesan: { bg: colors.paleOrange, fg: colors.orange },
+  gabung: { bg: colors.paleBlue, fg: colors.navy },};const STATUS_LABEL_KEY: Record<TableStatus, string> = {
+  kosong: 'tbl.stKosong',
+  terisi: 'tbl.stTerisi',
+  dipesan: 'tbl.stDipesan',
+  gabung: 'tbl.stGabung',};/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */function fmtDurasi(min?: number, minLbl = 'mnt', hrLbl = 'jam'): string {
   if (min === undefined) return '';
-  if (min < 60) return `${min} mnt`;
+  if (min < 60) return `${min} ${minLbl}`;
   const h = Math.floor(min / 60);
   const m = min % 60;
-  return m === 0 ? `${h} jam` : `${h} jam ${m} mnt`;}/** Catat mutasi meja ke antrean sync (offline-first, tidak memblokir UI). */function queueTableOp(op: string, payload: Record<string, unknown>): void { try { enqueueSync('other', { op, ...payload, at: new Date().toISOString() });
+  return m === 0 ? `${h} ${hrLbl}` : `${h} ${hrLbl} ${m} ${minLbl}`;}
+/** Samakan nomor meja lokal ke kanonis TableTimer ("A-01" dan "A1" sama). */
+function normNo(raw: string): string {
+  return canonTableNo(raw);
+}
+interface TimerStoreRow { id: string; elapsed: number; limit: number }
+/** Tulis elapsed satu nomor meja ke persist TableTimer (F2, best-effort).
+ * Diam bila store TableTimer belum ada (belum pernah dibuka). */
+async function writeTimerStore(no: string, elapsed: number): Promise<void> {
+  try {
+    const cur = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []);
+    if (!Array.isArray(cur) || cur.length === 0) return;
+    const target = normNo(no);
+    await setJSON(
+      TABLE_TIMER_TIM_KEY,
+      cur.map((x) => (canonTableNo(x.id) === target ? { ...x, elapsed } : x)),
+    );
+  } catch { /* abaikan: snapshot SEATED_KEY tetap jadi fallback */ }}/** Catat mutasi meja ke antrean sync (offline-first, tidak memblokir UI). */function queueTableOp(op: string, payload: Record<string, unknown>): void { try { enqueueSync('other', { op, ...payload, at: new Date().toISOString() });
 }
 
-catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer durasi, hold order, transaksi cepat (QS). */export default function TablesScreen({ navigation }: Props) {
+catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved/...) ke status denah lokal. */function mapBeStatus(raw: unknown): TableStatus { const v = String(raw ?? '').trim().toLowerCase(); if (v === 'occupied' || v === 'busy' || v === 'terisi' || v === 'isi') return 'terisi'; if (v === 'reserved' || v === 'booked' || v === 'booking' || v === 'res' || v === 'reservasi' || v === 'dipesan') return 'dipesan'; if (v === 'merged' || v === 'merge' || v === 'combined' || v === 'join' || v === 'gabung') return 'gabung'; return 'kosong'; }type MsTableRow = { id: string; tableNo: string | null; sectionId: string | null; capacity: number | null; status: string | null };/** Tulis status balik ke ms_table (best-effort, tak memblokir UI). */function persistTableStatus(tb: { id: string; no: string }, status: TableStatus): void { void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE id = ? OR TRIM(tableNo) = ?', [status, tb.id, tb.no]); } catch { /* master belum tersedia */ } })(); }/** Denah meja - section, status, timer durasi, hold order, transaksi cepat (QS). */export default function TablesScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>(TABLES);
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>(TABLES); const [liveSections, setLiveSections] = useState<string[] | null>(null);
   const [section, setSection] = useState('Semua');
   const [filter, setFilter] = useState<'semua' | TableStatus>('semua');
   const [selected, setSelected] = useState<Table | null>(null);
@@ -53,9 +73,17 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
   const [held, setHeld] = useState<Record<string, boolean>>({});
   const [qsCount, setQsCount] = useState(0);
 
-  // Pulihkan snapshot timer meja dari storage saat layar dibuka.
-  useEffect(() => { let on = true; void getJSON<Record<string, number>>(SEATED_KEY, {}).then((saved) => { if (!on) return; setTables((list) => list.map((tb) => saved[tb.id] !== undefined && (tb.status === 'terisi' || tb.status === 'gabung') ? { ...tb, seatedMin: saved[tb.id] } : tb, ), ); }); return () => { on = false; }; }, []);
+  // F2: sumber utama = persist TableTimer (elapsed per nomor meja, tick 10 dtk);
+  // fallback = snapshot lama SEATED_KEY agar durasi lama tak hilang.
+  useEffect(() => { let on = true; (async () => { let byNo: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const no = canonTableNo(String(x?.id ?? '')); if (no && Number.isFinite(el) && el >= 0) byNo[no] = el; } } } catch { /* abaikan: pakai fallback */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } if (!on) return; setTables((list) => list.map((tb) => tb.status === 'terisi' || tb.status === 'gabung' ? { ...tb, seatedMin: byNo[normNo(tb.no)] ?? saved[tb.id] ?? tb.seatedMin } : tb, ), ); })().catch(() => undefined); return () => { on = false; }; }, []);
+  // Live: denah dari ms_table (id, tableNo, sectionId, capacity, status) pola
+  // MoveTableScreen; TABLES/SECTIONS di atas hanya fallback bila DB kosong.
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const rows = await query<MsTableRow>('SELECT id, tableNo, sectionId, capacity, status FROM ms_table LIMIT 60'); if (!on || rows.length === 0) return; const byNo = new Map(TABLES.map((fb) => [normNo(fb.no), fb])); let byTim: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const k = canonTableNo(String(x?.id ?? '')); if (k && Number.isFinite(el) && el >= 0) byTim[k] = el; } } } catch { /* abaikan */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } const liveTables: Table[] = rows.map((r) => { const no = normNo(String(r.tableNo || r.id || '')); const fb = byNo.get(no); const st = mapBeStatus(r.status); const tb: Table = { id: String(r.id), no, section: String(r.sectionId || fb?.section || ''), kapasitas: Number(r.capacity) || fb?.kapasitas || 0, status: st }; if (st === 'terisi' || st === 'gabung') { const m = byTim[normNo(no)] ?? saved[String(r.id)]; if (m !== undefined) tb.seatedMin = m; } return tb; }); if (!on) return; setTables(liveTables); const secs: string[] = []; for (const tb of liveTables) { if (tb.section && !secs.includes(tb.section)) secs.push(tb.section); } setLiveSections(['Semua', ...secs]); } catch { /* SQLite belum siap - fallback konstanta tetap tampil */ } })().catch(() => undefined); return () => { on = false; }; }, []);
   // Timer durasi: tiap menit tambah 1 menit utk meja terisi/gabung + simpan snapshot.
+  // Cermin ke store TableTimer via max-merge (monoton naik, anti-mundur) agar
+  // TableTimerScreen ikut melihat durasi terbaru; best-effort, tak memblokir tick.
+  // Toleransi +1 menit: tick Tables kasar (bulat) - jangan timpa presisi tick
+  // 10-detik TableTimerScreen tiap menit; hanya perbaiki bila store basi/tertinggal.
   useEffect(() => {
     const timer = setInterval(() => {
       setTables((list) =>
@@ -65,7 +93,9 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
             : tb,
 
       );
-    const snap: Record<string, number> = {}; for (const tb of next) { if (tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung')) { snap[tb.id] = tb.seatedMin; } } void setJSON(SEATED_KEY, snap); return next; }); }, 60000);
+    const snap: Record<string, number> = {}; for (const tb of next) { if (tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung')) { snap[tb.id] = tb.seatedMin; } } void setJSON(SEATED_KEY, snap);
+    void (async () => { try { const cur = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (!Array.isArray(cur) || cur.length === 0) return; let dirty = false; const merged = cur.map((x) => { const tb = next.find((t) => normNo(t.no) === canonTableNo(x.id)); const el = tb?.seatedMin; if (tb && (tb.status === 'terisi' || tb.status === 'gabung') && el !== undefined && el > Number(x.elapsed) + 1) { dirty = true; return { ...x, elapsed: Math.round(el * 100) / 100 }; } return x; }); if (dirty) await setJSON(TABLE_TIMER_TIM_KEY, merged); } catch { /* abaikan */ } })();
+    return next; }); }, 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -113,7 +143,12 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
         return tb;
       }),
     );
-    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); closeModal();
+    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); } closeModal();
+    // F2: pindahkan elapsed ke entri timer tujuan, nolkan asal (best-effort).
+    if (moveMode === 'pindah') {
+      void writeTimerStore(target.no, sel.seatedMin ?? 0);
+      void writeTimerStore(sel.no, 0);
+    }
   };
 
   const cancelTable = () => {
@@ -128,7 +163,9 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
         tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
       ),
     );
-    queueTableOp('table-clear', { table: no }); closeModal();
+    queueTableOp('table-clear', { table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
+    // F2: nolkan entri timer agar durasi tak terbaca basi (best-effort).
+    void writeTimerStore(no, 0);
   };
 
   const toggleHold = () => {
@@ -164,30 +201,45 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
 
   return (
     <View style={s.root}>
-      <ScreenHeader title={t('title_tables')} onBack={() => navigation?.goBack?.()} right={ <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}> <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-        </TouchableOpacity>
-
-      } /> <View style={s.legend}>
+      <ScreenHeader
+        title={t('title_tables')}
+        left={
+          <TouchableOpacity
+            onPress={() => setDrawerOpen(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={t('action_open_menu')}>
+            <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+          </TouchableOpacity>
+        }
+      /> <View style={s.legend}>
         {(Object.keys(STATUS_META) as TableStatus[]).map((k) => (
           <View key={k} style={s.legendItem}>
             <View style={[s.legendDot, { backgroundColor: STATUS_META[k].fg }]} />
-            <Text style={[s.legendTxt, isTablet && s.legendTxtBig]}>{STATUS_META[k].label}</Text>
+            <Text style={[s.legendTxt, isTablet && s.legendTxtBig]}>{t(STATUS_LABEL_KEY[k])}</Text>
           </View>
         ))}
         <View style={s.legendRight}>
-        {qsCount > 0 && <Text style={s.qsNote}>{qsCount} QS shift ini</Text>}
+        {qsCount > 0 && <Text style={s.qsNote}>{t('tbl.qsNote').replace('{n}', String(qsCount))}</Text>}
         <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>
           <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>+ QS</Text>
         </TouchableOpacity>
         </View>
       </View>
 
+      {/* Satu baris filter: satu chip "Semua" mereset seksi + status;
+          logika filter di `shown` tak berubah (dua dimensi tetap digabung). */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.filters}
         style={s.filtersScroll}>
-        {SECTIONS.map((sec) => (
+        <TouchableOpacity
+          style={[s.filterChip, section === 'Semua' && filter === 'semua' && s.filterActive]}
+          onPress={() => { setSection('Semua'); setFilter('semua'); }}>
+          <Text style={[s.filterTxt, section === 'Semua' && filter === 'semua' && s.filterTxtActive, isTablet && s.filterTxtBig]}>{t('common.all')}</Text>
+        </TouchableOpacity>
+        {(liveSections ?? SECTIONS).filter((sec) => sec !== 'Semua').map((sec) => (
           <TouchableOpacity
             key={sec}
             style={[s.filterChip, section === sec && s.filterActive]}
@@ -196,13 +248,13 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
           </TouchableOpacity>
         ))}
         <View style={s.filterSep} />
-        {(['semua', 'kosong', 'terisi', 'dipesan', 'gabung'] as const).map((f) => (
+        {(['kosong', 'terisi', 'dipesan', 'gabung'] as const).map((f) => (
           <TouchableOpacity
             key={f}
             style={[s.filterChip, filter === f && s.filterActive]}
             onPress={() => setFilter(f)}>
             <Text style={[s.filterTxt, filter === f && s.filterTxtActive, isTablet && s.filterTxtBig]}>
-              {f === 'semua' ? 'Semua' : STATUS_META[f].label}
+              {t(STATUS_LABEL_KEY[f])}
             </Text>
           </TouchableOpacity>
         ))}
@@ -218,13 +270,13 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
               style={[s.tableCard, { backgroundColor: meta.bg }, isHeld && s.tableHeld]}
               onPress={() => openDetail(tb)}>
               <Text style={[s.tableNo, isTablet && s.tableNoBig]}>{tb.no}</Text>
-              <Text style={[s.tableStatus, { color: meta.fg }, isTablet && s.tableStatusBig]}>{meta.label}</Text>
+              <Text style={[s.tableStatus, { color: meta.fg }, isTablet && s.tableStatusBig]}>{t(STATUS_LABEL_KEY[tb.status])}</Text>
               <Text style={[s.tableCap, isTablet && s.tableCapBig]}>{tb.kapasitas} tamu</Text>
               {tb.total ? (
                 <Text style={[s.tableTotal, isTablet && s.tableTotalBig]}>{rp(tb.total)}</Text>
               ) : null}
               {tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung') ? (
-                <Text style={[s.tableDur, isTablet && s.tableDurBig]}>Timer {fmtDurasi(tb.seatedMin)}</Text>
+                <Text style={[s.tableDur, isTablet && s.tableDurBig]}>Timer {fmtDurasi(tb.seatedMin, t('tbl.min'), t('tbl.hour'))}</Text>
               ) : null}
               {isHeld ? <Text style={s.holdBadge}>Hold</Text> : null}
               {tb.namaTamu ? (
@@ -261,7 +313,7 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
                     <TouchableOpacity key={tb.id} style={s.targetRow} onPress={() => applyMove(tb)}>
                       <Text style={[s.targetNo, isTablet && s.targetNoBig]}>Meja {tb.no}</Text>
                       <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
-                        {STATUS_META[tb.status].label} • {tb.kapasitas} pax
+                        {t(STATUS_LABEL_KEY[tb.status])} • {tb.kapasitas} pax
                         {tb.total ? ` • ${rp(tb.total)}` : ''}
                       </Text>
                     </TouchableOpacity>
@@ -274,72 +326,61 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
               <>
                 <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>Meja {selected.no}</Text>
                 <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
-                  {STATUS_META[selected.status].label} • {selected.section} • {selected.kapasitas} pax
+                  {t(STATUS_LABEL_KEY[selected.status])} • {selected.section} • {selected.kapasitas} pax
                   {selected.namaTamu ? ` • ${selected.namaTamu}` : ''}
                   {selected.total ? ` • ${rp(selected.total)}` : ''}
-                  {selected.seatedMin !== undefined ? ` • ${fmtDurasi(selected.seatedMin)}` : ''}
+                  {selected.seatedMin !== undefined ? ` • ${fmtDurasi(selected.seatedMin, t('tbl.min'), t('tbl.hour'))}` : ''}
                   {held[selected.id] ? ' • Hold' : ''}
                 </Text>
-                <TouchableOpacity
-                  style={s.primaryBtn}
+                <AppButton
+                  title={selected.status === 'kosong' ? 'Buat Pesanan' : 'Buka Pesanan'}
                   onPress={() => {
                     closeModal();
                     navigation?.navigate?.('Cashier', { table: selected.no });
-                  }}>
-                  <Text style={[s.primaryTxt, isTablet && s.primaryTxtBig]}>
-                    {selected.status === 'kosong' ? 'Buat Pesanan' : 'Buka Pesanan'}
-                  </Text>
-                </TouchableOpacity>
+                  }}
+                />
                 <View style={s.actionRow}>
-                  <TouchableOpacity
-                    style={s.secondaryBtn}
-                    onPress={() => setBookingVisible(true)}>
-                    <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_book')}</Text>
-                  </TouchableOpacity>
+                  <AppButton title={t('tbl_book')} variant="secondary" onPress={() => setBookingVisible(true)} fullWidth={false} style={s.actionBtn} />
                   {selected.status !== 'kosong' && (
-                    <TouchableOpacity
-                      style={s.secondaryBtn}
-                      onPress={toggleHold}>
-                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{held[selected.id] ? 'Lanjut Order' : 'Hold Order'}</Text>
-                    </TouchableOpacity>
+                    <AppButton title={held[selected.id] ? 'Lanjut Order' : 'Hold Order'} variant="secondary" onPress={toggleHold} fullWidth={false} style={s.actionBtn} />
                   )}
                 </View>
                 <View style={s.actionRow}>
                   {selected.status !== 'kosong' && (
-                    <TouchableOpacity
-                      style={s.secondaryBtn}
+                    <AppButton
+                      title={t('tbl_move')}
+                      variant="secondary"
                       onPress={() => {
                         closeModal();
                         navigation?.navigate?.('MoveTable', { from: selected.no });
-                      }}>
-                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_move')}</Text>
-                    </TouchableOpacity>
+                      }}
+                      fullWidth={false}
+                      style={s.actionBtn}
+                    />
                   )}
                   {selected.status === 'terisi' && (
-                    <TouchableOpacity
-                      style={s.secondaryBtn}
-                      onPress={() => setMoveMode('gabung')}>
-                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_merge')}</Text>
-                    </TouchableOpacity>
+                    <AppButton title={t('tbl_merge')} variant="secondary" onPress={() => setMoveMode('gabung')} fullWidth={false} style={s.actionBtn} />
                   )}
                 </View>
                 {selected.status !== 'kosong' && (
                   <View style={s.actionRow}>
-                    <TouchableOpacity
-                      style={s.secondaryBtn}
+                    <AppButton
+                      title={t('tbl_move_items')}
+                      variant="secondary"
                       onPress={() => {
                         closeModal();
                         navigation?.navigate?.('MoveItems', { from: selected.no });
-                      }}>
-                      <Text style={[s.secondaryTxt, isTablet && s.secondaryTxtBig]}>{t('tbl_move_items')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={confirmCancel ? s.dangerBtnSolid : s.dangerBtn}
-                      onPress={cancelTable}>
-                      <Text style={[confirmCancel ? s.dangerSolidTxt : s.dangerTxt, isTablet && s.secondaryTxtBig]}>
-                        {confirmCancel ? 'Yakin? Ketuk lagi' : t('tbl_cancel_table')}
-                      </Text>
-                    </TouchableOpacity>
+                      }}
+                      fullWidth={false}
+                      style={s.actionBtn}
+                    />
+                    <AppButton
+                      title={confirmCancel ? 'Yakin? Ketuk lagi' : t('tbl_cancel_table')}
+                      variant="danger"
+                      onPress={cancelTable}
+                      fullWidth={false}
+                      style={s.actionBtn}
+                    />
                   </View>
                 )}
                 <TouchableOpacity
@@ -362,33 +403,29 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
               {t('tbl_book')}{selected ? ` ${selected.no}` : ''}
             </Text>
             <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Sudah memesan meja? Catat reservasi</Text>
-            <TextInput
-              style={s.input}
+            <AppInput
               placeholder="Nama pelanggan"
-              placeholderTextColor={colors.faint}
               value={namaBooking}
               onChangeText={setNamaBooking}
             />
             <View style={s.inputRow}>
-              <TextInput
-                style={[s.input, s.inputHalf]}
-                placeholder="Jam (19:00)"
-                placeholderTextColor={colors.faint}
-                value={jamBooking}
-                onChangeText={setJamBooking}
-              />
-              <TextInput
-                style={[s.input, s.inputHalf]}
-                placeholder="Pax"
-                placeholderTextColor={colors.faint}
-                keyboardType="number-pad"
-                value={pax}
-                onChangeText={setPax}
-              />
+              <View style={[s.inputHalf, s.inputHalfWrap]}>
+                <AppInput
+                  placeholder="Jam (19:00)"
+                  value={jamBooking}
+                  onChangeText={setJamBooking}
+                />
+              </View>
+              <View style={[s.inputHalf, s.inputHalfWrap]}>
+                <AppInput
+                  placeholder="Pax"
+                  keyboardType="number-pad"
+                  value={pax}
+                  onChangeText={setPax}
+                />
+              </View>
             </View>
-            {bookingWarn ? <Text style={s.warn}>{bookingWarn}</Text> : null} <TouchableOpacity style={s.primaryBtn} onPress={saveBooking}>
-              <Text style={[s.primaryTxt, isTablet && s.primaryTxtBig]}>{t('tbl_save_book')}</Text>
-            </TouchableOpacity>
+            {bookingWarn ? <Text style={s.warn}>{bookingWarn}</Text> : null} <AppButton title={t('tbl_save_book')} onPress={saveBooking} />
             <TouchableOpacity
               style={s.cancelBtn}
               onPress={() => setBookingVisible(false)}>
@@ -496,6 +533,7 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
   },
   primaryTxt: { color: colors.white, fontSize: 15, fontFamily: fonts.bold },
   actionRow: { flexDirection: 'row', marginTop: 8 },
+  actionBtn: { flex: 1, marginTop: 0, marginHorizontal: 4 },
   secondaryBtn: {
     flex: 1,
     borderWidth: 1,
@@ -549,6 +587,7 @@ catch { /* antrean belum siap */ }}/** Denah meja - section, status, timer duras
   },
   inputRow: { flexDirection: 'row' },
   inputHalf: { flex: 1, marginHorizontal: 4 },
+  inputHalfWrap: { marginTop: 10 },
   /* Varian tablet (breakpoint 768): teks +1..4pt agar proporsional di layar lebar. */
   legendTxtBig: { fontSize: 13 },
   qsTxtBig: { fontSize: 14 },

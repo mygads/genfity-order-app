@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
@@ -8,7 +10,7 @@ import { logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
-import { pullMaster } from '../../lib/master';
+import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -34,6 +36,33 @@ export default function SettingsScreen({ navigation }: Props) {
   const [draftBranchName, setDraftBranchName] = useState('');
   const [syncBusy, setSyncBusy] = useState<'push' | 'pull' | null>(null);
   const [syncMsg, setSyncMsg] = useState('');
+  // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
+  // kosong = dummy/offline, sync panel tetap jalan tanpa server).
+  const [posVer, setPosVer] = useState('');
+  const [verifyMsg, setVerifyMsg] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const v = await fetchPosVersion();
+        if (!live || v.fromDummy || !v.latestVersion) return;
+        setPosVer(`v${v.latestVersion} / min v${v.minVersion}`);
+      } catch { /* offline - tanpa info versi */ }
+    })();
+    return () => { live = false; };
+  }, []);
+  const doVerify = async () => {
+    if (verifyBusy) return;
+    setVerifyBusy(true);
+    setVerifyMsg('');
+    try {
+      const r = await notifyTerminalVerification('verified');
+      if (r.ok && !r.fromDummy) setVerifyMsg(t('term_verify_ok'));
+    } catch { /* offline - panel tetap jalan */ } finally {
+      setVerifyBusy(false);
+    }
+  };
   const [lastPush, setLastPush] = useState(() => getLastSync() || '');
 
   const go = (route: string) => navigation?.navigate(route);
@@ -104,8 +133,11 @@ export default function SettingsScreen({ navigation }: Props) {
       <ScreenHeader
         title={t('settings.title')}
         sub={t('settings.sub')}
-        onBack={() => setDrawerOpen(true)}
-        backLabel="☰"
+        left={
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+          </TouchableOpacity>
+        }
       />
       <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
@@ -123,17 +155,15 @@ export default function SettingsScreen({ navigation }: Props) {
         </View>
         {serverEnv === 'custom' && (
           <View style={styles.customRow}>
-            <TextInput
-              style={styles.input}
-              value={customUrl}
-              onChangeText={setCustomUrl}
-              placeholder="https://server-anda/api/web"
-              placeholderTextColor={colors.faint}
-              autoCapitalize="none"
-            />
-            <Pressable style={styles.saveBtn} onPress={saveCustom}>
-              <Text style={styles.saveBtnText}>{t('common.save')}</Text>
-            </Pressable>
+            <View style={styles.formFlex}>
+              <AppInput
+                value={customUrl}
+                onChangeText={setCustomUrl}
+                placeholder="https://server-anda/api/web"
+                autoCapitalize="none"
+              />
+            </View>
+            <AppButton title={t('common.save')} onPress={saveCustom} fullWidth={false} style={styles.btnInline} />
           </View>
         )}
       </View>
@@ -142,14 +172,17 @@ export default function SettingsScreen({ navigation }: Props) {
         <Text style={styles.cardTitle}>{t('sync.title')}</Text>
         <Text style={styles.cardSub}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
         <View style={styles.syncRow}>
-          <Pressable style={[styles.syncBtn, syncBusy && styles.syncBtnDisabled]} onPress={doPush} disabled={!!syncBusy}>
-            <Text style={styles.syncBtnText}>{syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')}</Text>
-          </Pressable>
-          <Pressable style={[styles.syncBtnPull, syncBusy && styles.syncBtnDisabled]} onPress={doPull} disabled={!!syncBusy}>
-            <Text style={styles.syncBtnPullText}>{syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')}</Text>
-          </Pressable>
+          <AppButton title={syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!syncBusy} fullWidth={false} style={styles.btnFlexNavy} />
+          <AppButton title={syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!syncBusy} variant="secondary" fullWidth={false} style={styles.btnFlex} />
         </View>
         {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
+        {posVer ? <Text style={styles.cardSub}>{t('about.terminal')} - POS {posVer}</Text> : null}
+        <View style={styles.syncRow}>
+          <Pressable style={[styles.syncBtn, verifyBusy && styles.syncBtnDisabled]} onPress={doVerify} disabled={verifyBusy}>
+            <Text style={styles.syncBtnText}>{t('vou_check')}</Text>
+          </Pressable>
+        </View>
+        {verifyMsg ? <Text style={styles.syncMsg}>{verifyMsg}</Text> : null}
       </View>
 
       <Text style={styles.groupLabel}>{t('settings.printerPrint')}</Text>
@@ -211,14 +244,16 @@ export default function SettingsScreen({ navigation }: Props) {
       <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
       <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 
-      <Pressable
-        style={styles.logout}
+      <AppButton
+        title={t('settings.logout')}
+        variant="danger"
         onPress={() => {
           logout();
           navigation?.navigate('Login');
-        }}>
-        <Text style={styles.logoutText}>{t('settings.logout')}</Text>
-      </Pressable>
+        }}
+        style={styles.logoutBtn}
+        textStyle={styles.logoutBtnText}
+      />
       <Text style={styles.version}>v1.0.0 - genfity-order</Text>
 
       <Modal visible={terminalOpen} animationType="fade" transparent>
@@ -226,19 +261,12 @@ export default function SettingsScreen({ navigation }: Props) {
           <View style={[styles.dialog, styles.dialogNarrow]}>
             <Text style={styles.dialogTitle}>{t('settings.claimTerminal')}</Text>
             <Text style={styles.dialogSub}>{t('settings.claimSub')}</Text>
-            <Text style={styles.fieldLabel}>{t('settings.terminalCode')}</Text>
-            <TextInput style={styles.input} value={draftCode} onChangeText={setDraftCode} placeholder="TRM-001" placeholderTextColor={colors.faint} autoCapitalize="characters" />
-            <Text style={styles.fieldLabel}>{t('settings.branchId')}</Text>
-            <TextInput style={styles.input} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="BR-01" placeholderTextColor={colors.faint} />
-            <Text style={styles.fieldLabel}>{t('settings.branchName')}</Text>
-            <TextInput style={styles.input} value={draftBranchName} onChangeText={setDraftBranchName} placeholder="Cabang Poris" placeholderTextColor={colors.faint} />
+            <AppInput label={t('settings.terminalCode')} value={draftCode} onChangeText={setDraftCode} placeholder="TRM-001" autoCapitalize="characters" />
+            <AppInput label={t('settings.branchId')} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="BR-01" />
+            <AppInput label={t('settings.branchName')} value={draftBranchName} onChangeText={setDraftBranchName} placeholder="Cabang Poris" />
             <View style={styles.dialogBtns}>
-              <Pressable style={styles.btnGhost} onPress={() => setTerminalOpen(false)}>
-                <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
-              </Pressable>
-              <Pressable style={styles.btnPrimary} onPress={saveTerminal}>
-                <Text style={styles.btnPrimaryText}>{t('common.save')}</Text>
-              </Pressable>
+              <AppButton title={t('common.cancel')} onPress={() => setTerminalOpen(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+              <AppButton title={t('common.save')} onPress={saveTerminal} fullWidth={false} style={styles.btnFlexNavy} />
             </View>
           </View>
         </View>
@@ -270,6 +298,7 @@ function MenuRow({
 }
 
 const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   content: { paddingBottom: 32 },
   groupLabel: {
@@ -328,6 +357,12 @@ const styles = StyleSheet.create({
   envText: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
   envTextActive: { color: colors.white },
   customRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  formFlex: { flex: 1 },
+  btnInline: { marginTop: 0 },
+  btnFlex: { marginTop: 0, flex: 1 },
+  btnFlexNavy: { marginTop: 0, flex: 1, backgroundColor: colors.navy },
+  logoutBtn: { marginTop: 22, marginHorizontal: 16, backgroundColor: colors.paleRed },
+  logoutBtnText: { color: colors.red },
   input: {
     flex: 1,
     borderRadius: 10,

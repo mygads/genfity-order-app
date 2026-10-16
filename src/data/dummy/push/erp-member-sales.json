@@ -1,0 +1,19 @@
+{
+  "request": { "memberId": "MBR-001", "branchId": "B001", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 2,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "salesNum": "TRX-20261016-014", "salesDate": "2026-10-16 12:40:00", "grandTotal": 69300, "paymentMethod": "Tunai", "lastSyncDate": "2026-10-16 12:40:00" },
+        { "salesNum": "TRX-20261015-031", "salesDate": "2026-10-15 19:05:00", "grandTotal": 57250, "paymentMethod": "QRIS", "lastSyncDate": "2026-10-15 19:05:00" }
+      ]
+    }
+  }
+}

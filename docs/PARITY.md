@@ -272,22 +272,68 @@ dikerjakan terpisah).
     (e) Cancel live DONE; (f) persist move DONE (kecuali split fisik F1);
     (g) ESB status outbox DONE.
 - TODO FINAL (jujur, bernomor; tidak dicari lagi selain ini):
-  - F1: Split fisik `tr_salesmenu` antar `salesNum` untuk move-item (butuh
-    penulis `sales.ts` + kontrak API `move-items`).
-  - F2: Dua sumber timer (`TablesScreen.SEATED_KEY` vs
-    `TableTimerScreen.TIM_KEY`) belum disatukan (butuh keputusan data layer).
-  - F3: Sisa hardcode: 14 key `printers.*/mprint.routeTo` (B3b), campur ID/EN
-    di Pay/CartDetail/Booking/Shift/EsbOrder/TableTimer (Batch 4 visual),
-    chip "Semua" ganda di Tables, tombol Pay phone wrap 2 baris.
+  - F1 DONE 2026-10-16: belah fisik `tr_salesmenu` antar `salesNum` ada +
+    ter-wire: `sales.ts:moveSaleItems` (baris penuh/sebagian prorata + extras +
+    head tujuan baru/gabung + kedua head kotor + outbox + push §5.2) dipanggil
+    `MoveItemsScreen:227` (fallback antrean manual bila DB tak cocok).
+  - F2 DONE 2026-10-16: dua arah sinkron — init Tables seed dari TIM store
+    (`TABLE_TIMER_TIM_KEY`, presisi 10-dtk) via `canonTableNo`, fallback
+    `SEATED_KEY`; cermin Tables→TIM monoton-naik dengan toleransi +1 mnt agar
+    tick kasar 1-mnt tak membulatkan presisi TableTimer tiap menit (hanya
+    perbaiki store basi); pindah meja memindahkan elapsed + nolkan asal.
+  - F3 SELESAI 2026-10-16: verifikasi `grep` — `printers.*/mprint.routeTo` tak
+    ada lagi di kode (dibereskan agen printer); sisa campur ID/EN minor bersih.
   - F4 DIPUTUSKAN 11% (2026-10-16): kontrak §5.1/§9/§10.3 + fixtures
     order-finish/view + rumus §3 + contoh §3 + label `taxIncl` + komentar
     `totals.ts` seluruhnya selaras 11 setting-driven. TUTUP.
-  - F5: `PayScreen:927` ke Member tanpa konteks order (order reset dari Pay);
-    perlu satu baris kirim konteks di Pay.
-  - F6: Blokir E00044 baru banner Sync; belum gate di Cashier/Pay.
-  - F7: Approve petty tidak refresh layar lain (tanpa focus-listener).
+  - F5 DONE 2026-10-16: `PayScreen` → Member membawa konteks order (total/
+    items/mode/table/ongkir/customer/voucher(+code)/discount/service/tax/
+    rounding/feeESB + memberId); `applyMember` mengembalikannya sehingga
+    order tak reset; tipe rute `Member` dilebarkan.
+  - F6 DONE 2026-10-16: `syncWarnLevel()` di `lib/sync.ts` ('ok'/'warn3'/
+    'block7' dari `getLastSyncMs`); Pay kunci total saat block7 (panel
+    `sync.blocked/blockedMsg` + tombol `sync.openSync` → Sync; Qris/Edc
+    hanya dari Pay sehingga tertutup); Cashier banner + tombol Bayar mati
+    (bangun keranjang tetap boleh).
+  - F7 DONE 2026-10-16: `lib/pettyApproval.ts` (satu kunci kanonis + gabung-
+    baca lawas + siaran in-memory) dipakai PettyCash/Detail/Expense;
+    fokus-listener agen lain dipertahankan (komplementer).
   - F8: T10/T13 luar-kode tetap: prebuild + dev-client + uji fisik
     (BT SPP/USB/LAN + drawer + EDC APOS + Presentation display + keep-awake).
-  - F9: 3 domain M9 tanpa skema: promotion, menu-online, expense-chart/coa
-    (komentar `master.ts:174-176`).
-  - F10: `Rounding/Step` dummy = 50 vs klaim §3 step 100 (pre-existing).
+  - F9 DONE 2026-10-16: 3 domain M9 kini punya tabel agregat minimal
+    (`ms_promotion`, `ms_coa`, `ms_menuonline`, CREATE TABLE IF NOT EXISTS di
+    `db.ts` — aman untuk DB lama) + Domain pull di `master.ts`
+    (`promotion`→`main/get-promotion`, `expensecoa`→
+    `v1/pull/expense-chart-of-accounts`, `menuonline`→`v1/pull/get-menu-online`).
+    Server menang (tak di-push, `tablePushPath` null untuk `ms_*`).
+    Layar Expense/PromotionList tetap live-fetch + cache (pola lama, komplementer).
+    Normalisasi `order-split-bill.json` bill-level: A 94500/kembali 5500,
+    B 59750/lunas; jumlah = parent 154250, tax 14369 dan service 7250 aditif.
+  - F10 DONE 2026-10-16: `Rounding/Step` dummy 50 → 100 selaras kontrak §9.
+- AUDIT PRINTER/SYNC 2026-10-16 (temuan + perbaikan):
+  - P1 DONE: `src/specs/GenfityPrinter.ts` dibuat — selama ini `native/
+    printer.ts` me-require file yang tak ada sehingga BT/USB SELALU
+    `need-dev-client` bahkan di dev-client. Sekarang bridge classic
+    (NativeModules.GenfityPrinter) tersambung; Expo Go/web tetap null aman.
+  - P2 DONE: struk thermal kini rincian penuh ala POSLite (`escpos.ts` +
+    `ReceiptScreen.doPrint`): service, PPN inkl. info-only, feeESB, voucher,
+    ongkir, pembulatan, bayar+nominal, kembali, tanggal, footer cabang
+    (sebelumnya hanya subtotal/diskon/total). Tunai sukses → tendang laci
+    otomatis (`openDefaultDrawer`, best-effort).
+  - P3 DONE: cetak tiket dapur/checker (`buildKitchenTicketBytes` +
+    `printKitchenTicket` per station + tombol `kit_print` di KitchenScreen;
+    sebelumnya tombol cetak hanya menuju struk kasir).
+  - P4 DONE: pull station tak lagi menghapus alamat printer lokal
+    (partial upsert di `master.ts` + fallback KitchenScreen; printerPort/
+    connection/autocut milik per-terminal dipertahankan).
+  - P5 DONE: realtime nyala saat login (`LoginScreen`) + mati saat logout
+    (`session.logout` + `setWsForeground`); sebelumnya hanya nyala bila
+    membuka 3 layar tertentu.
+  - P6 DONE: toggle sync-otomatis kini menjadwalkan push 5-mnt
+    (`applyAutoSyncPrefs`; hormati wifiOnly via expo-network; diam-diam).
+  - SISA LUAR-KODE (F8): prebuild + `eas.json` + build dev-client/APK;
+    izin USB (requestPermission) belum ada di modul Java (butuh dialog
+    sistem/intent-filter saat uji fisik); LAN murni-JS sudah jalan di Expo Go.
+  - CATATAN: `tsc` masih merah di file lane lain (CancelScreen/InstallScreen/
+    style AppButton di ReceiptScreen — refactor design-system agen lain,
+    bukan file audit ini).

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -95,11 +97,13 @@ export default function DineInScreen({ navigation, route }: Props) {
     bruto,
     total,
     rounding,
+    feeESB,
   } = totals({
     gross: subtotalGross,
     discount: discountTotal,
     ongkir,
     voucher: voucher ?? undefined,
+    esbOrder: isMarketplaceMode(mode),
     taxRate,
   });
   const useOngkirCut = (voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR') && ongkir > 0;
@@ -136,9 +140,10 @@ export default function DineInScreen({ navigation, route }: Props) {
       discount: discountForChain,
       ...(voucher ? { voucherCode: voucher.code } : {}),
       ongkir: ongkirNet,
-      // Rincian info-only agar baris struk pas dengan total (service/pajak/pembulatan).
+      // Rincian info-only agar baris struk pas dengan total (service/pajak/fee/pembulatan).
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+      ...(feeESB > 0 ? { feeESB } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
@@ -157,6 +162,7 @@ export default function DineInScreen({ navigation, route }: Props) {
       ongkir: ongkirNet,
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+      ...(feeESB > 0 ? { feeESB } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
@@ -195,23 +201,23 @@ export default function DineInScreen({ navigation, route }: Props) {
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.label, isTablet && styles.labelBig]}>{t('pax')}</Text>
-          <TextInput
-            style={[styles.input, isTablet && styles.inputBig]}
+          <AppInput
+            boxStyle={styles.input}
+            style={[styles.fieldText, isTablet && styles.inputBig]}
             value={pax}
             onChangeText={setPax}
             keyboardType="numeric"
             placeholder="2"
-            placeholderTextColor={colors.faint}
           />
         </View>
         <View style={{ flex: 2 }}>
           <Text style={[styles.label, isTablet && styles.labelBig]}>{t('guestName')}</Text>
-          <TextInput
-            style={[styles.input, isTablet && styles.inputBig]}
+          <AppInput
+            boxStyle={styles.input}
+            style={[styles.fieldText, isTablet && styles.inputBig]}
             value={guest}
             onChangeText={setGuest}
             placeholder={t('guestName')}
-            placeholderTextColor={colors.faint}
           />
         </View>
       </View>
@@ -251,24 +257,41 @@ export default function DineInScreen({ navigation, route }: Props) {
         )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('taxIncl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(taxIncl)}</Text></View>
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('serviceExcl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
+        {feeESB > 0 && (
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('feeESB')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
+        )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('deliveryFee')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(ongkirNet)}</Text></View>
         {voucher && useOngkirCut && (
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>Voucher {voucher.code}</Text><Text style={[styles.disc, isTablet && styles.priceBig]}>-{rp(ongkirCut)}</Text></View>
         )}
-        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>Rounding</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(rounding)}</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('rounding')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(rounding)}</Text></View>
         <View style={styles.totalRow}><Text style={[styles.totalL, isTablet && styles.totalLBig]}>{t('total')}</Text><Text style={[styles.totalV, isTablet && styles.totalVBig]}>{rp(total)}</Text></View>
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.ghost} onPress={goSave}>
-          <Text style={[styles.ghostT, isTablet && styles.ghostTBig]}>{t('save')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.ghost} onPress={goPrint}>
-          <Text style={[styles.ghostT, isTablet && styles.ghostTBig]}>{t('printReceipt')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.primary} onPress={active.length > 0 ? goPay : goCashier}>
-          <Text style={[styles.primaryT, isTablet && styles.primaryTBig]}>{t('pay')} | {rp(total)} ›</Text>
-        </TouchableOpacity>
+        <AppButton
+          variant="secondary"
+          title={t('save')}
+          onPress={goSave}
+          fullWidth={false}
+          style={styles.ghost}
+          textStyle={styles.ghostT}
+        />
+        <AppButton
+          variant="secondary"
+          title={t('printReceipt')}
+          onPress={goPrint}
+          fullWidth={false}
+          style={styles.ghost}
+          textStyle={styles.ghostT}
+        />
+        <AppButton
+          title={`${t('pay')} | ${rp(total)} ›`}
+          onPress={active.length > 0 ? goPay : goCashier}
+          fullWidth={false}
+          style={styles.primary}
+          textStyle={styles.primaryT}
+        />
       </View>
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { from: table })}>
@@ -318,6 +341,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
   },
+  /** Teks di dalam AppInput: medium ala form lama. */
+  fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   bill: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 14, borderWidth: 1, borderColor: colors.line },
   billTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy, marginBottom: 6 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, gap: 8 },

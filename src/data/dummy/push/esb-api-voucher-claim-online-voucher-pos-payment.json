@@ -1,0 +1,11 @@
+{
+  "request": { "code": "ONLINE-QOQI10", "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "code": "ONLINE-QOQI10", "claimed": true, "salesNum": "TRX-20261016-014", "amount": 10000 }
+  }
+}

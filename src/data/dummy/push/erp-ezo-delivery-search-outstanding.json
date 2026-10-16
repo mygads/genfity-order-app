@@ -1,0 +1,21 @@
+{
+  "request": { "branchId": "B001", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 1,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "orderId": "ESO-88109", "bookingId": "EZO-88109", "customerName": "Siti Aminah",
+          "subtotal": 45000, "discount": 0, "tax": 4459, "serviceCharge": 2250,
+          "ongkir": 10000, "grandTotal": 57250, "status": "OUTSTANDING",
+          "lastSyncDate": "2026-10-16 11:20:00" }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "request": { "userId": "U07", "terminalId": "T001", "startCash": 200000, "note": "Shift Pagi" },
+  "request": { "op": "shift-open", "userId": "U07", "terminalId": "T001", "startCash": 200000, "note": "Shift Pagi" },
   "response": {
     "name": "OK",
     "message": "Berhasil",
@@ -12,7 +12,11 @@
       "nama": "Gista",
       "terminalId": "T001",
       "startCash": 200000,
-      "clockIn": "2026-10-16 08:57:00"
+      "clockIn": "2026-10-16 08:57:00",
+      "endCash": 512500,
+      "expectedCash": 512500,
+      "diff": 0,
+      "clockOut": "2026-10-16 17:02:00"
     }
   }
 }

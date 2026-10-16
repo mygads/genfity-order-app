@@ -23,11 +23,19 @@ export const ENV_BASE_URL: Record<ServerEnv, string> = {
 export const WS_URL: Record<ServerEnv, string> = {
   prod: 'wss://ws-poslite.esb.co.id/ws',
   dev: 'wss://dev7.esb.co.id/wss-self-order',
-  staging: 'wss://stg-eso.esb.co.id/ws',
+  // REA-13: APK memakai /wss-self-order di semua env non-prod (staging lama
+  // memakai /ws di stg-eso - diselaraskan ke APK).
+  staging: 'wss://stg-eso.esb.co.id/wss-self-order',
   custom: '',
 };
 
-/** Path API (fakta dari string table APK - tanpa body JSON). */
+/** Path API (fakta dari string table APK - tanpa body JSON).
+ *
+ * Status tiap path (REA-18, dossier Lampiran F):
+ * - [FAKTA] = literalnya ada di libapp.so.
+ * - [asumsi-clean-room] = TIDAK ADA di APK; tebakan clean-room milik kita,
+ *   didokumentasikan eksplisit di docs/API-CONTRACT.md.
+ */
 export const ApiPath = {
   validateTerminal: 'main/validate-terminal',
   getTerminal: 'terminal/get-terminal',
@@ -38,39 +46,86 @@ export const ApiPath = {
   pullMenu: 'main/get-menu',
   pullBranchMenu: 'main/get-branch-menu',
   pullBranchSettings: 'main/get-branch-settings',
-  pullMenuOnline: 'main/get-menu-online',
-  pullExpenseCoa: 'main/get-expense-chart-of-accounts',
+  // [FAKTA] APK: v1/pull/get-menu-online (REA-18: main/get-menu-online
+  // adalah tebakan tanpa padanan).
+  pullMenuOnline: 'v1/pull/get-menu-online',
+  // [FAKTA] APK: v1/pull/expense-chart-of-accounts (REA-18).
+  pullExpenseCoa: 'v1/pull/expense-chart-of-accounts',
   pullUser: 'main/get-user',
   pullTable: 'main/get-table',
   pullPromotion: 'main/get-promotion',
   pullMember: 'main/get-member',
   pullVoucher: 'main/get-voucher',
+  // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
   pullPaymentMethod: 'main/get-payment-method',
-  pullStation: 'main/get-station',
+  // [FAKTA] APK: esb_api/pull/pull-station-data (REA-12/REA-18).
+  pullStation: 'esb_api/pull/pull-station-data',
   pullSales: 'main/get-sales',
+  // [FAKTA] REA-11: tarik log shift dari server.
+  pullShiftLog: 'esb_api/main/get-shift-log-data',
+  // [FAKTA] REA-12: setting per terminal.
+  pullTerminalSettings: 'esb_api/pull/pull-terminal-settings',
+  // [FAKTA] REA-12: versi POS (nama konkret pull-pos-version).
+  pullPosVersion: 'esb_api/pull/pull-pos-version',
+  // [FAKTA] REA-8: spesimen grup v11.
+  terminalSettingsV11: 'esb_apiv11/main/get-terminal-settings',
+  // [FAKTA] REA-9: notifikasi verifikasi terminal.
+  terminalVerifyNotify: 'esb_apiv9/terminal/verification-notify',
   pushOrderFinish: 'order/finish',
   pushOrderView: 'order/view',
+  // [FAKTA] REA-10: varian order tambahan.
+  orderViewByQr: 'posv1/order/view-by-qr',
+  orderViewQuickService: 'posv1/order/view-quick-service',
+  orderErrorLog: 'posv1/order/pos-error-log',
   splitBill: 'order/split-bill',
   moveItems: 'order/move-items',
   moveTable: 'order/move-table',
-  pushShiftOpen: 'shift/open',
-  pushShiftClose: 'shift/close',
-  pushExpense: 'branch-expenses/push',
+  // [FAKTA] APK: satu path v1/push/shift untuk buka + tutup (REA-18).
+  // Dibedakan via body {op: 'shift-open' | 'shift-close'} (kontrak §5.2).
+  pushShiftOpen: 'v1/push/shift',
+  pushShiftClose: 'v1/push/shift',
+  // [FAKTA] APK: v1/push/branch-expenses (REA-18).
+  pushExpense: 'v1/push/branch-expenses',
+  // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
   pushRegister: 'device/register-push',
   receiptEmail: 'sales/receipt-email',
   voucherLock: 'posv1/esb-voucher/lock',
   voucherUnlock: 'posv1/esb-voucher/unlock',
   voucherValidate: 'posv1/esb-voucher/validate',
   voucherBurn: 'posv1/esb-voucher/burn',
+  // [FAKTA] REA-6: voucher eksternal (burn/unburn/validate).
+  extVoucherValidate: 'esb_api/external-voucher/validate',
+  extVoucherBurn: 'esb_api/external-voucher/burn',
+  extVoucherUnburn: 'esb_api/external-voucher/unburn',
+  // [FAKTA] REA-7: voucher online + template.
+  voucherOnlineValidate: 'esb_api/voucher/validate-online-voucher-pos-payment',
+  voucherOnlineClaim: 'esb_api/voucher/claim-online-voucher-pos-payment',
+  voucherTemplateClaim: 'esb_api/voucher/claim-voucher-template',
   clockIn: 'employee-attendance/clock-in',
+  // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
   supervisorApprove: 'auth/supervisor-approve',
+  // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
   cashierLogin: 'auth/cashier-login',
   clockOut: 'employee-attendance/clock-out',
   depositInquiry: 'member-deposit-withdrawal/inquiry-deposit',
+  // [asumsi-clean-room] inquiry-deposit ADA di APK, topup nihil (REA-18).
   depositTopup: 'member-deposit-withdrawal/topup',
-  // Pendaftaran member baru dari layar Member (aditif: register-member).
-  // Kontrak body ikut server Anda; dummy JSON: push/member-register.json.
-  registerMember: 'member/register',
+  // Dipetakan ke grup erp/member/* (REA-3: balance-deposit, deposit, sales).
+  // Sub-path pasti untuk registrasi tak terverifikasi - pakai path dasar grup.
+  // Lihat kontrak §5.5.
+  registerMember: 'erp/member',
+  // [FAKTA] REA-2: grup delivery erp/ezo-delivery (7 path).
+  deliveryApprove: 'erp/ezo-delivery/approve',
+  deliveryCreateBooking: 'erp/ezo-delivery/create-booking',
+  deliveryFinishByOutlet: 'erp/ezo-delivery/finish-by-outlet',
+  deliveryPushData: 'erp/ezo-delivery/push-data',
+  deliveryScheduleOrder: 'erp/ezo-delivery/schedule-order',
+  deliverySearchOngoing: 'erp/ezo-delivery/search-ongoing',
+  deliverySearchOutstanding: 'erp/ezo-delivery/search-outstanding',
+  // [FAKTA] REA-3: sub-path member erp/member/*.
+  memberErpBalance: 'erp/member/balance-deposit',
+  memberErpDeposit: 'erp/member/deposit',
+  memberErpSales: 'erp/member/sales',
 } as const;
 
 export interface TerminalInfo {
@@ -200,7 +255,12 @@ export function getBranchId(): string {
   return b || 'B001';
 }
 
-/** GET dengan query branch + paging inkremental (§0 kontrak). */
+/** GET dengan query branch + paging inkremental (§0 kontrak).
+ *
+ * REA-18: header X-Terminal-Code / X-Branch-Id TANPA padanan literal di APK
+ * (kandidat yang ADA: authKey, deviceID/UDID, Authorization/Bearer, ApiKey).
+ * Dipertahankan sebagai [KONTRAK] milik kita - lihat docs/API-CONTRACT.md §2.
+ */
 export async function apiGet(
   path: string,
   params?: Record<string, string | number>,

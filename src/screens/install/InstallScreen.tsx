@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation }: { navigation?: Nav }) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [code, setCode] = useState('');
@@ -6,6 +6,19 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const [showHelp, setShowHelp] = useState(false);
 
   const [checking, setChecking] = useState(false);
+  // WIRE REA-12: versi POS server (best-effort - kosong = dummy/offline).
+  const [posVer, setPosVer] = useState('');
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const v = await fetchPosVersion();
+        if (!live || v.fromDummy || !v.latestVersion) return;
+        setPosVer(`v${v.latestVersion} / min v${v.minVersion}`);
+      } catch { /* offline - tanpa info versi */ }
+    })();
+    return () => { live = false; };
+  }, []);
   // Klaim via lapisan apiSource (Dummy Mode offline / backend asli bila env
   // terisi). Kode terminal yang lolos disimpan ke setTerminal untuk header
   // request berikutnya.
@@ -15,7 +28,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       return;
     }
     setChecking(true); setError('');
-    try { const r = await validateTerminal(code.trim().toUpperCase()); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: code.trim().toUpperCase(), branchId: r.branchId, branchName: r.branchName, }); navigation?.navigate('SelectBranch');
+    try { const r = await validateTerminal(code.trim().toUpperCase()); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: code.trim().toUpperCase(), branchId: r.branchId, branchName: r.branchName, }); try { await notifyTerminalVerification('verified'); } catch { /* notify best-effort - klaim tetap lanjut */ } navigation?.navigate('SelectBranch');
   } catch { setError(t('inst_claim_invalid')); } finally { setChecking(false); } };
 
   return (
@@ -28,6 +41,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       <Text style={styles.desc}>
         {t('inst_desc')}
       </Text>
+      {posVer ? <Text style={styles.desc}>POS {posVer}</Text> : null}
 
       <View style={styles.stepsCard}>
         {STEP_KEYS.map((k, i) => (
@@ -51,25 +65,30 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       </View>
 
       <Text style={styles.label}>{t('inst_code_label')}</Text>
-      <TextInput
-        style={styles.input}
+      <AppInput
+        boxStyle={styles.input}
+        style={styles.inputText}
         value={code}
         onChangeText={(t) => { setCode(t); setError(''); }}
         placeholder={t('inst_code_ph')}
-        placeholderTextColor={colors.faint}
         autoCapitalize="characters"
+        error={error}
       />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={[styles.primary, checking && styles.primaryIdle]} onPress={claim} disabled={checking}>
-        <Text style={styles.primaryT}> {checking ? t('inst_claim_checking') : `${t('inst_claim_btn')} ›`} </Text>
-      </TouchableOpacity>
+      <AppButton
+        title={checking ? t('inst_claim_checking') : `${t('inst_claim_btn')} ›`}
+        onPress={claim}
+        disabled={checking}
+        style={styles.primary}
+      />
 
-      <TouchableOpacity
+      <AppButton
+        variant="secondary"
+        title={`${t('inst_web_btn')} ›`}
+        onPress={() => navigation?.navigate('WebView', { url: WEB_URLS.register, title: t('inst_web_title') })}
         style={styles.webBtn}
-        onPress={() => navigation?.navigate('WebView', { url: WEB_URLS.register, title: 'Pendaftaran POS' })}>
-        <Text style={styles.webBtnT}>{`${t('inst_web_btn')} ›`}</Text>
-      </TouchableOpacity>
+        textStyle={styles.webBtnT}
+      />
 
       <TouchableOpacity onPress={() => setShowHelp((v) => !v)}>
         <Text style={styles.link}>{`${t('inst_no_qr')} ›`}</Text>
@@ -113,6 +132,8 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
     backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line, borderRadius: 10,
     paddingHorizontal: 16, height: 52, fontFamily: fonts.bold, fontSize: 14, color: '#2B2B2B', letterSpacing: 1,
   },
+  /** Teks di dalam AppInput: tebal + spasi huruf ala kode terminal. */
+  inputText: { fontFamily: fonts.bold, letterSpacing: 1 },
   error: { fontFamily: fonts.medium, fontSize: 13, color: '#D33A3F', marginTop: 8 },
   primary: {
     backgroundColor: colors.orange, borderRadius: 14, height: 52,

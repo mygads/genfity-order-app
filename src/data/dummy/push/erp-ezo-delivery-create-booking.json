@@ -1,0 +1,11 @@
+{
+  "request": { "orderId": "ESO-88121", "branchId": "B001", "courier": "GoSend", "slot": "2026-10-16 13:00:00" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "bookingId": "EZO-88121", "orderId": "ESO-88121", "courier": "GoSend", "status": "BOOKED" }
+  }
+}

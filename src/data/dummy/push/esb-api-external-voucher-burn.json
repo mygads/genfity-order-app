@@ -1,0 +1,11 @@
+{
+  "request": { "code": "ESBEXT-77881", "salesNum": "TRX-20261016-014" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "code": "ESBEXT-77881", "burned": true, "salesNum": "TRX-20261016-014", "amount": 15000 }
+  }
+}

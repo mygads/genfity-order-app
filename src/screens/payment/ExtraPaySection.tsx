@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors, fonts } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { EXTRA_METHODS, type ExtraMethodId } from '../../lib/payments';
 import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
 
@@ -83,27 +85,25 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
           <View style={[styles.dialog, styles.dialogNarrow]}>
             <Text style={styles.dTitle}>{t('xp_auth_title')}</Text>
             <Text style={styles.dSub}>{t('xp_auth_sub')}</Text>
-            <TextInput
-              style={styles.input}
+            <AppInput
               keyboardType="numeric"
               maxLength={6}
               secureTextEntry
               placeholder={t('xp_pin_ph')}
-              placeholderTextColor={colors.faint}
               value={pin}
-              onChangeText={(t) => setPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+              onChangeText={(v) => setPin(v.replace(/[^0-9]/g, '').slice(0, 6))}
+              style={styles.pinField}
             />
             {msg ? <Text style={styles.msg}>{msg}</Text> : null}
             <View style={styles.btns}>
-              <TouchableOpacity style={styles.ghost} onPress={() => setAuthFor(null)} disabled={busy}>
-                <Text style={styles.ghostT}>{t('xp_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primary, (pin.length !== 6 || busy) && styles.disabled]}
+              <AppButton title={t('xp_cancel')} variant="secondary" disabled={busy} onPress={() => setAuthFor(null)} fullWidth={false} style={styles.modalBtn} />
+              <AppButton
+                title={busy ? t('xp_checking') : t('xp_approve')}
                 disabled={pin.length !== 6 || busy}
-                onPress={() => { void approve(); }}>
-                <Text style={styles.primaryT}>{busy ? t('xp_checking') : t('xp_approve')}</Text>
-              </TouchableOpacity>
+                onPress={() => { void approve(); }}
+                fullWidth={false}
+                style={styles.modalBtn}
+              />
             </View>
           </View>
         </View>
@@ -114,25 +114,22 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
           <View style={[styles.dialog, styles.dialogNarrow]}>
             <Text style={styles.dTitle}>{t('xp_ref_title')}</Text>
             <Text style={styles.dSub}>{t('xp_ref_sub')}</Text>
-            <TextInput
-              style={styles.input}
+            <AppInput
               placeholder={t('xp_ref_ph')}
-              placeholderTextColor={colors.faint}
               value={refNo}
               onChangeText={(v) => setRefNo(v.toUpperCase().slice(0, 32))}
               autoCapitalize="characters"
             />
             {refMsg ? <Text style={styles.msg}>{refMsg}</Text> : null}
             <View style={styles.btns}>
-              <TouchableOpacity style={styles.ghost} onPress={() => setRefFor(null)}>
-                <Text style={styles.ghostT}>{t('xp_cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primary, refNo.trim().length < 3 && styles.disabled]}
+              <AppButton title={t('xp_cancel')} variant="secondary" onPress={() => setRefFor(null)} fullWidth={false} style={styles.modalBtn} />
+              <AppButton
+                title={t('xp_ref_done')}
                 disabled={refNo.trim().length < 3}
-                onPress={submitRef}>
-                <Text style={styles.primaryT}>{t('xp_ref_done')}</Text>
-              </TouchableOpacity>
+                onPress={submitRef}
+                fullWidth={false}
+                style={styles.modalBtn}
+              />
             </View>
           </View>
         </View>
@@ -177,6 +174,8 @@ const styles = StyleSheet.create({
   },
   msg: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8, textAlign: 'center' },
   btns: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  modalBtn: { flex: 1, marginTop: 0 },
+  pinField: { textAlign: 'center', letterSpacing: 4 },
   ghost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 12, alignItems: 'center' },
   ghostT: { fontFamily: fonts.bold, fontSize: 13, color: colors.muted },
   primary: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 12, alignItems: 'center' },

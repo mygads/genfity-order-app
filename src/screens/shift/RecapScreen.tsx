@@ -199,8 +199,10 @@ export default function RecapScreen({ navigation }: Props) {
           const tot = Math.round(num(r.total));
           promoMap.set(code, { n: Math.max(cur.n, num(r.n)), total: tot > 0 ? tot : cur.total });
         }
+        // FIX2-3b: abaikan baris absensi ('Absensi') agar label shift rekap
+        // selalu dari shift kasir sungguhan.
         const shift = await queryFirst<{ shiftName: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null }>(
-          'SELECT shiftName, userId, cashierName, clockIn, clockOut FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+          "SELECT shiftName, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE shiftName IS NULL OR shiftName <> 'Absensi' ORDER BY clockIn DESC LIMIT 1",
         );
         if (!on) return;
         const nm = getSession()?.name ?? 'Gista';

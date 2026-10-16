@@ -1,0 +1,23 @@
+{
+  "request": {
+    "orderId": "ESO-88121",
+    "branchId": "B001", "terminalId": "T001",
+    "customerName": "Budi Santoso",
+    "address": "Jl. Poris Indah No. 21",
+    "subtotal": 52000, "discount": 2000, "tax": 4955,
+    "serviceCharge": 2500, "ongkir": 12000,
+    "grandTotal": 64500,
+    "items": [
+      { "menuId": "M001", "name": "Ayam Geprek", "qty": 2, "unitPrice": 18000, "discount": 2000, "note": "level 3" },
+      { "menuId": "M006", "name": "Es Teh Manis", "qty": 2, "unitPrice": 8000, "discount": 0, "note": "" }
+    ]
+  },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": { "orderId": "ESO-88121", "received": true, "status": "ONGOING" }
+  }
+}

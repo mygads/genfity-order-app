@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Modal, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { printReceipt } from '../../lib/print';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
@@ -145,7 +147,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
     <View style={styles.receipt}>
       <ScrollView>
         <Text style={styles.shopName}>ESB Cabang Poris</Text>
-        <Text style={styles.shopSub}>Kasir Gista • {orderMode ?? 'Dine In'}</Text>
+        <Text style={styles.shopSub}>Kasir Gista • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
         <View style={styles.divider} />
         {miniShown.map((it) => (
           <View key={it.id} style={styles.row}>
@@ -242,23 +244,17 @@ export default function SuccessScreen({ navigation, route }: Props) {
         <View style={styles.dialog}>
           <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
           <Text style={styles.dSub}>Struk {orderNo} • {rp(total)}</Text>
-          <TextInput
-            style={styles.input}
+          <AppInput
             value={mailTo}
             onChangeText={setMailTo}
             placeholder={t('hist_mail_ph')}
-            placeholderTextColor={colors.faint}
             keyboardType="email-address"
             autoCapitalize="none"
           />
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
-            <TouchableOpacity style={styles.ghostBtn} onPress={() => setMailOpen(false)}>
-              <Text style={styles.ghostBtnText}>{t('c_close')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.sendBtn} onPress={sendMail}>
-              <Text style={styles.sendBtnText}>{t('hist_mail_send')}</Text>
-            </TouchableOpacity>
+            <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} style={styles.dBtn} />
+            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} style={styles.dBtn} />
           </View>
         </View>
       </View>
@@ -279,26 +275,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.printBtn}
-            onPress={doPrint}>
-            <Text style={styles.printBtnText}>{t('ok_print')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.printBtn}
-            onPress={() => setMailOpen(true)}>
-            <Text style={styles.printBtnText}>{t('ok_email_long')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.printBtn}
-            onPress={() => navigation?.navigate('History')}>
-            <Text style={styles.printBtnText}>{t('ok_history_long')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.newOrderBtn}
-            onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={styles.newOrderBtnText}>{t('ok_new')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} style={styles.footBtnFlex} />
+          <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} style={styles.footBtnFlex} />
+          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} style={styles.footBtnFlex} />
+          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={styles.footBtnWide} />
         </View>
         {mailModal}
       </View>
@@ -318,26 +298,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
       </View>
 
       <View style={[styles.footer, styles.footerGrid]}>
-        <TouchableOpacity
-          style={styles.footBtn}
-          onPress={() => navigation?.navigate('Receipt', receiptParams)}>
-          <Text style={styles.printBtnText}>{t('ok_print')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.footBtn}
-          onPress={() => setMailOpen(true)}>
-          <Text style={styles.printBtnText}>{t('ok_email_long')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.footBtn}
-          onPress={() => navigation?.navigate('History')}>
-          <Text style={styles.printBtnText}>{t('ok_history_long')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.footBtnPrimary}
-          onPress={() => navigation?.navigate('Cashier')}>
-          <Text style={styles.newOrderBtnText}>{t('ok_new')}</Text>
-        </TouchableOpacity>
+        <AppButton title={t('ok_print')} variant="secondary" onPress={() => navigation?.navigate('Receipt', receiptParams)} fullWidth={false} style={styles.footGridBtn} />
+        <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} style={styles.footGridBtn} />
+        <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} style={styles.footGridBtn} />
+        <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} style={styles.footGridBtn} />
       </View>
       {mailModal}
     </View>
@@ -430,6 +394,10 @@ const styles = StyleSheet.create({
   },
   mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
   dBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  dBtn: { flex: 1, marginTop: 0 },
+  footBtnFlex: { flex: 1, marginTop: 0 },
+  footBtnWide: { flex: 2, marginTop: 0 },
+  footGridBtn: { width: '48%', flexGrow: 1, flexShrink: 0, marginTop: 0 },
   ghostBtn: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 12, alignItems: 'center' },
   ghostBtnText: { fontFamily: fonts.bold, fontSize: 13, color: colors.muted },
   sendBtn: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 12, alignItems: 'center' },

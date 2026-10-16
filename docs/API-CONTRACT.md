@@ -21,18 +21,31 @@ dokumen ini (ikuti persis bila bangun BE baru).
 | WS device channel | `wss://ws-poslite.esb.co.id/ws` | `WS_URL` |
 | WS self-order channel | `wss://…/wss-self-order` | `WS_SELF_ORDER_URL` |
 
+REA-13: APK memakai path `/wss-self-order` di semua env non-prod
+(`dev7`, `qa7`, `stg-eso`, emulator `ws://10.0.2.2:8082/ws` untuk device
+channel). Staging clone diselaraskan ke
+`wss://stg-eso.esb.co.id/wss-self-order` (lihat §7).
+
 Ganti semua via layar Pengaturan → Terminal & Server (`src/config/server.ts`).
 
 ## 2. Konvensi umum
 
 - Semua request: `POST`, `Content-Type: application/json`.
-- [KONTRAK] Header auth setiap request runtime:
+- [KONTRAK] Header auth setiap request runtime (kode: `apiGet`/`apiPost`
+  di `src/config/server.ts`):
 
 ```http
-X-Terminal-Key: <terminalKey dari hasil install>
-X-Terminal-Id: <T001>
-X-Device-Id: <16-hex deviceID>
+X-Terminal-Code: <terminalCode dari hasil install>
+X-Branch-Id: <B001>
+Idempotency-Key: <id unik per item antre> (push saja)
+Authorization: Bearer <authKey user> (bila ada token)
 ```
+
+REA-18: `X-Terminal-Code` / `X-Branch-Id` TANPA padanan literal di APK
+(status `asumsi-clean-room`). Kandidat yang ADA di APK: `authKey`,
+`deviceID`/`DeviceID`, `UDID`/`udid`, `Authorization`/`Bearer`, `ApiKey`,
+`x-esb-ws-secret-token` (WS saja). Backend sendiri cukup menerima header
+[KONTRAK] di atas apa adanya.
 
 - [KONTRAK] Envelope sukses Yii2-style:
 
@@ -136,9 +149,15 @@ Server kembalikan hanya baris yang berubah sejak `lastSyncDate`.
 | Voucher | `POST main/get-voucher` | `ms_voucher`, template |
 | Member | `POST main/get-member` | `ms_member` |
 | Penjualan | `POST main/get-sales` | riwayat `tr_saleshead*` |
-| CoA | `POST main/get-expense-chart-of-accounts` | `ms_coa` |
-| Menu online | `POST main/get-menu-online` | stok online + mapping gofood/grab |
-| Versi | `POST esb_api/pull/pos-version` | `{minVersion, latestVersion}` |
+| CoA | `POST v1/pull/expense-chart-of-accounts` [FAKTA] | `ms_coa` |
+| Menu online | `POST v1/pull/get-menu-online` [FAKTA] | stok online + mapping gofood/grab |
+| Station | `POST esb_api/pull/pull-station-data` [FAKTA] | `ms_station` |
+| Versi | `POST esb_api/pull/pull-pos-version` [FAKTA] | `{minVersion, latestVersion}` (tanpa tabel) |
+| Log shift | `POST esb_api/main/get-shift-log-data` [FAKTA] | `tr_shiftlog` |
+| Setting terminal | `POST esb_api/pull/pull-terminal-settings` [FAKTA] | `ms_terminalsetting` |
+| Setting terminal (v11) | `POST esb_apiv11/main/get-terminal-settings` [FAKTA] | dibaca langsung (tanpa tabel) |
+| Verifikasi terminal | `POST esb_apiv9/terminal/verification-notify` [FAKTA] | `{ok, verifiedAt}` (tanpa tabel) |
+| Payment method | `POST main/get-payment-method` [asumsi-clean-room] | `ms_paymentmethod` |
 
 Contoh item menu:
 
@@ -148,6 +167,59 @@ Contoh item menu:
   "flagActive": 1, "soldOut": 0, "imageUrl": "https://…/m001.webp",
   "lastSyncDate": "2026-10-16 10:00:00" }
 ```
+
+### 4.1 REA-18: path per path (asli APK vs asumsi)
+
+| Path lama (tebakan) | Path kini | Status |
+|---|---|---|
+| `main/get-menu-online` | `v1/pull/get-menu-online` | [FAKTA] |
+| `main/get-expense-chart-of-accounts` | `v1/pull/expense-chart-of-accounts` | [FAKTA] |
+| `main/get-payment-method` | `main/get-payment-method` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `main/get-station` | `esb_api/pull/pull-station-data` | [FAKTA] (REA-12) |
+| `shift/open` | `v1/push/shift` (`body.op: 'shift-open'`) | [FAKTA] |
+| `shift/close` | `v1/push/shift` (`body.op: 'shift-close'`) | [FAKTA] |
+| `branch-expenses/push` | `v1/push/branch-expenses` | [FAKTA] |
+| `device/register-push` | `device/register-push` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `auth/supervisor-approve` | `auth/supervisor-approve` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `auth/cashier-login` | `auth/cashier-login` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `member-deposit-withdrawal/topup` | `member-deposit-withdrawal/topup` (tetap) | `asumsi-clean-room` (inquiry-deposit ADA, topup nihil) |
+| `member/register` | `erp/member` (path dasar grup) | grup [FAKTA] (REA-3), sub-path pasti `asumsi-clean-room` |
+
+Fungsi tidak ada yang dihapus, hanya pathnya yang dialihkan
+(`src/config/server.ts` + kunci katalog `src/lib/apiSource.ts`).
+
+### 4.2 Pull baru REA-11/12/8/9
+
+| Endpoint | Body | `data` |
+|---|---|---|
+| `POST esb_api/main/get-shift-log-data` | `{branchId, terminalId, lastSyncDate, page}` | `{totalRecords, pageCount, page, items[]}` dengan item `{shiftId, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, cashActual, cashDiff, status}` → `tr_shiftlog` (INSERT OR IGNORE, baris lokal dilindungi) |
+| `POST esb_api/pull/pull-terminal-settings` | `{branchId, terminalId, lastSyncDate, page}` | `{totalRecords, pageCount, page, items[]}` dengan item `{terminalId, settingKey, settingValue, flag}` → `ms_terminalsetting` (server menang) |
+| `POST esb_api/pull/pull-pos-version` | `{branchId, terminalId, platform}` | `{minVersion, latestVersion}` (tanpa tabel; helper `fetchPosVersion()` di `apiSource`) |
+| `POST esb_apiv11/main/get-terminal-settings` | `{branchId, terminalId, lastSyncDate, page}` | `{terminalId, branchId, settings: [{key, value}]}` (dibaca langsung, tanpa tabel) |
+| `POST esb_apiv9/terminal/verification-notify` | `{terminalCode, branchId, deviceID, status}` | `{ok, terminalCode, verifiedAt}` (helper `notifyTerminalVerification()`) |
+
+### 4.3 Delapan kunci setting baru (REA-14)
+
+Nama [FAKTA], pemetaan `(key1, key2)` [KONTRAK] (pecahan pasti tak
+terverifikasi). Domain `branchsettings` menarik generik ke `ms_setting`,
+jadi 8 baris ini ikut pull otomatis (dummy `pull/main-get-branch-settings.json`):
+
+| Nama APK | `(key1, key2)` kontrak | `value1` contoh |
+|---|---|---|
+| Customer Display Logo | `(CustomerDisplay, Logo)` | URL logo |
+| Enable ESB Order Web Socket | `(EsbOrder, EnableWebSocket)` | `1` |
+| Enable Queue Prefix | `(Queue, EnablePrefix)` | `1` (`value2`: prefix `A`) |
+| Enable Realtime Stock | `(Stock, EnableRealtime)` | `1` |
+| Enable Sound ESB Order | `(EsbOrder, EnableSound)` | `1` |
+| Enable Wakelock | `(Device, EnableWakelock)` | `1` |
+| Rounding Mode | `(Rounding, Mode)` | `NEAREST` (`UP`/`DOWN`) |
+| Rounding Nearest Value | `(Rounding, NearestValue)` | `100` |
+
+REA-19: string berikut JANGAN dipakai mentah (artefak/terpotong):
+`wss://dev7.esb.co.id/wss-poslite.esb.co.id/ws`,
+`pos-lite-minimum-version-v2P`, `esb_api/poslite/expense-chart-of-accounts&`,
+`esb-order/eso-qs/pos-void&`, `sales-expenseX`, `ms_promotionheadr`.
+Tidak ada yang dipakai di kontrak ini maupun di kode lane REA-FIX-A.
 
 ## 5. Push (aplikasi → server) -dirty = `syncDate IS NULL`
 
@@ -186,11 +258,13 @@ yang gagal TETAP `syncDate NULL` (retry berikutnya).
 | `POST order/move-items` | `{fromSalesNum, toTableNo, itemIds[]}` |
 | `POST order/move-table` | `{salesNum, fromTableNo, toTableNo}` |
 | `POST order/view` | `{salesNum}` → detail (untuk load-order lintas terminal) |
-| `POST shift/open` | `{userId, terminalId, startCash}` |
-| `POST shift/close` | `{shiftId, endCash, expectedCash}` |
-| `POST branch-expenses/push` | `{date, coaId, amount, note, photoUrl?}` |
+| `POST posv1/order/view-by-qr` [FAKTA] | `{qrCode, branchId}` → detail seperti `order/view` + `qrCode` |
+| `POST posv1/order/view-quick-service` [FAKTA] | `{queueNumber, branchId}` → detail order quick-service + `queueNumber` |
+| `POST posv1/order/pos-error-log` [FAKTA] | `{terminalId, branchId, errorCode, errorMessage, salesNum?}` → `{ok, logId}` |
+| `POST v1/push/shift` [FAKTA] | buka: `{op:'shift-open', userId, terminalId, startCash}` / tutup: `{op:'shift-close', shiftId, endCash, expectedCash}` (satu path, beda `op`) |
+| `POST v1/push/branch-expenses` [FAKTA] | `{date, coaId, amount, note, photoUrl?}` |
 | `POST member-deposit-withdrawal/inquiry-deposit` | `{memberId}` → `{saldo, poin}` |
-| `POST member-deposit-withdrawal/topup` | `{memberId, amount, paymentMethod}` |
+| `POST member-deposit-withdrawal/topup` [asumsi-clean-room] | `{memberId, amount, paymentMethod}` |
 | `POST sales/receipt-email` | `{salesNum, email}` |
 
 ### 5.3 Voucher online (lock/burn agar tidak dipakai 2x)
@@ -201,6 +275,53 @@ POST posv1/esb-voucher/lock     {code, salesNum}   → {locked:true}
 POST posv1/esb-voucher/unlock   {code, salesNum}   → {ok:true}   (batal bayar)
 POST posv1/esb-voucher/burn     {code, salesNum}   → {ok:true}   (lunas)
 ```
+
+### 5.4 Voucher online + eksternal (REA-6/REA-7)
+
+```
+POST esb_api/external-voucher/validate {code, grandTotal?} → {valid, amount, source:'external'}
+POST esb_api/external-voucher/burn     {code, salesNum}    → {burned:true, amount}
+POST esb_api/external-voucher/unburn   {code, salesNum}    → {unburned:true, amount}
+POST esb_api/voucher/validate-online-voucher-pos-payment {code, grandTotal} → {valid, amount}
+POST esb_api/voucher/claim-online-voucher-pos-payment    {code, salesNum}   → {claimed:true, amount}
+POST esb_api/voucher/claim-voucher-template {templateId, salesNum} → {code, claimed:true, amount}
+```
+
+Helper siap di `src/lib/apiSource.ts`: `validateOnlineVoucher()`,
+`claimOnlineVoucher()`, `externalVoucher(op)`.
+TODO(pemilik layar VoucherScreen): panggil helper ini untuk alur
+claim/unburn online (wiring UI bukan lane REA-FIX-A).
+
+### 5.5 Member via erp/member/* (REA-3)
+
+```
+POST erp/member                 {memberId, name, phone}                              → {memberId, name, ok:true} (register; sub-path pasti asumsi-clean-room)
+POST erp/member/balance-deposit {memberId, branchId}                                 → {saldo, poin}
+POST erp/member/deposit         {memberId, branchId, amount, paymentMethod, userId} → {amount, balanceBefore, balanceAfter, ok:true}
+POST erp/member/sales           {memberId, branchId, page}                           → {totalRecords, pageCount, page, items[]}
+```
+
+Helper siap: `memberErpApi(op, body)` di `src/lib/apiSource.ts`.
+TODO(pemilik layar Member/TopupDeposit): alihkan inquiry/topup/register
+ke helper ini. Catatan: `erp/steroid/find` (REA-4) belum dipetakan,
+butuh riset biner lanjutan.
+
+### 5.6 Delivery erp/ezo-delivery/* (REA-2)
+
+```
+POST erp/ezo-delivery/approve          {bookingId, branchId, userId}      → {approved:true, status}
+POST erp/ezo-delivery/create-booking   {orderId, branchId, courier, slot} → {bookingId, status:'BOOKED'}
+POST erp/ezo-delivery/finish-by-outlet {bookingId, branchId, userId}      → {finished:true, status}
+POST erp/ezo-delivery/push-data        {orderId, customerName, address, items[], subtotal, discount, tax, serviceCharge, ongkir, grandTotal} → {received:true, status}
+POST erp/ezo-delivery/schedule-order   {orderId, branchId, slot}          → {scheduleId, status:'SCHEDULED'}
+POST erp/ezo-delivery/search-ongoing   {branchId, page}                   → {totalRecords, pageCount, page, items[]}
+POST erp/ezo-delivery/search-outstanding {branchId, page}                 → {totalRecords, pageCount, page, items[]}
+```
+
+Helper siap: `deliveryApi(op, body)` di `src/lib/apiSource.ts`.
+TODO(pemilik layar EsbOrder/dashboard delivery, batch lain): bangun UI
+di atas helper ini. Angka contoh ikut rumus §10.3
+(`tax = round(net * 11 / 111)`).
 
 ## 6. OTA - `OTA_BASE_URL`
 
@@ -222,7 +343,17 @@ layar update + unduh APK dari `data[].apkUrl` (tambahkan key `apkUrl` di BE Anda
 ## 7. WebSocket (realtime)
 
 Aturan koneksi [KONTRAK]: kedua channel + bus display HANYA tersambung saat env server = Custom (milik sendiri); env bawaan = mode lokal, aplikasi tidak pernah mendial infrastruktur pihak ketiga tanpa kredensial merchant. Dua channel [FAKTA], reconnect otomatis + heartbeat 30 dtk (lihat
-`src/lib/realtime.ts`).
+`src/lib/realtime.ts`). Guard custom-only TIDAK diubah (S5).
+
+URL per env [FAKTA] (REA-13):
+
+| Env | Device channel | Self-order channel |
+|---|---|---|
+| prod | `wss://ws-poslite.esb.co.id/ws` | `wss://…/wss-self-order` |
+| dev7 | (device, path sama) | `wss://dev7.esb.co.id/wss-self-order` |
+| qa7 | (device, path sama) | `wss://qa7.esb.co.id/wss-self-order` |
+| stg-eso | (device, path sama) | `wss://stg-eso.esb.co.id/wss-self-order` |
+| emulator | `ws://10.0.2.2:8082/ws` | - |
 
 ### 7.1 Device channel - `WS_URL`
 
@@ -260,7 +391,7 @@ Format `data` selaras §7 (`{type, payload}`) agar handler sama.
 ## 9. Kode area & format
 
 - Uang: integer rupiah (tanpa desimal). Pajak 11% default dari
-  `ms_setting(Tax, PPN)` (info-only, inklusif — lih. rumus §10.3). Pembulatan: `rounding` = selisih ke kelipatan
+  `ms_setting(Tax, PPN)` (info-only, inklusif, lih. rumus §10.3). Pembulatan: `rounding` = selisih ke kelipatan
   (`ms_setting(Rounding, Step)`, default 100).
 - Waktu: `YYYY-MM-DD HH:mm:ss` (zona terminal).
 - Nomor transaksi: `TRX-YYYYMMDD-NNN` unik per terminal per hari.
@@ -302,22 +433,39 @@ Satu file per endpoint, tiap file = pasangan `{request, response}`:
   `main-check-branch-status`, `pos-create-pin`, `esb-employee-validate`,
   `esb-employee-update-pin`, `employee-attendance-clock-in`,
   `employee-attendance-clock-out`
-- `src/data/dummy/pull/` - `main-get-branch-settings`, `main-get-menu`,
+- `src/data/dummy/pull/` - `main-get-branch-settings` (13 baris, termasuk
+  8 kunci REA-14 di §4.3), `main-get-menu`,
   `main-get-branch-menu`, `main-get-user`, `main-get-table`,
   `main-get-promotion`, `main-get-voucher`, `main-get-member`,
-  `main-get-sales`, `main-get-expense-chart-of-accounts`,
-  `main-get-menu-online`, `esb_api-pull-pos-version`,
-  `main-get-payment-method`, `main-get-station`, `terminal-get-terminal`,
+  `main-get-sales`, `v1-pull-get-menu-online`,
+  `v1-pull-expense-chart-of-accounts`, `esb-api-pull-pull-pos-version`,
+  `esb-api-pull-pull-station-data`, `esb-api-pull-pull-terminal-settings`,
+  `esb-api-main-get-shift-log-data`,
+  `esb-apiv11-main-get-terminal-settings`,
+  `esb-apiv9-terminal-verification-notify`,
+  `main-get-payment-method` ([asumsi-clean-room]), `terminal-get-terminal`,
   `terminal-update`
 - `src/data/dummy/push/` - `order-finish` (angka persis contoh §5.1:
   subtotal 70000, discount 2500, tax 5698, voucher 10000, rounding 25,
   grandTotal 60400, paid 100000, change 39600), `order-split-bill`,
-  `order-move-items`, `order-move-table`, `order-view`, `shift-open`,
-  `shift-close`, `branch-expenses-push`,
+  `order-move-items`, `order-move-table`, `order-view`,
+  `posv1-order-view-by-qr`, `posv1-order-view-quick-service`,
+  `posv1-order-pos-error-log`, `v1-push-shift` (satu file untuk
+  `shift-open` + `shift-close`: respons superset, bedakan via `body.op`),
+  `v1-push-branch-expenses`,
   `member-deposit-withdrawal-inquiry-deposit`,
-  `member-deposit-withdrawal-topup`, `sales-receipt-email`,
-  `posv1-esb-voucher-validate/lock/unlock/burn`, `auth-cashier-login`,
-  `auth-supervisor-approve`, `device-register-push`
+  `member-deposit-withdrawal-topup` ([asumsi-clean-room]),
+  `sales-receipt-email`,
+  `posv1-esb-voucher-validate/lock/unlock/burn`,
+  `esb-api-external-voucher-validate/burn/unburn`,
+  `esb-api-voucher-validate-online-voucher-pos-payment`,
+  `esb-api-voucher-claim-online-voucher-pos-payment`,
+  `esb-api-voucher-claim-voucher-template`,
+  `erp-member` (+ `erp-member-balance-deposit/deposit/sales`),
+  `erp-ezo-delivery-approve/create-booking/finish-by-outlet/push-data/schedule-order/search-ongoing/search-outstanding`,
+  `auth-cashier-login` ([asumsi-clean-room]),
+  `auth-supervisor-approve` ([asumsi-clean-room]),
+  `device-register-push` ([asumsi-clean-room])
 - `src/data/dummy/ota/pos-lite-minimum-version-v2.json` - array tanpa
   envelope `[{key1,key2,value1,value2}]` + `apkUrl` milik sendiri
 
@@ -351,4 +499,40 @@ gista.kasir), terminal T001/ESB-PORIS-001, harga rupiah wajar.
   `E00043` (>3 hari, banner di SyncScreen), `E401`, `E422`, `E409`.
   Banner E00043/E00044 dihitung dari timestamp sync sukses terakhir
   (`getLastSyncMs`), bukan nilai statis.
+
+---
+
+## 11. Temuan REA-FIX-A (REAA-x) + TODO wiring pemilik layar
+
+- REAA-1: `order-finish.json` / `order-view.json` lama memakai tax 5698
+  untuk net 67500, tidak cocok rumus §10.3 (harusnya 6691). Dibiarkan apa
+  adanya agar contoh §5.1 tetap konsisten; semua dummy BARU memakai angka
+  kanonis §10.3 (cek: 66000→6541, 50000→4955, 45000→4459).
+- REAA-2: kunci katalog lama `esb_api/pull/pos-version` adalah tebakan
+  tanpa padanan; nama konkret APK adalah `pull-pos-version` (REA-12),
+  sudah dikoreksi di `ApiPath.pullPosVersion` + katalog dummy.
+- REAA-3: nama header §2 (`X-Terminal-Code`/`X-Branch-Id`) berbeda dari
+  draf kontrak lama (`X-Terminal-Key`/`X-Terminal-Id`/`X-Device-Id`);
+  diselaraskan ke kode (`apiGet`/`apiPost`) dan diberi status
+  `asumsi-clean-room` (REA-18).
+- REAA-4: `pushShiftOpen` dan `pushShiftClose` kini bernilai sama
+  (`v1/push/shift`); pembeda open/close adalah `body.op` + field
+  (`startCash` vs `endCash`). Antrean `sync.ts` (`pathFor`) tetap
+  membedakan via `payload.op`, jadi tidak ada perubahan layar.
+- REA-16/REA-17: konstanta siap di `src/lib/master.ts` (`QRIS_ACQUIRERS`
+  9 acquirer, `NATIVE_PREF_KEYS` 7 kunci prefs) + key i18n `qris_acq_*`.
+  TODO(pemilik layar QrisScreen): pakai untuk label metode bayar.
+  TODO(pemilik layar PrintersScreen/EdcScreen): pakai untuk modul
+  EDC/printer native.
+
+TODO wiring (bukan lane REA-FIX-A, helper sudah siap di `apiSource.ts`):
+
+| Helper | Pemilik layar |
+|---|---|
+| `validateOnlineVoucher`, `claimOnlineVoucher`, `externalVoucher` | VoucherScreen |
+| `deliveryApi` (7 op) | EsbOrder / dashboard delivery |
+| `memberErpApi` (3 op) | MemberScreen / TopupDepositScreen |
+| `fetchPosVersion`, `notifyTerminalVerification` | Install / Settings / Sync |
+| `QRIS_ACQUIRERS` + `qris_acq_*` | QrisScreen |
+| `NATIVE_PREF_KEYS` | PrintersScreen / EdcScreen |
 

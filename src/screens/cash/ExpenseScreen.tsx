@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
   id: string;
   nama: string;
   tanggal: string;
@@ -6,17 +7,22 @@ import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView,
   jumlah: number;
   disetujui: boolean;
   photo?: string;};type ExpenseRow = { id: string;
-coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const LS_APPROVAL = 'genfity.expense.approved';const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Sewa', 'Lainnya'];const SEED: Expense[] = [
-    { id: 'EX-101', nama: 'Belanja plastik dan tissue', tanggal: '16 Okt 2026', coa: 'Operasional', jumlah: 45000, disetujui: true },
-    { id: 'EX-102', nama: 'Bensin antar online', tanggal: '16 Okt 2026', coa: 'Operasional', jumlah: 20000, disetujui: true },
-    { id: 'EX-103', nama: 'Servis kompor dapur', tanggal: '15 Okt 2026', coa: 'Utilitas', jumlah: 150000, disetujui: false },];interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA expense: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb();
-  const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}function shortDate(iso: string | null): string { if (!iso) return '16 Okt 2026'; try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }); } catch { return iso; }}export default function ExpenseScreen({ navigation }: Props) { const { width } = useWindowDimensions(); const isTablet = width >= TABLET_BP; const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [items, setItems] = useState<Expense[]>(SEED); const [formOpen, setFormOpen] = useState(false);
+coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Sewa', 'Lainnya'];
+
+/** Seed tanggal lewat fmtDate agar ikut locale, bukan string hardcode. */
+const SEED: Expense[] = [
+    { id: 'EX-101', nama: 'Belanja plastik dan tissue', tanggal: fmtDate(new Date(2026, 9, 16)), coa: 'Operasional', jumlah: 45000, disetujui: true },
+    { id: 'EX-102', nama: 'Bensin antar online', tanggal: fmtDate(new Date(2026, 9, 16)), coa: 'Operasional', jumlah: 20000, disetujui: true },
+    { id: 'EX-103', nama: 'Servis kompor dapur', tanggal: fmtDate(new Date(2026, 9, 15)), coa: 'Utilitas', jumlah: 150000, disetujui: false },];interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA expense: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb();
+  const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}function shortDate(iso: string | null, lang: Lang = 'id'): string { if (!iso) return fmtDate(new Date(), lang); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return fmtDate(d, lang); } catch { return iso; }}export default function ExpenseScreen({ navigation }: Props) { const { width } = useWindowDimensions(); const isTablet = width >= TABLET_BP; const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [items, setItems] = useState<Expense[]>(SEED); const [formOpen, setFormOpen] = useState(false);
   const [nama, setNama] = useState('');
   const [jumlah, setJumlah] = useState('');
   const [coa, setCoa] = useState(FALLBACK_COA[0]);
   const [photo, setPhoto] = useState<string | null>(null);
 
-  const [saving, setSaving] = useState(false); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); (async () => { const approved = await getJSON<Record<string, boolean>>(LS_APPROVAL, {}); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' ORDER BY createdAt DESC", ); if (!alive || rows.length === 0) return; setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: tampilkan seed */ } })(); return () => { alive = false; }; }, []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
+  // F7: muat ulang tiap layar jadi fokus agar approve dari daftar lain langsung
+  // terlihat (focus-listener; aman: guard addListener + alive).
+  const [saving, setSaving] = useState(false); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' ORDER BY createdAt DESC", ); if (!alive || rows.length === 0) return; setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: tampilkan seed */ } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = nama.trim().length >= 3 && jumlahNum > 0 && !saving;
 
@@ -44,7 +50,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
       {
         id,
         nama: nama.trim(),
-        tanggal: shortDate(now),
+        tanggal: shortDate(now, lang),
         coa,
         jumlah: jumlahNum,
         disetujui: false,
@@ -57,11 +63,13 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   setSaving(false); };
 
   const setujui = async (id: string) =>
-    { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e)));
-
-  try { const approved = await getJSON<Record<string, boolean>>(LS_APPROVAL, {}); approved[id] = true; await setJSON(LS_APPROVAL, approved); await enqueueOutbox('tr_branchexpense', id, 'update'); } catch { /* abaikan */ } }; return (
+    { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); await markApproved(id); }; return (
     <View style={s.root}>
-      <ScreenHeader title={t('expense.title')} onBack={() => setDrawerOpen(true)} backLabel="☰" right={
+      <ScreenHeader title={t('expense.title')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+          <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+        </TouchableOpacity>
+      } right={
         <TouchableOpacity onPress={() => setFormOpen((v) => !v)}>
           <Text style={s.headerAction}>{t('common.add')}</Text>
         </TouchableOpacity>
@@ -77,26 +85,20 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
         {formOpen && (
           <View style={s.card}>
             <Text style={s.cardTitle}>{t('expense.addTitle')}</Text>
-            <Text style={s.label}>{t('expense.name')}</Text>
-            <TextInput
-              style={s.input}
+            <AppInput
+              label={t('expense.name')}
               placeholder={t('expense.namePh')}
-              placeholderTextColor={colors.faint}
               value={nama}
               onChangeText={setNama}
             />
-            <Text style={s.label}>{t('expense.nominal')}</Text>
-            <View style={s.amountBox}>
-              <Text style={s.rpPrefix}>Rp</Text>
-              <TextInput
-                style={s.amountInput}
-                keyboardType="number-pad"
-                placeholder="0"
-                placeholderTextColor={colors.faint}
-                value={jumlahNum ? rpNum(jumlahNum) : ''}
-                onChangeText={(v) => setJumlah(v.replace(/\D/g, '').slice(0, 12))}
-              />
-            </View>
+            <AppInput
+              label={t('expense.nominal')}
+              keyboardType="number-pad"
+              placeholder="0"
+              value={jumlahNum ? rpNum(jumlahNum) : ''}
+              onChangeText={(v) => setJumlah(v.replace(/\D/g, '').slice(0, 12))}
+              style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 20 }}
+            />
             <Text style={s.label}>{t('expense.coa')}</Text>
             <View style={s.chips}>
               {coaList.map((c) => (
@@ -111,21 +113,24 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
             <Text style={s.label}>{t('expense.photo')}</Text>
             <View style={s.photoRow}>
               {photo ? <Image source={{ uri: photo }} style={s.preview} /> : null}
-              <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
-                <Text style={s.photoBtnT}>{photo ? t('expense.changePhoto') : t('expense.takePhoto')}</Text>
-              </TouchableOpacity>
+              <AppButton
+                title={photo ? t('expense.changePhoto') : t('expense.takePhoto')}
+                variant="secondary"
+                fullWidth={false}
+                style={{ marginTop: 0 }}
+                onPress={pickPhoto}
+              />
               {photo ? (
                 <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={10}>
                   <Text style={s.del}>{t('common.delete')}</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
-            <TouchableOpacity
-              style={[s.primary, !ready && s.disabled]}
+            <AppButton
+              title={t('expense.saveBtn')}
               disabled={!ready}
-              onPress={tambah}>
-              <Text style={s.primaryT}>{t('expense.saveBtn')}</Text>
-            </TouchableOpacity>
+              onPress={() => void tambah()}
+            />
           </View>
         )}
 
@@ -158,6 +163,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
+  burger: { width: 22, height: 22 },
   headerAction: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
   body: { padding: 16, paddingBottom: 40 },
   hero: { backgroundColor: colors.navy, borderRadius: 14, padding: 18 },

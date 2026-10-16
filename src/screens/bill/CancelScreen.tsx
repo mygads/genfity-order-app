@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import { initDb, query } from '../../lib/db';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };const ITEMS = [
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import { initDb, query } from '../../lib/db';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };const ITEMS = [
   { id: 'c1', name: 'Sudirman Coffee', price: 12900, qty: 2 },
   { id: 'c2', name: 'Lele goreng kremes', price: 15000, qty: 1 },
   { id: 'c3', name: 'Es Teh Manis', price: 8000, qty: 2 },];type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar fallback mock dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }}const SPLITS = [
@@ -51,10 +51,8 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Text style={[styles.reasonT, reason === r && styles.reasonTOn]}>{r}</Text>
         </TouchableOpacity>
       ))}
-      <Text style={styles.label}>{t('c_note_opt')}</Text>
-      <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} placeholderTextColor={colors.faint} />
-      <Text style={styles.label}>{t('cx_pin')}</Text>
-      <TextInput style={styles.input} value={pin} onChangeText={(txt) => { setPin(txt.replace(/\D/g, '').slice(0, 6)); setAuthMsg(''); }} placeholder={t('cx_pin_ph')} placeholderTextColor={colors.faint} keyboardType="numeric" maxLength={6} secureTextEntry />
+      <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
+      <AppInput label={t('cx_pin')} value={pin} onChangeText={(txt) => { setPin(txt.replace(/\D/g, '').slice(0, 6)); setAuthMsg(''); }} placeholder={t('cx_pin_ph')} keyboardType="numeric" maxLength={6} secureTextEntry />
 
       {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null} <View style={styles.summary}>
         <Text style={styles.sumTitle}>{t('cx_confirm_split')}</Text>
@@ -78,15 +76,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       ))}
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.goBack()}>
-          <Text style={styles.ghostT}>{t('c_back')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.primary, !canConfirm && styles.disabled]} onPress={confirm} disabled={!canConfirm}>
-          <Text style={styles.primaryT}>{confirming ? '...' : `${t('cx_yes_void')} ›`}</Text>
-        </TouchableOpacity>
+        <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.goBack()} fullWidth={false} style={styles.actionBtn} />
+        <AppButton title={confirming ? '...' : `${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} style={styles.actionBtn} />
       </View>
       {done && <Text style={styles.done}>{t('cx_done')}</Text>} {done && (
-      <TouchableOpacity style={styles.printVoidBtn} onPress={printVoid}> <Text style={styles.printVoidTxt}>{t('cx_void_print')}</Text> </TouchableOpacity> )} <TouchableOpacity onPress={() => navigation?.navigate('History')}>
+      <AppButton title={t('cx_void_print')} onPress={printVoid} /> )} <TouchableOpacity onPress={() => navigation?.navigate('History')}>
         <Text style={styles.link}>{t('cx_history')}</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -122,6 +116,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   totalV: { fontFamily: fonts.bold, fontSize: 16, color: colors.orangeDark },
   cancelT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  actionBtn: { flex: 1, marginTop: 0 },
   primary: { flex: 1, backgroundColor: colors.red, borderRadius: 10, padding: 14, alignItems: 'center' },
   disabled: { opacity: 0.5 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },

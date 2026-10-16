@@ -309,3 +309,224 @@ cetak stub dev-client, harness screenshot `verify/shot.two.cjs`
 Sisa: pasang server sendiri (kontrak JSON ikut server Anda), modul native
 dev-client (BT SPP/LAN/USB print, foreground WS, Presentation-API,
 intent EDC, MLKit/UVC), push notification.
+
+## 15. Lampiran F - verifikasi ulang 2026-10-16 (REA-1, read-only + lampiran)
+
+Metode: tanpa apktool/jadx. Strings ASCII dibaca langsung dari biner
+menggunakan PowerShell + System.IO.Compression (buka APK sebagai ZIP,
+baca stream entry, ambil run ASCII printable >= 4 karakter, saring pola).
+Sumber biner: lib/arm64-v8a/libapp.so (18.088.864 byte, 75.471 string)
+dari split config.arm64_v8a.apk + classes.dex (5.995.252 byte) dan
+classes2.dex dari base APK. Aturan tulis: hanya lampiran ini yang
+ditambah, isi lama tidak diubah.
+
+### F.1 Identitas APK utama
+
+- APK utama (base): split-bundle/id.co.esb.esb_pos.apk, 20.396.209 byte,
+  md5 65a515bfab93aa31b719fd978801b4e5, mtime 2026-10-16 11:40 +0700.
+- Salinan identik (byte + md5 sama): stub/base.apk (mtime 2026-10-16
+  01:25), stub/base-check.apk (mtime 2026-10-16 11:21).
+- Manifest (split-bundle/manifest.json): ESB POSLite, package
+  id.co.esb.esb_pos, version_name 2.31.13, version_code 761, minSdk 23,
+  targetSdk 35. Target v2.31.13 TERKONFIRMASI.
+- reap/apk/base.apk (14 Okt, 20.396.209 byte) berukuran sama, kemungkinan
+  salinan yang sama (md5 tidak dihitung ulang di sesi ini).
+- apktest/work/xapk/ dan reap/rea-apk/ hanya berisi split config
+  (config.*.apk), tanpa file base id.co.esb.esb_pos.apk.
+- Catatan jujur: header dossier §0 menulis "sha base a9b979bb..." yang
+  TIDAK cocok dengan md5 terukur 65a515bf... (mungkin SHA atas file
+  lain atau subset). Perlu klarifikasi sumber hash itu.
+
+### F.2 Temuan BARU (belum di dossier, bernomor REA-x)
+
+REA-2 grup erp/ezo-delivery lengkap (7 path, dossier hanya sebut 2):
+erp/ezo-delivery/approve, create-booking, finish-by-outlet, push-data,
+schedule-order, search-ongoing, search-outstanding.
+Baru: approve, finish-by-outlet, schedule-order, search-ongoing,
+search-outstanding.
+
+REA-3 grup erp/member (baru seluruhnya): erp/member/,
+erp/member/balance-deposit, erp/member/deposit, erp/member/sales.
+Dugaan: alur member/deposit juga lewat host erp, bukan hanya eso-api.
+
+REA-4 path tak dikenal: erp/steroid/find. Butuh riset (mungkin search
+atau modul internal).
+
+REA-5 esb_api/employee-attendance lengkap: base, clock-in, clock-out,
+update-pin, validate. Dossier hanya sebut clock-in/out generik.
+Kembaran di grup esb/: esb/employee/update-pin, esb/employee/validate,
+esb/attendance/clock-in, esb/attendance/clock-out.
+
+REA-6 esb_api/external-voucher: burn, unburn, validate.
+Baru: unburn (dossier sebut external-voucher generik saja).
+
+REA-7 voucher online claim (baru): esb_api/voucher/
+claim-online-voucher-pos-payment, validate-online-voucher-pos-payment,
+claim-voucher-template.
+
+REA-8 spesimen v11 (baru): esb_apiv11/main/get-terminal-settings.
+Satu contoh konkret grup v11 untuk B6.
+
+REA-9 verifikasi terminal (baru): esb_apiv9/terminal/
+verification-notify.
+
+REA-10 varian posv1/order (baru): pos-error-log, view-by-qr,
+view-quick-service. Dossier hanya finish dan view.
+
+REA-11 pull shift log (baru): esb_api/main/get-shift-log-data.
+Peluang clone: tarik log shift dari server.
+
+REA-12 daftar konkret esb_api/pull (dossier hanya ringkasan generik):
+pull-branch-event-data, pull-branch-menu-data, branch-menu-transaction,
+pull-cancel-menu-data, pull-pos-version, pull-sales-data, pull-shift-data,
+pull-station-data, pull-terminal-settings, pull-voucher-data,
+pull-member-data, sales-expenseX (nama berekor X, curiga terpotong,
+jangan dipakai mentah, lihat REA-19).
+
+REA-13 URL WS konkret per env: prod wss://ws-poslite.esb.co.id/ws,
+dev7 wss://dev7.esb.co.id/wss-self-order, qa7
+wss://qa7.esb.co.id/wss-self-order (baru), stg-eso
+wss://stg-eso.esb.co.id/wss-self-order, wss://esb.co.id/wss-self-order
+(baru), emulator ws://10.0.2.2:8082/ws (baru). Artefak gabungan
+wss://dev7.esb.co.id/wss-poslite.esb.co.id/ws (lihat REA-19).
+Catatan divergensi: clone staging WS memakai /ws di stg-eso, APK memakai
+/wss-self-order. Perlu diselaraskan.
+
+REA-14 kunci ms_setting baru (8, dossier hanya sebut Api Url/Key,
+Branch ID, Terminal ID, Device ID Check, Login Type, Version, Enable
+Customer Display): Customer Display Logo, Enable ESB Order Web Socket,
+Enable Queue Prefix, Enable Realtime Stock, Enable Sound ESB Order,
+Enable Wakelock, Rounding Mode, Rounding Nearest Value.
+Kaitan: kunci Rounding menyentuh isu F10 (step rounding).
+
+REA-15 tabel dan kolom baru di luar daftar dossier:
+(a) tabel: ms_brandsetting, ms_cashmethod, ms_gofoodmenudetail,
+ms_gofoodmenugroup, ms_gofoodmenupackage, ms_grabmenugroup,
+ms_grabmenupackage (dossier hanya go_food_menu_group + grab_menu_detail),
+ms_menucategory, ms_menucategorydetail, ms_menuextra, ms_menugroup,
+ms_menupackage, ms_menutemplatehead, ms_notes, ms_notescategory,
+ms_poscustomerdisplayapplication, ms_poscustomerdisplayhead,
+ms_posuseraccess, ms_posuserrole, ms_promotionday,
+ms_promotionemployeegroup, ms_promotionheadr (curiga terpotong, lihat
+REA-19), ms_promotionrequirement, ms_promotiontime, ms_specialpriceday,
+ms_specialpricetime, ms_visitpurpose, tr_branchmenutransaction,
+tr_membertransactionlog. Total nama tabel cocok pola ms/tr/lk yang
+terekstrak: 88.
+(b) SQL migrasi terlihat di pool: ALTER TABLE tr_saleshead ADD
+promotionVoucherCode, ALTER TABLE tr_salesmenu ADD
+promotionVoucherCode, ALTER TABLE ms_paymentmethod ADD voucherCategoryID
+dan voucherSourceID, ALTER TABLE ms_station ADD flagAutocut (+ UPDATE
+flagAutocut), CREATE TABLE ms_vouchertemplate(+detail), tr_memberdeposit,
+ms_station, ms_voucher, tr_salesvoucherusage.
+(c) Model map_ terkonfirmasi: map_self_order_payment_method_model,
+map_branchvisitpurpose, map_visitpurposepaymentmethod, dan varian
+map_branch_visit_purpose_* (mendukung klaim dossier "visit-purpose + 4
+map"). Tidak ditemukan bentuk ms_gender dan ms_tabletype (yang ada
+lk_gender dan lk_tabletype); kemungkinan dossier memakai nama file model,
+bukan nama tabel. Perlu cek satu baris saat senggang.
+
+REA-16 temuan printer/BT dari classes.dex: UUID SPP penuh
+00001101-0000-1000-8000-00805F9B34FB ADA (dari plugin BT), createRfcomm
+ADA, prefs id.co.esb.pos_lite/bluetooth_printer ADA, usb_printer ADA,
+bca_apos ADA, bca_apos_callback ADA (EDC BCA APOS), camera_check ADA,
+check_auto_time_setting ADA, usb_uvc_scanner ADA. net.posprinter.*
+TETAP NIHIL di classes.dex dan classes2.dex (S4 bertahan: USB-serial
+inert). star_printer nihil di dex (kunci Dart-side sesuai dossier).
+
+REA-17 daftar acquirer QRIS dari string pool (baru): qrisbni, qrisbri,
+qriscimb, qrisdki, qrisesb, qrisgpay, qrisnobu, qrisshopee, qrisyukk.
+xendit dan midtrans NIHIL di pool. dana, gopay, pluxee, ultra ADA
+sebagai nama aset/model.
+
+REA-18 divergensi clone (12 path ApiPath + 2 header TANPA padanan literal
+di libapp.so, status tebakan clean-room sampai terbukti):
+main/get-menu-online (APK: v1/pull/get-menu-online),
+main/get-expense-chart-of-accounts (APK: v1/pull/expense-chart-of-accounts
+dan esb_api/poslite/expense-chart-of-accounts),
+main/get-payment-method (TIDAK ADA di APK),
+main/get-station (APK: esb_api/pull/pull-station-data),
+shift/open dan shift/close (APK: v1/push/shift),
+branch-expenses/push (APK: v1/push/branch-expenses),
+device/register-push (TIDAK ADA di APK; registerPush juga nihil),
+auth/supervisor-approve dan auth/cashier-login (TIDAK ADA di APK;
+supervisor dan cashier-login nihil),
+member-deposit-withdrawal/topup (inquiry-deposit ADA, topup nihil),
+member/register (TIDAK ADA; APK memakai grup erp/member/*).
+Header: X-Terminal-Code dan X-Branch-Id TANPA padanan (X-Terminal,
+X-Branch, X-Device nihil; kandidat yang ADA: authKey, deviceID/DeviceID,
+UDID/udid, Authorization/Bearer, ApiKey, x-esb-ws-secret-token).
+Yang cocok (28 path, tidak diulang di sini): seluruh grup
+esb_apiv9/main/get-*, terminal/*, pos/install, pos/create-pin,
+check-branch-status, order/finish, order/view, order/split-bill,
+order/move-items, order/move-table, posv1/esb-voucher/*,
+employee-attendance/clock-in dan clock-out,
+member-deposit-withdrawal/inquiry-deposit, sales/receipt-email.
+
+REA-19 string artefak/terpotong (jangan dipakai mentah, butuh konfirmasi
+biner): wss://dev7.esb.co.id/wss-poslite.esb.co.id/ws,
+pos-lite-minimum-version-v2P (P gantung),
+esb_api/poslite/expense-chart-of-accounts& (& gantung),
+esb-order/eso-qs/pos-void& (& gantung), sales-expenseX (X gantung),
+ms_promotionheadr (r gantung).
+
+Yang COCOK dengan dossier (verifikasi akurat, tidak diulang rinci):
+host prod + dev7/dev5/stg/int/qa/smoke/loop-lite + OSS get-qr + Sentry +
+registrasi (§2, 1:1 dengan reap/urls.txt), envelope list totalRecords dan
+pageCount, header x-esb-ws-secret-token, rute /pos/auth/register dan
+/esb/update/esb-ws-secret ADA di pool, 8 tabel promosi dan 4 tabel
+special-price (nama konkret kini diketahui), klaim S4 dan B8-bagian-USB.
+
+### F.3 Status B1-B10 pasca verifikasi murah
+
+- B1 masih valid (tetap tak bisa). Menyempit: dua path install diketahui
+  (erp/pos/install, esb_apiv9/pos/install). Butuh live capture body 200.
+- B2 masih valid. Method tiap grup pull/push tak terlihat dari string.
+  Kontrak POST JSON sisi kita tetap asumsi.
+- B3 masih valid. Nama header auth runtime tak tertangkap. Kandidat yang
+  ADA: authKey, deviceID/UDID, Authorization/Bearer, ApiKey. Header
+  X-Terminal-Code/X-Branch-Id versi clone tanpa padanan APK.
+- B4 masih valid untuk charge gateway (OVO/deposit/online). Sebagian
+  terbuka: path voucher online (REA-7), eso/gateway/pos-void, dan
+  external-voucher burn/unburn/validate (REA-6) kini diketahui.
+- B5 menyempit, tetap blokir untuk method/body. Path /pos/auth/register
+  TERKONFIRMASI ada di libapp.so.
+- B6 masih valid. Satu spesimen v11 konkret baru (REA-8). Semantik versi
+  tetap misteri.
+- B7 masih valid. Field camelCase tetap tak terekstrak. Envelope
+  {totalRecords,pageCount} terkonfirmasi di pool.
+- B8 sebagian terbuka. UUID SPP + createRfcomm + prefs printer kini
+  diketahui (REA-16). Wire byte ESC/POS tetap gelap. Butuh HCI-snoop
+  saat cetak nyata atau Ghidra atas .so printer.
+- B9 masih valid. Tanpa pinning/CertificatePinner/sha256 di pool
+  (mitmproxy layak jalan), tapi kredensial merchant tetap nihil.
+- B10 masih valid sebagai blokir umum. Menyempit banyak: peta WS per env
+  (REA-13), 8 kunci setting baru (REA-14), shift-log pull (REA-11), grup
+  erp/member (REA-3). Pull payment-method/station/master-settings bentuk
+  main/get-* tetap tanpa padanan (lihat REA-18).
+
+### F.4 Antrean untuk agen fix (endpoint/tabel yang perlu dipakai clone)
+
+1. Selaraskan 12 path + 2 header divergen (REA-18) ke path APK, atau
+   tandai eksplisit sebagai asumsi di docs/API-CONTRACT.md.
+2. Tambah pull: esb_api/main/get-shift-log-data,
+   esb_api/pull/pull-station-data, esb_api/pull/pull-terminal-settings,
+   v1/pull/get-menu-online, v1/pull/expense-chart-of-accounts,
+   esb_api/pull/pull-pos-version, esb_apiv11/main/get-terminal-settings,
+   esb_apiv9/terminal/verification-notify.
+3. Tambah order: posv1/order/view-by-qr, view-quick-service, pos-error-log.
+4. Tambah voucher online: claim/validate-online-voucher-pos-payment,
+   claim-voucher-template, esb_api/external-voucher/*.
+5. Tambah delivery: erp/ezo-delivery/approve, finish-by-outlet,
+   schedule-order, search-ongoing, search-outstanding.
+6. Tambah member via erp/member/* (balance-deposit, deposit, sales) dan
+   selidiki erp/steroid/find (REA-4).
+7. WS: selaraskan path staging ke /wss-self-order, catat URL qa7 dan
+   emulator (REA-13).
+8. Masukkan 8 kunci setting baru ke kamus sync ms_setting (REA-14).
+9. Tambah tabel REA-15 via migrasi aman (prioritas: ms_notes(+category),
+   ms_posuseraccess/role, ms_cashmethod, ms_brandsetting,
+   tr_membertransactionlog, tr_branchmenutransaction, kolom
+   promotionVoucherCode, voucherCategoryID/voucherSourceID, flagAutocut).
+10. Pakai prefs native bca_apos*, bluetooth/usb_printer, usb_uvc_scanner
+   untuk modul EDC/printer (REA-16) dan daftar acquirer QRIS (REA-17)
+   untuk label metode bayar.

@@ -1,9 +1,9 @@
-import { StyleSheet, Text, TextInput, View, type TextInputProps, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
 import { colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
- * Warna border input — paritas `INPUT_BORDER` LoginScreen (di sana literal).
+ * Warna border input - paritas `INPUT_BORDER` LoginScreen (di sana literal).
  * Belum jadi token `colors.*`, jadi diduplikat di sini dgn catatan ini.
  */
 const INPUT_BORDER = '#BDBDBD';
@@ -19,20 +19,20 @@ interface InputProps extends TextInputProps {
    */
   error?: string | boolean;
   /** Override kotak luar (border, background, tinggi). */
-  boxStyle?: ViewStyle;
+  boxStyle?: StyleProp<ViewStyle>;
 }
 
 /**
- * Kolom input bersama — gaya disalin dari LoginScreen:
+ * Kolom input bersama - gaya disalin dari LoginScreen:
  * h56, r14, border 1, padding horizontal 16, font 14.
  *
  * Sadar-tema: warna baca dari token `colors.*` (background kartu,
  * teks, faint utk placeholder) sehingga mengikuti tema bila token
  * berubah. Repo saat ini belum punya mode gelap (`useColorScheme`
- * tidak dipakai di layar mana pun) — begitu token gelap ada,
+ * tidak dipakai di layar mana pun) - begitu token gelap ada,
  * komponen ini ikut tanpa perubahan.
  *
- * Migrasi layar lama ke komponen ini adalah batch terpisah —
+ * Migrasi layar lama ke komponen ini adalah batch terpisah -
  * jangan ubah layar apa pun di sini.
  */
 export default function Input({ label, required, error, boxStyle, style, ...rest }: InputProps) {

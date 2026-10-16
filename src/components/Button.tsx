@@ -1,9 +1,9 @@
-import { StyleSheet, Text, TouchableOpacity, type TextStyle, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
- * Kuning pucat status nonaktif CTA primer — paritas `PEACH`
+ * Kuning pucat status nonaktif CTA primer - paritas `PEACH`
  * LoginScreen (di sana literal `#F6C28B`). Belum jadi token
  * `colors.*`, jadi diduplikat di sini dgn catatan ini.
  */
@@ -17,18 +17,18 @@ interface ButtonProps {
   onPress?: () => void;
   /** Gaya: primer oranye / outline biru / bahaya merah. */
   variant?: ButtonVariant;
-  /** Status nonaktif — gaya pucat ala CTA Login, tombol tak merespons. */
+  /** Status nonaktif - gaya pucat ala CTA Login, tombol tak merespons. */
   disabled?: boolean;
   /** Lebar penuh (default true, ala CTA Login/Dashboard). */
   fullWidth?: boolean;
   /** Override kotak tombol. */
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   /** Override teks tombol. */
-  textStyle?: TextStyle;
+  textStyle?: StyleProp<TextStyle>;
 }
 
 /**
- * Tombol bersama — bentuk disalin dari CTA LoginScreen:
+ * Tombol bersama - bentuk disalin dari CTA LoginScreen:
  * stadium (radius = tinggi / 2), h56, teks bold 16 putih.
  *
  * - `primary`: oranye solid ala Login (`colors.orange`).
@@ -38,7 +38,7 @@ interface ButtonProps {
  * Sadar-tema: warna baca dari token `colors.*` sehingga mengikuti
  * tema bila token berubah (repo saat ini belum punya mode gelap).
  *
- * Migrasi layar lama ke komponen ini adalah batch terpisah —
+ * Migrasi layar lama ke komponen ini adalah batch terpisah -
  * jangan ubah layar apa pun di sini.
  */
 export default function Button({

@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import type { SaleItemIn } from '../../lib/payments';
 
@@ -17,7 +19,7 @@ type Props = {
     params?: {
       items?: OrderItemParam[];
       total?: number; subtotal?: number; discount?: number;
-      voucher?: string | { code: string; amount: number };
+      voucher?: string | { code: string; amount: number; kind?: string };
       voucherCode?: string;
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;
@@ -46,6 +48,8 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const orderItems = p.items ?? [];
   const voucherCode =
     p.voucherCode ?? (typeof p.voucher === 'string' ? p.voucher : p.voucher?.code) ?? '';
+  const voucherKind =
+    typeof p.voucher === 'object' ? (p.voucher.kind ?? '') : '';
   const discountVal = p.discount ?? (typeof p.voucher === 'object' ? p.voucher.amount : 0) ?? 0;
   const ongkirVal = p.ongkir ?? 0;
   const serviceVal = p.service ?? p.serviceTotal ?? 0;
@@ -54,6 +58,10 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const roundingVal = p.rounding ?? 0;
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
+  // Kepala struk mengikuti order berjalan (meja/pelanggan/member asli bila dioper
+  // pemanggil); fallback tampilan lama bila dibuka tanpa params.
+  const metaTable = p.table ?? 'A-03';
+  const metaGuest = p.customer ?? p.memberId ?? 'QoQi';
   const [mode, setMode] = useState<Mode>('none');
   const [splits, setSplitsRaw] = useState(3);
   const [paid, setPaid] = useState<boolean[]>([false, false, false]);
@@ -132,11 +140,11 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         onBack={() => navigation?.goBack()}
       />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-        <Text style={styles.meta}>TRX hari ini · A-03 · QoQi</Text>
+        <Text style={styles.meta}>TRX hari ini · {metaTable} · {metaGuest}</Text>
       <View style={styles.bill}>
         <Text style={styles.shop}>ESB CABANG PORIS</Text>
         <Text style={styles.addr}>Jl. Poris Indah No. 88 · 021-5566-7788</Text>
-        <Text style={styles.trx}>TRX-047 · A-03 · Kasir Gista · 12:41</Text>
+        <Text style={styles.trx}>TRX-047 · {metaTable} · Kasir Gista · 12:41</Text>
         {orderItems.map((i) => (
           <View key={i.name} style={styles.row}>
             <Text style={styles.item}>{i.qty}× {i.name}</Text>
@@ -160,26 +168,35 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.price}>{rp(roundingVal)}</Text></View>
         )}
         <View style={styles.totalRow}><Text style={styles.totalL}>TOTAL</Text><Text style={styles.totalV}>{rp(total)}</Text></View>
-        <Text style={styles.member}>Member QoQi · GOLD · +79 poin</Text>
+        {(p.memberId || p.customer) ? (
+          <Text style={styles.member}>{p.memberId ? `Member ${p.memberId}` : metaGuest}{p.memberId && p.customer ? ` · ${p.customer}` : ''}</Text>
+        ) : null}
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Receipt', {
-          total, items: saleItems, discount: discountVal,
-          ...(voucherCode ? { voucherCode } : {}),
-          ...orderCtx,
-          ...breakdownCtx,
-        })}>
-          <Text style={styles.ghostT}>{t('ok_print')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.primary} onPress={() => navigation?.navigate('Pay', {
-          total, items: saleItems, discount: discountVal,
-          ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal } } : {}),
-          ...orderCtx,
-          ...breakdownCtx,
-        })}>
-          <Text style={styles.primaryT}>{t('bill_pay')} ›</Text>
-        </TouchableOpacity>
+        <AppButton
+          title={t('ok_print')}
+          variant="secondary"
+          onPress={() => navigation?.navigate('Receipt', {
+            total, items: saleItems, discount: discountVal,
+            ...(voucherCode ? { voucherCode } : {}),
+            ...orderCtx,
+            ...breakdownCtx,
+          })}
+          fullWidth={false}
+          style={styles.actionBtn}
+        />
+        <AppButton
+          title={`${t('bill_pay')} ›`}
+          onPress={() => navigation?.navigate('Pay', {
+            total, items: saleItems, discount: discountVal,
+            ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+            ...orderCtx,
+            ...breakdownCtx,
+          })}
+          fullWidth={false}
+          style={styles.actionBtn}
+        />
       </View>
       <Text style={styles.hint}>{t('bill_qr_after_pay')}</Text>
 
@@ -227,15 +244,15 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
               {splitNames.slice(0, splits).map((n, i) => (
                 <View key={n} style={styles.nomRow}>
                   <Text style={styles.item}>{t('bill_split_of').replace('{i}', String(i + 1)).replace('{n}', n)}</Text>
-                  <TextInput
-                    style={styles.nomInput}
+                  <AppInput
                     value={nominals[i]}
                     onChangeText={(v) =>
                       setNominals((arr) => arr.map((x, j) => (j === i ? v : x)))
                     }
                     placeholder={rp(0)}
-                    placeholderTextColor={colors.faint}
                     keyboardType="numeric"
+                    boxStyle={styles.nomBox}
+                    style={styles.nomField}
                   />
                 </View>
               ))}
@@ -264,15 +281,16 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
                   <Text style={paid[i] ? styles.lunas : styles.price}>{paid[i] ? t('bill_lunas') : rp(val)}</Text>
                 </View>
                 {!paid[i] && (
-                  <TouchableOpacity
-                    style={[styles.payBtn, !nominalGateOk(mode) && styles.payBtnOff]}
+                  <AppButton
+                    title={`${t('bill_pay')} ›`}
                     disabled={val <= 0 || !nominalGateOk(mode)}
                     // Split parsial: total split sudah neto (termasuk diskon),
                     // jadi teruskan konteks + share proporsional service/pajak/
                     // pembulatan, tanpa diskon/voucher ganda.
-                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) })}>
-                    <Text style={styles.payBtnT}>{t('bill_pay')} ›</Text>
-                  </TouchableOpacity>
+                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) })}
+                    fullWidth={false}
+                    style={styles.payBtn}
+                  />
                 )}
                 <TouchableOpacity onPress={() => togglePaid(i)} hitSlop={10} style={styles.lunasBtn}>
                   <Text style={styles.lunasT}>{paid[i] ? t('bill_unmark') : t('bill_mark')}</Text>
@@ -280,15 +298,19 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
               </View>
             );
           })}
-          <TouchableOpacity style={styles.ghost} onPress={() => setMode('none')}>
-            <Text style={styles.ghostT}>{t('bill_cancel_split')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('bill_cancel_split')} variant="secondary" onPress={() => setMode('none')} />
         </View>
       )}
 
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Cancel')}><Text style={styles.link}>{t('bill_void')}</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('Member')}><Text style={styles.link}>{t('bill_customer')}</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Member', {
+          total, items: saleItems, discount: discountVal,
+          ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+          ...(voucherCode ? { voucherCode } : {}),
+          ...orderCtx,
+          ...breakdownCtx,
+        })}><Text style={styles.link}>{t('bill_customer')}</Text></TouchableOpacity>
       </View>
     </ScrollView>
   </View>
@@ -313,6 +335,7 @@ const styles = StyleSheet.create({
   totalV: { fontFamily: fonts.bold, fontSize: 18, color: colors.orangeDark },
   member: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  actionBtn: { flex: 1, marginTop: 0 },
   primary: { flex: 1, backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center' },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
@@ -337,7 +360,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
     marginTop: 6,
   },
-  payBtn: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  payBtn: { paddingHorizontal: 12, paddingVertical: 8, height: 'auto', marginTop: 0 },
   payBtnOff: { opacity: 0.45 },
   payBtnT: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },
@@ -345,6 +368,8 @@ const styles = StyleSheet.create({
   lunasT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
   lunas: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },
   nomRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+  nomBox: { width: 130 },
+  nomField: { textAlign: 'right' },
   nomInput: {
     width: 130,
     backgroundColor: colors.bg,

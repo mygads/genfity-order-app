@@ -1,6 +1,7 @@
 import { Linking, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
 
 type Nav = { goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { url?: string; title?: string } } };
@@ -21,15 +22,16 @@ export default function WebViewScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.bar, isTablet && wideCenterSm]}>
-        <TouchableOpacity onPress={() => navigation?.goBack()}>
-          <Text style={styles.back}>‹ Tutup</Text>
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{title}</Text>
-        <TouchableOpacity onPress={openExternal}>
-          <Text style={styles.ext}>Browser ›</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title={title}
+        onBack={() => navigation?.goBack()}
+        backLabel="‹ Tutup"
+        right={
+          <TouchableOpacity onPress={openExternal} hitSlop={10}>
+            <Text style={styles.ext}>Browser ›</Text>
+          </TouchableOpacity>
+        }
+      />
       {url ? (
         <WebView source={{ uri: url }} style={styles.web} onError={openExternal} />
       ) : (
@@ -44,16 +46,6 @@ export default function WebViewScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  bar: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  back: { color: colors.white, fontFamily: fonts.medium, fontSize: 14, width: 70 },
-  title: { flex: 1, color: colors.white, fontFamily: fonts.bold, fontSize: 15, textAlign: 'center' },
   ext: { color: colors.white, fontFamily: fonts.medium, fontSize: 13, width: 70, textAlign: 'right' },
   web: { flex: 1 },
   empty: { padding: 24, alignItems: 'center' },

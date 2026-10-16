@@ -33,7 +33,7 @@ export type TotalsVoucher = {
 export const TAX_DEFAULT = 11;
 
 /**
- * Konfigurasi fee terpusat — SATU sumber angka untuk service, fee platform,
+ * Konfigurasi fee terpusat - SATU sumber angka untuk service, fee platform,
  * langkah pembulatan, dan ongkir bawaan per mode. totals() di bawah memakai
  * konstanta ini (nilai identik dengan literal lama: 0.05 / 0.05 / 100),
  * dan layar kasir memakai defaultOngkirForMode() untuk nilai awal ongkir.
@@ -45,7 +45,7 @@ export const FEE_DEFAULTS: {
   platformFeeRate: number;
   /** Langkah pembulatan grand total (Rp). */
   roundStep: number;
-  /** Ongkir bawaan per mode (Rp) — saat ini 0 semua; dialog ongkir tetap bisa ubah manual. */
+  /** Ongkir bawaan per mode (Rp) - saat ini 0 semua; dialog ongkir tetap bisa ubah manual. */
   ongkirByMode: Record<string, number>;
 } = {
   serviceRate: 0.05,

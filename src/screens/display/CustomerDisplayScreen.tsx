@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { publishDisplay, subscribeDisplay } from '../../lib/display';import { onWsMessage, startRealtime } from '../../lib/realtime';import { initDb, query } from '../../lib/db';import { useLang,
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppButton from '../../components/AppButton';import { publishDisplay, subscribeDisplay } from '../../lib/display';import { onWsMessage, startRealtime } from '../../lib/realtime';import { initDb, query } from '../../lib/db';import { useLang,
 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];const PROMO_DISCOUNT = 5000;/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
@@ -131,11 +131,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <View style={styles.promo}>
             <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${rp(PROMO_DISCOUNT)}${t('disp_promo_post')}`} </Text>
           </View>
-          <TouchableOpacity style={styles.primary} onPress={callNext} disabled={prep.length === 0}>
-            <Text style={styles.primaryT}>
-              {prep.length === 0 ? t('disp_all_ready') : `${t('disp_call_pre')}${prep[0]}${t('disp_call_post')}`}
-            </Text>
-          </TouchableOpacity>
+          <AppButton
+            title={prep.length === 0 ? t('disp_all_ready') : `${t('disp_call_pre')}${prep[0]}${t('disp_call_post')}`}
+            onPress={callNext}
+            disabled={prep.length === 0}
+          />
         </>
       ) : null}
 
@@ -161,9 +161,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
             <Image source={require('../../../assets/images/payment_qris.webp')} style={styles.qrisImg} resizeMode="contain" />
             <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${rp(runningTotal)}`}</Text>
           </View>
-          <TouchableOpacity style={styles.primary} onPress={() => setMode('success')}>
-            <Text style={styles.primaryT}>{t('disp_sim_pay')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('disp_sim_pay')} onPress={() => setMode('success')} />
         </View>
       ) : null}
 
@@ -174,9 +172,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={[styles.successTotal, isTablet && styles.successTotalBig]}>{rp(runningTotal)}</Text>
           <Text style={styles.successSub}>{t('disp_cash_line')}</Text>
           <Text style={styles.successSub}>{t('disp_thanks')}</Text>
-          <TouchableOpacity style={styles.primaryDark} onPress={() => setMode('queue')}>
-            <Text style={styles.primaryDarkT}>{t('disp_back_queue')}</Text>
-          </TouchableOpacity>
+          <AppButton title={t('disp_back_queue')} onPress={() => setMode('queue')} />
         </View>
       ) : null}
 

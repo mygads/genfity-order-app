@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
@@ -222,21 +224,21 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               {editingId === c.id && !c.voided && (
                 <View style={styles.editor}>
                   <Text style={styles.editorLabel}>Harga satuan (Rp)</Text>
-                  <TextInput
-                    style={styles.editorInput}
+                  <AppInput
+                    boxStyle={styles.editorInput}
+                    style={styles.fieldText}
                     value={priceDraft}
                     onChangeText={setPriceDraft}
                     keyboardType="numeric"
                     placeholder="0"
-                    placeholderTextColor={colors.faint}
                   />
                   <Text style={styles.editorLabel}>{t('itemNotes')}</Text>
-                  <TextInput
-                    style={styles.editorInput}
+                  <AppInput
+                    boxStyle={styles.editorInput}
+                    style={styles.fieldText}
                     value={noteDraft}
                     onChangeText={setNoteDraft}
                     placeholder={t('cartNotePh')}
-                    placeholderTextColor={colors.faint}
                   />
                   <View style={styles.editorRow}>
                     <TouchableOpacity style={styles.editorVoid} onPress={() => voidItem(c.id)}>
@@ -412,13 +414,13 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           <View style={styles.modalCard}>
             <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('ongkirTitle')}</Text>
             <Text style={styles.modalLabel}>{t('ongkirNominal')}</Text>
-            <TextInput
-              style={styles.modalInput}
+            <AppInput
+              boxStyle={styles.modalInput}
+              style={styles.fieldText}
               value={ongkirDraft}
               onChangeText={setOngkirDraft}
               keyboardType="numeric"
               placeholder={rp(0)}
-              placeholderTextColor={colors.faint}
             />
             <View style={styles.modalRow}>
               <TouchableOpacity style={styles.modalGhost} onPress={() => setShowOngkir(false)}>
@@ -449,16 +451,25 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         ) : (
           <>
             <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.saveBtn} onPress={goSave}>
-                <Text style={[styles.saveText, isTablet && styles.saveTextBig]}>{t('save')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              <AppButton
+                variant="secondary"
+                title={t('save')}
+                onPress={goSave}
+                fullWidth={false}
+                style={styles.saveBtn}
+                textStyle={styles.saveText}
+              />
+              <AppButton
+                variant="secondary"
+                title={t('load')}
+                onPress={() => navigation?.navigate('LoadOrder')}
+                fullWidth={false}
                 style={styles.printBtn}
-                onPress={() => navigation?.navigate('LoadOrder')}>
-                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>{t('load')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.printBtn}
+                textStyle={styles.printText}
+              />
+              <AppButton
+                variant="secondary"
+                title={t('printReceipt')}
                 onPress={() => navigation?.navigate('Receipt', {
                   total, mode,
                   items: active,
@@ -471,13 +482,17 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   ...(taxIncl > 0 ? { tax: taxIncl } : {}),
                   ...(rounding !== 0 ? { rounding } : {}),
                   ...(feeESB > 0 ? { feeESB } : {}),
-                })}>
-                <Text style={[styles.printText, isTablet && styles.saveTextBig]}>{t('printReceipt')}</Text>
-              </TouchableOpacity>
+                })}
+                fullWidth={false}
+                style={styles.printBtn}
+                textStyle={styles.printText}
+              />
             </View>
-            <TouchableOpacity style={styles.payBtn} onPress={goPay}>
-              <Text style={[styles.payText, isTablet && styles.payTextBig]} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)} ›</Text>
-            </TouchableOpacity>
+            <AppButton
+              title={`${t('pay')} | ${rp(total)} ›`}
+              onPress={goPay}
+              style={styles.payBtn}
+            />
           </>
         )}
       </View>
@@ -545,6 +560,8 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginTop: 4,
   },
+  /** Teks di dalam AppInput: medium ala form lama. */
+  fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   editorRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   editorVoid: { flex: 1, borderWidth: 1, borderColor: colors.red, borderRadius: 8, paddingVertical: 9, alignItems: 'center' },
   editorVoidT: { fontFamily: fonts.bold, fontSize: 13, color: colors.red },

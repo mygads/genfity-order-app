@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import AppInput from '../../components/AppInput';
+import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
@@ -109,8 +111,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
   const { t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [menus, setMenus] = useState<MenuEntry[]>(DEFAULT_MENUS);
-  const [group, setGroup] = useState<string>('Semua');
-  const [queryText, setQueryText] = useState('');
+  const [group, setGroup] = useState<string>('Semua');  const [queryText, setQueryText] = useState('');
   const [msg, setMsg] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
@@ -153,7 +154,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
             return {
               id: r.id,
               name: r.menuName ?? prev?.name ?? r.id,
-              group: (r.categoryId ? catName.get(r.categoryId) ?? r.categoryId : null) ?? prev?.group ?? 'Lainnya',
+              group: (r.categoryId ? catName.get(r.categoryId) ?? r.categoryId : null) ?? prev?.group ?? t('menu.otherGroup'),
               price: Number(r.price ?? prev?.price ?? 0),
               soldOut: soldMap.get(r.id) ?? prev?.soldOut ?? false,
               imageState: prev?.imageState ?? 'ok',
@@ -234,7 +235,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
   const saveEditor = (id: string) => {
     const name = draftName.trim();
     const price = Number(draftPrice.replace(/\D/g, '')) || 0;
-    const grp = draftGroup.trim() || 'Lainnya';
+    const grp = draftGroup.trim() || t('menu.otherGroup');
     if (name.length < 3 || price <= 0) {
       setMsg(t('menu.invalidForm'));
       return;
@@ -257,23 +258,26 @@ export default function MenuManagementScreen({ navigation }: Props) {
       <ScreenHeader
         title={t('menu.title')}
         sub={`${soldCount} ${t('menu.soldOut')} - ${missingCount} ${t('menu.imgMissing')}`}
-        onBack={() => setDrawerOpen(true)}
-        backLabel="☰"
+        left={
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+          </TouchableOpacity>
+        }
       />
       <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
       <View style={styles.tabs}>
         {groups.map((g) => (
           <Pressable key={g} onPress={() => setGroup(g)} style={[styles.tab, group === g && styles.tabActive]}>
-            <Text style={[styles.tabText, group === g && styles.tabTextActive]}>{g}</Text>
+            <Text style={[styles.tabText, group === g && styles.tabTextActive]}>{g === 'Semua' ? t('common.all') : g}</Text>
           </Pressable>
         ))}
       </View>
       <View style={styles.searchRow}>
-        <TextInput style={styles.input} value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} placeholderTextColor={colors.faint} />
-        <Pressable style={styles.btnDl} onPress={downloadAll}>
-          <Text style={styles.btnDlText}>{t('menu.downloadImages')}</Text>
-        </Pressable>
+        <View style={styles.formFlex}>
+          <AppInput value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} />
+        </View>
+        <AppButton title={t('menu.downloadImages')} onPress={downloadAll} fullWidth={false} style={styles.navyInline} />
       </View>
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
@@ -302,38 +306,26 @@ export default function MenuManagementScreen({ navigation }: Props) {
           </View>
           {editing === m.id ? (
             <View style={styles.editor}>
-              <Text style={styles.fieldLabel}>{t('menu.menuName')}</Text>
-              <TextInput style={styles.input} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} placeholderTextColor={colors.faint} />
-              <Text style={styles.fieldLabel}>{t('menu.price')}</Text>
-              <TextInput
-                style={styles.input}
+              <AppInput label={t('menu.menuName')} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} />
+              <AppInput
+                label={t('menu.price')}
                 value={draftPrice ? rpNum(Number(draftPrice.replace(/\D/g, '')) || 0) : ''}
                 onChangeText={(v) => setDraftPrice(v.replace(/\D/g, '').slice(0, 9))}
                 placeholder="0"
-                placeholderTextColor={colors.faint}
                 keyboardType="number-pad"
               />
-              <Text style={styles.fieldLabel}>{t('menu.group')}</Text>
-              <TextInput style={styles.input} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} placeholderTextColor={colors.faint} />
+              <AppInput label={t('menu.group')} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} />
               <View style={styles.editorBtns}>
-                <Pressable style={styles.btnGhost} onPress={() => setEditing(null)}>
-                  <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
-                </Pressable>
-                <Pressable style={styles.btnSave} onPress={() => saveEditor(m.id)}>
-                  <Text style={styles.btnSaveText}>{t('menu.saveChanges')}</Text>
-                </Pressable>
+                <AppButton title={t('common.cancel')} onPress={() => setEditing(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+                <AppButton title={t('menu.saveChanges')} onPress={() => saveEditor(m.id)} fullWidth={false} style={styles.navyFlex} />
               </View>
             </View>
           ) : null}
           <View style={styles.itemBtns}>
             {m.imageState !== 'ok' && m.imageState !== 'downloading' ? (
-              <Pressable style={styles.btnTest} onPress={() => downloadImage(m.id)}>
-                <Text style={styles.btnTestText}>{t('menu.downloadImages')}</Text>
-              </Pressable>
+              <AppButton title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             ) : null}
-            <Pressable style={styles.btnTest} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))}>
-              <Text style={styles.btnTestText}>{t('common.edit')}</Text>
-            </Pressable>
+            <AppButton title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             <View style={styles.soldRow}>
               <Text style={styles.rowLabel}>{t('menu.markSold')}</Text>
               <Switch value={m.soldOut} onValueChange={(v) => patch(m.id, { soldOut: v })} trackColor={{ true: colors.red, false: colors.stroke }} />
@@ -347,6 +339,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
@@ -355,6 +348,10 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: fonts.medium, fontSize: 12, color: colors.muted },
   tabTextActive: { color: colors.white },
   searchRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  formFlex: { flex: 1 },
+  btnFlex: { marginTop: 0, flex: 1 },
+  navyInline: { marginTop: 0, backgroundColor: colors.navy },
+  navyFlex: { marginTop: 0, flex: 1, backgroundColor: colors.navy },
   input: {
     flex: 1,
     borderRadius: 10,

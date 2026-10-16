@@ -8,23 +8,11 @@ import { apiFetch } from './apiSource';
 import { getSession } from '../session';
 import { initDb, query, queryFirst, run } from './db';
 import { enqueueOutbox, enqueueSync } from './sync';
+import { fmtSalesDate } from './datefmt';
 import type { Transaction, TxnStatus } from '../data/mock';
 
-const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
-/** ISO → {date: '13 Okt 2026', time: '12:04'} (manual, bebas locale perangkat). */
-export function fmtSalesDate(iso: string): { date: string; time: string } {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { date: '-', time: '' };
-  return {
-    date: `${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  };
-}
+/** Formatter tanggal kanonik pindah ke lib/datefmt (locale-aware id/en). */
+export { fmtSalesDate };
 
 /** salesMode kontrak (DINE_IN/…) → label kartu ('Dine In', …). */
 export function modeLabel(salesMode?: string | null): string {
