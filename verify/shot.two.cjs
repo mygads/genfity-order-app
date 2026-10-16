@@ -13,7 +13,7 @@ const PARAMS = {
   WebView: { url: 'https://www.esb.id/esbposlite/registration/', title: 'Pendaftaran POS' },
 };
 
-const GUEST = new Set(['Intro', 'Install', 'SelectBranch', 'InstallProgress', 'CreatePin', 'ForgotPin', 'Login']);
+const GUEST = new Set(['Intro', 'Install', 'SelectBranch', 'InstallProgress', 'CreatePin', 'ForgotPin', 'Login', 'QrHow']);
 
 async function shot(device, vp, screens, port) {
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] });

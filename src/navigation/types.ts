@@ -6,33 +6,35 @@ export type RootStackParamList = {
   CreatePin: { branch?: string } | undefined;
   ForgotPin: undefined;
   Login: undefined;
+  QrHow: undefined;
   Dashboard: undefined;
   Cashier:
     | {
         table?: string;
         mode?: string;
+        customer?: string;
         voucher?: { code: string; amount: number };
         customItem?: { name: string; price: number; qty: number; note?: string };
         itemNote?: { id: string; note: string };
         loadItems?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[];
       }
     | undefined;
-  CartDetail: { items?: unknown; total?: number } | undefined;
-  DineIn: { table?: string } | undefined;
+  CartDetail: { items?: unknown; total?: number; mode?: string; table?: string; ongkir?: number; customer?: string; voucher?: { code: string; amount: number } } | undefined;
+  DineIn: { table?: string; mode?: string; items?: unknown } | undefined;
   CustomMenu: undefined;
   BillPreview: undefined;
-  Receipt: { no?: string; total?: number; method?: string; mode?: string } | undefined;
+  Receipt: { no?: string; total?: number; ongkir?: number; method?: string; mode?: string; cash?: number; change?: number } | undefined;
   Tables: undefined;
   Booking: undefined;
   LoadOrder: undefined;
-  Cancel: { orderId?: string } | undefined;
+  Cancel: { orderId?: string; table?: string; cashier?: string; total?: number } | undefined;
   Member: undefined;
   Voucher: undefined;
   QrScan: undefined;
-  Pay: { total?: number; method?: string; voucher?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
+  Pay: { total?: number; method?: string; voucher?: string; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
   Qris: { total?: number } | undefined;
   Edc: { total?: number } | undefined;
-  Success: { total?: number; method?: string; cash?: number; change?: number } | undefined;
+  Success: { total?: number; method?: string; cash?: number; change?: number; orderNo?: string } | undefined;
   Attendance: undefined;
   Shift: undefined;
   Recap: undefined;
@@ -47,7 +49,7 @@ export type RootStackParamList = {
   SplitBill: { items?: unknown; total?: number } | undefined;
   MoveItems: { from?: string } | undefined;
   MoveTable: { from?: string } | undefined;
-  PromotionList: { returnTo?: string; subtotal?: number } | undefined;
+  PromotionList: { returnTo?: string; subtotal?: number; ongkir?: number } | undefined;
   MenuPrinting: undefined;
   Stock: undefined;
   TableTimer: undefined;

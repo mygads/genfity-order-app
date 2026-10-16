@@ -32,77 +32,51 @@ const ICON_GREY = '#9E9E9E';
 const RED = '#D33A3F';
 const TITLE_DARK = '#2B2B2B';
 
-const QR_PATTERN = [
-  1, 1, 1, 0, 1,
-  1, 0, 1, 1, 0,
-  1, 1, 0, 0, 1,
-  0, 1, 1, 0, 1,
-  1, 0, 1, 1, 1,
-];
+const ICONS = {
+  userBlue: require('../../../assets/icons/login_username_blue.webp'),
+  userGray: require('../../../assets/icons/login_username_gray.webp'),
+  qrBlue: require('../../../assets/icons/login_scanqr_blue.webp'),
+  qrGray: require('../../../assets/icons/login_scanqr_gray.webp'),
+  username: require('../../../assets/icons/username.webp'),
+  password: require('../../../assets/icons/password.webp'),
+  show: require('../../../assets/icons/password_show.webp'),
+  hide: require('../../../assets/icons/password_hide.webp'),
+  fail: require('../../../assets/icons/fail_red.webp'),
+  waQr: require('../../../assets/images/whatsapp_qr.webp'),
+  logo: require('../../../assets/images/esb_logo.webp'),
+};
 
-function PersonGlyph({ color, size = 22 }: { color: string; size?: number }) {
+/**
+ * Ilustrasi tablet + QR ala layar login-qr asli (aproksimasi: tidak ada aset
+ * ilustrasi ini di bundle, jadi digambar dari View + matriks QR deterministik).
+ */
+function QrTabletArt() {
+  const N = 11;
+  const cells: boolean[] = [];
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const inFinder = (r < 4 && c < 4) || (r < 4 && c >= N - 4) || (r >= N - 4 && c < 4);
+      if (inFinder) {
+        const lr = r >= N - 4 ? r - (N - 4) : r;
+        const lc = c >= N - 4 ? c - (N - 4) : c;
+        cells.push(lr === 0 || lr === 3 || lc === 0 || lc === 3 || (lr >= 1 && lr <= 2 && lc >= 1 && lc <= 2));
+      } else {
+        cells.push((r * 31 + c * 17 + 5) % 7 < 3);
+      }
+    }
+  }
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
-      <View
-        style={{
-          width: size * 0.42, height: size * 0.42, borderRadius: size * 0.21,
-          borderWidth: 2, borderColor: color, marginBottom: 1,
-        }}
-      />
-      <View
-        style={{
-          width: size * 0.8, height: size * 0.34, borderTopLeftRadius: size * 0.4,
-          borderTopRightRadius: size * 0.4, borderWidth: 2, borderColor: color,
-          borderBottomWidth: 0,
-        }}
-      />
-    </View>
-  );
-}
-
-function LockGlyph({ color, size = 20 }: { color: string; size?: number }) {
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
-      <View
-        style={{
-          width: size * 0.52, height: size * 0.4, borderWidth: 2, borderColor: color,
-          borderBottomWidth: 0, borderTopLeftRadius: 4, borderTopRightRadius: 4, marginBottom: -2,
-        }}
-      />
-      <View
-        style={{
-          width: size * 0.78, height: size * 0.56, borderRadius: 3,
-          borderWidth: 2, borderColor: color, alignItems: 'center', justifyContent: 'center',
-        }}
-      >
-        <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color }} />
-      </View>
-    </View>
-  );
-}
-
-function QrGlyph({ color, cell = 6, gap = 2 }: { color: string; cell?: number; gap?: number }) {
-  return (
-    <View style={{ width: cell * 3 + gap * 2, height: cell * 3 + gap * 2 }}>
-      {[0, 1, 2].map((r) => (
-        <View key={r} style={{ flexDirection: 'row', marginBottom: r < 2 ? gap : 0 }}>
-          {[0, 1, 2].map((c) => {
-            const filled = (r === 0 || c === 0 || r === 2 || c === 2) && !(r === 1 && c === 1)
-              ? (r + c) % 2 === 0
-              : (r * 3 + c) % 2 === 1;
-            return (
-              <View
-                key={c}
-                style={{
-                  width: cell, height: cell, marginRight: c < 2 ? gap : 0,
-                  backgroundColor: filled ? color : 'transparent',
-                  borderWidth: filled ? 0 : 1.5, borderColor: color, borderRadius: 1,
-                }}
-              />
-            );
-          })}
+    <View style={styles.tablet}>
+      <View style={styles.tabletScreen}>
+        <View style={styles.tabletQr}>
+          <View style={styles.miniQr}>
+            {cells.map((on, i) => (
+              <View key={i} style={[styles.miniCell, on && styles.miniCellOn]} />
+            ))}
+          </View>
         </View>
-      ))}
+      </View>
+      <View style={styles.tabletDot} />
     </View>
   );
 }
@@ -115,8 +89,6 @@ export default function LoginScreen({ navigation }: Props) {
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState(false);
-  const [manualCode, setManualCode] = useState('');
-  const [qrHelp, setQrHelp] = useState(false);
   const [help, setHelp] = useState(false);
 
   const filled = username.trim().length > 0 && password.length > 0;
@@ -138,8 +110,10 @@ export default function LoginScreen({ navigation }: Props) {
   };
 
   const scanQr = () => {
+    // Kunci sesi demo dulu (guard navigator butuh login), lalu pindai QR asli
+    // di layar kamera QrScan; hasil pindaian meneruskan ke alur kasir.
     loginDemo();
-    navigation?.navigate('Dashboard');
+    navigation?.navigate('QrScan');
   };
 
   const card = (which: 'email' | 'qr') => {
@@ -150,9 +124,11 @@ export default function LoginScreen({ navigation }: Props) {
         style={[styles.card, on ? styles.cardOn : styles.cardOff]}
         onPress={() => { setMode(which); setError(false); }}>
         <View style={[styles.iconBox, on ? styles.iconBoxOn : styles.iconBoxOff]}>
-          {which === 'email'
-            ? <PersonGlyph color={on ? BLUE : ICON_GREY} />
-            : <QrGlyph color={on ? BLUE : ICON_GREY} />}
+          <Image
+            source={which === 'email' ? (on ? ICONS.userBlue : ICONS.userGray) : on ? ICONS.qrBlue : ICONS.qrGray}
+            style={styles.iconImg}
+            resizeMode="contain"
+          />
         </View>
         {which === 'email' ? (
           <Text style={[styles.cardLabel, on ? styles.cardLabelOn : styles.cardLabelOff]}>
@@ -204,7 +180,11 @@ export default function LoginScreen({ navigation }: Props) {
               Username atau Email<Text style={styles.star}>*</Text>
             </Text>
             <View style={[styles.inputBox, error && styles.inputBoxError]}>
-              <PersonGlyph color={error ? RED : ICON_GREY} size={20} />
+              <Image
+                source={ICONS.username}
+                style={[styles.fieldIcon, error && { tintColor: RED }]}
+                resizeMode="contain"
+              />
               <TextInput
                 style={styles.input}
                 value={username}
@@ -219,7 +199,11 @@ export default function LoginScreen({ navigation }: Props) {
               Password<Text style={styles.star}>*</Text>
             </Text>
             <View style={[styles.inputBox, error && styles.inputBoxError]}>
-              <LockGlyph color={error ? RED : ICON_GREY} size={20} />
+              <Image
+                source={ICONS.password}
+                style={[styles.fieldIcon, error && { tintColor: RED }]}
+                resizeMode="contain"
+              />
               <TextInput
                 style={styles.input}
                 value={password}
@@ -229,13 +213,17 @@ export default function LoginScreen({ navigation }: Props) {
                 secureTextEntry={!showPass}
               />
               <TouchableOpacity onPress={() => setShowPass((v) => !v)} hitSlop={10}>
-                <Text style={styles.eye}>{showPass ? '◎' : '◡'}</Text>
+                <Image
+                  source={showPass ? ICONS.hide : ICONS.show}
+                  style={styles.eyeIcon}
+                  resizeMode="contain"
+                />
               </TouchableOpacity>
             </View>
 
             {error ? (
               <View style={styles.errorRow}>
-                <Text style={styles.errorGlyph}>▲</Text>
+                <Image source={ICONS.fail} style={styles.errorIcon} resizeMode="contain" />
                 <Text style={styles.errorText}>
                   Username atau Password yang Anda masukkan salah. Silakan coba kembali.
                 </Text>
@@ -257,42 +245,14 @@ export default function LoginScreen({ navigation }: Props) {
           </View>
         ) : (
           <View style={styles.form}>
-            <Text style={styles.qrHint}>
-              Pindai QR dari dashboard owner untuk masuk otomatis ke terminal ini.
-            </Text>
-            <View style={styles.scanBox}>
-              <Text style={styles.scanGlyph}>▣</Text>
-              <Text style={styles.scanText}>Bingkai QR masuk di sini</Text>
-              <TouchableOpacity
-                style={styles.scanBtn}
-                onPress={() => setManualCode('ESB-PORIS-01')}>
-                <Text style={styles.scanBtnT}>Simulasikan Hasil Pindai</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={[styles.label, styles.labelGap]}>Kode manual</Text>
-            <View style={styles.inputBox}>
-              <QrGlyph color={ICON_GREY} cell={5} />
-              <TextInput
-                style={styles.input}
-                value={manualCode}
-                onChangeText={setManualCode}
-                placeholder="Masukkan kode dari dashboard"
-                placeholderTextColor={INPUT_BORDER}
-                autoCapitalize="characters"
-              />
+            <View style={styles.qrHero}>
+              <QrTabletArt />
             </View>
             <View style={styles.spacer} />
-            <TouchableOpacity style={styles.outline} onPress={() => setQrHelp((v) => !v)}>
+            <TouchableOpacity style={styles.outline} onPress={() => navigation?.navigate('QrHow')}>
               <Text style={styles.outlineT}>Cara mendapatkan QR</Text>
             </TouchableOpacity>
-            {qrHelp ? (
-              <View style={styles.qrHelpCard}>
-                <Text style={styles.qrHelpT}>1. Masuk ke dashboard owner (web) sebagai pemilik usaha.</Text>
-                <Text style={styles.qrHelpT}>2. Buka menu Perangkat → pilih terminal kasir.</Text>
-                <Text style={styles.qrHelpT}>3. Pindai QR login yang tampil, atau salin kode manual ke sini.</Text>
-              </View>
-            ) : null}
-            <TouchableOpacity style={styles.primary} onPress={scanQr}>
+            <TouchableOpacity style={[styles.primary, styles.scanGlow]} onPress={scanQr}>
               <Text style={styles.primaryT}>Scan QR</Text>
             </TouchableOpacity>
           </View>
@@ -304,21 +264,11 @@ export default function LoginScreen({ navigation }: Props) {
           <View style={styles.helpCard}>
             <View style={styles.helpGreen}>
               <View style={styles.helpLogoCircle}>
-                <Text style={styles.helpLogoT}>ESB</Text>
+                <Image source={ICONS.logo} style={styles.helpLogoImg} resizeMode="contain" />
               </View>
               <Text style={styles.helpGreenTitle}>ESB Restaurant Technology</Text>
               <Text style={styles.helpGreenSub}>PT. Esensi Solusi Buana</Text>
-              <View style={styles.helpQr}>
-                {QR_PATTERN.map((v, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      width: 18, height: 18, margin: 1.5,
-                      backgroundColor: v ? '#111' : '#FFFFFF',
-                    }}
-                  />
-                ))}
-              </View>
+              <Image source={ICONS.waQr} style={styles.helpQrImg} resizeMode="contain" />
             </View>
             <Text style={styles.helpBody}>
               Silakan scan barcode di atas untuk bantuan langsung atau hubungi kami melalui nomor{' '}
@@ -360,6 +310,7 @@ const styles = StyleSheet.create({
   iconBox: { width: 48, height: 42, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   iconBoxOn: { backgroundColor: BLUE_ICON_BG },
   iconBoxOff: { backgroundColor: '#F1F3F5' },
+  iconImg: { width: 26, height: 26 },
   cardLabel: { fontSize: 13, fontFamily: fonts.regular },
   cardLabelBold: { fontFamily: fonts.bold },
   cardLabelOn: { color: BLUE },
@@ -370,46 +321,54 @@ const styles = StyleSheet.create({
   star: { color: RED },
   inputBox: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    height: 52, borderRadius: 12, borderWidth: 1, borderColor: INPUT_BORDER,
+    height: 56, borderRadius: 14, borderWidth: 1, borderColor: INPUT_BORDER,
     paddingHorizontal: 16, backgroundColor: '#FFFFFF',
   },
   inputBoxError: { borderColor: RED },
+  fieldIcon: { width: 22, height: 22 },
   input: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, height: '100%' },
-  eye: { fontSize: 22, color: ICON_GREY, paddingLeft: 8 },
+  eyeIcon: { width: 24, height: 24 },
   errorRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'flex-start' },
-  errorGlyph: { fontSize: 16, color: RED, marginTop: 2 },
+  errorIcon: { width: 20, height: 20, marginTop: 1 },
   errorText: { flex: 1, fontFamily: fonts.medium, fontSize: 13, color: RED, lineHeight: 19 },
   forgotLink: { alignSelf: 'flex-end', marginTop: 10, paddingVertical: 4 },
   forgotLinkT: { fontFamily: fonts.semibold, fontSize: 13, color: BLUE },
   spacer: { flex: 1, minHeight: 48 },
   primary: {
-    backgroundColor: ORANGE, borderRadius: 16, height: 52,
+    backgroundColor: ORANGE, borderRadius: 28, height: 56,
     alignItems: 'center', justifyContent: 'center', marginTop: 16,
   },
   primaryIdle: { backgroundColor: PEACH },
+  scanGlow: {
+    shadowColor: ORANGE, shadowOpacity: 0.45, shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 }, elevation: 6,
+  },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF' },
   outline: {
-    borderWidth: 1.5, borderColor: BLUE, borderRadius: 16, height: 52,
+    borderWidth: 1.5, borderColor: BLUE, borderRadius: 28, height: 56,
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', marginTop: 12,
   },
   outlineT: { fontFamily: fonts.bold, fontSize: 16, color: BLUE },
-  qrHint: { fontFamily: fonts.regular, fontSize: 13, color: GREY, textAlign: 'center', lineHeight: 19 },
-  scanBox: {
-    borderWidth: 1.5, borderColor: BLUE, borderStyle: 'dashed', borderRadius: 14,
-    alignItems: 'center', padding: 20, marginTop: 16, backgroundColor: '#FFFFFF',
+  qrHero: { alignItems: 'center', marginTop: 48 },
+  tablet: {
+    width: 280, height: 200, borderRadius: 18, backgroundColor: '#111111',
+    alignItems: 'center', justifyContent: 'center',
   },
-  scanGlyph: { fontSize: 40, color: TITLE_DARK },
-  scanText: { fontFamily: fonts.medium, fontSize: 13, color: GREY, marginTop: 6 },
-  scanBtn: {
-    marginTop: 10, backgroundColor: BLUE_PALE, borderRadius: 8,
-    paddingHorizontal: 14, paddingVertical: 10,
+  tabletScreen: {
+    width: 252, height: 172, borderRadius: 4, backgroundColor: '#BEE3F8',
+    alignItems: 'center', justifyContent: 'center',
   },
-  scanBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: BLUE },
-  qrHelpCard: {
-    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: BORDER,
-    borderRadius: 12, padding: 14, marginTop: 12,
+  tabletQr: {
+    backgroundColor: '#FFFFFF', borderRadius: 8, padding: 10,
+    borderTopWidth: 3, borderTopColor: RED,
   },
-  qrHelpT: { fontFamily: fonts.regular, fontSize: 13, color: TITLE_DARK, marginTop: 4, lineHeight: 18 },
+  miniQr: { width: 99, flexDirection: 'row', flexWrap: 'wrap', backgroundColor: '#FFFFFF' },
+  miniCell: { width: 9, height: 9 },
+  miniCellOn: { backgroundColor: '#111111' },
+  tabletDot: {
+    position: 'absolute', right: 8, top: '50%', width: 6, height: 6,
+    borderRadius: 3, backgroundColor: '#444444', marginTop: -3,
+  },
   overlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center', justifyContent: 'center', padding: 32,
@@ -419,15 +378,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#1FA855', borderRadius: 12, padding: 20, alignItems: 'center',
   },
   helpLogoCircle: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: '#FFFFFF',
-    alignItems: 'center', justifyContent: 'center', marginTop: -48, marginBottom: 10,
+    width: 64, height: 64, borderRadius: 32, backgroundColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center', marginTop: -52, marginBottom: 10,
   },
-  helpLogoT: { fontFamily: fonts.bold, fontSize: 14, color: TITLE_DARK },
+  helpLogoImg: { width: 44, height: 16 },
   helpGreenTitle: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF', textAlign: 'center' },
   helpGreenSub: { fontFamily: fonts.regular, fontSize: 13, color: '#FFFFFF', marginTop: 4 },
-  helpQr: {
-    backgroundColor: '#FFFFFF', borderRadius: 8, padding: 12, marginTop: 16,
-    flexDirection: 'row', flexWrap: 'wrap', width: 138, justifyContent: 'center',
+  helpQrImg: {
+    backgroundColor: '#FFFFFF', borderRadius: 8, marginTop: 16,
+    width: 190, height: 190,
   },
   helpBody: {
     fontFamily: fonts.regular, fontSize: 13, color: '#333333',

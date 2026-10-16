@@ -1,0 +1,193 @@
+import type { ReactNode } from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { fonts, wideCenterSm } from '../../theme';
+
+type Nav = {
+  navigate: (screen: string, params?: Record<string, unknown>) => void;
+  goBack?: () => void;
+};
+
+type Props = { navigation?: Nav };
+
+const BLUE = '#1E88E5';
+const HEADER_BLUE = '#1B7FD4';
+const TITLE_DARK = '#2B2B2B';
+const GREY = '#757575';
+const DIVIDER = '#D8D8D8';
+
+/**
+ * Layar "Cara mendapatkan QR" — panduan 4 langkah + banner + thumbnail video
+ * sesuai capture asli login-qr-how(1-4).png. Video belum bisa diputar offline
+ * (butuh stream dari backend), jadi thumbnail tampil statis + penanda jelas.
+ */
+export default function QrHowScreen({ navigation }: Props) {
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
+
+  const goBack = () => {
+    if (navigation?.goBack) navigation.goBack();
+  };
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={goBack} hitSlop={12}>
+          <Text style={styles.headerBack}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Cara mendapatkan QR</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <ScrollView
+        contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
+        showsVerticalScrollIndicator={false}>
+        <Image
+          source={isTablet
+            ? require('../../../assets/images/get_qr_banner_tablet.webp')
+            : require('../../../assets/images/get_qr_banner.webp')}
+          style={styles.banner}
+          resizeMode="contain"
+        />
+
+        <Step
+          n="1"
+          thumb={require('../../../assets/images/get_qr_thumbnail_1.webp')}
+          body={(
+            <>
+              <Text style={styles.stepLead}>
+                Silakan kunjungi website ESB Core <Text style={styles.link}>erp.esb.co.id</Text>
+              </Text>
+              <Bullet>
+                <Text style={styles.stepText}>Masukkan <Text style={styles.em}>Username</Text> dan <Text style={styles.em}>Password</Text> Anda,</Text>
+              </Bullet>
+              <Bullet>
+                <Text style={styles.stepText}>Dan klik <Text style={styles.em}>Sign In</Text></Text>
+              </Bullet>
+            </>
+          )}
+        />
+
+        <Step
+          n="2"
+          thumb={require('../../../assets/images/get_qr_thumbnail_2.webp')}
+          body={(
+            <>
+              <Text style={styles.stepLead}>Setelah masuk halaman akun :</Text>
+              <Bullet>
+                <Text style={styles.stepText}>Klik <Text style={styles.em}>Menu Burger</Text> <BurgerGlyph /></Text>
+              </Bullet>
+              <Bullet>
+                <Text style={styles.stepText}>Klik menu <Text style={styles.em}>Master</Text></Text>
+              </Bullet>
+            </>
+          )}
+        />
+
+        <Step
+          n="3"
+          thumb={require('../../../assets/images/get_qr_thumbnail_3.webp')}
+          body={(
+            <>
+              <Text style={styles.stepLead}>Akan muncul halaman Master Data</Text>
+              <Bullet>
+                <Text style={styles.stepText}>Klik <Text style={styles.em}>Master Branch</Text></Text>
+              </Bullet>
+              <View style={styles.masterPill}>
+                <Text style={styles.masterPillT}>Master Branch</Text>
+              </View>
+            </>
+          )}
+        />
+
+        <Step
+          n="4"
+          thumb={require('../../../assets/images/get_qr_thumbnail_4.webp')}
+          last
+          body={(
+            <>
+              <Text style={styles.stepLead}>Dihalaman <Text style={styles.em}>Master Branch</Text></Text>
+              <Bullet>
+                <Text style={styles.stepText}>Pilih <Text style={styles.em}>cabang/outlet</Text></Text>
+              </Bullet>
+              <Bullet>
+                <Text style={styles.stepText}>Klik <Text style={styles.em}>icon QR</Text></Text>
+              </Bullet>
+            </>
+          )}
+        />
+      </ScrollView>
+    </View>
+  );
+}
+
+function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: ReactNode; last?: boolean }) {
+  return (
+    <View>
+      <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
+      <View style={styles.stepRow}>
+        <View style={styles.badge}>
+          <Text style={styles.badgeT}>{n}</Text>
+        </View>
+        <View style={styles.stepBody}>{body}</View>
+      </View>
+      {!last && <View style={styles.divider} />}
+    </View>
+  );
+}
+
+function Bullet({ children }: { children: ReactNode }) {
+  return (
+    <View style={styles.bulletRow}>
+      <View style={styles.bulletDot} />
+      <View style={styles.bulletBody}>{children}</View>
+    </View>
+  );
+}
+
+function BurgerGlyph() {
+  return (
+    <View style={styles.burger}>
+      <View style={styles.burgerLine} />
+      <View style={styles.burgerLine} />
+      <View style={styles.burgerLine} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#FFFFFF' },
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: HEADER_BLUE, paddingTop: 20, paddingBottom: 16, paddingHorizontal: 16,
+  },
+  headerBack: { fontSize: 26, color: '#FFFFFF', fontFamily: fonts.bold, paddingRight: 14 },
+  headerTitle: { fontFamily: fonts.bold, fontSize: 18, color: '#FFFFFF' },
+  headerSpacer: { flex: 1 },
+  body: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
+  banner: { width: '100%', height: 150, borderRadius: 16 },
+  thumb: { width: '100%', height: 200, borderRadius: 16, marginTop: 20 },
+  stepRow: { flexDirection: 'row', marginTop: 16, gap: 12 },
+  badge: {
+    width: 44, height: 44, borderRadius: 10, backgroundColor: BLUE,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  badgeT: { fontFamily: fonts.bold, fontSize: 18, color: '#FFFFFF' },
+  stepBody: { flex: 1 },
+  stepLead: { fontFamily: fonts.regular, fontSize: 15, color: TITLE_DARK, lineHeight: 22 },
+  stepText: { fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, lineHeight: 21 },
+  em: { fontFamily: fonts.bold, fontStyle: 'italic' },
+  link: { fontFamily: fonts.bold, fontStyle: 'italic', color: BLUE },
+  bulletRow: { flexDirection: 'row', marginTop: 8, gap: 10, alignItems: 'flex-start' },
+  bulletDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: BLUE, marginTop: 6 },
+  bulletBody: { flex: 1 },
+  masterPill: {
+    alignSelf: 'flex-start', backgroundColor: '#1B9AAA', borderRadius: 6,
+    paddingHorizontal: 22, paddingVertical: 10, marginTop: 10, marginLeft: 20,
+  },
+  masterPillT: { fontFamily: fonts.semibold, fontSize: 14, color: '#FFFFFF' },
+  burger: {
+    backgroundColor: '#F1F3F5', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8,
+    gap: 3, marginLeft: 6,
+  },
+  burgerLine: { width: 22, height: 2.5, borderRadius: 1.5, backgroundColor: GREY },
+  divider: { borderTopWidth: 1, borderTopColor: DIVIDER, marginTop: 20 },
+});
