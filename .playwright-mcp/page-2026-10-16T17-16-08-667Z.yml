@@ -1,0 +1,137 @@
+- generic [ref=f1e289]:
+  - generic [ref=f1e290]:
+    - button "Buka menu" [ref=f1e292] [cursor=pointer]
+    - generic [ref=f1e295]:
+      - generic [ref=f1e296]: Pengaturan
+      - generic [ref=f1e297]: Toko Maju Jaya - Cabang Pusat
+  - generic [ref=f1e299]: Terminal dan Server
+  - generic [ref=f1e300] [cursor=pointer]:
+    - generic [ref=f1e301]:
+      - generic [ref=f1e302]: Terminal
+      - generic [ref=f1e303]: Belum diklaim - isi kode terminal
+    - generic [ref=f1e304]: ›
+  - generic [ref=f1e305]:
+    - generic [ref=f1e306]: Peran perangkat
+    - generic [ref=f1e307]: Kunci layar ke Kasir / Dapur / Display
+    - generic [ref=f1e308]:
+      - generic [ref=f1e309] [cursor=pointer]: Kasir
+      - generic [ref=f1e311] [cursor=pointer]: Dapur
+      - generic [ref=f1e313] [cursor=pointer]: Display
+  - generic [ref=f1e315]:
+    - generic [ref=f1e316]: Server
+    - generic [ref=f1e317]: https://poslite.esb.co.id/api/web
+    - generic [ref=f1e318]:
+      - generic [ref=f1e319] [cursor=pointer]: Prod
+      - generic [ref=f1e321] [cursor=pointer]: Dev
+      - generic [ref=f1e323] [cursor=pointer]: Staging
+      - generic [ref=f1e325] [cursor=pointer]: Custom
+  - generic [ref=f1e327]:
+    - generic [ref=f1e328]: Sinkronisasi
+    - generic [ref=f1e329]: Push/pull manual - antrean offline
+    - generic [ref=f1e330]:
+      - generic [ref=f1e331] [cursor=pointer]: Push Sekarang
+      - generic [ref=f1e333] [cursor=pointer]: Pull Sekarang
+    - generic [ref=f1e335]: Cek
+  - generic [ref=f1e338]: Printer dan Cetak
+  - generic [ref=f1e339] [cursor=pointer]:
+    - generic [ref=f1e340]:
+      - generic [ref=f1e341]: Koneksi Printer
+      - generic [ref=f1e342]: Station kasir/dapur - BT - LAN - Star
+    - generic [ref=f1e343]: ›
+  - generic [ref=f1e344] [cursor=pointer]:
+    - generic [ref=f1e345]:
+      - generic [ref=f1e346]: Pengaturan Cetakan Menu
+      - generic [ref=f1e347]: Routing cetak per menu ke station dapur/checker
+    - generic [ref=f1e348]: ›
+  - generic [ref=f1e349] [cursor=pointer]:
+    - generic [ref=f1e350]:
+      - generic [ref=f1e351]: Manajemen Menu
+      - generic [ref=f1e352]: Ubah menu - unduh gambar - tandai habis
+    - generic [ref=f1e353]: ›
+  - generic [ref=f1e354] [cursor=pointer]:
+    - generic [ref=f1e355]:
+      - generic [ref=f1e356]: Potong Otomatis
+      - generic [ref=f1e357]: Potong kertas otomatis setelah cetak
+    - switch [checked] [ref=f1e361]
+  - generic [ref=f1e362]: Operasional
+  - generic [ref=f1e363] [cursor=pointer]:
+    - generic [ref=f1e364]:
+      - generic [ref=f1e365]: Pengaturan Stok
+      - generic [ref=f1e366]: Lacak stok - stok menu online
+    - generic [ref=f1e367]: ›
+  - generic [ref=f1e368] [cursor=pointer]:
+    - generic [ref=f1e369]:
+      - generic [ref=f1e370]: Timer Meja
+      - generic [ref=f1e371]: Batas waktu duduk + peringatan
+    - generic [ref=f1e372]: ›
+  - generic [ref=f1e373] [cursor=pointer]:
+    - generic [ref=f1e374]:
+      - generic [ref=f1e375]: Tiket Dapur
+      - generic [ref=f1e376]: Lihat antrean masak dan saji
+    - generic [ref=f1e377]: ›
+  - generic [ref=f1e378] [cursor=pointer]:
+    - generic [ref=f1e379]:
+      - generic [ref=f1e380]: Pesanan Genfity
+      - generic [ref=f1e381]: Pesanan online dari agregator
+    - generic [ref=f1e382]: ›
+  - generic [ref=f1e383] [cursor=pointer]:
+    - generic [ref=f1e384]:
+      - generic [ref=f1e385]: Pengaturan Meja
+      - generic [ref=f1e386]: Denah, kapasitas, status
+    - generic [ref=f1e387]: ›
+  - generic [ref=f1e388] [cursor=pointer]:
+    - generic [ref=f1e389]:
+      - generic [ref=f1e390]: Bunyi Pesanan Baru
+      - generic [ref=f1e391]: Memberikan info pesanan baru dengan suara
+    - switch [checked] [ref=f1e395]
+  - generic [ref=f1e396] [cursor=pointer]:
+    - generic [ref=f1e397]:
+      - generic [ref=f1e398]: Cetak Otomatis Dapur
+      - generic [ref=f1e399]: Kirim tiket ke printer dapur saat bayar
+    - switch [checked] [ref=f1e403]
+  - generic [ref=f1e404]: Tampilan dan Pindai
+  - generic [ref=f1e405] [cursor=pointer]:
+    - generic [ref=f1e406]:
+      - generic [ref=f1e407]: Tampilan Pelanggan
+      - generic [ref=f1e408]: Layar info pesanan untuk pelanggan
+    - switch [ref=f1e412]
+  - generic [ref=f1e413] [cursor=pointer]:
+    - generic [ref=f1e414]:
+      - generic [ref=f1e415]: Layar Idle / Promosi
+      - generic [ref=f1e416]: Tampilan promosi saat tidak dipakai
+    - generic [ref=f1e417]: ›
+  - generic [ref=f1e418] [cursor=pointer]:
+    - generic [ref=f1e419]:
+      - generic [ref=f1e420]: Scan QR
+      - generic [ref=f1e421]: Klaim terminal - Genfity order - member
+    - generic [ref=f1e422]: ›
+  - generic [ref=f1e423]: Data dan Bantuan
+  - generic [ref=f1e424] [cursor=pointer]:
+    - generic [ref=f1e425]:
+      - generic [ref=f1e426]: Sinkronisasi Data
+      - generic [ref=f1e427]: Push/pull manual - antrean offline
+    - generic [ref=f1e428]: ›
+  - generic [ref=f1e429] [cursor=pointer]:
+    - generic [ref=f1e430]:
+      - generic [ref=f1e431]: Log Aplikasi
+      - generic [ref=f1e432]: Riwayat kejadian + detail
+    - generic [ref=f1e433]: ›
+  - generic [ref=f1e434] [cursor=pointer]:
+    - generic [ref=f1e435]:
+      - generic [ref=f1e436]: Bahasa
+      - generic [ref=f1e437]: Indonesia
+    - generic [ref=f1e438]:
+      - generic [ref=f1e439]: ID
+      - generic [ref=f1e441]: EN
+  - generic [ref=f1e443] [cursor=pointer]:
+    - generic [ref=f1e444]:
+      - generic [ref=f1e445]: Bantuan / FAQ
+      - generic [ref=f1e446]: Panduan dan pertanyaan umum
+    - generic [ref=f1e447]: ›
+  - generic [ref=f1e448] [cursor=pointer]:
+    - generic [ref=f1e449]:
+      - generic [ref=f1e450]: Tentang Aplikasi
+      - generic [ref=f1e451]: Genfity Order v1.0.0
+    - generic [ref=f1e452]: ›
+  - generic [ref=f1e453] [cursor=pointer]: Keluar
+  - generic [ref=f1e455]: v1.0.0 - genfity-order

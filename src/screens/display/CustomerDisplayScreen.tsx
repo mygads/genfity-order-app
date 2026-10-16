@@ -13,8 +13,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     if (e.type === 'call') {
       setPrep((p) => (p[0] === e.ticket ? p.slice(1) : p.filter((t) => t !== e.ticket)));
       setReady((r) => (r.includes(e.ticket) ? r : [e.ticket, ...r].slice(0, 6)));
-    } else {
+    } else if (e.type === 'ready') {
       setReady((r) => (r.includes(e.ticket) ? r : [...r, e.ticket].slice(0, 6)));
+    } else {
+      // Event order dari server (DISPLAY_ORDER): antrean + rincian berjalan.
+      setPrep((p) => (p.includes(e.ticket) ? p : [...p, e.ticket].slice(0, 6)));
+      if (e.items.length > 0) setLiveItems(e.items);
     }
   }), []);
 

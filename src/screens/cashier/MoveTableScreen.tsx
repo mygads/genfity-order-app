@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { enqueueSync } from '../../lib/sync';
 import { initDb, query, run } from '../../lib/db';
@@ -47,7 +46,6 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? OCCUPIED[0]?.table ?? 'A2'));
   const [to, setTo] = useState(EMPTY[0] as string);
   const [done, setDone] = useState(false);
@@ -166,11 +164,6 @@ export default function MoveTableScreen({ navigation, route }: Props) {
       <ScreenHeader
         title={t('title_move_table')}
         onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
-            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </TouchableOpacity>
-        }
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('mov_hint_table')}</Text>
@@ -251,20 +244,12 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
       </ScrollView>
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => {
-          navigation?.navigate(r);
-        }}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  burger: { width: 22, height: 22 },
   body: { padding: 16, paddingBottom: 40 },
   hint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 14, marginBottom: 8 },

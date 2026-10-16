@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
 import { logout } from '../session';
 import { useLang } from '../lib/i18n';
+import { getDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
 
 interface DrawerItem {
@@ -31,6 +32,15 @@ interface Props {
 export default function DrawerMenu({ visible, onClose, navigate, outlet, user, shiftOpen: shiftOpenProp }: Props) {
   const { lang, setLang, t } = useLang();
   const navigation = useNavigation();
+  // Route aktif untuk highlight menu — baca aman, fallback undefined bila di luar navigator.
+  // Hook dipanggil tanpa syarat di atas early-return agar urutan hooks stabil.
+  let activeRoute: string | undefined;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    activeRoute = useNavigationState((s) => s?.routes?.[s?.index ?? 0]?.name);
+  } catch {
+    activeRoute = undefined;
+  }
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   // Drawer Android asli meluncur dari KIRI - samakan (sebelumnya panel di kanan).
@@ -69,6 +79,9 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // (sama-sama permukaan order) dan Expense memakai nav_petty_cash
   // (sama-sama arus kas keluar); Member memakai nav_attendance (direktori orang).
   const ITEMS: DrawerItem[] = [
+    // Dashboard memakai ikon nav_esb_order_dashboard.webp bersama EsbOrder/CustomerDisplay
+    // (reuse ikon yang sudah ada, tanpa berkas baru).
+    { label: t('nav_dashboard'), sub: t('nav_dashboard_sub'), route: 'Dashboard', icon: require('../../assets/icons/nav_esb_order_dashboard.webp') },
     { label: t('nav_order'), sub: t('nav_cashier'), route: 'Cashier', icon: require('../../assets/icons/nav_order.webp') },
     { label: t('nav_tables'), sub: t('nav_layout_sub'), route: 'Tables', icon: require('../../assets/icons/nav_order.webp') },
     { label: t('nav_shift'), sub: t('nav_shift_sub'), route: 'Shift', icon: require('../../assets/icons/nav_shift.webp') },
@@ -80,6 +93,21 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     { label: t('nav_petty'), sub: t('nav_petty_sub'), route: 'PettyCash', icon: require('../../assets/icons/nav_petty_cash.webp') },
     { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
   ];
+  // Kunci peran perangkat: DAPUR/DISPLAY hanya melihat layarnya + Pengaturan
+  // (agar peran bisa dikembalikan). KASIR (default) melihat semua seperti semula.
+  const role = getDeviceRole();
+  const VISIBLE: DrawerItem[] =
+    role === 'DAPUR'
+      ? [
+          { label: t('nav_kitchen'), sub: t('nav_kitchen_sub'), route: 'Kitchen', icon: require('../../assets/icons/nav_order.webp') },
+          { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
+        ]
+      : role === 'DISPLAY'
+        ? [
+            { label: t('nav_display'), sub: t('nav_display_sub'), route: 'CustomerDisplay', icon: require('../../assets/icons/nav_esb_order_dashboard.webp') },
+            { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
+          ]
+        : ITEMS;
   const go = (route: string) => {
     onClose();
     navigate(route);
@@ -104,16 +132,19 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
           {/* Daftar menu digulir agar tombol bahasa/logout tak terpotong
               di tablet landscape pendek; footer bahasa + logout tetap di bawah. */}
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
-            {ITEMS.map((m) => (
-              <Pressable key={m.route} style={styles.row} onPress={() => go(m.route)}>
-                <Image source={m.icon} style={[styles.rowIcon, isTablet && styles.rowIconTablet]} resizeMode="contain" />
-                <View style={styles.rowLeft}>
-                  <Text style={[styles.rowLabel, isTablet && styles.rowLabelTablet]}>{m.label}</Text>
-                  <Text style={[styles.rowSub, isTablet && styles.rowSubTablet]}>{m.sub}</Text>
-                </View>
-                <Text style={styles.chev}>›</Text>
-              </Pressable>
-            ))}
+            {VISIBLE.map((m) => {
+              const active = m.route === activeRoute;
+              return (
+                <Pressable key={m.route} style={[styles.row, active && styles.rowActive]} onPress={() => go(m.route)}>
+                  <Image source={m.icon} style={[styles.rowIcon, isTablet && styles.rowIconTablet]} resizeMode="contain" />
+                  <View style={styles.rowLeft}>
+                    <Text style={[styles.rowLabel, isTablet && styles.rowLabelTablet, active && styles.rowLabelActive]}>{m.label}</Text>
+                    <Text style={[styles.rowSub, isTablet && styles.rowSubTablet]}>{m.sub}</Text>
+                  </View>
+                  <Text style={styles.chev}>›</Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
           <View style={styles.langRow}>
             {(['id', 'en'] as const).map((l) => (
@@ -179,10 +210,13 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   rowLeft: { flex: 1 },
+  // Baris menu aktif: latar navy muda + label navy tebal.
+  rowActive: { backgroundColor: colors.paleBlue },
   rowIcon: { width: 30, height: 30, marginRight: 12 },
   // Tablet: ikon + teks menu lebih besar agar proporsional dibaca.
   rowIconTablet: { width: 34, height: 34 },
   rowLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
+  rowLabelActive: { color: colors.navy, fontFamily: fonts.bold },
   rowLabelTablet: { fontSize: 16 },
   rowSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   rowSubTablet: { fontSize: 13 },

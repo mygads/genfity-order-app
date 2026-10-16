@@ -6,9 +6,14 @@
  */
 import { getServerEnv, getTerminal, getWsUrl } from '../config/server';
 
+export type DisplayOrderItem = { name: string; qty: number; price: number };
+
 export type DisplayEvent =
   | { type: 'call'; ticket: string }
-  | { type: 'ready'; ticket: string };
+  | { type: 'ready'; ticket: string }
+  /** Order berjalan dari server (DISPLAY_ORDER, kontrak terminal §5):
+   * antrean + rincian item + total ikut kasir. */
+  | { type: 'order'; ticket: string; items: DisplayOrderItem[]; total?: number; status?: string };
 
 type Listener = (e: DisplayEvent) => void;
 
@@ -61,6 +66,22 @@ function emitLocal(e: DisplayEvent): void {
   });
 }
 
+/** Normalisasi rincian item asing → DisplayOrderItem (tanpa nama = buang). */
+function toOrderItems(raw: unknown): DisplayOrderItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DisplayOrderItem[] = [];
+  for (const it of raw) {
+    const r = it as { name?: unknown; qty?: unknown; price?: unknown };
+    if (!r || typeof r.name !== 'string') continue;
+    out.push({
+      name: r.name,
+      qty: Math.max(1, Math.round(Number(r.qty) || 1)),
+      price: Math.round(Number(r.price) || 0),
+    });
+  }
+  return out;
+}
+
 function ensureSocket(): void {
   try {
     // Hanya ke server milik sendiri (env Custom). Env bawaan menunjuk
@@ -84,8 +105,37 @@ function ensureSocket(): void {
     ws.onmessage = (msg) => {
       try {
         const data = JSON.parse(String(msg.data)) as DisplayEvent;
-        if (data && (data.type === 'call' || data.type === 'ready') && typeof data.ticket === 'string') {
+        if (!data || typeof data.ticket !== 'string') {
+          // Nama server DISPLAY_ORDER (kontrak terminal §4.2) dipetakan ke
+          // event order lokal agar tak tergantung socket mana yang ditarget.
+          const raw = data as unknown as { type?: unknown; ticket?: unknown; items?: unknown; total?: unknown; status?: unknown };
+          if (raw && raw.type === 'DISPLAY_ORDER') {
+            const ticket = String(raw.ticket ?? '').trim();
+            const items = toOrderItems(raw.items);
+            if (ticket && items.length > 0) {
+              emitLocal({
+                type: 'order',
+                ticket,
+                items,
+                ...(typeof raw.total === 'number' ? { total: raw.total } : {}),
+                ...(typeof raw.status === 'string' ? { status: raw.status } : {}),
+              });
+            }
+          }
+          return;
+        }
+        if (data.type === 'call' || data.type === 'ready') {
           emitLocal(data);
+        } else if (data.type === 'order') {
+          const items = toOrderItems(data.items);
+          if (items.length === 0) return;
+          emitLocal({
+            type: 'order',
+            ticket: data.ticket,
+            items,
+            ...(typeof data.total === 'number' ? { total: data.total } : {}),
+            ...(typeof data.status === 'string' ? { status: data.status } : {}),
+          });
         }
       } catch {
         /* abaikan payload asing */
@@ -121,4 +171,20 @@ export function publishDisplay(e: DisplayEvent): void {
   } catch {
     /* offline - tampilan lokal tetap sinkron */
   }
+}
+
+/** Siarkan order berjalan (dipakai kasir setelah saveSale / update cart). */
+export function publishDisplayOrder(
+  ticket: string,
+  items: DisplayOrderItem[],
+  total?: number,
+  status?: string,
+): void {
+  publishDisplay({
+    type: 'order',
+    ticket,
+    items,
+    ...(total === undefined ? {} : { total }),
+    ...(status === undefined ? {} : { status }),
+  });
 }

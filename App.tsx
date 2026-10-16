@@ -16,6 +16,7 @@ import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
+import { allowedRoutesFor, getDeviceRole, homeRouteFor, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
@@ -111,6 +112,14 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
   /** Soft-guard shift: instalasi fresh (tr_shiftlog kosong) bebas ke Dashboard/Cashier
    * agar demo/screenshot jalan; bila ada riwayat shift tapi tak ada yang open → mulai di Shift. */
   const [shiftClosed, setShiftClosed] = useState(false);
+  /** Kunci peran perangkat: DAPUR mulai di Kitchen, DISPLAY di
+   * CustomerDisplay, dan rute di luar peran di-reset paksa ke beranda. */
+  const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => getDeviceRole());
+  useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);
+  const home: 'Dashboard' | 'Shift' | 'Kitchen' | 'CustomerDisplay' =
+    deviceRole === 'KASIR'
+      ? (shiftClosed ? 'Shift' : 'Dashboard')
+      : (homeRouteFor(deviceRole) as 'Kitchen' | 'CustomerDisplay');
   useEffect(() => {
     if (!loggedIn) {
       setShiftClosed(false);
@@ -179,14 +188,44 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
         const routes = st && Array.isArray(st.routes) ? st.routes : [];
         const cur = routes.length > 0 && typeof st?.index === 'number' ? routes[st.index]?.name : undefined;
         const bottom = routes.length > 0 ? routes[0]?.name : undefined;
-        const home = shiftClosed ? 'Shift' : 'Dashboard';
+        // Kunci peran: DAPUR/DISPLAY tak boleh mendarat di rute kasir
+        // (mis. deep-link sisa sesi) - kembalikan ke beranda peran.
+        const allowed = allowedRoutesFor(deviceRole);
+        if (allowed && cur && !allowed.has(cur)) {
+          n.reset?.({ index: 0, routes: [{ name: home }] });
+          return;
+        }
         if (cur === 'Login' && bottom !== 'Dashboard' && bottom !== 'Shift') {
           n.reset?.({ index: 0, routes: [{ name: home }] });
         }
       } catch { /* abaikan */ }
     }, 150);
     return () => clearTimeout(timer);
-  }, [loggedIn, nav, shiftClosed]);
+  }, [loggedIn, nav, shiftClosed, deviceRole, home]);
+  /** Kunci peran kontinu: setiap perpindahan rute di luar peran langsung
+   * dikembalikan ke beranda peran (deep-link, drawer sisa, dsb). Reset
+   * berhenti sendiri karena beranda selalu diizinkan. */
+  useEffect(() => {
+    const allowed = allowedRoutesFor(deviceRole);
+    if (!allowed) return undefined;
+    const ctl = nav as unknown as {
+      addListener?: (ev: string, cb: () => void) => () => void;
+      getState?: () => { routes?: { name?: string }[]; index?: number };
+      reset?: (s: { index: number; routes: { name: string }[] }) => void;
+    };
+    if (typeof ctl.addListener !== 'function') return undefined;
+    const unsub = ctl.addListener('state', () => {
+      setTimeout(() => {
+        try {
+          const st = ctl.getState?.();
+          if (!st || !Array.isArray(st.routes) || typeof st.index !== 'number') return;
+          const cur = st.routes[st.index]?.name;
+          if (cur && !allowed.has(cur)) ctl.reset?.({ index: 0, routes: [{ name: home }] });
+        } catch { /* abaikan */ }
+      }, 60);
+    });
+    return unsub;
+  }, [nav, deviceRole, home]);
   if (!loggedIn) {
     return (
       // key eksplisit: tanpa ini React me-reuse state navigator tamu saat
@@ -214,8 +253,8 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
         </View>
       ) : null}
       <Stack.Navigator
-        key={shiftClosed ? 'shift-closed' : 'shift-ok'}
-        initialRouteName={shiftClosed ? 'Shift' : 'Dashboard'}
+        key={`${deviceRole}-${shiftClosed ? 'shift-closed' : 'shift-ok'}`}
+        initialRouteName={home}
         screenOptions={screenOptions}>
       <Stack.Screen name="Login" component={LoginScreen} options={{ title: t('title_login'), headerShown: false }} />
       <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: t('title_dashboard'), headerShown: false }} />

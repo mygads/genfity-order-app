@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga master per menu (fakta: harga resmi datang dari pullMenu/pullBranchMenu * ke ms_menu; tabel di bawah hanya fallback offline untuk mock tiket yang * tidak membawa harga). Dapur tidak menghitung qty*15000 lagi. */const MENU_PRICE: Record<string, number> = { 'Nasi Goreng Spesial': 25000, 'Es Teh Manis': 8000, 'Ayam Geprek': 18000, 'Mie Goreng Jawa': 22000, 'Jus Alpukat': 15000, 'Soto Ayam': 17000, 'Tempe Mendoan': 12000, 'Es Jeruk': 10000,};const FALLBACK_PRICE = 15000;/** * T9: harga live dari pull menu (ms_menu via apiSource, offline = dummy lokal) * menang atas fallback di bawah; fallback hanya bila SQLite + pull kosong. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + (live?.[it.name] ?? MENU_PRICE[it.name] ?? FALLBACK_PRICE) * it.qty, 0);}function priceOf(name: string, live?: Record<string, number>): number { return live?.[name] ?? MENU_PRICE[name] ?? FALLBACK_PRICE;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}function stationOf(t: KitchenTicket, live?: Record<string, string>, menuStation?: Record<string, string>): 'Dapur' | 'Checker' {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { getDeviceRole } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga master per menu (fakta: harga resmi datang dari pullMenu/pullBranchMenu * ke ms_menu; tabel di bawah hanya fallback offline untuk mock tiket yang * tidak membawa harga). Dapur tidak menghitung qty*15000 lagi. */const MENU_PRICE: Record<string, number> = { 'Nasi Goreng Spesial': 25000, 'Es Teh Manis': 8000, 'Ayam Geprek': 18000, 'Mie Goreng Jawa': 22000, 'Jus Alpukat': 15000, 'Soto Ayam': 17000, 'Tempe Mendoan': 12000, 'Es Jeruk': 10000,};const FALLBACK_PRICE = 15000;/** * T9: harga live dari pull menu (ms_menu via apiSource, offline = dummy lokal) * menang atas fallback di bawah; fallback hanya bila SQLite + pull kosong. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + (live?.[it.name] ?? MENU_PRICE[it.name] ?? FALLBACK_PRICE) * it.qty, 0);}function priceOf(name: string, live?: Record<string, number>): number { return live?.[name] ?? MENU_PRICE[name] ?? FALLBACK_PRICE;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}function stationOf(t: KitchenTicket, live?: Record<string, string>, menuStation?: Record<string, string>): 'Dapur' | 'Checker' {
   const raw = String( (t as { stationId?: unknown }).stationId ?? (t as { station?: unknown }).station ?? '', ).trim(); if (raw) { const hit = live?.[raw] ?? live?.[raw.toLowerCase()]; if (hit) { const n = normStationName(hit); if (n) return n; } const direct = normStationName(raw); if (direct) return direct; } if (menuStation) { for (const it of t.items) { const sid = menuStation[it.name.trim().toLowerCase()]; if (!sid) continue; const hit = live?.[sid] ?? live?.[sid.toLowerCase()]; if (hit) { const n = normStationName(hit); if (n) return n; } const direct = normStationName(sid); if (direct) return direct; } } return t.mode === 'ESB Order' || t.table === 'Online' ? 'Checker' : 'Dapur';}function statusStyle(s: KitchenStatus) {
   if (s === 'Baru') return { bg: colors.red, fg: colors.white, label: 'BARU' };
   if (s === 'Diproses') return { bg: colors.orange, fg: colors.white, label: 'DIMASAK' };
@@ -32,6 +32,85 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
   try {
     await enqueueOutbox('tr_kitchenticket', tk.id, 'update');
   } catch { /* abaikan */ }
+}
+
+/** Normalisasi payload KITCHEN_TICKET server → tiket + station cetak.
+ * Null bila tak valid (tak ada nomor / tak ada item). */
+function normalizePushTicket(p: Record<string, unknown>): {
+  ticket: KitchenTicket;
+  station: 'Dapur' | 'Checker';
+  salesNum: string;
+} | null {
+  const salesNum = String(p.salesNum ?? p.orderId ?? '').trim();
+  const no = String(p.ticketNo ?? p.no ?? p.ticket ?? salesNum).trim();
+  if (!salesNum && !no) return null;
+  const rawItems = Array.isArray(p.items) ? p.items : [];
+  const items: KitchenItem[] = [];
+  for (const raw of rawItems) {
+    const it = raw as { name?: unknown; menuName?: unknown; qty?: unknown; note?: unknown };
+    const name = String(it.name ?? it.menuName ?? '').trim();
+    if (!name) continue;
+    items.push({
+      name,
+      qty: Math.max(1, Math.round(Number(it.qty) || 1)),
+      ...(it.note ? { note: String(it.note) } : {}),
+    });
+  }
+  if (items.length === 0) return null;
+  const st = String(p.status ?? 'Baru').trim();
+  const status: KitchenStatus = st === 'Diproses' || st === 'Selesai' ? st : 'Baru';
+  const id = String(p.ticketId ?? (salesNum ? `kt-${salesNum}` : `kt-push-${no}`)).trim();
+  const stationRaw = String(p.stationId ?? p.station ?? '').trim();
+  return {
+    ticket: {
+      id,
+      no: no || salesNum,
+      table: String(p.table ?? p.tableNo ?? salesNum).trim(),
+      mode: String(p.mode ?? '').trim(),
+      time: String(p.time ?? new Date().toISOString().slice(11, 16)).trim(),
+      elapsed: '',
+      items,
+      status,
+      priority: false,
+    },
+    station: /check/i.test(stationRaw) ? 'Checker' : 'Dapur',
+    // salesNum fallback ke nomor agar baris cache head/menu tetap
+    // berelasi walau payload hanya membawa nomor tiket.
+    salesNum: salesNum || no,
+  };
+}
+
+/** Simpan tiket push sebagai cache lokal bertanda sync (syncDate = now).
+ * Tanpa outbox: kasir pemilik order yang push ke server; dapur hanya cermin
+ * agar tiket tetap ada setelah reload. Tak pernah melempar. */
+async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }): Promise<void> {
+  const now = new Date().toISOString();
+  try {
+    await initDb();
+    const { ticket, salesNum } = tk;
+    await run(
+      `INSERT INTO tr_kitchenticket (id, ticketNo, salesNum, status, createdAt, updatedAt, syncDate)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET status = excluded.status, updatedAt = excluded.updatedAt, syncDate = excluded.syncDate`,
+      [ticket.id, ticket.no, salesNum, ticket.status, now, now, now],
+    );
+    if (!salesNum) return;
+    await run(
+      `INSERT INTO tr_saleshead (salesNum, salesMode, tableNo, status, createdAt, updatedAt, syncDate)
+       VALUES (?, ?, ?, 'open', ?, ?, ?)
+       ON CONFLICT (salesNum) DO NOTHING`,
+      [salesNum, ticket.mode || null, ticket.table || null, now, now, now],
+    );
+    for (let i = 0; i < ticket.items.length; i += 1) {
+      const it = ticket.items[i];
+      await run(
+        `INSERT INTO tr_salesmenu (id, salesNum, menuName, qty, price, discount, subtotal, note, status, syncDate, createdAt)
+         VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'open', ?, ?)
+         ON CONFLICT (id) DO NOTHING`,
+        [`sm-${ticket.id}-${i}`, salesNum, it.name, it.qty, it.note ?? null, now, now],
+      );
+    }
+  } catch { /* cache best-effort: state in-memory tetap tampil */ }
 }export default function KitchenScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -47,7 +126,53 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
   const [now, setNow] = useState(() => Date.now());
   // T9: peta harga + station live (ms_menu/ms_station; pull via apiSource yang
   // offline-jatuh-ke-dummy). Kosong = fallback konstanta tetap dipakai.
-  const [livePrice, setLivePrice] = useState<Record<string, number>>({}); const [liveStation, setLiveStation] = useState<Record<string, string>>({}); const [menuStation, setMenuStation] = useState<Record<string, string>>({}); /** Timer dapur: segarkan elapsed tiap 30 detik (Timer.periodic ala APK). */ useEffect(() => autoSync(30000, () => setNow(Date.now())), []); /** Konsumen realtime ala EsbOrderScreen: refresh tiket live + notif tiket baru. */ useEffect(() => { try { startRealtime(); } catch { /* abaikan */ } const off = onWsMessage((msg) => { if (!/kitchen|ticket|order-status/i.test(msg.type)) return; const code = String(msg.payload?.code ?? msg.payload?.no ?? msg.payload?.ticketId ?? ''); setNow(Date.now()); setLiveNotice(code ? `${t('kit_title')}: ${code}` : t('kit_new')); void notifyLocal(t('kit_title'), code ? `${code}` : t('kit_new'), code ? { code } : undefined); }); return off; }, [t]); useEffect(() => { let on = true; (async () => { try { await initDb(); let menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); if (menus.length === 0) { const res = await apiFetch(ApiPath.pullMenu, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.menuId ?? it.id ?? '').trim(); if (!id) continue; const price = Number(it.price); await run( `INSERT OR REPLACE INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [ id, it.name === undefined || it.name === null ? null : String(it.name), it.categoryId === undefined || it.categoryId === null ? null : String(it.categoryId), Number.isFinite(price) ? Math.round(price) : 0, it.imageUrl === undefined || it.imageUrl === null ? null : String(it.imageUrl), it.stationId === undefined || it.stationId === null ? null : String(it.stationId), it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); } let stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); if (stations.length === 0) { const res = await apiFetch(ApiPath.pullStation, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.stationId ?? it.id ?? '').trim(); if (!id) continue; await run( `INSERT INTO ms_station (id, stationName, printerName, connection, printerType, charPerLine, flagDefault, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagActive = excluded.flagActive, syncDate = excluded.syncDate`, [ id, it.stationName === undefined || it.stationName === null ? null : String(it.stationName), it.printerName === undefined || it.printerName === null ? null : String(it.printerName), it.connection === undefined || it.connection === null ? null : String(it.connection), it.printerType === undefined || it.printerType === null ? null : String(it.printerType), Number.isFinite(Number(it.charPerLine)) ? Number(it.charPerLine) : 32, it.flagDefault === undefined || it.flagDefault === null ? 0 : Number(it.flagDefault) ? 1 : 0, it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); } let savedStatus: Record<string, KitchenStatus> = {}; try { const rows = await query<{ id: string; status: string | null }>( 'SELECT id, status FROM tr_kitchenticket LIMIT 500', ); for (const r of rows) { const st = (r.status ?? '').trim(); if (r.id && (st === 'Baru' || st === 'Diproses' || st === 'Selesai')) savedStatus[r.id] = st as KitchenStatus; } } catch { /* tabel kosong: daftar tetap kosong → empty-state */ } if (!on) return; if (Object.keys(savedStatus).length > 0) setMoved((m) => ({ ...savedStatus, ...m })); try { const rows = await query<{ id: string; ticketNo: string | null; salesNum: string | null; status: string | null; createdAt: string | null }>( 'SELECT id, ticketNo, salesNum, status, createdAt FROM tr_kitchenticket ORDER BY createdAt DESC LIMIT 200', ); const out: KitchenTicket[] = []; for (const row of rows) { const st = (row.status ?? '').trim(); if (st !== 'Baru' && st !== 'Diproses' && st !== 'Selesai') continue; const salesNum = (row.salesNum ?? '').trim(); let table = salesNum; let mode = ''; let time = (row.createdAt ?? '').slice(11, 16); try { if (salesNum) { const head = await queryFirst<{ tableNo: string | null; salesMode: string | null; createdAt: string | null }>( 'SELECT tableNo, salesMode, createdAt FROM tr_saleshead WHERE salesNum = ? LIMIT 1', [salesNum], ); if (head) { if (head.tableNo) table = head.tableNo; if (head.salesMode) mode = head.salesMode; const ht = (head.createdAt ?? '').slice(11, 16); if (ht) time = ht; } } } catch { /* info head opsional */ } let items: KitchenItem[] = []; try { if (salesNum) { const menuRows = await query<{ menuName: string | null; qty: number | null; note: string | null }>( 'SELECT menuName, qty, note FROM tr_salesmenu WHERE salesNum = ?', [salesNum], ); items = menuRows.map((mr) => ({ name: mr.menuName ?? '-', qty: Math.round(Number(mr.qty) || 0), ...(mr.note ? { note: mr.note } : {}) })); } } catch { /* item opsional */ } out.push({ id: row.id, no: (row.ticketNo ?? '').trim() || salesNum, table, mode, time, elapsed: '', items, status: st as KitchenStatus, priority: false, salesNum } as KitchenTicket); } if (!on) return; setTickets(out); } catch { if (on) setTickets([]); } if (menus.length > 0) { const pm: Record<string, number> = {}; for (const m of menus) { const p = Math.round(Number(m.price) || 0); if (m.menuName) pm[m.menuName] = p; pm[m.id] = p; } setLivePrice(pm); } if (menus.length > 0) { const ms: Record<string, string> = {}; for (const m of menus) { const sid = (m.stationId ?? '').trim(); if (!sid || !m.menuName) continue; ms[m.menuName.trim().toLowerCase()] = sid; } setMenuStation(ms); } if (stations.length > 0) { const sm: Record<string, string> = {}; for (const s of stations) { if (!s.stationName) continue; sm[s.id] = s.stationName; sm[s.id.toLowerCase()] = s.stationName; } setLiveStation(sm); } } catch { /* offline / DB belum siap - fallback konstanta tetap jalan */ } })(); return () => { on = false; }; }, []); const NEXT_LABEL: Record<KitchenStatus, string> = { Baru: t('kit_cook'), Diproses: t('kit_ready'), Selesai: '', }; const list = useMemo(
+  const [livePrice, setLivePrice] = useState<Record<string, number>>({}); const [liveStation, setLiveStation] = useState<Record<string, string>>({}); const [menuStation, setMenuStation] = useState<Record<string, string>>({}); /** Timer dapur: segarkan elapsed tiap 30 detik (Timer.periodic ala APK). */ useEffect(() => autoSync(30000, () => setNow(Date.now())), []);   /** Konsumen realtime: tiket push dari server (KITCHEN_TICKET, kontrak
+   * terminal §4) + notif tipe warisan. Tiket push disimpan sebagai cache
+   * lokal bertanda sync (tanpa outbox - kasir pemilik order yang push). */
+  useEffect(() => {
+    try { startRealtime(); } catch { /* abaikan */ }
+    const off = onWsMessage((msg) => {
+      if (!/kitchen|ticket|order-status/i.test(msg.type)) return;
+      setNow(Date.now());
+      if (msg.type === 'KITCHEN_TICKET') {
+        const tk = normalizePushTicket(msg.payload ?? {});
+        if (!tk) return;
+        void cachePushTicket(tk);
+        setTickets((prev) => {
+          if (!prev.some((x) => x.id === tk.ticket.id)) return [tk.ticket, ...prev];
+          // Tiket dikenal (echo / update status server): item selalu segar;
+          // status server hanya menang bila belum disentuh lokal (moved)
+          // agar echo basi tak meregresi advance dapur.
+          setMoved((m) => (m[tk.ticket.id] ? m : { ...m, [tk.ticket.id]: tk.ticket.status }));
+          return prev.map((x) => (x.id === tk.ticket.id ? { ...x, items: tk.ticket.items } : x));
+        });
+        setLiveNotice(`${t('kit_title')}: ${tk.ticket.no}`);
+        void notifyLocal(t('kit_title'), tk.ticket.no, { code: tk.ticket.no });
+        // Perangkat DAPUR: cetak otomatis sesuai preferensi (kontrak §4.3).
+        if (getDeviceRole() === 'DAPUR' && getNotif().autoPrintKitchen) {
+          void printKitchenTicket(tk.station, {
+            station: tk.station,
+            no: `${t('kit_ticket')} ${tk.ticket.no}`,
+            table: tk.ticket.table,
+            mode: tk.ticket.mode,
+            time: tk.ticket.time,
+            items: tk.ticket.items.map((it) => ({
+              name: it.name,
+              qty: it.qty,
+              ...(it.note ? { note: String(it.note) } : {}),
+            })),
+          }).then((res) => {
+            if (!res.ok) setLiveNotice(t('kit_print_fail'));
+          });
+        }
+        return;
+      }
+      const code = String(msg.payload?.code ?? msg.payload?.no ?? msg.payload?.ticketId ?? '');
+      setLiveNotice(code ? `${t('kit_title')}: ${code}` : t('kit_new'));
+      void notifyLocal(t('kit_title'), code ? `${code}` : t('kit_new'), code ? { code } : undefined);
+    });
+    return off;
+  }, [t]); useEffect(() => { let on = true; (async () => { try { await initDb(); let menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); if (menus.length === 0) { const res = await apiFetch(ApiPath.pullMenu, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.menuId ?? it.id ?? '').trim(); if (!id) continue; const price = Number(it.price); await run( `INSERT OR REPLACE INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [ id, it.name === undefined || it.name === null ? null : String(it.name), it.categoryId === undefined || it.categoryId === null ? null : String(it.categoryId), Number.isFinite(price) ? Math.round(price) : 0, it.imageUrl === undefined || it.imageUrl === null ? null : String(it.imageUrl), it.stationId === undefined || it.stationId === null ? null : String(it.stationId), it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); } let stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); if (stations.length === 0) { const res = await apiFetch(ApiPath.pullStation, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.stationId ?? it.id ?? '').trim(); if (!id) continue; await run( `INSERT INTO ms_station (id, stationName, printerName, connection, printerType, charPerLine, flagDefault, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagActive = excluded.flagActive, syncDate = excluded.syncDate`, [ id, it.stationName === undefined || it.stationName === null ? null : String(it.stationName), it.printerName === undefined || it.printerName === null ? null : String(it.printerName), it.connection === undefined || it.connection === null ? null : String(it.connection), it.printerType === undefined || it.printerType === null ? null : String(it.printerType), Number.isFinite(Number(it.charPerLine)) ? Number(it.charPerLine) : 32, it.flagDefault === undefined || it.flagDefault === null ? 0 : Number(it.flagDefault) ? 1 : 0, it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); } let savedStatus: Record<string, KitchenStatus> = {}; try { const rows = await query<{ id: string; status: string | null }>( 'SELECT id, status FROM tr_kitchenticket LIMIT 500', ); for (const r of rows) { const st = (r.status ?? '').trim(); if (r.id && (st === 'Baru' || st === 'Diproses' || st === 'Selesai')) savedStatus[r.id] = st as KitchenStatus; } } catch { /* tabel kosong: daftar tetap kosong → empty-state */ } if (!on) return; if (Object.keys(savedStatus).length > 0) setMoved((m) => ({ ...savedStatus, ...m })); try { const rows = await query<{ id: string; ticketNo: string | null; salesNum: string | null; status: string | null; createdAt: string | null }>( 'SELECT id, ticketNo, salesNum, status, createdAt FROM tr_kitchenticket ORDER BY createdAt DESC LIMIT 200', ); const out: KitchenTicket[] = []; for (const row of rows) { const st = (row.status ?? '').trim(); if (st !== 'Baru' && st !== 'Diproses' && st !== 'Selesai') continue; const salesNum = (row.salesNum ?? '').trim(); let table = salesNum; let mode = ''; let time = (row.createdAt ?? '').slice(11, 16); try { if (salesNum) { const head = await queryFirst<{ tableNo: string | null; salesMode: string | null; createdAt: string | null }>( 'SELECT tableNo, salesMode, createdAt FROM tr_saleshead WHERE salesNum = ? LIMIT 1', [salesNum], ); if (head) { if (head.tableNo) table = head.tableNo; if (head.salesMode) mode = head.salesMode; const ht = (head.createdAt ?? '').slice(11, 16); if (ht) time = ht; } } } catch { /* info head opsional */ } let items: KitchenItem[] = []; try { if (salesNum) { const menuRows = await query<{ menuName: string | null; qty: number | null; note: string | null }>( 'SELECT menuName, qty, note FROM tr_salesmenu WHERE salesNum = ?', [salesNum], ); items = menuRows.map((mr) => ({ name: mr.menuName ?? '-', qty: Math.round(Number(mr.qty) || 0), ...(mr.note ? { note: mr.note } : {}) })); } } catch { /* item opsional */ } out.push({ id: row.id, no: (row.ticketNo ?? '').trim() || salesNum, table, mode, time, elapsed: '', items, status: st as KitchenStatus, priority: false, salesNum } as KitchenTicket); } if (!on) return; setTickets(out); } catch { if (on) setTickets([]); } if (menus.length > 0) { const pm: Record<string, number> = {}; for (const m of menus) { const p = Math.round(Number(m.price) || 0); if (m.menuName) pm[m.menuName] = p; pm[m.id] = p; } setLivePrice(pm); } if (menus.length > 0) { const ms: Record<string, string> = {}; for (const m of menus) { const sid = (m.stationId ?? '').trim(); if (!sid || !m.menuName) continue; ms[m.menuName.trim().toLowerCase()] = sid; } setMenuStation(ms); } if (stations.length > 0) { const sm: Record<string, string> = {}; for (const s of stations) { if (!s.stationName) continue; sm[s.id] = s.stationName; sm[s.id.toLowerCase()] = s.stationName; } setLiveStation(sm); } } catch { /* offline / DB belum siap - fallback konstanta tetap jalan */ } })(); return () => { on = false; }; }, []); const NEXT_LABEL: Record<KitchenStatus, string> = { Baru: t('kit_cook'), Diproses: t('kit_ready'), Selesai: '', }; const list = useMemo(
     () =>
       tickets
         .map((tk) => ({ ...tk, status: moved[tk.id] ?? tk.status }))
@@ -66,7 +191,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
 
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
     <View style={styles.root}>
-      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable>
+      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable>
       </View>
 
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><View style={styles.tabs}>

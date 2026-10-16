@@ -3,7 +3,6 @@ import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowD
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { enqueueSync } from '../../lib/sync';
 import { initDb, query } from '../../lib/db';
@@ -50,7 +49,6 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   // T7: katalog live dari SQLite (bill aktif per meja + ms_table); konstanta
   // SOURCE/DESTS hanya fallback saat DB kosong (instalasi baru / kasir web).
   const [liveSource, setLiveSource] = useState<Record<string, MoveItem[]> | null>(null);

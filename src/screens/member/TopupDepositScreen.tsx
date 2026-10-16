@@ -9,7 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -155,7 +155,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           onClose={() => setDrawerOpen(false)}
           navigate={(r) => navigation?.navigate(r)}
         />
-        <View style={[s.body, isTablet && wideCenter]}>
+        <View style={[s.body, isTablet && wideCenterLg]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('top_success')}</Text>
           <Text style={s.sub}>{nama} - {memberId}</Text>
@@ -201,7 +201,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
         onClose={() => setDrawerOpen(false)}
         navigate={(r) => navigation?.navigate(r)}
       />
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.memberBar}>
           <Text style={s.memberName}>{nama}</Text>
           <Text style={s.memberMeta}>{memberId} - {t('top_balance_before')} {rp(saldoAwal)}</Text>

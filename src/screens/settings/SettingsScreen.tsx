@@ -12,6 +12,8 @@ import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
 import { requireAccess } from '../../lib/access';
 import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
+import { getDeviceRole, setDeviceRole, subscribeDeviceRole, type DeviceRole } from '../../lib/deviceRole';
+import { syncTerminalSettings } from '../../lib/terminal';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -39,6 +41,9 @@ export default function SettingsScreen({ navigation }: Props) {
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
   const [terminal, setTerminalState] = useState(() => getTerminal());
   const [terminalOpen, setTerminalOpen] = useState(false);
+  // Kunci peran perangkat: 1 perangkat = 1 peran (Kasir penuh, Dapur, Display).
+  const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => getDeviceRole());
+  useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);
   const [draftCode, setDraftCode] = useState('');
   const [draftBranchId, setDraftBranchId] = useState('');
   const [draftBranchName, setDraftBranchName] = useState('');
@@ -106,6 +111,14 @@ export default function SettingsScreen({ navigation }: Props) {
     });
   };
 
+  const pickRole = (r: DeviceRole) => {
+    void guardSettingsEdit().then((ok) => {
+      if (!ok) return;
+      setDeviceRole(r);
+      setDeviceRoleState(r);
+    });
+  };
+
   const saveCustom = () => {
     void guardSettingsEdit().then((ok) => {
       if (!ok) return;
@@ -159,6 +172,12 @@ export default function SettingsScreen({ navigation }: Props) {
       setTerminal(next);
       setTerminalState(next);
       setTerminalOpen(false);
+      // Klaim baru = tarik setting per terminal (peran, printer default,
+      // auto-print dapur, footer) agar tak setting manual per tablet.
+      void syncTerminalSettings().then((r) => {
+        setDeviceRoleState(getDeviceRole());
+        setSyncMsg(r.ok ? t('term.settingsOk') : t('term.settingsFail'));
+      });
     });
   };
 
@@ -183,6 +202,19 @@ export default function SettingsScreen({ navigation }: Props) {
 
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.terminalServer')}</Text>
       <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={openTerminal} />
+      <View style={styles.panel}>
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.deviceRole')}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('settings.deviceRoleSub')}</Text>
+        <View style={styles.envRow}>
+          {(['KASIR', 'DAPUR', 'DISPLAY'] as DeviceRole[]).map((r) => (
+            <Pressable key={r} onPress={() => pickRole(r)} style={[styles.envBtn, deviceRole === r && styles.envBtnActive]}>
+              <Text style={[styles.envText, deviceRole === r && styles.envTextActive]}>
+                {r === 'KASIR' ? t('role.kasir') : r === 'DAPUR' ? t('role.dapur') : t('role.display')}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
       <View style={styles.panel}>
         <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.server')}</Text>
         <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{getBaseUrl() || t('settings.noServer')}</Text>

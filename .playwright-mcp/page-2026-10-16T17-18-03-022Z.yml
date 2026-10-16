@@ -1,0 +1,42 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e14]:
+    - generic [ref=f3e15]:
+      - generic [ref=f3e16]: ‹
+      - generic [ref=f3e19]:
+        - generic [ref=f3e20]: Tiket Dapur
+        - generic [ref=f3e21]: 0 tiket - 0 Baru - 0 Diproses
+      - generic [ref=f3e24] [cursor=pointer]
+    - generic [ref=f3e27]:
+      - generic [ref=f3e28] [cursor=pointer]: Semua
+      - generic [ref=f3e30] [cursor=pointer]: Baru
+      - generic [ref=f3e32] [cursor=pointer]: Diproses
+      - generic [ref=f3e34] [cursor=pointer]: Selesai
+    - generic [ref=f3e36]:
+      - generic [ref=f3e37] [cursor=pointer]: Semua Station
+      - generic [ref=f3e39] [cursor=pointer]: Station Dapur
+      - generic [ref=f3e41] [cursor=pointer]: Station Checker
+    - generic [ref=f3e45]:
+      - generic [ref=f3e46]: Tidak ada tiket
+      - generic [ref=f3e47]: Semua pesanan dapur sudah selesai
+  - dialog [ref=f3e49]:
+    - generic [ref=f3e51]:
+      - generic [ref=f3e52]:
+        - generic [ref=f3e53]:
+          - generic [ref=f3e54]: Genfity Cabang Poris
+          - generic [ref=f3e55]: Gista | Shift Buka
+        - generic [ref=f3e59]:
+          - generic [active] [ref=f3e60] [cursor=pointer]:
+            - generic [ref=f3e63]:
+              - generic [ref=f3e64]: Dapur
+              - generic [ref=f3e65]: Tiket masak
+            - generic [ref=f3e66]: ›
+          - generic [ref=f3e67] [cursor=pointer]:
+            - generic [ref=f3e70]:
+              - generic [ref=f3e71]: Pengaturan
+              - generic [ref=f3e72]: Printer & sinkron
+            - generic [ref=f3e73]: ›
+        - generic [ref=f3e74]:
+          - generic [ref=f3e75] [cursor=pointer]: ID
+          - generic [ref=f3e77] [cursor=pointer]: EN
+        - generic [ref=f3e79] [cursor=pointer]: Keluar
+      - generic [ref=f3e82] [cursor=pointer]
