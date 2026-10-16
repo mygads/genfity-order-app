@@ -38,12 +38,12 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
       style={{ flex: 1 }}
       contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
       showsVerticalScrollIndicator={false}>
-      <Image source={require('../../../assets/images/claim_terminal.webp')} style={styles.banner} resizeMode="contain" />
-      <Text style={styles.title}>{t('inst_title')}</Text>
-      <Text style={styles.desc}>
+      <Image source={require('../../../assets/images/claim_terminal.webp')} style={[styles.banner, isTablet && styles.bannerBig]} resizeMode="contain" />
+      <Text style={[styles.title, isTablet && styles.titleBig]}>{t('inst_title')}</Text>
+      <Text style={[styles.desc, isTablet && styles.descBig]}>
         {t('inst_desc')}
       </Text>
-      {posVer ? <Text style={styles.desc}>POS {posVer}</Text> : null}
+      {posVer ? <Text style={[styles.desc, isTablet && styles.descBig]}>POS {posVer}</Text> : null}
 
       <View style={styles.stepsCard}>
         {STEP_KEYS.map((k, i) => (
@@ -51,22 +51,22 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
             <View style={styles.stepNum}>
               <Text style={styles.stepNumT}>{i + 1}</Text>
             </View>
-            <Text style={styles.stepT}>{t(k)}</Text>
+            <Text style={[styles.stepT, isTablet && styles.stepTBig]}>{t(k)}</Text>
           </View>
         ))}
       </View>
 
       <View style={styles.scanBox}>
         <Text style={styles.scanGlyph}>▣</Text>
-        <Text style={styles.scanText}>{t('inst_scan_frame')}</Text>
+        <Text style={[styles.scanText, isTablet && styles.scanTextBig]}>{t('inst_scan_frame')}</Text>
         <TouchableOpacity
-          style={styles.scanBtn}
-          onPress={() => { setCode('ESB-PORIS-01'); setError(''); }}>
+          style={[styles.scanBtn, isTablet && styles.scanBtnBig]}
+          onPress={() => { setCode('GNF-PORIS-01'); setError(''); }}>
           <Text style={styles.scanBtnT}>{t('inst_sim_scan')}</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.label}>{t('inst_code_label')}</Text>
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('inst_code_label')}</Text>
       <AppInput
         boxStyle={styles.input}
         style={styles.inputText}
@@ -111,6 +111,14 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 32 },
   banner: { width: '100%', height: 150 },
+  /** Skala tablet: banner + teks membesar, tombol scan penuhi sentuh 48px (phone tetap). */
+  bannerBig: { height: 210 },
+  titleBig: { fontSize: 24 },
+  descBig: { fontSize: 15, lineHeight: 21 },
+  stepTBig: { fontSize: 15, lineHeight: 21 },
+  scanTextBig: { fontSize: 15 },
+  labelBig: { fontSize: 14 },
+  scanBtnBig: { minHeight: 48, paddingVertical: 14 },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 16 },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: GREY, marginTop: 6, lineHeight: 19 },
   stepsCard: {

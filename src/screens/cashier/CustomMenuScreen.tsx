@@ -73,31 +73,34 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       {added.length === 0
         ? <Text style={styles.empty}>{t('emptyCustom')}</Text>
         : added.map((a) =><Text key={a} style={styles.added}>• {a}</Text>)}
+      {/* Tablet: form item kiri, notes+preview kanan; phone tetap susun vertikal. */}
+      <View style={[isTablet && styles.cols]}>
+      <View style={[isTablet && styles.col]}>
 
-      <Text style={styles.label}>{t('itemName')}</Text>
-      <AppInput boxStyle={styles.input} style={styles.fieldText} value={name} onChangeText={setName} placeholder="cth: Nasi + Ayam" />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('itemName')}</Text>
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={name} onChangeText={setName} placeholder="cth: Nasi + Ayam" />
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>{t('price')}</Text>
-          <AppInput boxStyle={styles.input} style={styles.fieldText} value={price} onChangeText={(v) => setPrice(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder={rp(0)} />
+          <Text style={[styles.label, isTablet && styles.labelBig]}>{t('price')}</Text>
+          <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={price} onChangeText={(v) => setPrice(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder={rp(0)} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>{t('qty')}</Text>
+          <Text style={[styles.label, isTablet && styles.labelBig]}>{t('qty')}</Text>
           <View style={styles.qtyRow}>
-            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(Math.max(1, qtyNum - 1)))}>
+            <TouchableOpacity style={[styles.qtyBtn, isTablet && styles.qtyBtnBig]} onPress={() => setQty(String(Math.max(1, qtyNum - 1)))}>
               <Text style={styles.qtyT}>-</Text>
             </TouchableOpacity>
             <TextInput style={[styles.input, styles.qtyInput]} value={qty} onChangeText={(v) => setQty(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" />
-            <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(qtyNum + 1))}>
+            <TouchableOpacity style={[styles.qtyBtn, isTablet && styles.qtyBtnBig]} onPress={() => setQty(String(qtyNum + 1))}>
               <Text style={styles.qtyT}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
-      <Text style={styles.label}>{t('kitchenStation')}</Text>
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('kitchenStation')}</Text>
       <View style={styles.chips}>
         {STATIONS.map((st) => (
-          <TouchableOpacity key={st} style={[styles.chip, station === st && styles.chipOn]} onPress={() => setStation(st)}>
+          <TouchableOpacity key={st} style={[styles.chip, station === st && styles.chipOn, isTablet && styles.chipBig]} onPress={() => setStation(st)}>
             <Text style={[styles.chipT, station === st && styles.chipTOn]}>{st}</Text>
           </TouchableOpacity>
         ))}
@@ -111,18 +114,20 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
         style={styles.primary}
       />
 
+      </View>
+      <View style={[isTablet && styles.col]}>
       <Text style={styles.sec}>{t('itemNotes')}</Text>
       <Text style={styles.hint}>{t('notesHint')}</Text>
-      <Text style={styles.label}>Item · {targetName} ×1</Text>
+      <Text style={[styles.label, isTablet && styles.labelBig]}>Item · {targetName} ×1</Text>
       <View style={styles.chips}>
         {QUICK.map((q) => (
-          <TouchableOpacity key={q} style={[styles.chip, notes.includes(q) && styles.chipOn]} onPress={() => toggleNote(q)}>
+          <TouchableOpacity key={q} style={[styles.chip, notes.includes(q) && styles.chipOn, isTablet && styles.chipBig]} onPress={() => toggleNote(q)}>
             <Text style={[styles.chipT, notes.includes(q) && styles.chipTOn]}>{q}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>{t('freeNote')}</Text>
-      <AppInput boxStyle={styles.input} style={styles.fieldText} value={free} onChangeText={setFree} placeholder={t('freeNote')} />
+      <Text style={[styles.label, isTablet && styles.labelBig]}>{t('freeNote')}</Text>
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={free} onChangeText={setFree} placeholder={t('freeNote')} />
       <View style={styles.preview}>
         <Text style={styles.prevTitle}>Pratinjau KDS · {station}</Text>
         <Text style={styles.prevLine}>1x {targetName} - {[...notes, free].filter(Boolean).join(' · ')}</Text>
@@ -146,6 +151,8 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
           textStyle={styles.primaryT}
         />
       </View>
+      </View>
+      </View>
       </ScrollView>
     </View>
   );
@@ -162,6 +169,14 @@ const styles = StyleSheet.create({
   added: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 4 },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8 },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 12, marginBottom: 6 },
+  /* Kolom tablet: item+harga+station kiri, notes+preview kanan (phone tetap 1 kolom). */
+  cols: { flexDirection: 'row', gap: 16 },
+  col: { flex: 1, minWidth: 0 },
+  /* Varian tablet: teks +1pt, chip dan qtyBtn min 48px. */
+  labelBig: { fontSize: 13 },
+  fieldTextBig: { fontSize: 15 },
+  chipBig: { minHeight: 48, justifyContent: 'center', paddingVertical: 12 },
+  qtyBtnBig: { width: 48, height: 48, borderRadius: 12 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text, outlineStyle: 'none' as never },
   /** Teks di dalam AppInput: medium ala form lama. */
   fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },

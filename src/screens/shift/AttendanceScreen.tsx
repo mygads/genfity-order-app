@@ -96,26 +96,26 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
   const clockedIn = inTime !== null && outTime === null;
 
-  const outlet = s?.outlet ?? 'ESB Cabang Poris'; const who = s?.name ?? 'Gista'; return (
+  const outlet = s?.outlet ?? 'Genfity Cabang Poris'; const who = s?.name ?? 'Gista'; return (
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
       <Text style={styles.clock}>{fmtClock(now)}</Text>
       <Text style={styles.date}>{now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-      <Text style={styles.meta}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
+      <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
 
       <View style={styles.card}>
         <Text style={styles.cardT}>{t('att_outlet')} {outlet}</Text>
-        <Text style={styles.meta}>{who} ({s?.username ?? 'gista.kasir'})</Text>
-        <Text style={styles.meta}>{s?.shift ?? t('fallback_shift')} · {t('att_cash')} {rp(s?.cash ?? 200000)} · {t('dash_shift_open')}</Text>
+        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{who} ({s?.username ?? 'gista.kasir'})</Text>
+        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{s?.shift ?? t('fallback_shift')} · {t('att_cash')} {rp(s?.cash ?? 200000)} · {t('dash_shift_open')}</Text>
       </View>
 
       <Text style={styles.sec}>{t('att_list')}</Text>
       <View style={styles.card}>
-        <View style={styles.row}><Text style={styles.item}>{t('att_in')}</Text><Text style={styles.item}>{inTime ?? '-- : --'}</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_in')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{inTime ?? '-- : --'}</Text></View>
         {/* FIX3-ISTIRAHAT: placeholder disengaja — tak ada sumber break di tr_shiftlog/payload sync; tampil '--:--' agar layout visual tetap identik. Keputusan produk (sembunyikan vs lacak istirahat) lihat held/notes. */}
-        <View style={styles.row}><Text style={styles.item}>{t('att_break')}</Text><Text style={styles.item}>-- : --</Text></View>
-        <View style={styles.row}><Text style={styles.item}>{t('att_out')}</Text><Text style={styles.item}>{outTime ?? '-- : --'}</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_break')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-- : --</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_out')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{outTime ?? '-- : --'}</Text></View>
       </View>
       {!inTime && <Text style={styles.empty}>{t('att_empty_in')}</Text>}
 
@@ -126,9 +126,9 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
         ))}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <View style={styles.keys}>
+      <View style={[styles.keys, isTablet && styles.keysTablet]}>
         {KEYS.map((k) => (
-          <TouchableOpacity key={k} style={[styles.key, (k === 'C' || k === '⌫') && styles.keyUtil]} onPress={() => press(k)}>
+          <TouchableOpacity key={k} style={[styles.key, (k === 'C' || k === '⌫') && styles.keyUtil, isTablet && styles.keyTablet]} onPress={() => press(k)}>
             <Text style={[styles.keyT, (k === 'C' || k === '⌫') && styles.keyUtilT]}>{k}</Text>
           </TouchableOpacity>
         ))}
@@ -179,10 +179,10 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
       />
       <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
         {/* Ketuk area gelap di luar kartu = tutup. */}
-        <Pressable style={styles.modalBg} onPress={() => setPinModal(false)}>
-          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+        <Pressable style={[styles.modalBg, isTablet && styles.modalBgTablet]} onPress={() => setPinModal(false)}>
+          <View style={[styles.modalCard, isTablet && styles.modalCardTablet]} onStartShouldSetResponder={() => true}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>{t('att_change_pin')}</Text>
+              <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('att_change_pin')}</Text>
               <AppInput
                 label={t('att_old_label')}
                 keyboardType="numeric"
@@ -231,17 +231,25 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   clock: { fontFamily: fonts.bold, fontSize: 34, color: colors.navy, marginTop: 6 },
   date: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted, marginTop: 2 },
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  // Tablet: teks status kehadiran lebih proporsional.
+  metaTablet: { fontSize: 13 },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 10, borderWidth: 1, borderColor: colors.line },
   cardT: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
   item: { fontFamily: fonts.regular, fontSize: 13, color: colors.text },
+  // Tablet: baris status kehadiran lebih terbaca.
+  itemTablet: { fontSize: 14 },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 8 },
   pinRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
   pinDot: { width: 56, height: 56, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   pinChar: { fontSize: 20, color: colors.navy },
   error: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8 },
   keys: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  // Tablet: grid keypad dibatasi agar tombol tidak pipih raksasa.
+  keysTablet: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   key: { width: '31%', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  // Tablet: tombol keypad lebih tinggi dan mudah disentuh.
+  keyTablet: { minHeight: 56, justifyContent: 'center' },
   keyT: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },
   keyUtil: { backgroundColor: colors.bg },
   keyUtilT: { color: colors.red },
@@ -261,6 +269,17 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   },
   pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  // Tablet: sheet ganti PIN jadi dialog tengah yang dibatasi lebarnya.
+  modalBgTablet: { justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '85%' },
+  // Tablet: kartu dialog tengah maxWidth 520, bukan selebar layar.
+  modalCardTablet: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    borderRadius: 16,
+  },
   modalTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, textAlign: 'center', marginBottom: 4 },
+  // Tablet: judul dialog sedikit lebih besar.
+  modalTitleBig: { fontSize: 18 },
   modalCancel: { fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 12 },});

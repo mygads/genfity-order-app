@@ -18,11 +18,11 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   return (
     <ScreenRoot style={styles.root}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
-      <Image source={require('../../../assets/images/forget_pin.webp')} style={styles.hero} resizeMode="contain" />
-      <Text style={styles.title}>{t('g_forgot_title')}</Text>
+      <Image source={require('../../../assets/images/forget_pin.webp')} style={[styles.hero, isTablet && styles.heroBig]} resizeMode="contain" />
+      <Text style={[styles.title, isTablet && styles.titleBig]}>{t('g_forgot_title')}</Text>
       {sent ? (
         <>
-          <Text style={styles.desc}>
+          <Text style={[styles.desc, isTablet && styles.descBig]}>
             {t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}
             {t('g_forgot_sent_post')}
           </Text>
@@ -35,7 +35,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
         </>
       ) : (
         <>
-          <Text style={styles.desc}>
+          <Text style={[styles.desc, isTablet && styles.descBig]}>
             {t('g_forgot_desc')}
           </Text>
           <Text style={styles.label}>{t('g_forgot_label')}</Text>
@@ -67,6 +67,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 20, paddingBottom: 40, alignItems: 'center' },
   hero: { width: '100%', height: 180, marginTop: 12 },
+  /** Skala tablet: hero + judul + deskripsi membesar (phone tetap). */
+  heroBig: { height: 240 },
+  titleBig: { fontSize: 24 },
+  descBig: { fontSize: 15, lineHeight: 22 },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 12 },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 8, textAlign: 'center', lineHeight: 19 },
   bold: { fontFamily: fonts.bold, color: colors.text },

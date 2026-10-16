@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenter, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -141,8 +141,9 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
         <Text style={styles.meta}>TRX hari ini · {metaTable} · {metaGuest}</Text>
-      <View style={styles.bill}>
-        <Text style={styles.shop}>ESB CABANG PORIS</Text>
+      {/* Tablet: struk dibatasi sempit + tengahkan agar proporsional. */}
+      <View style={[styles.bill, isTablet && wideCenterSm]}>
+        <Text style={styles.shop}>GENFITY CABANG PORIS</Text>
         <Text style={styles.addr}>Jl. Poris Indah No. 88 · 021-5566-7788</Text>
         <Text style={styles.trx}>TRX-047 · {metaTable} · Kasir Gista · 12:41</Text>
         {orderItems.map((i) => (
@@ -207,8 +208,8 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       <Text style={styles.label}>{t('bill_mode')}</Text>
       <View style={styles.chips}>
         {([['rata', t('bill_mode_even').replace('{n}', String(splits))], ['item', t('bill_mode_item')], ['nominal', t('bill_mode_nominal')]] as [Mode, string][]).map(([m, l]) => (
-          <TouchableOpacity key={m} style={[styles.chip, mode === m && styles.chipOn]} onPress={() => setMode(mode === m ? 'none' : m)}>
-            <Text style={[styles.chipT, mode === m && styles.chipTOn]}>{l}</Text>
+          <TouchableOpacity key={m} style={[styles.chip, isTablet && styles.chipTablet, mode === m && styles.chipOn]} onPress={() => setMode(mode === m ? 'none' : m)}>
+            <Text style={[styles.chipT, isTablet && styles.chipTTablet, mode === m && styles.chipTOn]}>{l}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -219,8 +220,8 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <Text style={styles.label}>{t('bill_count')}</Text>
           <View style={styles.chips}>
             {[2, 3, 4].map((n) => (
-              <TouchableOpacity key={n} style={[styles.chip, splits === n && styles.chipOn]} onPress={() => resetSplits(n)}>
-                <Text style={[styles.chipT, splits === n && styles.chipTOn]}>÷{n}</Text>
+              <TouchableOpacity key={n} style={[styles.chip, isTablet && styles.chipTablet, splits === n && styles.chipOn]} onPress={() => resetSplits(n)}>
+                <Text style={[styles.chipT, isTablet && styles.chipTTablet, splits === n && styles.chipTOn]}>÷{n}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -295,7 +296,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
                     style={styles.payBtn}
                   />
                 )}
-                <TouchableOpacity onPress={() => togglePaid(i)} hitSlop={10} style={styles.lunasBtn}>
+                <TouchableOpacity onPress={() => togglePaid(i)} hitSlop={10} style={[styles.lunasBtn, isTablet && styles.lunasBtnTablet]}>
                   <Text style={styles.lunasT}>{paid[i] ? t('bill_unmark') : t('bill_mark')}</Text>
                 </TouchableOpacity>
               </View>
@@ -348,8 +349,11 @@ const styles = StyleSheet.create({
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 6 },
   chips: { flexDirection: 'row', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card },
+  // Tablet: chip penuhi target sentuh 48px.
+  chipTablet: { minHeight: 48, paddingVertical: 12 },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
+  chipTTablet: { fontSize: 13 },
   chipTOn: { color: colors.orangeDark },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 10 },
   paidBanner: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark, marginTop: 10 },
@@ -368,6 +372,8 @@ const styles = StyleSheet.create({
   payBtnT: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },
   lunasBtn: { paddingVertical: 8, paddingLeft: 4 },
+  // Tablet: toggle lunas penuhi target sentuh 48px.
+  lunasBtnTablet: { minHeight: 48, paddingVertical: 12 },
   lunasT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
   lunas: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },
   nomRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },

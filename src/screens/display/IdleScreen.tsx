@@ -16,12 +16,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View><View style={styles.hero}>
-        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
+        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
         <Text style={[styles.shop, isTablet && styles.shopBig]}>{t('disp_shop')}</Text>
         <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>
       </View>
       <View style={styles.promoCard}>
-        <Image source={PROMO_IMAGES[idx]} style={styles.promoImg} resizeMode="contain" />
+        <Image source={PROMO_IMAGES[idx]} style={[styles.promoImg, isTablet && styles.promoImgTablet]} resizeMode="contain" />
         <Text style={[styles.promoTitle, isTablet && styles.promoTitleBig]}>{promo.title}</Text>
         <Text style={[styles.promoDesc, isTablet && styles.promoDescBig]}>{promo.desc}</Text>
         <View style={styles.dots}>
@@ -31,16 +31,16 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         </View>
       </View>
       <View style={styles.infoRow}>
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>{t('idle_hours')}</Text>
+        <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
+          <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_hours')}</Text>
           <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val')}</Text>
         </View>
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>{t('idle_wifi')}</Text>
-          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>ESB-PORIS</Text>
+        <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
+          <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_wifi')}</Text>
+          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>GNF-PORIS</Text>
         </View>
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>{t('idle_queue')}</Text>
+        <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
+          <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_queue')}</Text>
           <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_queue_val')}</Text>
         </View>
       </View>
@@ -54,10 +54,14 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   body: { padding: 16, paddingBottom: 40 },
   langWrap: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }, langBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.navy }, langBtnOn: { backgroundColor: colors.white, borderColor: colors.white }, langT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navyTint }, langTOn: { color: colors.navy }, hero: { alignItems: 'center', marginTop: 20 },
   logo: { width: 130, height: 64 },
+  /* Tablet: logo lebih besar agar terbaca dari jauh. */
+  logoTablet: { width: 180, height: 88 },
   shop: { fontFamily: fonts.bold, fontSize: 24, color: colors.white, marginTop: 8, textAlign: 'center' },
-  shopBig: { fontSize: 30 }, heroSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, marginTop: 4, textAlign: 'center' },
+  shopBig: { fontSize: 36 }, heroSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, marginTop: 4, textAlign: 'center' },
   heroSubBig: { fontSize: 16 }, promoCard: { backgroundColor: colors.white, borderRadius: 16, padding: 18, marginTop: 20, alignItems: 'center' },
   promoImg: { width: '100%', height: 150 },
+  /* Tablet: gambar promo lebih tinggi agar mengisi layar display. */
+  promoImgTablet: { height: 240 },
   promoTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 12, textAlign: 'center' },
   promoTitleBig: { fontSize: 24 }, promoDesc: { fontFamily: fonts.regular, fontSize: 14, color: colors.muted, marginTop: 4, textAlign: 'center' },
   promoDescBig: { fontSize: 16 }, dots: { flexDirection: 'row', gap: 8, marginTop: 12 },
@@ -65,7 +69,10 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   dotActive: { backgroundColor: colors.orange },
   infoRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
   infoBox: { flex: 1, backgroundColor: colors.navy, borderRadius: 12, padding: 12, alignItems: 'center' },
+  /* Tablet: kotak info lebih lega di layar display pelanggan. */
+  infoBoxTablet: { padding: 16 },
   infoTitle: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
+  infoTitleBig: { fontSize: 15 },
   infoSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.navyTint, marginTop: 2, textAlign: 'center' },
   infoSubBig: { fontSize: 13 }, cta: { backgroundColor: colors.orange, borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 16 },
   ctaText: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },

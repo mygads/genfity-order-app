@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { colors, fonts } from '../../theme';
+import { Modal, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { TABLET_BP, colors, fonts } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -12,6 +12,9 @@ import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
  * non-penjualan. Dua terakhir wajib otorisasi supervisor (fail-closed).
  */
 export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string) => void }) {
+  // Tablet: kartu 4 sebaris proporsional di dalam konten PayScreen.
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [authFor, setAuthFor] = useState<ExtraMethodId | null>(null);
   const [pin, setPin] = useState('');
@@ -73,9 +76,9 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
       <Text style={styles.hint}>{t('xp_hint')}</Text>
       <View style={styles.grid}>
         {EXTRA_METHODS.map((m) => (
-          <TouchableOpacity key={m.id} style={styles.card} onPress={() => tap(m.id)}>
-            <Text style={styles.cardT}>{m.label}</Text>
-            <Text style={styles.cardS}>{m.desc}</Text>
+          <TouchableOpacity key={m.id} style={[styles.card, isTablet && styles.cardTablet]} onPress={() => tap(m.id)}>
+            <Text style={[styles.cardT, isTablet && styles.cardTTablet]}>{m.label}</Text>
+            <Text style={[styles.cardS, isTablet && styles.cardSTablet]}>{m.desc}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -156,6 +159,10 @@ const styles = StyleSheet.create({
   },
   cardT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
   cardS: { fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 },
+  // Tablet: 4 kartu sebaris proporsional dengan teks sedikit besar.
+  cardTablet: { flexBasis: '23%', minHeight: 64, padding: 16 },
+  cardTTablet: { fontSize: 14 },
+  cardSTablet: { fontSize: 12 },
   wrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
   dialogNarrow: { width: '100%', maxWidth: 480, alignSelf: 'center' },

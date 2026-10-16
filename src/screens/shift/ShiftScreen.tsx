@@ -210,18 +210,29 @@ const MAX_KAS_AWAL = 10000000;
       </ScrollView>
 
       <View style={s.footer}>
+        {isTablet ? (
+          <View style={s.footerInnerTablet}>
+            <AppButton
+              title={kasAwalNum > 0 ? `${t('shf_open_btn')} · ${rp(kasAwalNum)}` : t('shf_fill_cash')}
+              disabled={kasAwalNum <= 0}
+              style={{ marginTop: 0 }}
+              onPress={openPin}
+            />
+          </View>
+        ) : (
         <AppButton
           title={kasAwalNum > 0 ? `${t('shf_open_btn')} · ${rp(kasAwalNum)}` : t('shf_fill_cash')}
           disabled={kasAwalNum <= 0}
           style={{ marginTop: 0 }}
           onPress={openPin}
         />
+        )}
       </View>
 
       <Modal visible={pinVisible} transparent animationType="slide">
-        <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{t('shf_pin_title')}</Text>
+        <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('shf_pin_title')}</Text>
             <Text style={s.modalHint}>PIN kasir untuk membuka shift</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -234,13 +245,13 @@ const MAX_KAS_AWAL = 10000000;
                 (k) => (
                   <TouchableOpacity
                     key={k}
-                    style={s.pinKey}
+                    style={[s.pinKey, isTablet && s.pinKeyTablet]}
                     onPress={() => {
                       if (k === 'C') setPin(pin.slice(0, -1));
                       else if (k === 'OK') confirmOpen();
                       else pressPinKey(k);
                     }}>
-                    <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
+                    <Text style={[s.pinKeyTxt, isTablet && s.pinKeyTxtBig]}>{k === 'C' ? '⌫' : k}</Text>
                   </TouchableOpacity>
                 ),
               )}
@@ -356,6 +367,8 @@ const MAX_KAS_AWAL = 10000000;
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
+  // Tablet: isi footer dibatasi lebarnya + tengah.
+  footerInnerTablet: { width: '100%', maxWidth: 880, alignSelf: 'center' },
   openBtn: {
     backgroundColor: colors.orange,
     borderRadius: 10,
@@ -369,6 +382,8 @@ const MAX_KAS_AWAL = 10000000;
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
+  // Tablet: sheet PIN jadi dialog tengah yang dibatasi lebarnya.
+  modalBgTablet: { justifyContent: 'center', padding: 24 },
   modalCard: {
     backgroundColor: colors.white,
     borderTopLeftRadius: 20,
@@ -376,7 +391,16 @@ const MAX_KAS_AWAL = 10000000;
     padding: 24,
     alignItems: 'center',
   },
+  // Tablet: kartu PIN maxWidth 520 + tengah, bukan selebar layar.
+  modalCardTablet: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    borderRadius: 16,
+  },
   modalTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  // Tablet: judul PIN sedikit lebih besar.
+  modalTitleBig: { fontSize: 19 },
   modalHint: {
     fontSize: 13,
     fontFamily: fonts.regular,
@@ -403,7 +427,11 @@ const MAX_KAS_AWAL = 10000000;
     justifyContent: 'center',
     margin: 5,
   },
+  // Tablet: tombol PIN lebih besar dan mudah disentuh.
+  pinKeyTablet: { width: 84, height: 64 },
   pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
+  // Tablet: label tombol PIN sedikit lebih besar.
+  pinKeyTxtBig: { fontSize: 22 },
   cancelBtn: { marginTop: 12, padding: 10 },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },});

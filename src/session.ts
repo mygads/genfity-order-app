@@ -16,7 +16,7 @@ export interface Session {
 const DEMO: Session = {
   name: 'Gista',
   username: 'gista.kasir',
-  outlet: 'ESB Cabang Poris',
+  outlet: 'Genfity Cabang Poris',
   shift: 'Shift Pagi',
   clockIn: '08:57',
   cash: 200000,

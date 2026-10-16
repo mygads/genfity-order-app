@@ -8,7 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -685,31 +685,31 @@ export default function PayScreen({ navigation, route }: Props) {
 
       <View style={styles.grid}>
         <TouchableOpacity
-          style={[styles.gridCard, !customMode && cashSel === remaining && styles.gridCardActive]}
+          style={[styles.gridCard, isTablet && styles.gridCardTablet, !customMode && cashSel === remaining && styles.gridCardActive]}
           onPress={() => {
             setCustomMode(false);
             setCashSel(remaining);
           }}>
-          <Text style={styles.gridText}>{t('pay_exact')}</Text>
+          <Text style={[styles.gridText, isTablet && styles.gridTextTablet]}>{t('pay_exact')}</Text>
           <Text style={styles.gridSub}>{rp(remaining)}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.gridCard, customMode && styles.gridCardActive]}
+          style={[styles.gridCard, isTablet && styles.gridCardTablet, customMode && styles.gridCardActive]}
           onPress={() => {
             setCustomMode(true);
             setCashSel(null);
           }}>
-          <Text style={styles.gridText}>{t('pay_other')} ›</Text>
+          <Text style={[styles.gridText, isTablet && styles.gridTextTablet]}>{t('pay_other')} ›</Text>
         </TouchableOpacity>
         {nominals.map((v) => (
           <TouchableOpacity
             key={v}
-            style={[styles.gridCard, !customMode && cashSel === v && styles.gridCardActive]}
+            style={[styles.gridCard, isTablet && styles.gridCardTablet, !customMode && cashSel === v && styles.gridCardActive]}
             onPress={() => {
               setCustomMode(false);
               setCashSel(v);
             }}>
-            <Text style={styles.gridText}>{rp(v)}</Text>
+            <Text style={[styles.gridText, isTablet && styles.gridTextTablet]}>{rp(v)}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -836,7 +836,7 @@ export default function PayScreen({ navigation, route }: Props) {
           return (
             <TouchableOpacity
               key={w.id}
-              style={[styles.walletCard, active && styles.walletCardActive]}
+              style={[styles.walletCard, isTablet && styles.walletCardTablet, active && styles.walletCardActive]}
               onPress={() => setWallet(w.id)}
               accessibilityRole="radio"
               accessibilityState={{ selected: active }}>
@@ -1034,7 +1034,7 @@ export default function PayScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {renderBanner()}
         {syncBlocked && (
           <View style={styles.syncWarn}>
@@ -1178,6 +1178,9 @@ const styles = StyleSheet.create({
   },
   gridCardActive: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   gridText: { fontFamily: fonts.medium, fontSize: 14, color: colors.muted },
+  // Tablet: teks sedikit besar + kartu nominal 3 kolom proporsional.
+  gridTextTablet: { fontSize: 15 },
+  gridCardTablet: { width: '31%', flexGrow: 0, paddingVertical: 16 },
   gridSub: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 2 },
   customRow: { marginTop: 10 },
   fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: 5 },
@@ -1287,6 +1290,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   walletCardActive: { borderColor: colors.orange, backgroundColor: colors.paleOrange, borderWidth: 2 },
+  // Tablet: kartu dompet 3 kolom proporsional (selaras grid nominal).
+  walletCardTablet: { width: '31%', flexGrow: 0, paddingVertical: 16 },
   walletCheck: {
     position: 'absolute', top: 6, right: 6,
     width: 18, height: 18, borderRadius: 9,

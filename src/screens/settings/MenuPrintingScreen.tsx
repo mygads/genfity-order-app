@@ -111,8 +111,10 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
 
+      {/* Tablet: kartu routing 2 kolom; phone tetap 1 kolom (wadah transparan). */}
+      <View style={isTablet ? styles.gridTablet : undefined}>
       {routes.map((r) => (
-        <View key={r.id} style={styles.card}>
+        <View key={r.id} style={[styles.card, isTablet && styles.cardTablet]}>
           <View style={styles.cardTop}>
             <View style={styles.cardLeft}>
               <Text style={styles.groupName}>{r.group}</Text>
@@ -136,6 +138,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
           </View>
         </View>
       ))}
+      </View>
 
       <View style={styles.card}>
         <Text style={styles.groupName}>{t('mprint.kitchenOpts')}</Text>
@@ -196,4 +199,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
     backgroundColor: colors.white,
     marginTop: 6,
   },
-  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14 },});
+  foot: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 14 },
+  // Tablet: grid kartu routing 2 kolom (phone tak tersentuh).
+  gridTablet: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16 },
+  cardTablet: { flexBasis: '48%', flexGrow: 1, marginHorizontal: 0 },});

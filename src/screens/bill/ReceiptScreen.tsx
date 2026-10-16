@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const { t } = useLang(); const no = route?.params?.no ?? '#148';
   const method = route?.params?.method ?? 'QRIS';
   const mode = route?.params?.mode ?? 'Bawa Pulang';
+  // Label tampil: nilai data 'ESB Order' (dipakai logika fee/mode) tetap, yang tampil jadi nama produk.
+  const modeLabel = mode === 'ESB Order' ? 'Genfity Order' : mode;
   const cash = route?.params?.cash ?? 0;
   const change = route?.params?.change ?? 0;
   const isCash = method.toLowerCase().includes('tunai') || method.toLowerCase() === 'cash';
@@ -42,14 +44,14 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const approvalCode = route?.params?.approvalCode ?? '';
   const cardLast4 = route?.params?.cardLast4 ?? '';
   const edcLine = [route?.params?.bank, route?.params?.terminal].filter(Boolean).join(' · ');
-  const shopName = route?.params?.shopName ?? 'ESB Cabang Poris';
+  const shopName = route?.params?.shopName ?? 'Genfity Cabang Poris';
   const shopAddr = route?.params?.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
   const customFooter = route?.params?.footer ?? '';
   const [printing, setPrinting] = useState(false);
   /** Cetak nyata: ESC/POS rincian penuh (selaras tampilan kertas) → printer
    * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
    * kas ala POSLite (best-effort). */
-  const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${mode}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
+  const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${modeLabel}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
   /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
    * lain (pratinjau/arsip/void) tetap manual via tombol. */
   const autoPrinted = useRef(false);
@@ -60,27 +62,27 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const paper = (<View style={styles.paper}>
-      <Text style={styles.shop}>{shopName}</Text><Text style={styles.addr}>{shopAddr}</Text><Text style={styles.line}>No: {no}    {mode}</Text>
+  const paper = (<View style={[styles.paper, isTablet && styles.paperTablet]}>
+      <Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text><Text style={styles.addr}>{shopAddr}</Text><Text style={styles.line}>No: {no}    {modeLabel}</Text>
       <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
       <View style={styles.div} />
-      {hasItems ? ( cartItems.map((it) => (<View key={it.id}><View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View>{(it.modifiers ?? []).map((m) => (<Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))}</View> )) ) : null}
-      <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.item}>{rp(subtotal)}</Text></View>{discount > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('rc_discount')}</Text><Text style={styles.item}>-{rp(discount)}</Text></View> )}{service > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.item}>{rp(service)}</Text></View> )}{feeESB > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )}{tax > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )}{voucherCode ? (
-      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
-      <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
-      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View>{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={styles.item}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View></> )}
+      {hasItems ? ( cartItems.map((it) => (<View key={it.id}><View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{it.qty}x {it.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(lineTotal(it))}</Text></View>{(it.modifiers ?? []).map((m) => (<Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))}</View> )) ) : null}
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('c_subtotal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(subtotal)}</Text></View>{discount > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_discount')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(discount)}</Text></View> )}{service > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('serviceExcl')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(service)}</Text></View> )}{feeESB > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('feeESB')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(feeESB)}</Text></View> )}{tax > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ok_tax')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(tax)}</Text></View> )}{voucherCode ? (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_voucher')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_approval')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_terminal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{edcLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rounding')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
+      <View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(total)}</Text></View>{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_void_total')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(voidTotal)}</Text></View></> )}
       {isCash && cash > 0 ? (
         <>
-          <View style={styles.row}><Text style={styles.item}>{t('rc_cashin')}</Text><Text style={styles.item}>{rp(cash)}</Text></View>
-          <View style={styles.row}><Text style={styles.item}>{t('rc_change')}</Text><Text style={styles.item}>{rp(change)}</Text></View>
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_cashin')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(cash)}</Text></View>
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_change')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(change)}</Text></View>
         </>
       ) : (
-        <View style={styles.row}><Text style={styles.item}>{t('rc_change')}</Text><Text style={styles.item}>{rp(0)}</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_change')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(0)}</Text></View>
       )}
       <Text style={styles.thanks}>{t('rc_thanks')}</Text>{customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}
     </View>
@@ -145,11 +147,11 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
         <ScrollView style={styles.summarySide} contentContainerStyle={styles.summarySideBody}>
           <Text style={styles.summaryTitle}>{t('rc_summary')}</Text>
           <View style={styles.summaryCard}>
-            <View style={styles.row}><Text style={styles.item}>{t('rc_no')}</Text><Text style={styles.item}>{no}</Text></View>
-            <View style={styles.row}><Text style={styles.item}>{t('rc_mode')}</Text><Text style={styles.item}>{mode}</Text></View>
-            <View style={styles.row}><Text style={styles.item}>{t('rc_method')}</Text><Text style={styles.item}>{method}</Text></View>
-            {ongkir > 0 && (<View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
-            <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
+            <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_no')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{no}</Text></View>
+            <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_mode')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{modeLabel}</Text></View>
+            <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_method')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text></View>
+            {ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
+            <View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>
           </ScrollView>{mailModal}
@@ -168,19 +170,25 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1, backgroundColor: colors.bg }, body: { padding: 16, paddingBottom: 40 },
   paper: { backgroundColor: colors.white, borderRadius: 8, padding: 18, borderWidth: 1, borderColor: colors.line },
+  // Tablet: kertas struk dibatasi sempit + tengahkan (tidak melar).
+  paperTablet: { width: '100%', maxWidth: 560, alignSelf: 'center' },
   shop: { fontFamily: fonts.bold, fontSize: 17, color: colors.text, textAlign: 'center' },
+  shopTablet: { fontSize: 20 },
   addr: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 },
   line: { fontFamily: fonts.medium, fontSize: 12, color: colors.text, marginTop: 6 },
   div: { borderTopWidth: 1, borderTopColor: colors.line, borderStyle: 'dashed', marginVertical: 10 },
   item: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, marginTop: 3 },
+  // Tablet: skala font struk agar proporsional kolom.
+  itemTablet: { fontSize: 14 },
   note: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
   total: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, marginTop: 4 },
+  totalTablet: { fontSize: 18 },
   voidTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.red, marginTop: 4 }, voidItem: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 3, textDecorationLine: 'line-through' }, thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 12 },
   footerNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 }, actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   actionsStack: { flexDirection: 'column' },
   actionCol: { width: '100%' },
-  actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, actionBtn: { marginTop: 0 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+  actionHalf: { width: '48%', flexGrow: 1, flexShrink: 0 }, actionFull: { width: '100%' }, dBtnFlex: { flex: 1 }, actionBtn: { marginTop: 0 }, split: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg, width: '100%', maxWidth: 1024, alignSelf: 'center' },
   paperSide: { flex: 1.2 },
   summarySide: { flex: 1, backgroundColor: colors.card, borderLeftWidth: 1, borderLeftColor: colors.line }, summarySideBody: { padding: 20, paddingBottom: 32 },
   summaryTitle: { fontFamily: fonts.bold, fontSize: 17, color: colors.navy },

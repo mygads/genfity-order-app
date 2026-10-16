@@ -3,20 +3,22 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const isTablet = width >= TABLET_BP;
 
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const go = (route: string) => navigation?.navigate(route); return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <ScrollView style={styles.root} contentContainerStyle={styles.body}>
       <ScreenHeader title={t('settings.about')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /><View style={styles.hero}>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /><View style={styles.hero}>{/* Tablet: hero full-bleed, isi dibatasi 560. */}<View style={isTablet ? styles.heroInner : undefined}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
         <Text style={styles.version}>{t('about.version')}</Text>
         <Text style={styles.heroSub}>{t('about.heroSub')}</Text>
+        </View>
       </View>
+      <View style={isTablet ? wideCenterSm : undefined}>
       <View style={styles.card}>
         <Row label={t('about.package')} value="Genfity Order (Expo RN)" />
-        <Row label={t('about.branch')} value="ESB Cabang Poris - BR-01" />
+        <Row label={t('about.branch')} value="Genfity Cabang Poris - BR-01" />
         <Row label={t('about.terminal')} value="TRM-001" />
         <Row label={t('about.env')} value={t('about.envVal')} />
         <Row label={t('about.printer')} value="BT SPP - LAN - Star" />
@@ -26,6 +28,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
         <Text style={[styles.cardText, isTablet && { fontSize: 14 }]}>{t('about.body')}</Text>
       </View>
       <Text style={styles.foot}>{t('about.foot')}</Text>
+      </View>
     </ScrollView>
   );}function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -38,6 +41,8 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   root: { flex: 1, backgroundColor: colors.bg },
   body: { paddingBottom: 32 },
   hero: { backgroundColor: colors.navy, paddingTop: 24, paddingBottom: 24, paddingHorizontal: 16, alignItems: 'center' },
+  // Tablet: isi hero ditengahkan max 560 walau hero full-bleed (phone tak tersentuh).
+  heroInner: { width: '100%', maxWidth: 560, alignSelf: 'center', alignItems: 'center' },
   logo: { width: 120, height: 60 },
   appName: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, marginTop: 10 },
   version: { fontFamily: fonts.medium, fontSize: 13, color: colors.orange, marginTop: 4 },

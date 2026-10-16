@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';import { ActivityIndicator, Image, S
 import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';const BRANCHES = [
-  { id: 'B001', name: 'ESB Cabang Poris', addr: 'Jl. Poris Raya No. 8, Tangerang', device: 'Terminal 01 · Kasir' },
-  { id: 'B002', name: 'ESB Cabang Ciputat', addr: 'Jl. Dewi Sartika No. 12, Tangsel', device: 'Terminal 02 · Kasir' },
-  { id: 'B003', name: 'ESB Cabang Bintaro', addr: 'Jl. Bintaro Utama No. 5, Tangsel', device: 'Terminal 03 · Kasir' },];export default function SelectBranchScreen({ navigation }: { navigation?: Nav }) {
+  { id: 'B001', name: 'Genfity Cabang Poris', addr: 'Jl. Poris Raya No. 8, Tangerang', device: 'Terminal 01 · Kasir' },
+  { id: 'B002', name: 'Genfity Cabang Ciputat', addr: 'Jl. Dewi Sartika No. 12, Tangsel', device: 'Terminal 02 · Kasir' },
+  { id: 'B003', name: 'Genfity Cabang Bintaro', addr: 'Jl. Bintaro Utama No. 5, Tangsel', device: 'Terminal 03 · Kasir' },];export default function SelectBranchScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
@@ -38,14 +38,14 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>{t('sel_title')}</Text>
+          <Text style={[styles.title, isTablet && styles.titleBig]}>{t('sel_title')}</Text>
           <Image
             source={require('../../../assets/images/install_location_pin.webp')}
             style={styles.pinImg}
             resizeMode="contain"
           />
         </View>
-        <Text style={styles.desc}>{t('sel_desc')}</Text>
+        <Text style={[styles.desc, isTablet && styles.descBig]}>{t('sel_desc')}</Text>
         {loading ? (
           <ActivityIndicator size="small" color="#1E88E5" style={styles.loader} />
         ) : (
@@ -69,9 +69,9 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
               <Text style={[styles.avatarT, branchId === b.id && styles.avatarTOn]}>C</Text>
             </View>
             <View style={styles.info}>
-              <Text style={styles.name}>{b.name}</Text>
-              <Text style={styles.meta}>{b.addr}</Text>
-              <Text style={styles.meta}>{b.device}</Text>
+              <Text style={[styles.name, isTablet && styles.nameBig]}>{b.name}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{b.addr}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{b.device}</Text>
             </View>
             <View style={[styles.radio, branchId === b.id && styles.radioOn]}>
               {branchId === b.id && <View style={styles.radioDot} />}
@@ -105,6 +105,11 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   back: { fontSize: 28, color: '#4A4A4A', fontFamily: fonts.bold },
   titleRow: { flexDirection: 'row', alignItems: 'center' },
   title: { fontFamily: fonts.bold, fontSize: 20, color: TITLE_DARK },
+  /** Skala tablet: buang paddingRight 80 + teks membesar (phone tetap). */
+  titleBig: { fontSize: 24 },
+  descBig: { paddingRight: 0 },
+  nameBig: { fontSize: 17 },
+  metaBig: { fontSize: 14, lineHeight: 20 },
   pinImg: { width: 26, height: 26, marginLeft: 8 },
   loader: { marginTop: 28, alignSelf: 'flex-start' },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: GREY, marginTop: 6, lineHeight: 19, paddingRight: 80 },

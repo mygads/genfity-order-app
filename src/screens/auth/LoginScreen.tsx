@@ -91,8 +91,11 @@ function QrTabletArt() {
 }
 
 export default function LoginScreen({ navigation }: Props) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
+  // Tablet portrait (lebar < tinggi) pakai satu kolom tengah ala phone;
+  // split dua kolom hanya saat landscape agar tiap panel tetap lega.
+  const showSplit = isTablet && width > height;
   const { t } = useLang();
   const [mode, setMode] = useState<'email' | 'qr'>('email');
   const [username, setUsername] = useState('');
@@ -107,6 +110,13 @@ export default function LoginScreen({ navigation }: Props) {
   const [qrCode, setQrCode] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
   const qrBusy = useRef(false);
+  /** Web: kamera nyata (getUserMedia) - video dibuka, bukan tempelan kode. */
+  const [webManual, setWebManual] = useState(false);
+  const [webCamError, setWebCamError] = useState<'denied' | 'nocam' | ''>('');
+  /** HP: hasil izin dari requestPermission (nilai hook bisa basi saat modal dibuka). */
+  const [camAllowed, setCamAllowed] = useState(false);
+  const videoEl = useRef<unknown>(null);
+  const detRef = useRef<unknown>(null);
 
   const filled = username.trim().length > 0 && password.length > 0;
 
@@ -177,17 +187,25 @@ export default function LoginScreen({ navigation }: Props) {
   const openQrScanner = () => {
     if (busy) return;
     setServerError('');
+    setWebManual(false);
+    setWebCamError('');
     void (async () => {
-      if (Platform.OS !== 'web' && !permission?.granted) {
-        try {
-          const res = await requestPermission();
-          if (!res.granted) {
+      if (Platform.OS !== 'web') {
+        if (!permission?.granted) {
+          try {
+            const res = await requestPermission();
+            setCamAllowed(res.granted);
+            if (!res.granted) {
+              setServerError(t('scan_denied'));
+              return;
+            }
+          } catch {
+            setCamAllowed(false);
             setServerError(t('scan_denied'));
             return;
           }
-        } catch {
-          setServerError(t('scan_denied'));
-          return;
+        } else {
+          setCamAllowed(true);
         }
       }
       setQrCode('');
@@ -222,6 +240,64 @@ export default function LoginScreen({ navigation }: Props) {
       }
     })();
   };
+
+  /**
+   * Kamera web nyata: getUserMedia pasang stream ke <video>, BarcodeDetector
+   * (Chrome/Edge) memindai QR tiap 400ms. Kamera gagal/tak didukung ->
+   * fallback tempel kode. Stream dimatikan saat modal ditutup (cleanup).
+   */
+  useEffect(() => {
+    if (!scanOpen || Platform.OS !== 'web') return;
+    type Track = { stop: () => void };
+    let stream: { getTracks: () => Track[] } | null = null;
+    let alive = true;
+    const tick = async () => {
+      if (!alive || qrBusy.current || busy) return;
+      try {
+        const v = videoEl.current as unknown as { readyState?: number } | null;
+        const BD = (globalThis as unknown as {
+          BarcodeDetector?: new (o: unknown) => { detect: (s: unknown) => Promise<{ rawValue?: unknown }[]> };
+        }).BarcodeDetector;
+        if (!v || !BD) return;
+        if (!detRef.current) detRef.current = new BD({ formats: ['qr_code'] });
+        const codes = await (detRef.current as {
+          detect: (s: unknown) => Promise<{ rawValue?: unknown }[]>;
+        }).detect(v);
+        if (codes && codes.length > 0 && alive) handleQrData(String(codes[0]?.rawValue ?? ''));
+      } catch {
+        /* frame belum siap - coba interval berikut */
+      }
+    };
+    const timer: ReturnType<typeof setInterval> = setInterval(() => { void tick(); }, 400);
+    void (async () => {
+      try {
+        const g = globalThis as unknown as {
+          navigator?: { mediaDevices?: { getUserMedia: (c: unknown) => Promise<unknown> } };
+          BarcodeDetector?: unknown;
+        };
+        const md = g.navigator?.mediaDevices;
+        if (!md?.getUserMedia || !g.BarcodeDetector) {
+          if (alive) setWebCamError('nocam');
+          return;
+        }
+        stream = (await md.getUserMedia({ video: { facingMode: 'environment' }, audio: false })) as {
+          getTracks: () => Track[];
+        };
+        const v = videoEl.current as unknown as { srcObject?: unknown; play?: () => Promise<void> } | null;
+        if (!v) return;
+        v.srcObject = stream;
+        try { await v.play?.(); } catch { /* autoplay ditolak - user ketuk video */ }
+      } catch {
+        if (alive) setWebCamError('denied');
+      }
+    })();
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      try { stream?.getTracks().forEach((tr) => tr.stop()); } catch { /* abaikan */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanOpen]);
 
   const card = (which: 'email' | 'qr') => {
     const on = mode === which;
@@ -435,15 +511,76 @@ export default function LoginScreen({ navigation }: Props) {
   /**
    * Pemindai QR login: kamera live penuh-layar di atas form login (bukan
    * screen navigasi lain). Native: CameraView + pindai otomatis sekali.
-   * Web (tanpa kamera): tempel isi QR lalu Pakai Kode - jalur verifikasi sama.
+   * Web: kamera browser nyata (getUserMedia + BarcodeDetector) ke <video>;
+   * tempel kode hanya cadangan bila kamera tak ada/ditolak.
    */
   const scanModal = (
     <Modal visible={scanOpen} transparent={false} animationType="slide" onRequestClose={() => setScanOpen(false)}>
       <View style={styles.scanRoot}>
-        {Platform.OS === 'web' || !permission?.granted ? (
-          <View style={styles.scanManual}>
+        {Platform.OS === 'web' ? (
+          <View style={[styles.scanManual, isTablet && wideCenterSm]}>
             <Text style={styles.scanTitle}>{t('g_login_scan')}</Text>
             <Text style={styles.scanManualHint}>{t('login_qr_hint')}</Text>
+            <View style={[styles.scanVideoWrap, isTablet && styles.scanVideoWrapBig]}>
+              {webCamError ? (
+                <Text style={styles.scanCamErr}>
+                  {webCamError === 'denied' ? t('scan_denied') : t('login_qr_nocam')}
+                </Text>
+              ) : (
+                (createElement as unknown as (tag: string, props: Record<string, unknown>) => never)('video', {
+                  ref: (el: unknown) => { videoEl.current = el; },
+                  muted: true,
+                  playsInline: true,
+                  autoPlay: true,
+                  style: { width: '100%', height: '100%', objectFit: 'cover', backgroundColor: '#000000' },
+                })
+              )}
+              <View style={[styles.scanFrame, styles.scanFrameWeb]} pointerEvents="none" />
+            </View>
+            {webManual || webCamError ? (
+              <>
+                <View style={styles.scanBox}>
+                  <TextInput
+                    style={styles.scanInput}
+                    value={qrCode}
+                    onChangeText={setQrCode}
+                    placeholder={t('login_qr_paste')}
+                    placeholderTextColor={INPUT_BORDER}
+                    autoCapitalize="none"
+                    multiline
+                  />
+                </View>
+                <AppButton
+                  size="md"
+                  title={t('login_qr_use')}
+                  onPress={() => handleQrData(qrCode)}
+                  disabled={!qrCode.trim() || busy}
+                  style={styles.primary}
+                />
+              </>
+            ) : (
+              <TouchableOpacity onPress={() => setWebManual(true)} style={styles.scanLink} hitSlop={12}>
+                <Text style={styles.scanLinkT}>{t('login_qr_manual')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : camAllowed || permission?.granted ? (
+          <View style={styles.scanRoot}>
+            <CameraView
+              style={styles.scanner}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={({ data }) => handleQrData(String(data))}
+            />
+            <View style={styles.scanFrame} pointerEvents="none" />
+            <View style={styles.scanBar} pointerEvents="box-none">
+              <Text style={styles.scanHint}>{t('login_qr_hint')}</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.scanManual, isTablet && wideCenterSm]}>
+            <Text style={styles.scanTitle}>{t('g_login_scan')}</Text>
+            <Text style={styles.scanManualHint}>{t('scan_denied')}</Text>
             <View style={styles.scanBox}>
               <TextInput
                 style={styles.scanInput}
@@ -463,19 +600,7 @@ export default function LoginScreen({ navigation }: Props) {
               style={styles.primary}
             />
           </View>
-        ) : (
-          <CameraView
-            style={styles.scanner}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={({ data }) => handleQrData(String(data))}
-          />
         )}
-        {Platform.OS !== 'web' && permission?.granted ? (
-          <View style={styles.scanBar} pointerEvents="box-none">
-            <Text style={styles.scanHint}>{t('login_qr_hint')}</Text>
-          </View>
-        ) : null}
         <TouchableOpacity style={styles.scanCancel} onPress={() => setScanOpen(false)} hitSlop={12}>
           <Text style={styles.scanCancelT}>← {t('cancel')}</Text>
         </TouchableOpacity>
@@ -483,7 +608,9 @@ export default function LoginScreen({ navigation }: Props) {
     </Modal>
   );
 
-  if (isTablet) {
+  // Split dua kolom hanya saat tablet landscape; portrait tablet ikut jalur
+  // satu kolom tengah (wideCenterSm) seperti phone agar form tidak sempit.
+  if (showSplit) {
     return (
       <ScreenRoot style={styles.root}>
         <View style={styles.split}>
@@ -613,7 +740,8 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center', justifyContent: 'center', padding: 32,
   },
-  helpCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, width: '100%' },
+  /** Kartu bantuan dibatasi agar tidak melar selebar tablet (phone tak berubah). */
+  helpCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, width: '100%', maxWidth: 480, alignSelf: 'center' },
   helpGreen: {
     backgroundColor: '#1FA855', borderRadius: 12, padding: 20, alignItems: 'center',
   },
@@ -659,4 +787,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   scanInput: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, minHeight: 96, outlineStyle: 'none' as never },
+  /** Bingkai viewfinder di atas kamera (native penuh-layar maupun video web). */
+  scanVideoWrap: {
+    marginTop: 16, marginBottom: 8, height: 300, borderRadius: 14,
+    overflow: 'hidden', backgroundColor: '#000000',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  scanFrame: {
+    position: 'absolute', width: 220, height: 220,
+    borderWidth: 3, borderColor: '#FFFFFF', borderRadius: 16, opacity: 0.9,
+    alignSelf: 'center', top: '28%',
+  },
+  scanFrameWeb: { top: 40 },
+  /** Video pindai lebih tinggi di tablet agar proporsional (phone tetap 300). */
+  scanVideoWrapBig: { height: 420 },
+  scanCamErr: {
+    fontFamily: fonts.medium, fontSize: 14, color: '#FFFFFF',
+    textAlign: 'center', paddingHorizontal: 24,
+  },
+  scanLink: { alignSelf: 'center', marginTop: 8, paddingVertical: 8 },
+  scanLinkT: { fontFamily: fonts.semibold, fontSize: 14, color: BLUE, textDecorationLine: 'underline' },
 });

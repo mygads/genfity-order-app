@@ -13,7 +13,7 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const branch = route?.params?.branch ?? 'ESB Cabang Poris';
+  const branch = route?.params?.branch ?? 'Genfity Cabang Poris';
   const [done, setDone] = useState(0);
 
   useEffect(() => {

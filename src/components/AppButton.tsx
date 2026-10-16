@@ -5,8 +5,9 @@
  * di components/Button.tsx; jangan tambah gaya di sini.
  */
 import type { ComponentProps } from 'react';
-import { type TextStyle, type ViewStyle } from 'react-native';
+import { useWindowDimensions, type TextStyle, type ViewStyle } from 'react-native';
 import Button from './Button';
+import { TABLET_BP } from '../theme';
 
 /**
  * Ukuran tombol bersama — samakan di semua layar agar konsisten:
@@ -34,10 +35,28 @@ const SIZE_TEXT: Record<AppButtonSize, TextStyle> = {
   lg: { fontSize: 16 },
 };
 
+// Peta ukuran tablet: tinggi + font naik agar proporsional di layar lebar
+// (cabang isTablet; phone pakai peta dasar tak berubah).
+const SIZE_BOX_TABLET: Record<AppButtonSize, ViewStyle> = {
+  sm: { height: 44, borderRadius: 10, paddingHorizontal: 12 },
+  md: { height: 50, borderRadius: 12, paddingHorizontal: 14 },
+  lg: { height: 60, borderRadius: 14 },
+};
+
+const SIZE_TEXT_TABLET: Record<AppButtonSize, TextStyle> = {
+  sm: { fontSize: 14 },
+  md: { fontSize: 15 },
+  lg: { fontSize: 17 },
+};
+
 /** Ekspor ulang varian agar pemanggil tak perlu impor Button langsung. */
 export type { ButtonVariant as AppButtonVariant } from './Button';
 
 /** Tombol bersama - teruskan semua props ke `Button`, terapkan ukuran. */
 export default function AppButton({ size = 'lg', style, textStyle, ...rest }: AppButtonProps) {
-  return <Button {...rest} style={[SIZE_BOX[size], style]} textStyle={[SIZE_TEXT[size], textStyle]} />;
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BP;
+  const box = isTablet ? SIZE_BOX_TABLET[size] : SIZE_BOX[size];
+  const txt = isTablet ? SIZE_TEXT_TABLET[size] : SIZE_TEXT[size];
+  return <Button {...rest} style={[box, style]} textStyle={[txt, textStyle]} />;
 }

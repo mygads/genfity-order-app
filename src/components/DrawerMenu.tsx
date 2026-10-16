@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
 import { logout } from '../session';
@@ -34,8 +34,8 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   // Drawer Android asli meluncur dari KIRI - samakan (sebelumnya panel di kanan).
-  // Lebar adaptif: 300 phone, 340 tablet.
-  const drawerW = isTablet ? 340 : 300;
+  // Lebar adaptif: 300 phone, proporsional di tablet (maks 400).
+  const drawerW = isTablet ? Math.min(400, width * 0.42) : 300;
   // Status shift nyata ala CashierScreen (tr_shiftlog): hijau = buka,
   // merah = tutup, kuning = belum termuat/DB kosong. Prop shiftOpen menimpa.
   // Hooks WAJIB di atas early-return: keluar sebelum hooks membuat React
@@ -89,7 +89,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
       <View style={styles.root}>
         <View style={[styles.panel, { width: drawerW }]}>
           <View style={styles.head}>
-            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? 'ESB Cabang Poris'}</Text>
+            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? 'Genfity Cabang Poris'}</Text>
             <View style={styles.shiftRow}>
               <View
                 style={[
@@ -101,21 +101,25 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
               <Text style={styles.shiftText}>{user ?? t('drawer_demo_user')}</Text>
             </View>
           </View>
-          {ITEMS.map((m) => (
-            <Pressable key={m.route} style={styles.row} onPress={() => go(m.route)}>
-              <Image source={m.icon} style={styles.rowIcon} resizeMode="contain" />
-              <View style={styles.rowLeft}>
-                <Text style={styles.rowLabel}>{m.label}</Text>
-                <Text style={styles.rowSub}>{m.sub}</Text>
-              </View>
-              <Text style={styles.chev}>›</Text>
-            </Pressable>
-          ))}
+          {/* Daftar menu digulir agar tombol bahasa/logout tak terpotong
+              di tablet landscape pendek; footer bahasa + logout tetap di bawah. */}
+          <ScrollView style={styles.list} contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+            {ITEMS.map((m) => (
+              <Pressable key={m.route} style={styles.row} onPress={() => go(m.route)}>
+                <Image source={m.icon} style={[styles.rowIcon, isTablet && styles.rowIconTablet]} resizeMode="contain" />
+                <View style={styles.rowLeft}>
+                  <Text style={[styles.rowLabel, isTablet && styles.rowLabelTablet]}>{m.label}</Text>
+                  <Text style={[styles.rowSub, isTablet && styles.rowSubTablet]}>{m.sub}</Text>
+                </View>
+                <Text style={styles.chev}>›</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
           <View style={styles.langRow}>
             {(['id', 'en'] as const).map((l) => (
               <Pressable
                 key={l}
-                style={[styles.langBtn, lang === l && styles.langBtnOn]}
+                style={[styles.langBtn, lang === l && styles.langBtnOn, isTablet && styles.langBtnTablet]}
                 onPress={() => setLang(l)}>
                 <Text style={[styles.langT, lang === l && styles.langTOn]}>
                   {l === 'id' ? t('c_id') : t('c_en')}
@@ -124,7 +128,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
             ))}
           </View>
           <Pressable
-            style={styles.logout}
+            style={[styles.logout, isTablet && styles.logoutTablet]}
             onPress={() => {
               onClose();
               try {
@@ -153,7 +157,11 @@ const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row' },
   scrimWrap: { flex: 1, opacity: 0.55 },
   scrim: { flex: 1, backgroundColor: colors.navyDark },
-  panel: { backgroundColor: colors.white, paddingBottom: 24 },
+  // maxHeight agar ScrollView daftar bisa menggulir di layar pendek.
+  panel: { backgroundColor: colors.white, paddingBottom: 24, maxHeight: '100%' },
+  // Pembungkus daftar menu yg bisa digulir (footer bahasa/logout tetap di bawah).
+  list: { flex: 1 },
+  listContent: { paddingBottom: 8 },
   head: { backgroundColor: colors.navy, paddingTop: 56, paddingBottom: 18, paddingHorizontal: 18 },
   outlet: { fontFamily: fonts.bold, fontSize: 17, color: colors.white },
   outletTablet: { fontSize: 19 },
@@ -172,14 +180,20 @@ const styles = StyleSheet.create({
   },
   rowLeft: { flex: 1 },
   rowIcon: { width: 30, height: 30, marginRight: 12 },
+  // Tablet: ikon + teks menu lebih besar agar proporsional dibaca.
+  rowIconTablet: { width: 34, height: 34 },
   rowLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
+  rowLabelTablet: { fontSize: 16 },
   rowSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  rowSubTablet: { fontSize: 13 },
   chev: { fontSize: 22, color: colors.faint, fontFamily: fonts.bold },
   langRow: { flexDirection: 'row', gap: 8, marginHorizontal: 18, marginTop: 18 },
   langBtn: {
     flex: 1, borderWidth: 1, borderColor: colors.line, borderRadius: 10,
     paddingVertical: 10, alignItems: 'center', backgroundColor: colors.card,
   },
+  // Tablet: target sentuh min 48px.
+  langBtnTablet: { minHeight: 48, paddingVertical: 14 },
   langBtnOn: { backgroundColor: colors.navy, borderColor: colors.navy },
   langT: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
   langTOn: { color: colors.white },
@@ -191,5 +205,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     alignItems: 'center',
   },
+  // Tablet: target sentuh min 48px.
+  logoutTablet: { minHeight: 48, paddingVertical: 14 },
   logoutText: { fontFamily: fonts.bold, fontSize: 14, color: colors.red },
 });

@@ -71,13 +71,13 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       <ScreenHeader title={t('qris_title')} onBack={() => (seconds > 0 && status !== 'expired' ? setConfirmExit(true) : navigation?.goBack())} right={<Text style={styles.headRight}>{statusChip}</Text>} />
 
       {confirmExit && (
-        <View style={styles.exitBar}>
+        <View style={[styles.exitBar, isTablet && wideCenterSm]}>
           <Text style={styles.exitText}>{t('qris_exit')}</Text>
           <View style={styles.exitRow}>
-            <TouchableOpacity style={styles.exitKeep} onPress={() => setConfirmExit(false)}>
+            <TouchableOpacity style={[styles.exitKeep, isTablet && styles.exitKeepTablet]} onPress={() => setConfirmExit(false)}>
               <Text style={styles.exitKeepText}>{t('qris_stay')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.exitYes} onPress={() => navigation?.goBack()}>
+            <TouchableOpacity style={[styles.exitYes, isTablet && styles.exitYesTablet]} onPress={() => navigation?.goBack()}>
               <Text style={styles.exitYesText}>{t('qris_exit_yes')}</Text>
             </TouchableOpacity>
           </View>
@@ -87,7 +87,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       <View style={[styles.body, isTablet && styles.bodyTablet]}>
         <View style={styles.mainCol}>
           <Text style={styles.totalLabel}>{t('qris_total')}</Text>
-          <Text style={styles.totalValue}>{rp(total)}</Text>
+          <Text style={[styles.totalValue, isTablet && styles.totalValueTablet]}>{rp(total)}</Text>
           <Text style={styles.refCode}>{refCode} - {t('qris_valid')}</Text>
           <Text style={styles.refCode}>{acqLabel}</Text>
 
@@ -97,7 +97,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
               style={styles.qrLogo}
               resizeMode="contain"
             />
-            <View style={styles.qrPlaceholder}>
+            <View style={[styles.qrPlaceholder, isTablet && styles.qrPlaceholderTablet]}>
               <FauxQr seed={total} />
 
               <Text style={styles.qrSub}>{t('qris_scan')}</Text>
@@ -148,7 +148,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 
         {status === 'expired' ? (
           <TouchableOpacity
-            style={styles.checkBtn}
+            style={[styles.checkBtn, isTablet && styles.checkBtnTablet]}
             onPress={() => {
               setSeconds(5 * 60);
               setStatus('waiting');
@@ -157,7 +157,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={[styles.checkBtn, status === 'checking' && styles.checkBtnDisabled]}
+            style={[styles.checkBtn, status === 'checking' && styles.checkBtnDisabled, isTablet && styles.checkBtnTablet]}
             disabled={status === 'checking'}
             onPress={() => void doCheck()}>
             <Text style={styles.checkBtnText}>
@@ -182,6 +182,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   sideValue: { fontFamily: fonts.semibold, fontSize: 12, color: colors.text },
   totalLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   totalValue: { fontFamily: fonts.bold, fontSize: 30, color: colors.navy, marginTop: 2 },
+  // Tablet: nominal besar proporsional panel + QR tidak raksasa (matriks tetap).
+  totalValueTablet: { fontSize: 36 },
   refCode: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 4 },
   qrBox: {
     marginTop: 18,
@@ -203,6 +205,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     alignItems: 'center',
     justifyContent: 'center',
   padding: 10, },
+  // Tablet: QR proporsional ruang (tidak raksasa, matriks tetap 189).
+  qrPlaceholderTablet: { width: 280, minHeight: 280 },
   qrMatrix: {  width: 189, flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.white },
   qrCell: {  width: 9, height: 9 },
   qrCellOn: { backgroundColor: colors.text },
@@ -232,8 +236,11 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   exitText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red, textAlign: 'center' },
   exitRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   exitKeep: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  // Tablet: tombol konfirmasi penuhi target sentuh 48px.
+  exitKeepTablet: { minHeight: 48, justifyContent: 'center' },
   exitKeepText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
   exitYes: { flex: 1, backgroundColor: colors.red, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  exitYesTablet: { minHeight: 48, justifyContent: 'center' },
   exitYesText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
 
@@ -242,7 +249,10 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     backgroundColor: colors.orange,
     borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 13,
   },
+  // Tablet: tombol cek status penuhi target sentuh 48px.
+  checkBtnTablet: { minHeight: 48 },
   checkBtnDisabled: { opacity: 0.5 },
   checkBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },});

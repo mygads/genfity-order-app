@@ -45,10 +45,11 @@ export default function ScreenHeader({
   return (
     // paddingTop = inset sistem (status bar Android takik/edge-to-edge,
     // 0 di web) + 12 bawaan agar bilah tak tertutup jam/wifi HP.
-    <View style={[styles.bar, { paddingTop: insets.top + 12 }]}>
-      <View style={styles.side}>
+    // Tablet: bar lebih tinggi + lega (cabang isTablet; phone tak berubah).
+    <View style={[styles.bar, { paddingTop: insets.top + 12 }, isTablet && styles.barTablet]}>
+      <View style={[styles.side, isTablet && styles.sideTablet]}>
         {left ?? (onBack ? (
-          <TouchableOpacity onPress={onBack} hitSlop={12}>
+          <TouchableOpacity onPress={onBack} hitSlop={isTablet ? 16 : 12}>
             <Text style={styles.back}>{backLabel}</Text>
           </TouchableOpacity>
         ) : null)}
@@ -63,7 +64,7 @@ export default function ScreenHeader({
           </Text>
         ) : null}
       </View>
-      <View style={styles.sideRight}>{right}</View>
+      <View style={[styles.sideRight, isTablet && styles.sideRightTablet]}>{right}</View>
     </View>
   );
 }
@@ -77,8 +78,14 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     minHeight: 56,
   },
+  // Tablet: bar lebih tinggi + padding lega agar tak terlihat tipis di layar lebar.
+  barTablet: { minHeight: 64, paddingHorizontal: 20, paddingBottom: 14 },
   side: { width: 70, justifyContent: 'center' },
   sideRight: { width: 70, alignItems: 'flex-end', justifyContent: 'center' },
+  // Tablet: slot aksi lebih lebar (isi kanan tak terpotong) + minHeight 48
+  // agar touch target back/burger aman.
+  sideTablet: { width: 96, minHeight: 48 },
+  sideRightTablet: { width: 96, minHeight: 48 },
   center: { flex: 1, alignItems: 'center' },
   back: { color: colors.white, fontFamily: fonts.medium, fontSize: 28, lineHeight: 32, paddingRight: 16, paddingVertical: 4 },
   title: { color: colors.white, fontFamily: fonts.bold, textAlign: 'center' },

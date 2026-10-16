@@ -94,8 +94,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View><View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
-          <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive]}>
-            <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>
+          <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive, isTablet && styles.modeTabTablet]}>
+            <Text style={[styles.modeText, mode === m && styles.modeTextActive, isTablet && styles.modeTextBig]}>
               {m === 'queue' ? t('disp_queue') : m === 'order' ? t('disp_order') : t('disp_success')}
             </Text>
           </TouchableOpacity>
@@ -159,7 +159,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           </View>
           <View style={styles.qrisBox}>
             <Text style={styles.qrisTitle}>{t('disp_qris_title')}</Text>
-            <Image source={require('../../../assets/images/payment_qris.webp')} style={styles.qrisImg} resizeMode="contain" />
+            <Image source={require('../../../assets/images/payment_qris.webp')} style={[styles.qrisImg, isTablet && styles.qrisImgTablet]} resizeMode="contain" />
             <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${rp(runningTotal)}`}</Text>
           </View>
           <AppButton size="md" title={t('disp_sim_pay')} onPress={() => setMode('success')} />
@@ -184,6 +184,9 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   body: { padding: 16, paddingBottom: 40 },
   langWrap: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 },
   langBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.navy }, langBtnOn: { backgroundColor: colors.white, borderColor: colors.white }, langT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navyTint }, langTOn: { color: colors.navy }, modeRow: { flexDirection: 'row', gap: 6, marginTop: 8 }, modeTab: { flex: 1, borderRadius: 10, paddingVertical: 9, alignItems: 'center', backgroundColor: colors.navy },
+  /* Tablet: tab mode operator memenuhi target sentuh >=48px. */
+  modeTabTablet: { paddingVertical: 14, minHeight: 48 },
+  modeTextBig: { fontSize: 14 },
   modeTabActive: { backgroundColor: colors.white },
   modeText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navyTint },
   modeTextActive: { color: colors.navy },
@@ -217,6 +220,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   totalValBig: { fontSize: 24 }, qrisBox: { backgroundColor: colors.bg, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 12 },
   qrisTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
   qrisImg: { width: 160, height: 160, marginVertical: 8 },
+  /* Tablet: QR lebih besar agar terpindai dari jarak wajar. */
+  qrisImgTablet: { width: 220, height: 220 },
   qrisSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   successCard: { backgroundColor: colors.white, borderRadius: 16, padding: 28, marginTop: 24, alignItems: 'center' },
   successIcon: { fontSize: 56, color: colors.green, fontFamily: fonts.bold },

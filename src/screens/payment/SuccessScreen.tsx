@@ -145,7 +145,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const receipt = (
     <View style={styles.receipt}>
       <ScrollView>
-        <Text style={styles.shopName}>ESB Cabang Poris</Text>
+        <Text style={styles.shopName}>Genfity Cabang Poris</Text>
         <Text style={styles.shopSub}>Kasir Gista • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
         <View style={styles.divider} />
         {miniShown.map((it) => (
@@ -240,7 +240,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const mailModal = (
     <Modal visible={mailOpen} animationType="fade" transparent>
       <View style={styles.wrap}>
-        <View style={styles.dialog}>
+        <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
           <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
           <Text style={styles.dSub}>Struk {orderNo} • {rp(total)}</Text>
           <AppInput
@@ -273,11 +273,12 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.receiptSide}>{receipt}</View>
         </View>
 
-        <View style={styles.footer}>
-          <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={styles.footBtnFlex} />
-          <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={styles.footBtnFlex} />
-          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={styles.footBtnFlex} />
-          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={styles.footBtnWide} />
+        {/* Tablet: footer 2x2 agar label panjang tidak terjepit. */}
+        <View style={[styles.footer, styles.footerTablet]}>
+          <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
+          <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
+          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
+          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
         </View>
         {mailModal}
       </View>
@@ -346,6 +347,9 @@ const styles = StyleSheet.create({
   changeValue: { fontFamily: fonts.bold, fontSize: 14, color: colors.green },
   thanks: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center' },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
+  // Tablet: bungkus 2x2 agar label panjang tidak terjepit.
+  footerTablet: { flexWrap: 'wrap' },
+  footTabletBtn: { flexBasis: '45%', flexGrow: 1, minHeight: 52 },
   footerGrid: { flexWrap: 'wrap' },
   footBtn: {
     width: '48%',
@@ -385,6 +389,8 @@ const styles = StyleSheet.create({
   newOrderBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white, textAlign: 'center' },
   wrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 },
   dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
+  // Tablet: modal email dibatasi + tengahkan selaras dialogNarrow.
+  dialogTablet: { width: '100%', maxWidth: 480, alignSelf: 'center' },
   dTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text },
   dSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4 },
   input: {

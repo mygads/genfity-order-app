@@ -156,6 +156,22 @@ import React, { useEffect, useState } from 'react';import {
       </ScrollView>
 
       <View style={s.footer}>
+        {isTablet ? (
+          <View style={s.footerInnerTablet}>
+            <View style={s.footerInfo}>
+              <Text style={s.footerLabel}>Kas seharusnya</Text>
+              <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
+            </View>
+            <AppButton
+              title={t('end_close_btn')}
+              variant="danger"
+              fullWidth={false}
+              style={{ marginTop: 0, paddingHorizontal: 20, flexShrink: 0 }}
+              onPress={askClose}
+            />
+          </View>
+        ) : (
+        <>
         <View style={s.footerInfo}>
           <Text style={s.footerLabel}>Kas seharusnya</Text>
           <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
@@ -167,12 +183,14 @@ import React, { useEffect, useState } from 'react';import {
           style={{ marginTop: 0, paddingHorizontal: 20, flexShrink: 0 }}
           onPress={askClose}
         />
+        </>
+        )}
       </View>
 
       <Modal visible={confirmVisible} transparent animationType="fade">
         <View style={s.modalBg}>
-          <View style={s.dialog}>
-            <Text style={s.modalTitle}>Akhiri Shift?</Text>
+          <View style={[s.dialog, isTablet && s.dialogTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>Akhiri Shift?</Text>
             <Text style={s.modalHint}>
               Kas seharusnya {rp(kasSeharusnya)}{'\n'}Kas fisik {rp(kasFisikNum)}
               {'\n'}Selisih {selisih >= 0 ? '+' : '-'}
@@ -199,9 +217,9 @@ import React, { useEffect, useState } from 'react';import {
       </Modal>
 
       <Modal visible={pinVisible} transparent animationType="slide">
-        <View style={s.modalBg}>
-          <View style={s.modalCard}>
-            <Text style={s.modalTitle}>PIN Supervisor</Text>
+        <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>PIN Supervisor</Text>
             <Text style={s.modalHint}>Diperlukan persetujuan supervisor</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -370,6 +388,16 @@ import React, { useEffect, useState } from 'react';import {
     paddingVertical: 12,
   },
   footerInfo: { flex: 1, minWidth: 0, flexShrink: 1, marginRight: 4 },
+  // Tablet: isi footer dibatasi lebarnya + tengah.
+  footerInnerTablet: {
+    width: '100%',
+    maxWidth: 880,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   footerLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
   footerValue: { fontSize: 17, fontFamily: fonts.bold, color: colors.navy },
   closeBtn: {
@@ -384,6 +412,8 @@ import React, { useEffect, useState } from 'react';import {
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
+  // Tablet: sheet bawah jadi dialog tengah yang dibatasi lebarnya.
+  modalBgTablet: { justifyContent: 'center', padding: 24 },
   dialog: {
     backgroundColor: colors.white,
     margin: 24,
@@ -393,6 +423,8 @@ import React, { useEffect, useState } from 'react';import {
     marginBottom: 'auto',
     marginTop: 'auto',
   },
+  // Tablet: dialog konfirmasi dibatasi lebarnya + tengah.
+  dialogTablet: { width: '100%', maxWidth: 480, alignSelf: 'center' },
   modalCard: {
     backgroundColor: colors.white,
     borderTopLeftRadius: 20,
@@ -400,7 +432,16 @@ import React, { useEffect, useState } from 'react';import {
     padding: 24,
     alignItems: 'center',
   },
+  // Tablet: sheet PIN jadi dialog tengah maxWidth 520, bukan selebar layar.
+  modalCardTablet: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    borderRadius: 16,
+  },
   modalTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  // Tablet: judul dialog sedikit lebih besar.
+  modalTitleBig: { fontSize: 19 },
   modalHint: {
     fontSize: 13,
     fontFamily: fonts.regular,

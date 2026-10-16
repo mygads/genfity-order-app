@@ -194,7 +194,7 @@ export async function shareReceipt(text: string): Promise<void> {
   }).navigator;
   try {
     if (nav?.share) {
-      await nav.share({ title: 'Struk ESB POSLite', text });
+      await nav.share({ title: 'Struk Genfity Order App', text });
       return;
     }
     if (nav?.clipboard?.writeText) {

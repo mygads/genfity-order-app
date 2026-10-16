@@ -402,7 +402,7 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   /** Header ala DashboardScreen: outlet dinamis + nama kasir sesi + status shift nyata. */
   const sess = getSession();
-  const outletName = sess?.outlet || getTerminal().branchName || 'ESB Cabang Poris';
+  const outletName = sess?.outlet || getTerminal().branchName || 'Genfity Cabang Poris';
   const shiftOpen = shiftInfo?.open ?? true;
   const shiftLabel = `${sess?.name ?? 'Gista'} | ${shiftOpen ? t('dash_shift_open') : t('dash_shift_closed')}`;
 
@@ -472,10 +472,16 @@ export default function CashierScreen({ navigation, route }: Props) {
     });
   }, [activeCategory, activeSub, query, catalog]);
 
-  /** Tablet 2-kolom strict: ganjil → tambah spacer agar item terakhir tidak melebar. */
+  /** Tablet adaptif: 2 kolom di portrait, 3 kolom di landscape lebar (1024+); tambah spacer agar baris terakhir rata. */
+  const numCols = !isWide ? 1 : width >= 1024 ? 3 : 2;
   const gridData = useMemo<(Product | null)[]>(
-    () => (isWide && filtered.length % 2 === 1 ? [...filtered, null] : filtered),
-    [filtered, isWide],
+    () => {
+      if (!isWide) return filtered;
+      const rem = filtered.length % numCols;
+      if (rem === 0) return filtered;
+      return [...filtered, ...Array<Product | null>(numCols - rem).fill(null)];
+    },
+    [filtered, isWide, numCols],
   );
 
   /** Hanya item non-void yang dihitung. */
@@ -749,7 +755,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       contentContainerStyle={styles.toolbar}>
       <TouchableOpacity style={styles.modeBtn} onPress={() => setShowModes((v) => !v)}>
         <Image source={require('../../../assets/icons/icon_category.webp')} style={styles.toolIcon} resizeMode="contain" />
-        <Text style={styles.modeText}>
+        <Text style={[styles.modeText, isWide && styles.modeTextBig]}>
           {isWide ? t('modeTx') : mode} <Text style={styles.modeDim}>▾</Text>
         </Text>
       </TouchableOpacity>
@@ -764,30 +770,30 @@ export default function CashierScreen({ navigation, route }: Props) {
           />
         </View>
       )}
-      <TouchableOpacity style={styles.toolBtn} onPress={() => setShowSearch((v) => !v)}>
+      <TouchableOpacity style={[styles.toolBtn, isWide && styles.toolBtnBig]} onPress={() => setShowSearch((v) => !v)}>
         <SearchGlyph size={17} color={colors.navy} />
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]} onPress={goSaved}>
+      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]} onPress={goSaved}>
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('saved')}</Text>
+        <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('saved')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={() => navigation?.navigate('CustomMenu')}>
         <Image source={require('../../../assets/icons/add_notes_black.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('custom')}</Text>
+        <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('custom')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={openOngkir}>
         <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('ongkir')}{ongkir > 0 ? ` ${rp(ongkir)}` : ''}</Text>
+        <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('ongkir')}{ongkir > 0 ? ` ${rp(ongkir)}` : ''}</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier', subtotal })}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>
+        <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>
           {voucher ? voucher.code : t('promo')}
         </Text>
       </TouchableOpacity>
@@ -809,7 +815,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           return (
             <TouchableOpacity
               key={c.name}
-              style={[styles.catChip, active && styles.catChipActive]}
+              style={[styles.catChip, active && styles.catChipActive, isWide && styles.catChipBig]}
               onLayout={(e) => { chipX.current[c.name] = e.nativeEvent.layout.x; }}
               onPress={() => {
                 setActiveCategory(c.name);
@@ -877,10 +883,10 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   const renderMenu = () => (
     <FlatList
-      key={isWide ? 'grid' : 'list'}
+      key={isWide ? `grid-${numCols}` : 'list'}
       data={isWide ? gridData : filtered}
-      keyExtractor={(p) => (p ? p.id : '__spacer')}
-      numColumns={isWide ? 2 : 1}
+      keyExtractor={(p, idx) => (p ? p.id : `__spacer-${idx}`)}
+      numColumns={numCols}
       contentContainerStyle={styles.list}
       renderItem={({ item }) => {
         if (!item) return <View style={styles.cardSpacer} />;
@@ -890,7 +896,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           return (
             <View style={[styles.card, item.soldOut && styles.cardSoldOut]}>
               <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} disabled={item.soldOut}>
-                <MenuThumb size={64} />
+                <MenuThumb size={isWide ? 80 : 64} />
                 <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                 <View style={styles.cardFoot}>
                   <Text style={styles.cardPrice}>{rp(item.price)}</Text>
@@ -903,7 +909,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                       <Text style={styles.qtyBadgeText}>{qty}</Text>
                     </View>
                   ) : (
-                    <View style={styles.addBtn}>
+                    <View style={[styles.addBtn, isWide && styles.addBtnBig]}>
                       <Text style={styles.addBtnText}>+</Text>
                     </View>
                   )}
@@ -994,7 +1000,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   );
 
   const renderCartPanel = () => (
-    <View style={isWide ? styles.cartPanel : styles.cartHidden}>
+    <View style={isWide ? [styles.cartPanel, { width: Math.min(400, width * 0.36) }] : styles.cartHidden}>
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
@@ -1011,13 +1017,13 @@ export default function CashierScreen({ navigation, route }: Props) {
             <View style={[styles.cartRow, item.voided && styles.cartRowVoid]}>
               <View style={styles.stepper}>
                 <TouchableOpacity
-                  style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled]}
+                  style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled, isWide && styles.stepBtnBig]}
                   onPress={() => decQty(item.id)}
                   disabled={item.qty <= 1}>
                   <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>-</Text>
                 </TouchableOpacity>
                 <Text style={styles.stepQty}>{item.qty}</Text>
-                <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(item.id)}>
+                <TouchableOpacity style={[styles.stepBtn, isWide && styles.stepBtnBig]} onPress={() => incQty(item.id)}>
                   <Text style={styles.stepTxt}>+</Text>
                 </TouchableOpacity>
               </View>
@@ -1377,6 +1383,8 @@ const styles = StyleSheet.create({
   toolIcon: { width: 16, height: 16 },
   toolIconSm: { width: 14, height: 14 },
   modeText: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy, flexShrink: 1 },
+  /* Varian tablet: teks toolbar 11 ke 13 agar terbaca di layar lebar. */
+  modeTextBig: { fontSize: 13 },
   modeDim: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   customerWrap: {
     flex: 1,
@@ -1428,6 +1436,10 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   toolBtnWideText: { fontFamily: fonts.medium, fontSize: 11, color: colors.navy, flexShrink: 0 },
+  /* Varian tablet: target sentuh min 48px (toolBtn 38 ke 48, teks 11 ke 13). */
+  toolBtnBig: { width: 48, height: 48 },
+  toolBtnWideBig: { height: 48, minHeight: 48 },
+  toolBtnWideTextBig: { fontSize: 13 },
   toolBtnWidePhone: { paddingHorizontal: 7, gap: 4 },
   modeDropdown: {
     backgroundColor: colors.card,
@@ -1456,6 +1468,8 @@ const styles = StyleSheet.create({
     gap: 6,
     minHeight: 38,
   },
+  /* Varian tablet: chip kategori min 48px. */
+  catChipBig: { minHeight: 48, paddingVertical: 12 },
   catEdge: {
     position: 'absolute',
     right: 6,
@@ -1612,6 +1626,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   addBtnText: { color: colors.white, fontFamily: fonts.bold, fontSize: 16, lineHeight: 18 },
+  /* Varian tablet: tombol +/- kartu dan stepper cart 26 ke 44-48. */
+  addBtnBig: { width: 48, height: 48, borderRadius: 24 },
+  stepBtnBig: { width: 44, height: 44, borderRadius: 22 },
   emptyWrap: { alignItems: 'center', paddingVertical: 32 },
   emptyImg: { width: 120, height: 120 },
   empty: { textAlign: 'center', marginTop: 12, fontFamily: fonts.regular, fontSize: 14, color: colors.faint },

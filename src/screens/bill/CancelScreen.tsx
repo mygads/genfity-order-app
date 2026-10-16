@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import { initDb, query } from '../../lib/db';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };const ITEMS = [
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import { initDb, query } from '../../lib/db';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };const ITEMS = [
   { id: 'c1', name: 'Sudirman Coffee', price: 12900, qty: 2 },
   { id: 'c2', name: 'Lele goreng kremes', price: 15000, qty: 1 },
   { id: 'c3', name: 'Es Teh Manis', price: 8000, qty: 2 },];type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar fallback mock dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }}const SPLITS = [
@@ -32,16 +32,19 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
  }); }); };
 
   /** Cetak rincian void ke struk dengan data order asal (id/meja/kasir/total). */ const printVoid = () => { navigation?.navigate('Receipt', { no: orderId, table: tableNo, cashier, total: voidTotal, voidLines: picked.map((i) => ({ name: i.name, qty: voidQty[i.id] ?? 0, price: i.price })), reason, }); }; return (
-    <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={`Order ${orderId} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable></View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={`Order ${orderId} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable></View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.meta}>Order {orderId} - {tableNo} - {cashier} - {rp(orderTotal)}</Text>
       <Text style={styles.sec}>{t('cx_title')}</Text>
       <Text style={styles.hint}>{t('cx_pick_hint')}</Text>
 
+      {/* Tablet: dua kolom (kiri item+alasan+input, kanan ringkasan+aksi+split). */}
+      <View style={isTablet && styles.cols}>
+      <View style={isTablet && styles.colMain}>
       {items.map((i) => { const q = voidQty[i.id] ?? 0; const on = q > 0; return (
-        <View key={i.id} style={[styles.item, on && styles.itemOn]}><View style={styles.itemInfo}><Text style={styles.itemName}>{i.qty}x {i.name}</Text><Text style={styles.itemPrice}>{rp(i.price)}</Text></View><View style={styles.stepper}><TouchableOpacity style={styles.stepBtn} onPress={() => step(i.id, -1, i.qty)} hitSlop={8}>
-          <Text style={styles.stepTxt}>-</Text></TouchableOpacity>
-          <Text style={styles.stepVal}>{q}</Text><TouchableOpacity style={styles.stepBtn} onPress={() => step(i.id, 1, i.qty)} hitSlop={8}>
-          <Text style={styles.stepTxt}>+</Text>
+        <View key={i.id} style={[styles.item, on && styles.itemOn]}><View style={styles.itemInfo}><Text style={styles.itemName}>{i.qty}x {i.name}</Text><Text style={styles.itemPrice}>{rp(i.price)}</Text></View><View style={styles.stepper}><TouchableOpacity style={[styles.stepBtn, isTablet && styles.stepBtnTablet]} onPress={() => step(i.id, -1, i.qty)} hitSlop={isTablet ? 12 : 8}>
+          <Text style={[styles.stepTxt, isTablet && styles.stepTxtTablet]}>-</Text></TouchableOpacity>
+          <Text style={styles.stepVal}>{q}</Text><TouchableOpacity style={[styles.stepBtn, isTablet && styles.stepBtnTablet]} onPress={() => step(i.id, 1, i.qty)} hitSlop={isTablet ? 12 : 8}>
+          <Text style={[styles.stepTxt, isTablet && styles.stepTxtTablet]}>+</Text>
         </TouchableOpacity>
       </View></View> ); })}
 
@@ -54,7 +57,10 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
       <AppInput label={t('cx_pin')} value={pin} onChangeText={(txt) => { setPin(txt.replace(/\D/g, '').slice(0, 6)); setAuthMsg(''); }} placeholder={t('cx_pin_ph')} keyboardType="numeric" maxLength={6} secureTextEntry />
 
-      {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null}<View style={styles.summary}>
+      {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null}
+      </View>
+      <View style={isTablet && styles.colSide}>
+      <View style={styles.summary}>
         <Text style={styles.sumTitle}>{t('cx_confirm_split')}</Text>
         <Text style={styles.sumLine}>{picked.length} item ({rp(voidTotal)}) {t('cx_to_cancel')}</Text>
         <Text style={styles.sumNote}>{t('cx_stock_back')}</Text>
@@ -83,6 +89,8 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       <AppButton title={t('cx_void_print')} onPress={printVoid} size="md" /> )}<TouchableOpacity onPress={() => navigation?.navigate('History')}>
         <Text style={styles.link}>{t('cx_history')}</Text>
       </TouchableOpacity>
+      </View>
+      </View>
     </ScrollView>
   </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
@@ -98,6 +106,12 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   itemName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   itemPrice: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 2 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 }, stepBtn: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', }, stepTxt: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy }, stepVal: { fontFamily: fonts.bold, fontSize: 15, color: colors.text, minWidth: 18, textAlign: 'center' }, label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 14, marginBottom: 6 },
+  // Tablet: stepper penuhi target sentuh 48px + dua kolom proporsional.
+  stepBtnTablet: { width: 48, height: 48, borderRadius: 12 },
+  stepTxtTablet: { fontSize: 18 },
+  cols: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
+  colMain: { flex: 1.2, minWidth: 0 },
+  colSide: { flex: 1, minWidth: 0 },
   reason: { borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: colors.card, marginTop: 6 },
   reasonOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   reasonT: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },

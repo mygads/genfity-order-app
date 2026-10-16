@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
-  claim: '', esb: 'ESB-88121', member: 'MBR-QOQI-342', voucher: 'VC-DISKON10K',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
+  claim: '', esb: 'GNF-88121', member: 'MBR-QOQI-342', voucher: 'VC-DISKON10K',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
   claim: 'TRM-XXXX-XXXX',
-  esb: 'ESB-XXXXX',
+  esb: 'GNF-XXXXX',
   member: 'MBR-XXXX',
   voucher: 'VC-XXXX',};export default function QrScanScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -86,7 +86,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       <View style={styles.frame}>
         {scanning ? (
           <CameraView
-            style={styles.camera}
+            style={[styles.camera, isTablet && styles.cameraTablet]}
             facing="back"
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={({ data }) => {
@@ -97,11 +97,11 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
             }}
           />
         ) : (
-          <Image source={require('../../../assets/images/invalid_qr.webp')} style={styles.frameImg} resizeMode="contain" />
+          <Image source={require('../../../assets/images/invalid_qr.webp')} style={[styles.frameImg, isTablet && styles.frameImgTablet]} resizeMode="contain" />
         )}
         <Text style={[styles.frameT, isTablet && styles.frameTBig]}>{t('scan_frame_title')}</Text>
         <Text style={[styles.frameS, isTablet && styles.frameSBig]}>{tabHint(tab)}</Text>
-        <TouchableOpacity style={styles.scanBtn} onPress={toggleScan}>
+        <TouchableOpacity style={[styles.scanBtn, isTablet && styles.scanBtnTablet]} onPress={toggleScan}>
           <Text style={styles.scanBtnT}>{scanning ? t('scan_camera_off') : t('scan_camera_on')}</Text>
         </TouchableOpacity>
       </View>
@@ -149,6 +149,10 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   hintBig: { fontSize: 14 }, frame: { backgroundColor: colors.navy, borderRadius: 14, padding: 22, alignItems: 'center', marginTop: 12 },
   frameImg: { width: 120, height: 90 },
   camera: { width: 220, height: 160, borderRadius: 10, overflow: 'hidden' },
+  // Tablet: viewfinder proporsional 4:3 (400x300) + target sentuh 48px; phone tetap.
+  cameraTablet: { width: '100%', maxWidth: 400, height: 300 },
+  frameImgTablet: { width: 180, height: 135 },
+  scanBtnTablet: { minHeight: 48, justifyContent: 'center' },
   scanBtn: { marginTop: 10, borderWidth: 1, borderColor: colors.navyTint, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 9 },
   scanBtnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   frameT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white, marginTop: 8 },

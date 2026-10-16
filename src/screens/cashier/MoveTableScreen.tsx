@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -172,42 +172,63 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         }
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('mov_hint_table')}</Text>
+        {/* Tablet: pemilih Dari dan Ke berdampingan 2 kolom; phone tetap susun vertikal. */}
+        <View style={[isTablet && styles.cols]}>
+        <View style={[isTablet && styles.col]}>
         <Text style={[styles.label, isTablet && styles.labelBig]}>Dari meja (terisi)</Text>
         <View style={styles.chips}>
           {occupied.map((o) => (
             <TouchableOpacity
               key={o.table}
-              style={[styles.chip, from === o.table && styles.chipOn]}
+              style={[styles.chip, from === o.table && styles.chipOn, isTablet && styles.chipBig]}
               onPress={() => { setFrom(o.table); setDone(false); setWarn(''); }}>
               <Text style={[styles.chipT, from === o.table && styles.chipTOn, isTablet && styles.chipTBig]}>{o.table}</Text>
             </TouchableOpacity>
           ))}
         </View>
-
-        {src && (
+        </View>
+        {/* Phone: kartu info di posisi asal (di antara pemilih) agar urutan phone tak berubah. */}
+        {!isTablet && src && (
           <View style={styles.card}>
-            <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
+            <Text style={styles.cardTitle}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
             <View style={styles.cardRow}>
-              <Text style={[styles.cardLabel, isTablet && styles.cardLabelBig]}>Item</Text>
-              <Text style={[styles.cardVal, isTablet && styles.cardValBig]}>{src.items} item</Text>
+              <Text style={styles.cardLabel}>Item</Text>
+              <Text style={styles.cardVal}>{src.items} item</Text>
             </View>
             <View style={styles.cardRow}>
-              <Text style={[styles.cardLabel, isTablet && styles.cardLabelBig]}>Total berjalan</Text>
-              <Text style={[styles.cardVal, isTablet && styles.cardValBig]}>{rp(src.total)}</Text>
+              <Text style={styles.cardLabel}>Total berjalan</Text>
+              <Text style={styles.cardVal}>{rp(src.total)}</Text>
             </View>
           </View>
         )}
-
+        <View style={[isTablet && styles.col]}>
         <Text style={[styles.label, isTablet && styles.labelBig]}>Ke meja (kosong)</Text>
         <View style={styles.chips}>
           {emptyList.map((tb) => (
-            <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn]} onPress={() => { setTo(tb); setWarn(''); }}>
+            <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn, isTablet && styles.chipBig]} onPress={() => { setTo(tb); setWarn(''); }}>
               <Text style={[styles.chipT, to === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
             </TouchableOpacity>
           ))}
         </View>
+        </View>
+        </View>
+
+        {/* Tablet: kartu info full-width di bawah kolom. */}
+        {isTablet && src && (
+          <View style={styles.card}>
+            <Text style={[styles.cardTitle, styles.cardTitleBig]}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
+            <View style={styles.cardRow}>
+              <Text style={[styles.cardLabel, styles.cardLabelBig]}>Item</Text>
+              <Text style={[styles.cardVal, styles.cardValBig]}>{src.items} item</Text>
+            </View>
+            <View style={styles.cardRow}>
+              <Text style={[styles.cardLabel, styles.cardLabelBig]}>Total berjalan</Text>
+              <Text style={[styles.cardVal, styles.cardValBig]}>{rp(src.total)}</Text>
+            </View>
+          </View>
+        )}
 
         {done && src ? (
           <Text style={[styles.done, isTablet && styles.doneBig]}>Transaksi {src.table} ({rp(src.total)}) dipindahkan ke {to} - item dan catatan ikut.</Text>
@@ -250,6 +271,11 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: colors.card },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  /* Kolom tablet: pemilih Dari dan Ke berdampingan (phone tetap 1 kolom). */
+  cols: { flexDirection: 'row', gap: 16 },
+  col: { flex: 1, minWidth: 0 },
+  /* Varian tablet: chip min 48px agar mudah diketuk. */
+  chipBig: { minHeight: 48, justifyContent: 'center', paddingVertical: 12 },
   chipT: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },
   chipTOn: { color: colors.orangeDark },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 14, borderWidth: 1, borderColor: colors.line },

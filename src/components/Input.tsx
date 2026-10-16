@@ -1,5 +1,5 @@
-import { StyleSheet, Text, TextInput, View, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
-import { colors, fonts } from '../theme';
+import { StyleSheet, Text, TextInput, View, useWindowDimensions, type StyleProp, type TextInputProps, type ViewStyle } from 'react-native';
+import { TABLET_BP, colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
@@ -37,23 +37,26 @@ interface InputProps extends TextInputProps {
  */
 export default function Input({ label, required, error, boxStyle, style, ...rest }: InputProps) {
   const invalid = error !== undefined && error !== false && error !== '';
+  // Tablet: metrik input naik (cabang isTablet; phone tak berubah).
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BP;
   return (
     <View>
       {label ? (
-        <Text style={styles.label}>
+        <Text style={[styles.label, isTablet && styles.labelTablet]}>
           {label}
           {required ? <Text style={styles.star}>*</Text> : null}
         </Text>
       ) : null}
-      <View style={[styles.box, invalid && styles.boxError, boxStyle]}>
+      <View style={[styles.box, invalid && styles.boxError, isTablet && styles.boxTablet, boxStyle]}>
         <TextInput
-          style={[styles.field, style]}
+          style={[styles.field, isTablet && styles.fieldTablet, style]}
           placeholderTextColor={colors.faint}
           {...rest}
         />
       </View>
       {typeof error === 'string' && error ? (
-        <Text style={styles.errorText}>{error}</Text>
+        <Text style={[styles.errorText, isTablet && styles.errorTextTablet]}>{error}</Text>
       ) : null}
     </View>
   );
@@ -61,6 +64,8 @@ export default function Input({ label, required, error, boxStyle, style, ...rest
 
 const styles = StyleSheet.create({
   label: { fontFamily: fonts.regular, fontSize: 14, color: colors.text, marginBottom: 8 },
+  // Tablet: label sedikit lebih besar.
+  labelTablet: { fontSize: 15 },
   star: { color: colors.red },
   box: {
     flexDirection: 'row',
@@ -72,8 +77,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: colors.card,
   },
+  // Tablet: kolom lebih tinggi + lega.
+  boxTablet: { height: 60, paddingHorizontal: 20 },
   boxError: { borderColor: colors.red },
   // Hilangkan outline fokus bawaan browser di web (garis hitam) - pola yg sama di CashierScreen/PromotionListScreen.
   field: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text, height: '100%', outlineStyle: 'none' as never },
+  // Tablet: teks isi + pesan error naik.
+  fieldTablet: { fontSize: 16 },
   errorText: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8, lineHeight: 19 },
+  errorTextTablet: { fontSize: 14 },
 });

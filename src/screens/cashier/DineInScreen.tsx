@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -175,8 +175,11 @@ export default function DineInScreen({ navigation, route }: Props) {
         sub={`${t('table')} ${table} · ${section} · ${pax} ${t('guests')}`}
         onBack={() => navigation?.goBack()}
       />
-      <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={[styles.saved, isTablet && styles.savedBig]}>{t('saved')}</Text>
+      {/* Tablet: form kiri (section/meja/mode), bill+aksi kanan; phone tetap susun vertikal. */}
+      <View style={[isTablet && styles.cols]}>
+      <View style={[isTablet && styles.col]}>
 
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('section')}</Text>
       <View style={styles.chips}>
@@ -231,6 +234,8 @@ export default function DineInScreen({ navigation, route }: Props) {
         ))}
       </View>
 
+      </View>
+      <View style={[isTablet && styles.col]}>
       <View style={styles.bill}>
         <Text style={[styles.billTitle, isTablet && styles.billTitleBig]}>{guestName} · {t('table')} {table} · {pax} pax · {itemCount} item</Text>
         {active.length === 0 ? (
@@ -301,6 +306,8 @@ export default function DineInScreen({ navigation, route }: Props) {
           textStyle={styles.primaryT}
         />
       </View>
+      </View>
+      </View>
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { from: table })}>
           <Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveTable')}</Text>
@@ -330,6 +337,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   list: { flex: 1 },
   body: { padding: 16, paddingBottom: 40 },
+  /* Kolom tablet: form kiri, bill+aksi kanan (phone tetap 1 kolom). */
+  cols: { flexDirection: 'row', gap: 16 },
+  col: { flex: 1, minWidth: 0 },
   saved: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 2 },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 12, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

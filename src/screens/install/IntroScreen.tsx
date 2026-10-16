@@ -51,16 +51,16 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
         showsVerticalScrollIndicator={false}>
         <Image
           source={require('../../../assets/images/esb_logo.webp')}
-          style={styles.logo}
+          style={[styles.logo, isTablet && styles.logoBig]}
           resizeMode="contain"
         />
-        <Image source={PAGES[page].img} style={styles.hero} resizeMode="contain" />
-        <Text style={styles.title}>{t(PAGES[page].titleKey)}</Text>
-        <Text style={styles.desc}>{t(PAGES[page].descKey)}</Text>
+        <Image source={PAGES[page].img} style={[styles.hero, isTablet && styles.heroBig]} resizeMode="contain" />
+        <Text style={[styles.title, isTablet && styles.titleBig]}>{t(PAGES[page].titleKey)}</Text>
+        <Text style={[styles.desc, isTablet && styles.descBig]}>{t(PAGES[page].descKey)}</Text>
         <View style={styles.spacer} />
         <View style={styles.dots}>
           {PAGES.map((_, i) => (
-            <TouchableOpacity key={i} onPress={() => setPage(i)} hitSlop={8}>
+            <TouchableOpacity key={i} onPress={() => setPage(i)} hitSlop={16} style={styles.dotHit}>
               <View style={[styles.dot, i === page && styles.dotOn]} />
             </TouchableOpacity>
           ))}
@@ -111,6 +111,13 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 8, marginTop: 16, alignItems: 'center', justifyContent: 'center' },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: DOT_OFF },
   dotOn: { width: 26, backgroundColor: ORANGE },
+  /** Pembungkus dot: padding vertikal agar area sentuh >=48px (visual dot tetap 8px). */
+  dotHit: { paddingVertical: 12 },
+  /** Skala tablet: hero + logo + teks membesar proporsional (phone tetap). */
+  logoBig: { width: 250, height: 86 },
+  heroBig: { height: 320 },
+  titleBig: { fontSize: 28 },
+  descBig: { fontSize: 16, lineHeight: 24 },
   footer: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 28, gap: 12, backgroundColor: '#FFFFFF' },
   primary: {
     backgroundColor: ORANGE, borderRadius: 26, height: 52,

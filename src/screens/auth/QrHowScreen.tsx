@@ -37,7 +37,7 @@ export default function QrHowScreen({ navigation }: Props) {
         <TouchableOpacity onPress={goBack} hitSlop={12}>
           <Text style={styles.headerBack}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('g_qrhow_title')}</Text>
+        <Text style={[styles.headerTitle, isTablet && styles.headerTitleBig]}>{t('g_qrhow_title')}</Text>
         <View style={styles.headerSpacer} />
       </View>
       <ScrollView
@@ -56,14 +56,14 @@ export default function QrHowScreen({ navigation }: Props) {
           thumb={require('../../../assets/images/get_qr_thumbnail_1.webp')}
           body={(
             <>
-              <Text style={styles.stepLead}>
+              <Text style={[styles.stepLead, isTablet && styles.stepLeadBig]}>
                 {t('g_qrhow_visit')} <Text style={styles.link}>erp.esb.co.id</Text>
               </Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text>{t('g_qrhow_and')}<Text style={styles.em}>{t('g_qrhow_password')}</Text>{t('g_qrhow_yours')}</Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text>{t('g_qrhow_and')}<Text style={styles.em}>{t('g_qrhow_password')}</Text>{t('g_qrhow_yours')}</Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_then_click')} <Text style={styles.em}>{t('g_qrhow_signin')}</Text></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_then_click')} <Text style={styles.em}>{t('g_qrhow_signin')}</Text></Text>
               </Bullet>
             </>
           )}
@@ -74,12 +74,12 @@ export default function QrHowScreen({ navigation }: Props) {
           thumb={require('../../../assets/images/get_qr_thumbnail_2.webp')}
           body={(
             <>
-              <Text style={styles.stepLead}>{t('g_qrhow_s2_lead')}</Text>
+              <Text style={[styles.stepLead, isTablet && styles.stepLeadBig]}>{t('g_qrhow_s2_lead')}</Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_burger')}</Text><BurgerGlyph /></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_burger')}</Text><BurgerGlyph /></Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_tap_menu')} <Text style={styles.em}>{t('g_qrhow_master')}</Text></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_tap_menu')} <Text style={styles.em}>{t('g_qrhow_master')}</Text></Text>
               </Bullet>
             </>
           )}
@@ -90,9 +90,9 @@ export default function QrHowScreen({ navigation }: Props) {
           thumb={require('../../../assets/images/get_qr_thumbnail_3.webp')}
           body={(
             <>
-              <Text style={styles.stepLead}>{t('g_qrhow_s3_lead')}</Text>
+              <Text style={[styles.stepLead, isTablet && styles.stepLeadBig]}>{t('g_qrhow_s3_lead')}</Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
               </Bullet>
               <View style={styles.masterPill}>
                 <Text style={styles.masterPillT}>{t('g_qrhow_master_branch')}</Text>
@@ -107,12 +107,12 @@ export default function QrHowScreen({ navigation }: Props) {
           last
           body={(
             <>
-              <Text style={styles.stepLead}>{t('g_qrhow_at_page')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
+              <Text style={[styles.stepLead, isTablet && styles.stepLeadBig]}>{t('g_qrhow_at_page')} <Text style={styles.em}>{t('g_qrhow_master_branch')}</Text></Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_choose')} <Text style={styles.em}>{t('g_qrhow_branch')}</Text></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_choose')} <Text style={styles.em}>{t('g_qrhow_branch')}</Text></Text>
               </Bullet>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_qr_icon')}</Text></Text>
+                <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_qr_icon')}</Text></Text>
               </Bullet>
             </>
           )}
@@ -124,6 +124,9 @@ export default function QrHowScreen({ navigation }: Props) {
 
 function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: ReactNode; last?: boolean }) {
   const { t } = useLang();
+  // Step ikut skala tablet sendiri (tanpa ubah props) agar badge + tombol play membesar.
+  const { width } = useWindowDimensions();
+  const isTablet = width >= TABLET_BP;
   return (
     <View>
       <TouchableOpacity
@@ -134,14 +137,14 @@ function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: React
         }}>
         <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
         <View style={styles.playWrap} pointerEvents="none">
-          <View style={styles.playCircle}>
+          <View style={[styles.playCircle, isTablet && styles.playCircleBig]}>
             <Text style={styles.playGlyph}>▶</Text>
           </View>
         </View>
       </TouchableOpacity>
       <View style={styles.stepRow}>
-        <View style={styles.badge}>
-          <Text style={styles.badgeT}>{n}</Text>
+        <View style={[styles.badge, isTablet && styles.badgeBig]}>
+          <Text style={[styles.badgeT, isTablet && styles.badgeTBig]}>{n}</Text>
         </View>
         <View style={styles.stepBody}>{body}</View>
       </View>
@@ -177,6 +180,13 @@ const styles = StyleSheet.create({
   },
   headerBack: { fontSize: 26, color: '#FFFFFF', fontFamily: fonts.bold, paddingRight: 14 },
   headerTitle: { fontFamily: fonts.bold, fontSize: 18, color: '#FFFFFF' },
+  /** Skala tablet: judul + teks langkah + badge + tombol play membesar (phone tetap). */
+  headerTitleBig: { fontSize: 20 },
+  stepLeadBig: { fontSize: 17, lineHeight: 24 },
+  stepTextBig: { fontSize: 16, lineHeight: 23 },
+  playCircleBig: { width: 72, height: 72, borderRadius: 36 },
+  badgeBig: { width: 52, height: 52, borderRadius: 12 },
+  badgeTBig: { fontSize: 20 },
   headerSpacer: { flex: 1 },
   body: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 },
   banner: { width: '100%', height: 150, borderRadius: 16 },

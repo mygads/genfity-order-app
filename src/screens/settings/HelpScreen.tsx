@@ -23,7 +23,7 @@ import { useState } from 'react';import { Image, Pressable, ScrollView, StyleShe
         const isOpen = open === i;
         return (
           <View key={f.q} style={styles.card}>
-            <Pressable onPress={() => setOpen(isOpen ? null : i)} style={styles.qRow}>
+            <Pressable onPress={() => setOpen(isOpen ? null : i)} style={[styles.qRow, isTablet && styles.qRowTablet]}>
               <Text style={[styles.q, isTablet && { fontSize: 16 }]}>{t(f.q)}</Text>
               <Text style={styles.chev}>{isOpen ? '-' : '+'}</Text>
             </Pressable>
@@ -51,6 +51,8 @@ import { useState } from 'react';import { Image, Pressable, ScrollView, StyleShe
     borderColor: colors.line,
   },
   qRow: { flexDirection: 'row', alignItems: 'center' },
+  // Tablet: target sentuh FAQ min 48px (phone tetap setinggi teks).
+  qRowTablet: { minHeight: 48, paddingVertical: 12 },
   q: { flex: 1, fontFamily: fonts.bold, fontSize: 14, color: colors.navy, paddingRight: 8 },
   chev: { fontFamily: fonts.bold, fontSize: 16, color: colors.faint },
   a: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 8 },});

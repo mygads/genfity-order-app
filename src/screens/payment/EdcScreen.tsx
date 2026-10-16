@@ -162,24 +162,24 @@ export default function EdcScreen({ navigation, route }: Props) {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t('edc_machine')}</Text>
             <Text style={styles.fieldLabel}>{t('edc_bank')}</Text>
-            <View style={styles.chips}>
+            <View style={[styles.chips, isTablet && styles.chipsTablet]}>
               {BANKS.map((b) => (
                 <TouchableOpacity
                   key={b}
-                  style={[styles.chip, bank === b && styles.chipOn]}
+                  style={[styles.chip, isTablet && styles.chipTablet, bank === b && styles.chipOn]}
                   onPress={() => setBank(b)}>
-                  <Text style={[styles.chipT, bank === b && styles.chipTOn]}>{b}</Text>
+                  <Text style={[styles.chipT, isTablet && styles.chipTTablet, bank === b && styles.chipTOn]}>{b}</Text>
                 </TouchableOpacity>
               ))}
             </View>
             <Text style={styles.fieldLabel}>{t('edc_terminal')}</Text>
-            <View style={styles.chips}>
+            <View style={[styles.chips, isTablet && styles.chipsTablet]}>
               {TERMINALS.map((t) => (
                 <TouchableOpacity
                   key={t}
-                  style={[styles.chip, terminal === t && styles.chipOn]}
+                  style={[styles.chip, isTablet && styles.chipTablet, terminal === t && styles.chipOn]}
                   onPress={() => setTerminal(t)}>
-                  <Text style={[styles.chipT, terminal === t && styles.chipTOn]}>{t}</Text>
+                  <Text style={[styles.chipT, isTablet && styles.chipTTablet, terminal === t && styles.chipTOn]}>{t}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -285,9 +285,13 @@ const styles = StyleSheet.create({
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 4 },
   fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // Tablet: gap lega + chip penuhi target sentuh 48px.
+  chipsTablet: { gap: 10 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card },
+  chipTablet: { minHeight: 48, paddingVertical: 12, paddingHorizontal: 18 },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
+  chipTTablet: { fontSize: 13 },
   chipTOn: { color: colors.orangeDark },
   wait: { fontFamily: fonts.medium, fontSize: 13, color: colors.orangeDark, marginTop: 8 },
   err: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8 },

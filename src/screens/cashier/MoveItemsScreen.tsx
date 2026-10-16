@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -266,7 +266,10 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         }
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+        {/* Tablet: wizard 2 kolom (sumber+item kiri, tujuan+ringkasan kanan); phone tetap susun vertikal. */}
+        <View style={[isTablet && styles.cols]}>
+        <View style={[isTablet && styles.col]}>
         <Text style={[styles.step, isTablet && styles.stepBig]}>1 · Pilih meja sumber</Text>
         <View style={styles.chips}>
           {tables.map((tb) => (
@@ -298,7 +301,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
                 key={it.id}
                 style={[styles.itemRow, on && styles.itemOn]}
                 onPress={() => toggle(it.id)}>
-                <View style={[styles.check, on && styles.checkOn]}>
+                <View style={[styles.check, on && styles.checkOn, isTablet && styles.checkBig]}>
                   {on && <Text style={styles.checkT}>✓</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
@@ -308,11 +311,11 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
                 </View>
                 {on && (
                   <View style={styles.qtyRow}>
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => stepMoveQty(it.id, -1)}>
+                    <TouchableOpacity style={[styles.qtyBtn, isTablet && styles.qtyBtnBig]} onPress={() => stepMoveQty(it.id, -1)}>
                       <Text style={styles.qtyT}>-</Text>
                     </TouchableOpacity>
                     <Text style={styles.qtyN}>{sel}</Text>
-                    <TouchableOpacity style={styles.qtyBtn} onPress={() => stepMoveQty(it.id, 1)}>
+                    <TouchableOpacity style={[styles.qtyBtn, isTablet && styles.qtyBtnBig]} onPress={() => stepMoveQty(it.id, 1)}>
                       <Text style={styles.qtyT}>+</Text>
                     </TouchableOpacity>
                   </View>
@@ -322,6 +325,8 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           })
         )}
 
+        </View>
+        <View style={[isTablet && styles.col]}>
         <Text style={[styles.step, isTablet && styles.stepBig]}>3 · Pilih meja tujuan</Text>
         <View style={styles.chips}>
           {destList.map((tb) => (
@@ -350,6 +355,8 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           style={[styles.primary, (pickedItems.length === 0 || sameTable) && styles.off, { marginTop: 14 }]}
           textStyle={styles.primaryT}
         />
+        </View>
+        </View>
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
             <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>
@@ -384,6 +391,11 @@ const styles = StyleSheet.create({
   itemOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   check: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white },
   checkOn: { borderColor: colors.orange, backgroundColor: colors.orange },
+  /* Kolom tablet: langkah 1+2 kiri, tujuan+ringkasan kanan (phone tetap 1 kolom). */
+  cols: { flexDirection: 'row', gap: 16 },
+  col: { flex: 1, minWidth: 0 },
+  /* Varian tablet: check 24 ke 32, qtyBtn 28 ke 44 agar mudah diketuk. */
+  checkBig: { width: 32, height: 32, borderRadius: 16 },
   checkT: { color: colors.white, fontFamily: fonts.bold, fontSize: 14 },
   itemName: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
   itemNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.blue, marginTop: 2 },
@@ -391,6 +403,7 @@ const styles = StyleSheet.create({
   itemPrice: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   qtyBtn: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: colors.orange, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.white },
+  qtyBtnBig: { width: 44, height: 44, borderRadius: 22 },
   qtyT: { color: colors.orangeDark, fontFamily: fonts.bold, fontSize: 15 },
   qtyN: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 20, textAlign: 'center' },
   emptyWrap: { alignItems: 'center', paddingVertical: 20 },
