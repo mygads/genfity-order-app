@@ -1,34 +1,49 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { table?: string } } };
 
-const SEATS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
-const CATS = ['Promo', 'Favorit', 'Minuman', 'Makanan', 'Dessert', 'Pasta', 'Cake'];
-const SUBS: Record<string, string[]> = {
-  Minuman: ['Dingin', 'Panas', 'Coffee', 'Shake'],
-  Makanan: ['Cepat', 'Ringan'],
+const SECTIONS: Record<string, string[]> = {
+  Dalam: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
+  Teras: ['T1', 'T2', 'T3'],
+  VIP: ['VIP-1', 'VIP-2'],
 };
+const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
 
+/** Dine In — pilih section + meja, pax, nama tamu, ringkasan bill, Simpan/Cetak/Bayar. */
 export default function DineInScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const [section, setSection] = useState('Dalam');
   const [table, setTable] = useState(route?.params?.table ?? 'A3');
   const [pax, setPax] = useState('2');
   const [guest, setGuest] = useState('');
-  const [cat, setCat] = useState('Minuman');
-  const [sub, setSub] = useState<string | null>(null);
+  const [mode, setMode] = useState('DINE IN');
+
+  const seats = SECTIONS[section] ?? [];
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
-      <Text style={styles.head}>Meja {table} | Info tambahan / nama customer</Text>
+      <Text style={styles.head}>Meja {table} · {section} · {pax} tamu</Text>
       <Text style={styles.saved}>Tersimpan</Text>
+
+      <Text style={styles.label}>Section</Text>
+      <View style={styles.chips}>
+        {Object.keys(SECTIONS).map((s) => (
+          <TouchableOpacity
+            key={s}
+            style={[styles.chip, section === s && styles.chipOn]}
+            onPress={() => { setSection(s); setTable((SECTIONS[s] ?? [])[0] ?? ''); }}>
+            <Text style={[styles.chipT, section === s && styles.chipTOn]}>{s}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       <Text style={styles.label}>Meja</Text>
       <View style={styles.chips}>
-        {SEATS.map((st) => (
+        {seats.map((st) => (
           <TouchableOpacity key={st} style={[styles.chip, table === st && styles.chipOn]} onPress={() => setTable(st)}>
             <Text style={[styles.chipT, table === st && styles.chipTOn]}>{st}</Text>
           </TouchableOpacity>
@@ -36,36 +51,26 @@ export default function DineInScreen({ navigation, route }: Props) {
       </View>
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Tamu</Text>
+          <Text style={styles.label}>Tamu (pax)</Text>
           <TextInput style={styles.input} value={pax} onChangeText={setPax} keyboardType="numeric" />
         </View>
         <View style={{ flex: 2 }}>
           <Text style={styles.label}>Nama pelanggan</Text>
-          <TextInput style={styles.input} value={guest} onChangeText={setGuest} placeholder="Nama / info tambahan" />
+          <TextInput style={styles.input} value={guest} onChangeText={setGuest} placeholder="Nama / info tambahan" placeholderTextColor={colors.faint} />
         </View>
       </View>
 
       <Text style={styles.label}>Mode Transaksi</Text>
       <View style={styles.chips}>
-        {CATS.map((c) => (
-          <TouchableOpacity key={c} style={[styles.chip, cat === c && styles.chipOn]} onPress={() => { setCat(c); setSub(null); }}>
-            <Text style={[styles.chipT, cat === c && styles.chipTOn]}>{c}</Text>
+        {MODES.map((m) => (
+          <TouchableOpacity key={m} style={[styles.chip, mode === m && styles.chipOn]} onPress={() => setMode(m)}>
+            <Text style={[styles.chipT, mode === m && styles.chipTOn]}>{m}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      {SUBS[cat] && (
-        <View style={styles.chips2}>
-          {SUBS[cat].map((s) => (
-            <TouchableOpacity key={s} style={[styles.chip, sub === s && styles.chipOn]} onPress={() => setSub(s)}>
-              <Text style={[styles.chipT, sub === s && styles.chipTOn]}>{s}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-      {cat === 'Promo' && (<Text style={styles.empty}>Promo Tersedia kosong — pilih kategori lain.</Text>)}
 
       <View style={styles.bill}>
-        <Text style={styles.billTitle}>Dine In - {pax} tamu - Meja {table}</Text>
+        <Text style={styles.billTitle}>{guest.trim() || 'Tamu'} · Meja {table} · {pax} pax</Text>
         <View style={styles.row}><Text style={styles.item}>2 Sudirman Coffee + Normal Sugar + Normal Ice</Text><Text style={styles.price}>{rp(25800)} + {rp(7000)}</Text></View>
         <View style={styles.row}><Text style={styles.item}>1 Lele goreng kremes + Ekstra Sambel - Diskon (Rp)</Text><Text style={styles.price}>{rp(15000)} + {rp(4000)} - {rp(5000)}</Text></View>
         <View style={styles.row}><Text style={styles.item}>Subtotal</Text><Text style={styles.price}>{rp(65900)}</Text></View>
@@ -86,6 +91,17 @@ export default function DineInScreen({ navigation, route }: Props) {
           <Text style={styles.primaryT}>Bayar | {rp(60900)} ›</Text>
         </TouchableOpacity>
       </View>
+      <View style={styles.links}>
+        <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { from: table })}>
+          <Text style={styles.link}>Pindah Meja ›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', {})}>
+          <Text style={styles.link}>Bagi Bill ›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation?.navigate('Cashier', { table, mode })}>
+          <Text style={styles.link}>Tambah Menu ›</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -97,14 +113,12 @@ const styles = StyleSheet.create({
   saved: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 2 },
   label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 12, marginBottom: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chips2: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 13, paddingVertical: 8, backgroundColor: colors.card },
   chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
   chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   chipTOn: { color: colors.orangeDark },
   duo: { flexDirection: 'row', gap: 10 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
-  empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, marginTop: 10 },
   bill: { backgroundColor: colors.card, borderRadius: 12, padding: 14, marginTop: 14, borderWidth: 1, borderColor: colors.line },
   billTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy, marginBottom: 6 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, gap: 8 },
@@ -119,4 +133,6 @@ const styles = StyleSheet.create({
   primaryT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
   ghostT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  links: { flexDirection: 'row', gap: 16, marginTop: 14, flexWrap: 'wrap' },
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
 });

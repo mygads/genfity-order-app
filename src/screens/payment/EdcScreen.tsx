@@ -7,6 +7,9 @@ type Props = { navigation?: Nav; route?: { params?: { total?: number } } };
 
 type Phase = 'waiting' | 'error' | 'approval';
 
+const BANKS = ['BCA', 'Mandiri', 'BRI'];
+const TERMINALS = ['EDC-01', 'EDC-02'];
+
 export default function EdcScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
@@ -14,11 +17,21 @@ export default function EdcScreen({ navigation, route }: Props) {
   const [phase, setPhase] = useState<Phase>('waiting');
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
+  const [bank, setBank] = useState(BANKS[0]);
+  const [terminal, setTerminal] = useState(TERMINALS[0]);
+  const [cardNo, setCardNo] = useState('');
 
   useEffect(() => {
     if (phase !== 'waiting') return;
-    if (secs <= 0) { setPhase('error'); return; }
-    const t = setTimeout(() => setSecs((s) => s - 1), 1000);
+    const t = setTimeout(() => {
+      if (secs <= 1) {
+        setSecs(0);
+        setPhase('error');
+      } else {
+        setSecs(secs - 1);
+      }
+    }, 1000);
+
     return () => clearTimeout(t);
   }, [phase, secs]);
 
@@ -40,16 +53,54 @@ export default function EdcScreen({ navigation, route }: Props) {
       <View style={[isTablet && styles.split]}>
         <View style={[styles.main, isTablet && styles.mainTablet]}>
           <View style={styles.hero}>
-            <Text style={styles.heroLabel}>Pembayaran EDC · BCA · EDC-01</Text>
+            <Text style={styles.heroLabel}>Pembayaran EDC · {bank} · {terminal}</Text>
             <Text style={styles.heroValue}>{rp(total)}</Text>
             <Text style={styles.heroSub}>Ikuti instruksi pada mesin EDC yang terhubung.</Text>
           </View>
 
           <View style={styles.card}>
+            <Text style={styles.cardTitle}>Mesin & Bank</Text>
+            <Text style={styles.fieldLabel}>Bank penerbit</Text>
+            <View style={styles.chips}>
+              {BANKS.map((b) => (
+                <TouchableOpacity
+                  key={b}
+                  style={[styles.chip, bank === b && styles.chipOn]}
+                  onPress={() => setBank(b)}>
+                  <Text style={[styles.chipT, bank === b && styles.chipTOn]}>{b}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.fieldLabel}>Terminal</Text>
+            <View style={styles.chips}>
+              {TERMINALS.map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.chip, terminal === t && styles.chipOn]}
+                  onPress={() => setTerminal(t)}>
+                  <Text style={[styles.chipT, terminal === t && styles.chipTOn]}>{t}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.card}>
             <Text style={styles.cardTitle}>Input Nominal</Text>
             <Text style={styles.big}>{rp(total)}</Text>
-            <Text style={styles.meta}>Gesek / Insert · Bank / Mesin BCA · EDC-01</Text>
-            <Text style={styles.meta}>Nomor Kartu **** **** **** 4582 · Jenis Kartu Debit BCA</Text>
+            <Text style={styles.meta}>Gesek / Insert · Bank / Mesin {bank} · {terminal}</Text>
+            <Text style={styles.fieldLabel}>4 digit terakhir kartu (opsional)</Text>
+            <TextInput
+              style={styles.inputSmall}
+              value={cardNo}
+              onChangeText={(t) => setCardNo(t.replace(/[^0-9]/g, '').slice(0, 4))}
+              placeholder="Contoh: 4582"
+              placeholderTextColor={colors.faint}
+              keyboardType="numeric"
+              maxLength={4}
+            />
+            {cardNo.length === 4 && (
+              <Text style={styles.meta}>Nomor Kartu **** **** **** {cardNo} · {bank}</Text>
+            )}
           </View>
 
           <View style={styles.card}>
@@ -77,7 +128,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             </View>
             <View style={styles.sideRow}>
               <Text style={styles.sideLabel}>Mesin</Text>
-              <Text style={styles.sideValue}>BCA · EDC-01</Text>
+              <Text style={styles.sideValue}>{bank} · {terminal}</Text>
             </View>
             <Text style={styles.sideHint}>Ikuti instruksi pada mesin EDC yang terhubung.</Text>
           </View>
@@ -87,7 +138,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       <View style={[styles.card, isTablet && styles.approvalTablet]}>
         <Text style={styles.cardTitle}>Kode Persetujuan (6 digit dari struk EDC)</Text>
         <Text style={styles.meta}>Contoh struk persetujuan · 482913</Text>
-        <TextInput style={styles.input} value={approval} onChangeText={(t) => setApproval(t.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="482913" keyboardType="numeric" maxLength={6} />
+        <TextInput style={styles.input} value={approval} onChangeText={(t) => setApproval(t.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="482913" placeholderTextColor={colors.faint} keyboardType="numeric" maxLength={6} />
         <TouchableOpacity
           style={[styles.primary, !canSave && styles.disabled]}
           disabled={!canSave}
@@ -127,9 +178,16 @@ const styles = StyleSheet.create({
   cardTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
   big: { fontFamily: fonts.bold, fontSize: 22, color: colors.navy, marginTop: 6 },
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 4 },
+  fieldLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 10, marginBottom: 6 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card },
+  chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
+  chipTOn: { color: colors.orangeDark },
   wait: { fontFamily: fonts.medium, fontSize: 13, color: colors.orangeDark, marginTop: 8 },
   err: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8 },
   input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 12, fontFamily: fonts.bold, fontSize: 20, color: colors.text, letterSpacing: 6, textAlign: 'center', marginTop: 10 },
+  inputSmall: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 10, fontFamily: fonts.bold, fontSize: 15, color: colors.text, letterSpacing: 3, textAlign: 'center', marginTop: 4 },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 12 },
   disabled: { opacity: 0.5 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },

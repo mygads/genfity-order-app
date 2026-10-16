@@ -147,6 +147,9 @@ export default function ShiftScreen({ navigation }: Props) {
             <Text style={s.errorTxt}>{error}</Text>
           </View>
         ) : null}
+        <TouchableOpacity onPress={() => navigation?.navigate?.('Attendance')}>
+          <Text style={s.link}>Belum absen? Catat kehadiran dulu → Absensi</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <View style={s.footer}>
@@ -358,4 +361,5 @@ const s = StyleSheet.create({
   pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
   cancelBtn: { marginTop: 12, padding: 10 },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },
 });

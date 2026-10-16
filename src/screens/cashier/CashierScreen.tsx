@@ -17,7 +17,10 @@ type Nav = {
   goBack: () => void;
 };
 
-type Props = { navigation?: Nav };
+type Props = {
+  navigation?: Nav;
+  route?: { params?: { table?: string; voucher?: { code: string; amount: number } } };
+};
 
 export type CartModifier = { name: string; price: number };
 export type CartItem = {
@@ -27,6 +30,10 @@ export type CartItem = {
   qty: number;
   modifiers: CartModifier[];
   discount: number;
+  /** Catatan per item — diteruskan ke KDS / struk dapur. */
+  note?: string;
+  /** Item void tetap tampil di daftar tapi tidak dihitung ke total. */
+  voided?: boolean;
 };
 
 type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean };
@@ -60,8 +67,9 @@ const PRODUCTS: Product[] = [
 
 const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
 
+/** Item void tidak dihitung ke total. */
 export const itemTotal = (c: CartItem) =>
-  (c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0)) * c.qty - c.discount;
+  c.voided ? 0 : (c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0)) * c.qty - c.discount;
 
 export const unitPrice = (c: CartItem) => c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0);
 
@@ -95,7 +103,18 @@ function SearchGlyph({ size = 16, color = colors.navy }: { size?: number; color?
   );
 }
 
-export default function CashierScreen({ navigation }: Props) {
+/** Placeholder foto menu — katalog lokal belum ada foto, pakai aset kosong bawaan. */
+function MenuThumb({ size = 52 }: { size?: number }) {
+  return (
+    <Image
+      source={require('../../../assets/images/empty_menu_image.webp')}
+      style={{ width: size, height: size, borderRadius: 8 }}
+      resizeMode="cover"
+    />
+  );
+}
+
+export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
   const [activeCategory, setActiveCategory] = useState('Makanan');
@@ -106,6 +125,10 @@ export default function CashierScreen({ navigation }: Props) {
   const [showModes, setShowModes] = useState(false);
   const catScrollRef = useRef<ScrollView>(null);
   const [showSearch, setShowSearch] = useState(false);
+  const [table] = useState(route?.params?.table ?? '');
+  const [voucher, setVoucher] = useState<{ code: string; amount: number } | null>(
+    route?.params?.voucher ?? null,
+  );
   const [cart, setCart] = useState<CartItem[]>([
     {
       id: 'p11',
@@ -118,6 +141,10 @@ export default function CashierScreen({ navigation }: Props) {
     { id: 'p6', name: 'test baru', basePrice: 20000, qty: 1, modifiers: [], discount: 0 },
     { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 3, modifiers: [], discount: 2500 },
   ]);
+  // Editor catatan/diskon/void per item
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [discDraft, setDiscDraft] = useState('');
 
   const subs = useMemo(
     () => CATEGORIES.find((c) => c.name === activeCategory)?.subs ?? [],
@@ -140,7 +167,11 @@ export default function CashierScreen({ navigation }: Props) {
     [filtered, isWide],
   );
 
-  const qtyOf = (id: string) => cart.find((c) => c.id === id)?.qty ?? 0;
+  /** Hanya item non-void yang dihitung. */
+  const activeCart = useMemo(() => cart.filter((c) => !c.voided), [cart]);
+  const voidCount = cart.length - activeCart.length;
+
+  const qtyOf = (id: string) => cart.find((c) => c.id === id && !c.voided)?.qty ?? 0;
 
   /** D4: count produk per kategori untuk label chip `Nama (Npcs)` ala ref. */
   const catCount = (name: string) =>
@@ -149,7 +180,10 @@ export default function CashierScreen({ navigation }: Props) {
   const addToCart = (p: Product) => {
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
-      if (found) return prev.map((c) => (c.id === p.id ? { ...c, qty: c.qty + 1 } : c));
+      if (found)
+        return prev.map((c) =>
+          c.id === p.id ? { ...c, qty: c.qty + 1, voided: false } : c,
+        );
       return [...prev, { id: p.id, name: p.name, basePrice: p.price, qty: 1, modifiers: [], discount: 0 }];
     });
   };
@@ -162,27 +196,61 @@ export default function CashierScreen({ navigation }: Props) {
 
   const removeItem = (id: string) => setCart((prev) => prev.filter((c) => c.id !== id));
 
-  const subtotalGross = cart.reduce((s, c) => s + (c.basePrice + c.modifiers.reduce((m, x) => m + x.price, 0)) * c.qty, 0);
-  const discountTotal = cart.reduce((s, c) => s + c.discount, 0);
-  const subtotal = subtotalGross - discountTotal;
+  const voidItem = (id: string) => {
+    setCart((prev) => prev.map((c) => (c.id === id ? { ...c, voided: true } : c)));
+    setEditingId(null);
+  };
+
+  const unvoidItem = (id: string) =>
+    setCart((prev) => prev.map((c) => (c.id === id ? { ...c, voided: false } : c)));
+
+  const openEditor = (c: CartItem) => {
+    setEditingId(c.id);
+    setNoteDraft(c.note ?? '');
+    setDiscDraft(c.discount > 0 ? String(c.discount) : '');
+  };
+
+  const saveEditor = () => {
+    if (!editingId) return;
+    const disc = Math.max(0, Number(discDraft.replace(/[^0-9]/g, '')) || 0);
+    setCart((prev) =>
+      prev.map((c) =>
+        c.id === editingId ? { ...c, note: noteDraft.trim() || undefined, discount: disc } : c,
+      ),
+    );
+    setEditingId(null);
+  };
+
+  const subtotalGross = activeCart.reduce(
+    (s, c) => s + (c.basePrice + c.modifiers.reduce((m, x) => m + x.price, 0)) * c.qty,
+    0,
+  );
+  const discountTotal = activeCart.reduce((s, c) => s + c.discount, 0);
+  const voucherAmt = Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
+  const subtotal = subtotalGross - discountTotal - voucherAmt;
   const service = Math.round(subtotal * 0.05);
   const pb1incl = Math.round((subtotal * 10) / 110);
   const total = subtotal + service;
-  const itemCount = cart.reduce((s, c) => s + c.qty, 0);
+  const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
 
   /** Qty cart per kategori — badge di chip agar footer lintas-kategori bisa diaudit sekilas. */
   const cartQtyByCat = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const c of cart) {
+    for (const c of activeCart) {
       const p = PRODUCTS.find((x) => x.id === c.id);
       const cats = p ? [p.category, ...(p.fav ? ['Favorit'] : [])] : [];
       for (const k of cats) map[k] = (map[k] ?? 0) + c.qty;
     }
     return map;
-  }, [cart]);
+  }, [activeCart]);
 
-  const goCart = () => navigation?.navigate('CartDetail', { items: cart, total });
-  const goSaved = () => navigation?.navigate('SavedTransactions');
+  const goCart = () =>
+    navigation?.navigate('CartDetail', {
+      items: cart,
+      total,
+      ...(voucher ? { voucher } : {}),
+    });
+  const goSaved = () => navigation?.navigate('LoadOrder');
 
   const today = new Date().toLocaleDateString('id-ID', {
     weekday: 'long',
@@ -190,6 +258,40 @@ export default function CashierScreen({ navigation }: Props) {
     month: 'short',
     year: 'numeric',
   });
+
+  /** Panel editor catatan + diskon + void per item. */
+  const renderItemEditor = (c: CartItem) => {
+    if (editingId !== c.id) return null;
+    return (
+      <View style={styles.editor}>
+        <Text style={styles.editorLabel}>Catatan item (ke dapur)</Text>
+        <TextInput
+          style={styles.editorInput}
+          value={noteDraft}
+          onChangeText={setNoteDraft}
+          placeholder="cth: Level 3, es sedikit"
+          placeholderTextColor={colors.faint}
+        />
+        <Text style={styles.editorLabel}>Diskon item (Rp)</Text>
+        <TextInput
+          style={styles.editorInput}
+          value={discDraft}
+          onChangeText={setDiscDraft}
+          placeholder="0"
+          placeholderTextColor={colors.faint}
+          keyboardType="numeric"
+        />
+        <View style={styles.editorRow}>
+          <TouchableOpacity style={styles.editorVoid} onPress={() => voidItem(c.id)}>
+            <Text style={styles.editorVoidT}>Void Item</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.editorSave} onPress={saveEditor}>
+            <Text style={styles.editorSaveT}>Simpan</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -248,13 +350,23 @@ export default function CashierScreen({ navigation }: Props) {
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>Tersimpan</Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        onPress={() => navigation?.navigate('CustomMenu')}>
+        <Image source={require('../../../assets/icons/add_notes_black.webp')} style={styles.toolIconSm} resizeMode="contain" />
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>Custom</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
         <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>Ongkir</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}>
+      <TouchableOpacity
+        style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
+        onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier' })}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>Promo</Text>
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>
+          {voucher ? voucher.code : 'Promo'}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -349,54 +461,105 @@ export default function CashierScreen({ navigation }: Props) {
       keyExtractor={(p) => (p ? p.id : '__spacer')}
       numColumns={isWide ? 2 : 1}
       contentContainerStyle={styles.list}
-      renderItem={({ item, index }) => {
+      renderItem={({ item }) => {
         if (!item) return <View style={styles.cardSpacer} />;
         const qty = qtyOf(item.id);
+        const inCart = cart.find((c) => c.id === item.id);
         if (isWide) {
           return (
-            <TouchableOpacity style={styles.card} onPress={() => addToCart(item)} activeOpacity={0.7}>
-              <Text style={styles.cardName}>{item.name}</Text>
-              <View style={styles.cardFoot}>
-                <Text style={styles.cardPrice}>{rp(item.price)}</Text>
-                {qty > 0 ? (
-                  <View style={styles.qtyBadge}>
-                    <Text style={styles.qtyBadgeText}>{qty}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.addBtn}>
-                    <Text style={styles.addBtnText}>+</Text>
-                  </View>
-                )}
-              </View>
-            </TouchableOpacity>
+            <View style={styles.card}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7}>
+                <MenuThumb size={64} />
+                <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+                <View style={styles.cardFoot}>
+                  <Text style={styles.cardPrice}>{rp(item.price)}</Text>
+                  {qty > 0 ? (
+                    <View style={styles.qtyBadge}>
+                      <Text style={styles.qtyBadgeText}>{qty}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.addBtn}>
+                      <Text style={styles.addBtnText}>+</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+              {inCart && !inCart.voided && (
+                <TouchableOpacity onPress={() => openEditor(inCart)} style={styles.cardEdit}>
+                  <Text style={styles.cardEditT}>
+                    {inCart.note ? `📝 ${inCart.note}` : '✎ Catatan / diskon'}
+                    {inCart.discount > 0 ? ` · -${rp(inCart.discount)}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {inCart?.voided && (
+                <TouchableOpacity onPress={() => unvoidItem(inCart.id)} style={styles.cardEdit}>
+                  <Text style={styles.voidRestoreT}>Void — ketuk untuk kembalikan</Text>
+                </TouchableOpacity>
+              )}
+              {renderItemEditor(inCart ?? { id: item.id, name: item.name, basePrice: item.price, qty: 0, modifiers: [], discount: 0 })}
+            </View>
           );
         }
         return (
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => addToCart(item)}
-            activeOpacity={0.7}>
-            <Text style={styles.rowName}>{item.name}</Text>
-            {qty > 0 ? (
-              <View style={styles.stepperInline}>
-                <TouchableOpacity style={styles.stepBtnSm} onPress={() => decQty(item.id)}>
-                  <Text style={styles.stepTxtSm}>−</Text>
+          <View>
+            <View style={styles.row}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} style={styles.rowMain}>
+                <MenuThumb size={48} />
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
+                  <Text style={styles.rowPrice}>{rp(item.price)}</Text>
+                  {inCart?.note ? <Text style={styles.rowNote} numberOfLines={1}>📝 {inCart.note}</Text> : null}
+                  {inCart && inCart.discount > 0 ? (
+                    <Text style={styles.rowDisc}>Diskon -{rp(inCart.discount)}</Text>
+                  ) : null}
+                  {inCart?.voided ? <Text style={styles.voidBadge}>Void</Text> : null}
+                </View>
+              </TouchableOpacity>
+              {qty > 0 ? (
+                <View style={styles.stepperInline}>
+                  <TouchableOpacity style={styles.stepBtnSm} onPress={() => decQty(item.id)}>
+                    <Text style={styles.stepTxtSm}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.stepQtySm}>{qty}</Text>
+                  <TouchableOpacity style={styles.stepBtnSm} onPress={() => incQty(item.id)}>
+                    <Text style={styles.stepTxtSm}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.addBtnLg} onPress={() => addToCart(item)}>
+                  <Text style={styles.addBtnLgText}>+ Tambah</Text>
                 </TouchableOpacity>
-                <Text style={styles.stepQtySm}>{qty}</Text>
-                <TouchableOpacity style={styles.stepBtnSm} onPress={() => incQty(item.id)}>
-                  <Text style={styles.stepTxtSm}>+</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.addBtnLg} onPress={() => addToCart(item)}>
-                <Text style={styles.addBtnLgText}>+ Tambah</Text>
+              )}
+            </View>
+            {inCart && !inCart.voided && (
+              <TouchableOpacity
+                onPress={() => (editingId === inCart.id ? setEditingId(null) : openEditor(inCart))}
+                style={styles.rowEditBtn}>
+                <Text style={styles.rowEditT}>
+                  {editingId === inCart.id ? 'Tutup editor ▴' : '✎ Catatan / diskon / void ▾'}
+                </Text>
               </TouchableOpacity>
             )}
-            <Text style={styles.rowPrice}>{rp(item.price)}</Text>
-          </TouchableOpacity>
+            {inCart?.voided && (
+              <TouchableOpacity onPress={() => unvoidItem(inCart.id)} style={styles.rowEditBtn}>
+                <Text style={styles.voidRestoreT}>Void — ketuk untuk kembalikan</Text>
+              </TouchableOpacity>
+            )}
+            {inCart ? renderItemEditor(inCart) : null}
+          </View>
         );
       }}
-      ListEmptyComponent={<Text style={styles.empty}>Menu tidak ditemukan</Text>}
+      ListEmptyComponent={
+        <View style={styles.emptyWrap}>
+          <Image
+            source={require('../../../assets/images/empty_menu.webp')}
+            style={styles.emptyImg}
+            resizeMode="contain"
+          />
+          <Text style={styles.empty}>Menu tidak ditemukan</Text>
+        </View>
+      }
       ItemSeparatorComponent={!isWide ? () => <View style={styles.rowSep} /> : undefined}
     />
   );
@@ -406,7 +569,7 @@ export default function CashierScreen({ navigation }: Props) {
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
-          {mode} - {itemCount} item - {customer.trim() || 'QoQi'}
+          {mode}{table ? ` · Meja ${table}` : ''} - {itemCount} item - {customer.trim() || 'QoQi'}
         </Text>
       </View>
       <FlatList
@@ -415,43 +578,62 @@ export default function CashierScreen({ navigation }: Props) {
         contentContainerStyle={styles.cartList}
         ItemSeparatorComponent={() => <View style={styles.cartDivider} />}
         renderItem={({ item }) => (
-          <View style={styles.cartRow}>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled]}
-                onPress={() => decQty(item.id)}
-                disabled={item.qty <= 1}>
-                <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.stepQty}>{item.qty}</Text>
-              <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(item.id)}>
-                <Text style={styles.stepTxt}>+</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.cartInfo}>
-              <Text style={styles.cartName}>{item.name}</Text>
-              {item.modifiers.length === 0 ? (
-                <Text style={styles.cartUnit}>@ {rp(item.basePrice)}</Text>
-              ) : (
-                <Text style={styles.cartUnit}>
-                  {rp(item.basePrice)} + {item.modifiers.map((m) => rp(m.price)).join(' + ')} = {rp(unitPrice(item))}/pcs
+          <View>
+            <View style={[styles.cartRow, item.voided && styles.cartRowVoid]}>
+              <View style={styles.stepper}>
+                <TouchableOpacity
+                  style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled]}
+                  onPress={() => decQty(item.id)}
+                  disabled={item.qty <= 1}>
+                  <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.stepQty}>{item.qty}</Text>
+                <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(item.id)}>
+                  <Text style={styles.stepTxt}>+</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.cartInfo}>
+                <Text style={[styles.cartName, item.voided && styles.voidName]}>
+                  {item.name}
+                  {item.voided ? ' (Void)' : ''}
                 </Text>
-              )}
-              {item.modifiers.map((m, i) => (
-                <Text key={i} style={styles.cartMod}>
-                  + {m.name} + {rp(m.price)}
-                </Text>
-              ))}
-              {item.discount > 0 && (
-                <Text style={styles.cartDisc}>Diskon -{rp(item.discount)}</Text>
-              )}
+                {item.modifiers.length === 0 ? (
+                  <Text style={styles.cartUnit}>@ {rp(item.basePrice)}</Text>
+                ) : (
+                  <Text style={styles.cartUnit}>
+                    {rp(item.basePrice)} + {item.modifiers.map((m) => rp(m.price)).join(' + ')} = {rp(unitPrice(item))}/pcs
+                  </Text>
+                )}
+                {item.modifiers.map((m, i) => (
+                  <Text key={i} style={styles.cartMod}>
+                    + {m.name} + {rp(m.price)}
+                  </Text>
+                ))}
+                {item.note ? <Text style={styles.cartNote}>📝 {item.note}</Text> : null}
+                {item.discount > 0 && (
+                  <Text style={styles.cartDisc}>Diskon -{rp(item.discount)}</Text>
+                )}
+                {item.voided ? (
+                  <TouchableOpacity onPress={() => unvoidItem(item.id)}>
+                    <Text style={styles.voidRestoreT}>Kembalikan item</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => (editingId === item.id ? setEditingId(null) : openEditor(item))}>
+                    <Text style={styles.cartEditLink}>
+                      {editingId === item.id ? 'Tutup ▴' : '✎ Catatan / diskon / void'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <View style={styles.cartRight}>
+                <TouchableOpacity style={styles.cartXBtn} onPress={() => removeItem(item.id)} hitSlop={8}>
+                  <Image source={require('../../../assets/icons/close.webp')} style={styles.cartXIcon} resizeMode="contain" />
+                </TouchableOpacity>
+                <Text style={styles.cartPrice}>{rp(itemTotal(item))}</Text>
+              </View>
             </View>
-            <View style={styles.cartRight}>
-              <TouchableOpacity style={styles.cartXBtn} onPress={() => removeItem(item.id)} hitSlop={8}>
-                <Image source={require('../../../assets/icons/close.webp')} style={styles.cartXIcon} resizeMode="contain" />
-              </TouchableOpacity>
-              <Text style={styles.cartPrice}>{rp(itemTotal(item))}</Text>
-            </View>
+            {renderItemEditor(item)}
           </View>
         )}
         ListEmptyComponent={<Text style={styles.empty}>Keranjang kosong</Text>}
@@ -464,8 +646,22 @@ export default function CashierScreen({ navigation }: Props) {
         </View>
         {discountTotal > 0 && (
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Diskon</Text>
+            <Text style={styles.totalLabel}>Diskon item</Text>
             <Text style={[styles.totalVal, styles.discVal]}>-{rp(discountTotal)}</Text>
+          </View>
+        )}
+        {voucher && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Voucher {voucher.code}</Text>
+            <TouchableOpacity onPress={() => setVoucher(null)}>
+              <Text style={[styles.totalVal, styles.discVal]}>-{rp(voucherAmt)} ✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {voidCount > 0 && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Item void</Text>
+            <Text style={styles.totalVal}>{voidCount} item tidak dihitung</Text>
           </View>
         )}
         <View style={styles.totalRow}>
@@ -497,8 +693,8 @@ export default function CashierScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={[styles.btnPay, cart.length === 0 && styles.ctaDisabled]}
-          disabled={cart.length === 0}
+          style={[styles.btnPay, activeCart.length === 0 && styles.ctaDisabled]}
+          disabled={activeCart.length === 0}
           onPress={goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
           <Text style={styles.btnPayText}>Bayar | {rp(total)}</Text>
@@ -598,16 +794,19 @@ export default function CashierScreen({ navigation }: Props) {
         {(() => {
           const visibleQty = filtered.reduce((s, p) => s + qtyOf(p.id), 0);
           const hiddenQty = itemCount - visibleQty;
-          const visibleSum = filtered.reduce((s, p) => s + (cart.find((c) => c.id === p.id)?.qty ?? 0) * p.price, 0);
+          const visibleSum = filtered.reduce((s, p) => s + (activeCart.find((c) => c.id === p.id)?.qty ?? 0) * p.price, 0);
           return hiddenQty > 0 ? (
             <Text style={styles.ctaNote}>
               {visibleQty} item {activeCategory} ({rp(visibleSum)}) + {hiddenQty} item kategori lain = {itemCount} item
             </Text>
           ) : null;
         })()}
+        {voucher ? (
+          <Text style={styles.ctaNote}>Voucher {voucher.code} terpakai (-{rp(voucherAmt)}) — ketuk Promo untuk ganti.</Text>
+        ) : null}
         <TouchableOpacity
-          style={[styles.cta, cart.length === 0 && styles.ctaDisabled]}
-          disabled={cart.length === 0}
+          style={[styles.cta, activeCart.length === 0 && styles.ctaDisabled]}
+          disabled={activeCart.length === 0}
           onPress={goCart}
           activeOpacity={0.85}>
           <View style={styles.ctaCount}>
@@ -841,9 +1040,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 10,
   },
-  rowAlt: { backgroundColor: colors.paleBlue },
-  rowName: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
-  rowPrice: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, minWidth: 80, maxWidth: 140, textAlign: 'right', flexShrink: 0 },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  rowInfo: { flex: 1, minWidth: 0 },
+  rowName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
+  rowPrice: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, marginTop: 2 },
+  rowNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.blue, marginTop: 2 },
+  rowDisc: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 2 },
+  rowEditBtn: { backgroundColor: colors.white, paddingHorizontal: 16, paddingVertical: 6 },
+  rowEditT: { fontFamily: fonts.medium, fontSize: 12, color: colors.blue },
+  voidBadge: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    color: colors.red,
+    marginTop: 2,
+  },
+  voidName: { textDecorationLine: 'line-through', color: colors.faint },
+  voidRestoreT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.greenDark },
   stepperInline: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
   stepBtnSm: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.navy, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
   stepTxtSm: { color: colors.navy, fontFamily: fonts.bold, fontSize: 18 },
@@ -872,9 +1084,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   cardSpacer: { flex: 1, margin: 6, minWidth: 0 },
-  cardName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text, minHeight: 38, flexShrink: 1 },
+  cardName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text, minHeight: 38, flexShrink: 1, marginTop: 8 },
   cardFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, gap: 8 },
   cardPrice: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy, flex: 1, minWidth: 0 },
+  cardEdit: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.line },
+  cardEditT: { fontFamily: fonts.medium, fontSize: 12, color: colors.blue },
   addBtn: {
     width: 26,
     height: 26,
@@ -885,7 +1099,48 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   addBtnText: { color: colors.white, fontFamily: fonts.bold, fontSize: 16, lineHeight: 18 },
-  empty: { textAlign: 'center', marginTop: 40, fontFamily: fonts.regular, fontSize: 14, color: colors.faint },
+  emptyWrap: { alignItems: 'center', paddingVertical: 32 },
+  emptyImg: { width: 120, height: 120 },
+  empty: { textAlign: 'center', marginTop: 12, fontFamily: fonts.regular, fontSize: 14, color: colors.faint },
+  editor: {
+    backgroundColor: colors.paleBlue,
+    borderRadius: 10,
+    padding: 12,
+    marginHorizontal: 12,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  editorLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 6 },
+  editorInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    padding: 9,
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.text,
+    marginTop: 4,
+  },
+  editorRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  editorVoid: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.red,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  editorVoidT: { fontFamily: fonts.bold, fontSize: 13, color: colors.red },
+  editorSave: {
+    flex: 2,
+    backgroundColor: colors.navy,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  editorSaveT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
   cartHidden: { display: 'none' },
   cartPanel: {
     width: 320,
@@ -907,6 +1162,7 @@ const styles = StyleSheet.create({
   cartList: { paddingVertical: 4 },
   cartDivider: { height: 1, backgroundColor: colors.line, marginHorizontal: 14 },
   cartRow: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  cartRowVoid: { opacity: 0.6 },
   stepper: { alignItems: 'center', gap: 2, flexShrink: 0, paddingTop: 1 },
   stepBtn: {
     width: 26,
@@ -926,7 +1182,9 @@ const styles = StyleSheet.create({
   cartName: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, flexShrink: 1 },
   cartUnit: { fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 },
   cartMod: { fontFamily: fonts.regular, fontSize: 11, color: colors.blue, marginTop: 1, flexShrink: 1 },
+  cartNote: { fontFamily: fonts.regular, fontSize: 11, color: colors.blue, marginTop: 1 },
   cartDisc: { fontFamily: fonts.medium, fontSize: 11, color: colors.red, marginTop: 1 },
+  cartEditLink: { fontFamily: fonts.medium, fontSize: 11, color: colors.blue, marginTop: 3 },
   cartRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, maxWidth: 120 },
   cartXBtn: { padding: 8, marginTop: -8, marginRight: -8 },
   cartXIcon: { width: 13, height: 13 },

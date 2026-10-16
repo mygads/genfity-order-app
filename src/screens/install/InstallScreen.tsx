@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, wideCenterSm } from '../../theme';
+import { WEB_URLS } from '../../config/server';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 
@@ -54,6 +55,12 @@ export default function InstallScreen({ navigation }: { navigation?: Nav }) {
         <Text style={styles.primaryT}>Klaim Terminal ›</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.webBtn}
+        onPress={() => navigation?.navigate('WebView', { url: WEB_URLS.register, title: 'Pendaftaran POS' })}>
+        <Text style={styles.webBtnT}>Daftar Akun via Web ›</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity onPress={() => setShowHelp((v) => !v)}>
         <Text style={styles.link}>Belum punya QR? Lihat cara mendapatkan ›</Text>
       </TouchableOpacity>
@@ -95,4 +102,6 @@ const styles = StyleSheet.create({
   helpCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 14, marginTop: 12 },
   helpImg: { width: '100%', height: 120, marginBottom: 8 },
   helpT: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, marginTop: 4, lineHeight: 18 },
+  webBtn: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.navy, borderRadius: 10, padding: 13, alignItems: 'center', marginTop: 10 },
+  webBtnT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
 });

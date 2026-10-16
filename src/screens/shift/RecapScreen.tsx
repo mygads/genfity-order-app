@@ -1,142 +1,168 @@
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
-interface Expense { id: string; name: string; time: string; amount: number; coa: string; approved: boolean; photo?: string; }
+type Range = 'Hari Ini' | 'Kemarin' | '7 Hari';
 
-/** Akun (CoA) pengeluaran kas kecil ala APK. */
-const COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Lainnya'];
+const RANGES: Range[] = ['Hari Ini', 'Kemarin', '7 Hari'];
+
+/** Rekap mock — di app nyata dari sales_recap_* (menu, kategori, payment, mode). */
+const BY_MENU = [
+  { nama: 'Es Teh Manis', qty: 42, total: 336000 },
+  { nama: 'Lele goreng kremes', qty: 28, total: 420000 },
+  { nama: 'Sudirman Coffee', qty: 25, total: 322500 },
+  { nama: 'Menu Custom (Nasi + Ayam)', qty: 9, total: 80100 },
+];
+const BY_CATEGORY = [
+  { nama: 'Minuman', qty: 67, total: 658500 },
+  { nama: 'Makanan', qty: 37, total: 500100 },
+];
+const BY_METHOD = [
+  { nama: 'Tunai (18 trx)', total: 486500 },
+  { nama: 'EDC / Kartu (12 trx)', total: 312000 },
+  { nama: 'QRIS / E-Wallet (11 trx)', total: 198400 },
+  { nama: 'Deposit Member (4 trx)', total: 112000 },
+  { nama: 'Order Online (6 trx)', total: 124000 },
+];
+const BY_MODE = [
+  { nama: 'Dine In (21 trx)', total: 512000 },
+  { nama: 'Bawa Pulang (14 trx)', total: 356900 },
+  { nama: 'Online / Delivery (6 trx)', total: 124000 },
+];
+const PROMO = [
+  { nama: 'QOQI10 (Diskon)', pakai: 12, total: -60000 },
+  { nama: 'HEMAT20 (Voucher)', pakai: 5, total: -100000 },
+  { nama: 'GIFT50 (Gift)', pakai: 2, total: -100000 },
+];
+const CANCELLED = [
+  { nama: 'Es Teh Manis', qty: 3, alasan: 'Salah input' },
+  { nama: 'Lele goreng kremes', qty: 1, alasan: 'Stok habis' },
+];
+
+const EXPENSE_TOTAL = 65000;
 
 export default function RecapScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
-  const [expenses, setExpenses] = useState<Expense[]>([
-    { id: 'e1', name: 'Belanja plastik & tissue', time: '10:20', amount: 45000, coa: 'Operasional', approved: true },
-    { id: 'e2', name: 'Bensin antar online', time: '12:05', amount: 20000, coa: 'Operasional', approved: true },
-  ]);
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [coa, setCoa] = useState(COA[0]);
-  const [photo, setPhoto] = useState<string | null>(null);
-  const expTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const [range, setRange] = useState<Range>('Hari Ini');
 
-  const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.5,
-    });
-    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
-  };
-
-  const add = () => {
-    const n = Number(amount.replace(/[^0-9]/g, ''));
-    if (!name.trim() || !n) return;
-    setExpenses((l) => [...l, { id: `e${Date.now()}`, name: name.trim(), time: '13:40', amount: n, coa, approved: false, photo: photo ?? undefined }]);
-    setName(''); setAmount(''); setPhoto(null);
-  };
-
-  const approve = (id: string) =>
-    setExpenses((l) => l.map((e) => (e.id === id ? { ...e, approved: true } : e)));
-
-  const rows: [string, string, number][] = [
-    ['Tunai (18 trx)', '', 486500],
-    ['EDC / Kartu (12 trx)', '', 312000],
-    ['QRIS / E-Wallet (11 trx)', '', 198400],
-    ['Order Online (6 trx)', '', 124000],
-  ];
-  const gross = rows.reduce((s, [, , v]) => s + v, 0);
+  const gross = useMemo(() => BY_METHOD.reduce((s, r) => s + r.total, 0), []);
+  const trxCount = 51;
+  const promoTotal = PROMO.reduce((s, p) => s + p.total, 0);
+  const cancelQty = CANCELLED.reduce((s, c) => s + c.qty, 0);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.sub}>Shift Pagi · Kasir Gista</Text>
-      <View style={styles.hero}>
-        <Text style={styles.heroLabel}>Total Penjualan Shift Ini</Text>
-        <Text style={styles.heroValue}>{rp(gross)}</Text>
-        <Text style={styles.heroSub}>47 transaksi · 08:00 – 15:00</Text>
-        <Text style={styles.heroNet}>Kas bersih {rp(gross - expTotal)} setelah pengeluaran</Text>
+
+      <View style={styles.filters}>
+        {RANGES.map((r) => (
+          <TouchableOpacity
+            key={r}
+            style={[styles.filterChip, range === r && styles.filterActive]}
+            onPress={() => setRange(r)}>
+            <Text style={[styles.filterTxt, range === r && styles.filterTxtActive]}>{r}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
-      <Text style={styles.sec}>Ringkasan Pembayaran</Text>
+
+      <View style={styles.hero}>
+        <Text style={styles.heroLabel}>Total Penjualan · {range}</Text>
+        <Text style={styles.heroValue}>{rp(gross)}</Text>
+        <Text style={styles.heroSub}>{trxCount} transaksi · 08:00 – 15:00</Text>
+        <Text style={styles.heroNet}>Kas bersih {rp(gross - EXPENSE_TOTAL)} setelah pengeluaran</Text>
+      </View>
+
+      <Text style={styles.sec}>Ringkasan per Metode Bayar</Text>
       <View style={styles.card}>
-        {rows.map(([l, , v]) => (
-          <View key={l} style={styles.row}>
-            <Text style={styles.item}>{l}</Text>
-            <Text style={styles.price}>{rp(v)}</Text>
+        {BY_METHOD.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <Text style={styles.item}>{r.nama}</Text>
+            <Text style={styles.price}>{rp(r.total)}</Text>
           </View>
         ))}
       </View>
+
+      <Text style={styles.sec}>Penjualan per Menu</Text>
+      <View style={styles.card}>
+        {BY_MENU.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.item}>{r.nama}</Text>
+              <Text style={styles.meta}>{r.qty} terjual</Text>
+            </View>
+            <Text style={styles.price}>{rp(r.total)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.sec}>Penjualan per Kategori</Text>
+      <View style={styles.card}>
+        {BY_CATEGORY.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.item}>{r.nama}</Text>
+              <Text style={styles.meta}>{r.qty} item</Text>
+            </View>
+            <Text style={styles.price}>{rp(r.total)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.sec}>Penjualan per Mode</Text>
+      <View style={styles.card}>
+        {BY_MODE.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <Text style={styles.item}>{r.nama}</Text>
+            <Text style={styles.price}>{rp(r.total)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.sec}>Promo & Diskon</Text>
+      <View style={styles.card}>
+        {PROMO.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.item}>{r.nama}</Text>
+              <Text style={styles.meta}>{r.pakai}x dipakai</Text>
+            </View>
+            <Text style={styles.disc}>{rp(r.total)}</Text>
+          </View>
+        ))}
+        <View style={styles.row}>
+          <Text style={styles.totalL}>Total promo</Text>
+          <Text style={styles.disc}>{rp(promoTotal)}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.sec}>Item Dibatalkan ({cancelQty})</Text>
+      <View style={styles.card}>
+        {CANCELLED.map((r) => (
+          <View key={r.nama} style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.item}>{r.qty}× {r.nama}</Text>
+              <Text style={styles.meta}>{r.alasan}</Text>
+            </View>
+          </View>
+        ))}
+        {CANCELLED.length === 0 && <Text style={styles.meta}>Tidak ada item dibatalkan.</Text>}
+      </View>
+
       <Text style={styles.sec}>Pengeluaran Kas</Text>
       <View style={styles.card}>
-        {expenses.map((e) => (
-          <View key={e.id} style={styles.row}>
-            {e.photo ? (
-              <Image source={{ uri: e.photo }} style={styles.thumb} />
-            ) : null}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.item}>{e.name}</Text>
-              <Text style={styles.meta}>
-                {e.time} · {e.coa} ·{' '}
-                {e.approved ? (
-                  <Text style={styles.okBadge}>✓ Disetujui</Text>
-                ) : (
-                  <Text style={styles.waitBadge}>Menunggu persetujuan</Text>
-                )}
-              </Text>
-            </View>
-            <Text style={styles.disc}>-{rp(e.amount)}</Text>
-            {!e.approved && (
-              <TouchableOpacity
-                onPress={() => approve(e.id)}
-                hitSlop={10}
-                style={styles.approveBtn}>
-                <Text style={styles.approve}>Setujui</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              onPress={() => setExpenses((l) => l.filter((x) => x.id !== e.id))}
-              hitSlop={10}
-              style={styles.delBtn}>
-              <Text style={styles.del}>Hapus</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
-        {expenses.length === 0 && <Text style={styles.meta}>Belum ada pengeluaran outlet hari ini.</Text>}
         <View style={styles.row}>
-          <Text style={styles.totalL}>Total pengeluaran</Text>
-          <Text style={styles.disc}>-{rp(expTotal)}</Text>
+          <Text style={styles.item}>Total pengeluaran outlet</Text>
+          <Text style={styles.disc}>-{rp(EXPENSE_TOTAL)}</Text>
         </View>
-        <Text style={styles.label}>Tambah pengeluaran</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Nama pengeluaran" placeholderTextColor={colors.faint} />
-        <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder="Nominal Rp" placeholderTextColor={colors.faint} keyboardType="numeric" />
-        <Text style={styles.label}>Akun (CoA)</Text>
-        <View style={styles.chips}>
-          {COA.map((c) => (
-            <TouchableOpacity key={c} style={[styles.chip, coa === c && styles.chipOn]} onPress={() => setCoa(c)}>
-              <Text style={[styles.chipT, coa === c && styles.chipTOn]}>{c}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={styles.label}>Foto struk (opsional)</Text>
-        <View style={styles.photoRow}>
-          {photo ? (
-            <Image source={{ uri: photo }} style={styles.preview} />
-          ) : null}
-          <TouchableOpacity style={styles.photoBtn} onPress={pickPhoto}>
-            <Text style={styles.photoBtnT}>{photo ? 'Ganti Foto' : '📷 Ambil Foto'}</Text>
-          </TouchableOpacity>
-          {photo ? (
-            <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={10} style={styles.delBtn}>
-              <Text style={styles.del}>Hapus</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity style={styles.primary} onPress={add}>
-          <Text style={styles.primaryT}>Tambah</Text>
+        <TouchableOpacity onPress={() => navigation?.navigate('Expense')}>
+          <Text style={styles.link}>Kelola pengeluaran cabang ›</Text>
         </TouchableOpacity>
       </View>
+
       <View style={styles.actions}>
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('History')}>
           <Text style={styles.ghostT}>Riwayat Transaksi</Text>
@@ -153,6 +179,14 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { padding: 16, paddingBottom: 40 },
   sub: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
+  filters: { flexDirection: 'row', marginTop: 10 },
+  filterChip: {
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card,
+    borderRadius: 20, paddingVertical: 7, paddingHorizontal: 16, marginRight: 8,
+  },
+  filterActive: { backgroundColor: colors.navy, borderColor: colors.navy },
+  filterTxt: { fontSize: 12, fontFamily: fonts.medium, color: colors.muted },
+  filterTxtActive: { color: colors.white },
   hero: { backgroundColor: colors.navy, borderRadius: 14, padding: 18, marginTop: 10 },
   heroLabel: { fontFamily: fonts.medium, fontSize: 13, color: colors.navyTint },
   heroValue: { fontFamily: fonts.bold, fontSize: 28, color: colors.white, marginTop: 6 },
@@ -165,35 +199,11 @@ const styles = StyleSheet.create({
   meta: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint },
   price: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   disc: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
-  delBtn: { paddingVertical: 8, paddingLeft: 12 },
-  del: { fontFamily: fonts.semibold, fontSize: 12, color: colors.faint },
-  approveBtn: { paddingVertical: 8, paddingLeft: 12 },
-  approve: { fontFamily: fonts.bold, fontSize: 12, color: colors.greenDark },
-  okBadge: { fontFamily: fonts.semibold, color: colors.greenDark },
-  waitBadge: { fontFamily: fonts.semibold, color: colors.amberDark },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
-  chipOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
-  chipT: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
-  chipTOn: { color: colors.orangeDark },
   totalL: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, flex: 1 },
-  label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 10, marginBottom: 6 },
-  input: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text, marginBottom: 8 },
-  primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 12, alignItems: 'center', marginTop: 4 },
-  thumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: colors.line },
-  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  preview: { width: 56, height: 56, borderRadius: 10, backgroundColor: colors.line },
-  photoBtn: {
-    borderWidth: 1,
-    borderColor: colors.navy,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
-  primaryT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
   ghostT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
   primary2: { flex: 1, backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center' },
+  primaryT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
 });

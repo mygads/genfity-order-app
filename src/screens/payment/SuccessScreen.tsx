@@ -1,6 +1,8 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import { printReceipt } from '../../lib/print';
+import { isValidEmail, recordReceiptEmail } from '../../lib/payments';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -18,12 +20,26 @@ const METHOD_LABEL: Record<string, string> = {
   cash: 'Tunai',
   debit: 'Kartu Debit',
   kredit: 'Kartu Kredit',
+  'debit-bca': 'Debit BCA',
+  'kredit-bca': 'Kredit BCA',
+  'debit-ocbc': 'Debit OCBC',
+  'EDC BCA': 'EDC BCA',
   transfer: 'Transfer Bank',
+  'Transfer Bank': 'Transfer Bank',
   qris: 'QRIS',
   gopay: 'GoPay',
   ovo: 'OVO',
   dana: 'DANA',
   shopeepay: 'ShopeePay',
+  deposit: 'Deposit Member',
+  pluxee: 'Pluxee',
+  ultra: 'Ultra Voucher',
+  lainnya: 'Lainnya',
+  compliment: 'Kompliment',
+  compliment_label: 'Kompliment',
+  Kompliment: 'Kompliment',
+  'Non-Penjualan': 'Non-Penjualan',
+  nonsales: 'Non-Penjualan',
 };
 
 export default function SuccessScreen({ navigation, route }: Props) {
@@ -34,12 +50,25 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const cash = route?.params?.cash ?? 0;
   const change = route?.params?.change ?? 0;
   const orderNo = '#TRX-000123';
-  const receiptParams = { total, method: METHOD_LABEL[method] ?? method };
+  const receiptParams = { total, method: METHOD_LABEL[method] ?? method, cash, change };
   const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const now = new Date();
   const todayId = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
   const timeId = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
+
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailTo, setMailTo] = useState('');
+  const [mailMsg, setMailMsg] = useState('');
+
+  const sendMail = () => {
+    if (!isValidEmail(mailTo)) {
+      setMailMsg('Alamat email tidak valid.');
+      return;
+    }
+    recordReceiptEmail(mailTo, orderNo, total, method);
+    setMailMsg('Struk masuk antrean kirim — terkirim saat online.');
+  };
 
   const status = (
     <>
@@ -84,6 +113,35 @@ export default function SuccessScreen({ navigation, route }: Props) {
     </View>
   );
 
+  const mailModal = (
+    <Modal visible={mailOpen} animationType="fade" transparent>
+      <View style={styles.wrap}>
+        <View style={styles.dialog}>
+          <Text style={styles.dTitle}>Kirim Struk via Email</Text>
+          <Text style={styles.dSub}>Struk {orderNo} • {rp(total)}</Text>
+          <TextInput
+            style={styles.input}
+            value={mailTo}
+            onChangeText={setMailTo}
+            placeholder="nama@email.com"
+            placeholderTextColor={colors.faint}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
+          <View style={styles.dBtns}>
+            <TouchableOpacity style={styles.ghostBtn} onPress={() => setMailOpen(false)}>
+              <Text style={styles.ghostBtnText}>Tutup</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.sendBtn} onPress={sendMail}>
+              <Text style={styles.sendBtnText}>Kirim</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   if (isTablet) {
     return (
       <View style={styles.root}>
@@ -95,8 +153,13 @@ export default function SuccessScreen({ navigation, route }: Props) {
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.printBtn}
-            onPress={() => navigation?.navigate('Receipt', receiptParams)}>
+            onPress={() => printReceipt()}>
             <Text style={styles.printBtnText}>Cetak Struk</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.printBtn}
+            onPress={() => setMailOpen(true)}>
+            <Text style={styles.printBtnText}>Kirim Email</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.printBtn}
@@ -109,6 +172,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
             <Text style={styles.newOrderBtnText}>Order Baru</Text>
           </TouchableOpacity>
         </View>
+        {mailModal}
       </View>
     );
   }
@@ -128,8 +192,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.printBtn}
-          onPress={() => navigation?.navigate('History')}>
-          <Text style={styles.printBtnText}>Lihat Riwayat</Text>
+          onPress={() => setMailOpen(true)}>
+          <Text style={styles.printBtnText}>Email</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.newOrderBtn}
@@ -137,6 +201,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <Text style={styles.newOrderBtnText}>Order Baru</Text>
         </TouchableOpacity>
       </View>
+      {mailModal}
     </View>
   );
 }
@@ -196,4 +261,18 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   newOrderBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
+  wrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', paddingHorizontal: 28 },
+  dialog: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
+  dTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text },
+  dSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4 },
+  input: {
+    borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 12, paddingVertical: 11,
+    fontFamily: fonts.regular, fontSize: 14, color: colors.text, backgroundColor: colors.white, marginTop: 12,
+  },
+  mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
+  dBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  ghostBtn: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 12, alignItems: 'center' },
+  ghostBtnText: { fontFamily: fonts.bold, fontSize: 13, color: colors.muted },
+  sendBtn: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 12, alignItems: 'center' },
+  sendBtnText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 import { getSession } from '../../session';
 
@@ -8,14 +8,24 @@ type Props = { navigation?: Nav };
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];
 
+const fmtClock = (d: Date) =>
+  d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');
+
 export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const s = getSession();
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
-  const [clockedIn, setClockedIn] = useState(false);
+  const [inTime, setInTime] = useState<string | null>(null);
+  const [outTime, setOutTime] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
+
+  // Ganti PIN
+  const [oldPin, setOldPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [pinMsg, setPinMsg] = useState('');
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -29,19 +39,42 @@ export default function AttendanceScreen({ navigation }: Props) {
     else if (pin.length < 4) setPin(pin + k);
   };
 
-  const submit = () => {
+  const clockIn = () => {
     if (pin.length < 4) { setError('PIN salah — coba lagi atau hubungi supervisor.'); return; }
-    setClockedIn(true);
+    setInTime(fmtClock(new Date()).slice(0, 5));
     setPin('');
   };
+
+  const clockOut = () => {
+    if (pin.length < 4) { setError('Masukkan PIN untuk clock-out.'); return; }
+    setOutTime(fmtClock(new Date()).slice(0, 5));
+    setPin('');
+  };
+
+  const changePin = () => {
+    const clean = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 6);
+    const o = clean(oldPin);
+    const n = clean(newPin);
+    const c = clean(confirmPin);
+    if (o.length < 4) { setPinMsg('PIN lama minimal 4 digit.'); return; }
+    if (n.length < 4) { setPinMsg('PIN baru minimal 4 digit.'); return; }
+    if (n !== c) { setPinMsg('Konfirmasi PIN baru tidak sama.'); return; }
+    if (o === n) { setPinMsg('PIN baru harus berbeda dari PIN lama.'); return; }
+    setPinMsg('PIN berhasil diganti.');
+    setOldPin('');
+    setNewPin('');
+    setConfirmPin('');
+  };
+
+  const clockedIn = inTime !== null && outTime === null;
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.hint}>Karyawan {s?.outlet ?? 'ESB Cabang Poris'} · Kasir {s?.name ?? 'Gista'}</Text>
       <Text style={styles.sec}>Masuk / Keluar Kerja</Text>
-      <Text style={styles.clock}>{now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':')}</Text>
+      <Text style={styles.clock}>{fmtClock(now)}</Text>
       <Text style={styles.date}>{now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-      <Text style={styles.meta}>Shift Pagi (08:00 – 16:00) · {clockedIn ? '● Sudah Masuk' : '● Belum Masuk'}</Text>
+      <Text style={styles.meta}>Shift Pagi (08:00 – 16:00) · {clockedIn ? '● Sudah Masuk' : outTime ? '● Sudah Keluar' : '● Belum Masuk'}</Text>
 
       <View style={styles.card}>
         <Text style={styles.cardT}>Outlet {s?.outlet ?? 'ESB Cabang Poris'}</Text>
@@ -51,11 +84,11 @@ export default function AttendanceScreen({ navigation }: Props) {
 
       <Text style={styles.sec}>Daftar Kehadiran</Text>
       <View style={styles.card}>
-        <View style={styles.row}><Text style={styles.item}>Masuk</Text><Text style={styles.item}>{clockedIn ? '08:57' : '-- : --'}</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Masuk</Text><Text style={styles.item}>{inTime ?? '-- : --'}</Text></View>
         <View style={styles.row}><Text style={styles.item}>Istirahat</Text><Text style={styles.item}>-- : --</Text></View>
-        <View style={styles.row}><Text style={styles.item}>Keluar</Text><Text style={styles.item}>-- : --</Text></View>
+        <View style={styles.row}><Text style={styles.item}>Keluar</Text><Text style={styles.item}>{outTime ?? '-- : --'}</Text></View>
       </View>
-      {!clockedIn && <Text style={styles.empty}>Belum ada absen masuk hari ini.</Text>}
+      {!inTime && <Text style={styles.empty}>Belum ada absen masuk hari ini.</Text>}
 
       <Text style={styles.sec}>Masukkan PIN Absensi</Text>
       <View style={styles.pinRow}>
@@ -73,9 +106,16 @@ export default function AttendanceScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity style={[styles.primary, clockedIn && styles.disabled]} onPress={submit} disabled={clockedIn}>
-          <Text style={styles.primaryT}>Masuk ›</Text>
-        </TouchableOpacity>
+        {!outTime ? (
+          <TouchableOpacity style={[styles.primary, clockedIn && styles.disabled]} onPress={clockIn} disabled={clockedIn}>
+            <Text style={styles.primaryT}>Masuk ›</Text>
+          </TouchableOpacity>
+        ) : null}
+        {clockedIn ? (
+          <TouchableOpacity style={styles.danger} onPress={clockOut}>
+            <Text style={styles.primaryT}>Keluar ›</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Dashboard')}>
           <Text style={styles.ghostT}>Keluar</Text>
         </TouchableOpacity>
@@ -83,6 +123,47 @@ export default function AttendanceScreen({ navigation }: Props) {
       <View style={styles.links}>
         <TouchableOpacity onPress={() => navigation?.navigate('Shift')}><Text style={styles.link}>Setelah masuk → Buka Shift</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')}><Text style={styles.link}>Lewati → Dashboard</Text></TouchableOpacity>
+      </View>
+
+      <Text style={styles.sec}>Ganti PIN</Text>
+      <View style={styles.card}>
+        <Text style={styles.fieldLabel}>PIN lama</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          secureTextEntry
+          maxLength={6}
+          placeholder="PIN lama"
+          placeholderTextColor={colors.faint}
+          value={oldPin}
+          onChangeText={(t) => setOldPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+        />
+        <Text style={styles.fieldLabel}>PIN baru (min. 4 digit)</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          secureTextEntry
+          maxLength={6}
+          placeholder="PIN baru"
+          placeholderTextColor={colors.faint}
+          value={newPin}
+          onChangeText={(t) => setNewPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+        />
+        <Text style={styles.fieldLabel}>Konfirmasi PIN baru</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          secureTextEntry
+          maxLength={6}
+          placeholder="Ulangi PIN baru"
+          placeholderTextColor={colors.faint}
+          value={confirmPin}
+          onChangeText={(t) => setConfirmPin(t.replace(/[^0-9]/g, '').slice(0, 6))}
+        />
+        {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
+        <TouchableOpacity style={styles.primary} onPress={changePin}>
+          <Text style={styles.primaryT}>Simpan PIN Baru</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -112,10 +193,17 @@ const styles = StyleSheet.create({
   keyUtilT: { color: colors.red },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   primary: { flex: 1, backgroundColor: colors.orange, borderRadius: 10, padding: 14, alignItems: 'center' },
+  danger: { flex: 1, backgroundColor: colors.red, borderRadius: 10, padding: 14, alignItems: 'center' },
   disabled: { opacity: 0.5 },
   primaryT: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   ghost: { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 14, alignItems: 'center' },
   ghostT: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
   links: { gap: 8, marginTop: 14 },
   link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
+  fieldLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 10, marginBottom: 5 },
+  input: {
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10,
+    padding: 11, fontFamily: fonts.bold, fontSize: 15, color: colors.text, letterSpacing: 3, textAlign: 'center',
+  },
+  pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },
 });

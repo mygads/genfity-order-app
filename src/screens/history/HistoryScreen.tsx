@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
 import { transactions, type Transaction, type TxnStatus } from '../../data/mock';
+import { isValidEmail, recordReceiptEmail } from '../../lib/payments';
 
 const STATUS_LABEL: Record<TxnStatus, string> = {
   Selesai: 'Berhasil',
@@ -51,6 +52,9 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
   const [voided, setVoided] = useState<string[]>([]);
   const [payModal, setPayModal] = useState(false);
   const [payOver, setPayOver] = useState<Record<string, string>>({});
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailTo, setMailTo] = useState('');
+  const [mailMsg, setMailMsg] = useState('');
 
   const dates = useMemo(() => [...new Set(transactions.map((t) => t.date))], []);
   const payments = useMemo(() => [...new Set(transactions.map((t) => t.payment))], []);
@@ -96,6 +100,16 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
     setVoidNote('');
   };
 
+  const sendMail = () => {
+    if (!selected) return;
+    if (!isValidEmail(mailTo)) {
+      setMailMsg('Alamat email tidak valid.');
+      return;
+    }
+    recordReceiptEmail(mailTo, selected.no, selected.total, payOf(selected, payOver));
+    setMailMsg('Struk masuk antrean kirim — terkirim saat online.');
+  };
+
   const pickerOptions: string[] =
     picker === 'date'
       ? dates
@@ -124,6 +138,8 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
       }
       onChangePay={() => setPayModal(true)}
       onVoid={() => setConfirmVoid(true)}
+      onVoidItem={() => navigation?.navigate('Cancel', { orderId: selected?.no })}
+      onEmail={() => { setMailMsg(''); setMailTo(''); setMailOpen(true); }}
       onClose={() => setSelectedId(null)}
       showClose={!isTablet}
     />
@@ -317,6 +333,33 @@ export default function HistoryScreen({ navigation }: { navigation?: { navigate:
           </View>
         </View>
       </Modal>
+
+      <Modal visible={mailOpen} animationType="fade" transparent>
+        <View style={styles.centerWrap}>
+          <View style={styles.dialog}>
+            <Text style={styles.dialogTitle}>Kirim Struk via Email</Text>
+            <Text style={styles.dialogSub}>{selected?.no} · {selected ? rp(selected.total) : ''}</Text>
+            <TextInput
+              style={styles.mailInput}
+              placeholder="nama@email.com"
+              placeholderTextColor={colors.faint}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={mailTo}
+              onChangeText={setMailTo}
+            />
+            {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
+            <View style={styles.dialogBtns}>
+              <Pressable style={styles.btnGhost} onPress={() => setMailOpen(false)}>
+                <Text style={styles.btnGhostText}>Tutup</Text>
+              </Pressable>
+              <Pressable style={styles.btnPrint} onPress={sendMail}>
+                <Text style={styles.btnPrintText}>Kirim</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -407,6 +450,8 @@ function DetailPanel({
   onPrint,
   onChangePay,
   onVoid,
+  onVoidItem,
+  onEmail,
   onClose,
   showClose,
 }: {
@@ -415,6 +460,8 @@ function DetailPanel({
   onPrint: () => void;
   onChangePay: () => void;
   onVoid: () => void;
+  onVoidItem: () => void;
+  onEmail: () => void;
   onClose: () => void;
   showClose: boolean;
 }) {
@@ -473,6 +520,9 @@ function DetailPanel({
         <Pressable style={styles.btnPrint} onPress={onPrint}>
           <Text style={styles.btnPrintText}>Cetak Ulang</Text>
         </Pressable>
+        <Pressable style={styles.btnPrint} onPress={onEmail}>
+          <Text style={styles.btnPrintText}>Email</Text>
+        </Pressable>
         {txn.status === 'Selesai' && (
           <Pressable style={styles.btnChange} onPress={onChangePay}>
             <Text style={styles.btnChangeText}>Ubah Pembayaran</Text>
@@ -481,6 +531,11 @@ function DetailPanel({
         {txn.status === 'Selesai' && (
           <Pressable style={styles.btnVoid} onPress={onVoid}>
             <Text style={styles.btnVoidText}>Void</Text>
+          </Pressable>
+        )}
+        {txn.status === 'Selesai' && (
+          <Pressable style={styles.btnGhost} onPress={onVoidItem}>
+            <Text style={styles.btnGhostText}>Void per Item ›</Text>
           </Pressable>
         )}
         {showClose && (
@@ -739,5 +794,17 @@ const styles = StyleSheet.create({
     minHeight: 72,
     textAlignVertical: 'top',
   },
+  mailInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.text,
+    marginTop: 12,
+  },
+  mailMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
   dialogBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
 });

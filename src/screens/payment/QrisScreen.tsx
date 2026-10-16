@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenterSm } from '../../theme';
 
 type Nav = {
@@ -25,21 +25,34 @@ export default function QrisScreen({ navigation, route }: Props) {
   const [seconds, setSeconds] = useState(5 * 60);
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
+
+  /** Kode referensi mock — di app nyata dari backend saat generate QR. */
+  const refCode = useMemo(() => {
+    const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
+    return `QRIS-${String(n).padStart(6, '0')}`;
+  }, [total]);
 
   useEffect(() => {
     if (status === 'paid') return;
-    if (seconds <= 0) {
-      setStatus('expired');
-      return;
-    }
-    const t = setTimeout(() => setSeconds((s) => s - 1), 1000);
+    const t = setTimeout(() => {
+      if (seconds <= 1) {
+        setSeconds(0);
+        setStatus('expired');
+      } else {
+        setSeconds(seconds - 1);
+      }
+    }, 1000);
     return () => clearTimeout(t);
   }, [seconds, status]);
 
-  // Auto-polling tiap 10 dtk saat menunggu (simulasi status backend)
+  // Cek status otomatis tiap 10 dtk saat menunggu (simulasi polling backend)
   useEffect(() => {
     if (status !== 'waiting') return;
-    const t = setTimeout(() => setStatus('checking'), 10000);
+    const t = setTimeout(() => {
+      setPollCount((c) => c + 1);
+      setStatus('checking');
+    }, 10000);
     return () => clearTimeout(t);
   }, [status, seconds]);
 
@@ -51,11 +64,15 @@ export default function QrisScreen({ navigation, route }: Props) {
 
   const checkStatus = () => {
     setStatus('checking');
+    setPollCount((c) => c + 1);
     setTimeout(() => {
       setStatus('paid');
       navigation?.navigate('Success', { total, method: 'qris' });
     }, 1500);
   };
+
+  const statusChip =
+    status === 'paid' ? 'Lunas' : status === 'expired' ? 'Kadaluarsa' : status === 'checking' ? 'Memeriksa…' : 'Menunggu';
 
   return (
     <View style={styles.root}>
@@ -84,9 +101,14 @@ export default function QrisScreen({ navigation, route }: Props) {
         <View style={styles.mainCol}>
           <Text style={styles.totalLabel}>Total Bayar</Text>
           <Text style={styles.totalValue}>{rp(total)}</Text>
+          <Text style={styles.refCode}>{refCode} · Berlaku 5 menit</Text>
 
           <View style={styles.qrBox}>
-            {/* Placeholder QR — ganti dengan <Image source={qrUri} /> dari backend */}
+            <Image
+              source={require('../../../assets/images/payment_qris.webp')}
+              style={styles.qrLogo}
+              resizeMode="contain"
+            />
             <View style={styles.qrPlaceholder}>
               <View style={styles.qrCornerTL} />
               <View style={styles.qrCornerTR} />
@@ -107,9 +129,11 @@ export default function QrisScreen({ navigation, route }: Props) {
               ? 'Kode QR kadaluarsa. Buat kode baru untuk melanjutkan.'
               : status === 'checking'
                 ? 'Memeriksa status pembayaran otomatis…'
-                : 'Minta pelanggan memindai QR di atas. Status diperiksa otomatis.'}
+                : 'Minta pelanggan memindai QR di atas. Status diperiksa otomatis tiap 10 detik.'}
           </Text>
-          <Text style={styles.txnMeta}>Nominal {rp(total)} • Metode QRIS • Berlaku 5 menit</Text>
+          <Text style={styles.txnMeta}>
+            Nominal {rp(total)} • Metode QRIS • Dicek {pollCount}x otomatis
+          </Text>
           <Text style={styles.steps}>1. Tampilkan QR ke pelanggan  2. Pelanggan pindai & bayar  3. Cek Status / tunggu otomatis</Text>
         </View>
         {isTablet && (
@@ -120,14 +144,16 @@ export default function QrisScreen({ navigation, route }: Props) {
               <Text style={styles.sideValue}>{rp(total)}</Text>
             </View>
             <View style={styles.sideRow}>
+              <Text style={styles.sideLabel}>Referensi</Text>
+              <Text style={styles.sideValue}>{refCode}</Text>
+            </View>
+            <View style={styles.sideRow}>
               <Text style={styles.sideLabel}>Metode</Text>
               <Text style={styles.sideValue}>QRIS</Text>
             </View>
             <View style={styles.sideRow}>
               <Text style={styles.sideLabel}>Status</Text>
-              <Text style={styles.sideValue}>
-                {status === 'paid' ? 'Lunas' : status === 'expired' ? 'Kadaluarsa' : 'Menunggu'}
-              </Text>
+              <Text style={styles.sideValue}>{statusChip}</Text>
             </View>
           </View>
         )}
@@ -185,6 +211,7 @@ const styles = StyleSheet.create({
   sideValue: { fontFamily: fonts.semibold, fontSize: 12, color: colors.text },
   totalLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   totalValue: { fontFamily: fonts.bold, fontSize: 30, color: colors.navy, marginTop: 2 },
+  refCode: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 4 },
   qrBox: {
     marginTop: 18,
     backgroundColor: colors.card,
@@ -192,7 +219,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     padding: 20,
+    alignItems: 'center',
   },
+  qrLogo: { width: 96, height: 28, marginBottom: 12 },
   qrPlaceholder: {
     width: 230,
     height: 230,

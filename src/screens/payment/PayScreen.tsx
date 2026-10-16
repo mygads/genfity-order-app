@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +10,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import ExtraPaySection from './ExtraPaySection';
+import { recordSale } from '../../lib/payments';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -20,10 +23,10 @@ type Props = {
   route?: { params?: { total?: number } };
 };
 
-type Tab = 'tunai' | 'nontunai' | 'online';
+type Tab = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
 type Split = { id: string; label: string; amount: number };
 
-const CASH_DRAWERS = ['Cash Authorization', 'Cash Child 1', 'Cash Child 2'];
+const CASH_DRAWERS = ['Laci 1', 'Laci 2', 'Laci 3'];
 
 const CARDS = [
   { id: 'debit-bca', name: 'Debit BCA' },
@@ -32,10 +35,18 @@ const CARDS = [
 ];
 
 const WALLETS = [
-  { id: 'ovo', name: 'OVO' },
-  { id: 'gopay', name: 'gopay' },
-  { id: 'dana', name: 'DANA' },
-  { id: 'qris', name: 'QRIS' },
+  { id: 'ovo', name: 'OVO', img: require('../../../assets/images/payment_ovo.webp') },
+  { id: 'gopay', name: 'GoPay', img: require('../../../assets/images/payment_gopay.webp') },
+  { id: 'dana', name: 'DANA', img: require('../../../assets/images/payment_dana.webp') },
+  { id: 'qris', name: 'QRIS', img: require('../../../assets/images/payment_qris.webp') },
+  { id: 'shopeepay', name: 'ShopeePay', img: null },
+];
+
+/** Deposit member mock — di app nyata diambil dari server (member butuh online). */
+const MEMBER_DEPOSIT_DB = [
+  { id: 'M001', nama: 'Budi Santoso', saldo: 150000 },
+  { id: 'M002', nama: 'Sinta Dewi', saldo: 500000 },
+  { id: 'M003', nama: 'Andi Pratama', saldo: 0 },
 ];
 
 const VOUCHER_VALUE = 10000;
@@ -45,6 +56,8 @@ const SIDEBAR: { id: Tab; title: string; sub: string }[] = [
   { id: 'tunai', title: 'Tunai', sub: '(Uang kertas & koin)' },
   { id: 'nontunai', title: 'Non-Tunai', sub: '(Debit/Kredit via EDC)' },
   { id: 'online', title: 'Pembayaran Online', sub: '(E-Wallet, QRIS, transfer)' },
+  { id: 'member', title: 'Deposit Member', sub: '(Potong saldo)' },
+  { id: 'lainnya', title: 'Pluxee / Ultra', sub: '(Voucher tender)' },
 ];
 
 const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -74,21 +87,32 @@ export default function PayScreen({ navigation, route }: Props) {
 
   // Non-tunai
   const [card, setCard] = useState(CARDS[1].id);
-  const [cardAmount, setCardAmount] = useState('');
-  const [cardNo, setCardNo] = useState('');
   const [edcCode, setEdcCode] = useState('');
-  const [bankName, setBankName] = useState('');
-  const [holderName, setHolderName] = useState('');
 
   // Online
   const [wallet, setWallet] = useState<string | null>(null);
+  const [ovoPhone, setOvoPhone] = useState('');
+
+  // Deposit member
+  const [memberQ, setMemberQ] = useState('');
+  const [memberSel, setMemberSel] = useState<string | null>(null);
+
+  // Pluxee / Ultra / lainnya
+  const [tenderCode, setTenderCode] = useState('');
+  const [tenderKind, setTenderKind] = useState<'Pluxee' | 'Ultra' | 'Lainnya'>('Pluxee');
+  const [tenderAmt, setTenderAmt] = useState('');
 
   const payable = total - voucherApplied;
   const paid = useMemo(() => splits.reduce((s, x) => s + x.amount, 0), [splits]);
   const remaining = Math.max(0, payable - paid);
-  const hasAdjust = voucherApplied > 0 || paid > 0;
 
-  const WALLET_LABEL: Record<string, string> = { ovo: 'OVO', gopay: 'GoPay', dana: 'DANA', qris: 'QRIS' };
+  const WALLET_LABEL: Record<string, string> = {
+    ovo: 'OVO',
+    gopay: 'GoPay',
+    dana: 'DANA',
+    qris: 'QRIS',
+    shopeepay: 'ShopeePay',
+  };
 
   const nominals = useMemo(() => {
     const base = remaining > 0 ? remaining : payable;
@@ -125,6 +149,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
 
   const goSuccess = (method: string, cash: number, change: number) => {
+    recordSale(method, payable, { cash, change });
     navigation?.navigate('Success', { total: payable, method, cash, change });
   };
 
@@ -144,32 +169,64 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   // ---- Non-tunai actions ----
-  const cardNum = Number(cardAmount.replace(/[^0-9]/g, '')) || 0;
   const onCardLanjut = () => {
-    const amt = cardNum > 0 ? cardNum : remaining;
-    if (amt <= 0 || payable <= 0) return;
+    if (edcCode.length !== 6 || payable <= 0) return;
+    const amt = remaining > 0 ? remaining : payable;
     const grand = paid + amt;
     if (grand >= payable) {
       goSuccess(card, grand, Math.max(0, grand - payable));
     } else {
       addSplit(CARDS.find((c) => c.id === card)?.name ?? 'Non Tunai', amt);
-      setCardAmount('');
+      setEdcCode('');
     }
   };
 
-  const onCardUbah = () => {
-    setCardAmount(remaining > 0 ? String(remaining) : '');
-  };
-
   // ---- Online actions ----
+  const ovoPhoneOk = wallet !== 'ovo' || ovoPhone.replace(/[^0-9]/g, '').length >= 9;
   const onOnlineLanjut = () => {
-    if (!wallet || payable <= 0) return;
+    if (!wallet || payable <= 0 || !ovoPhoneOk) return;
     if (wallet === 'qris') {
       navigation?.navigate('Qris', { total: remaining > 0 ? remaining : payable });
       return;
     }
     const grand = paid + (remaining > 0 ? remaining : payable);
     goSuccess(wallet, grand, 0);
+  };
+
+  // ---- Deposit member actions ----
+  const memberHits = MEMBER_DEPOSIT_DB.filter(
+    (m) =>
+      memberQ.trim() === '' ||
+      m.nama.toLowerCase().includes(memberQ.toLowerCase()) ||
+      m.id.toLowerCase().includes(memberQ.toLowerCase()),
+  );
+  const memberPicked = MEMBER_DEPOSIT_DB.find((m) => m.id === memberSel) ?? null;
+  const onDepositLanjut = () => {
+    if (!memberPicked || memberPicked.saldo <= 0 || payable <= 0) return;
+    const pakai = Math.min(memberPicked.saldo, remaining > 0 ? remaining : payable);
+    const grand = paid + pakai;
+    if (grand >= payable) {
+      goSuccess('deposit', grand, 0);
+    } else {
+      addSplit(`Deposit ${memberPicked.nama}`, pakai);
+      setMemberSel(null);
+    }
+  };
+
+  // ---- Pluxee / Ultra / lainnya ----
+  const tenderNum = Number(tenderAmt.replace(/[^0-9]/g, '')) || 0;
+  const tenderReady = tenderCode.trim().length >= 3 && tenderNum > 0;
+  const onTenderTambah = () => {
+    if (!tenderReady) return;
+    addSplit(`${tenderKind} ${tenderCode.trim().toUpperCase()}`, Math.min(tenderNum, remaining));
+    setTenderCode('');
+    setTenderAmt('');
+  };
+  const onTenderLunas = () => {
+    if (!tenderReady || payable <= 0) return;
+    const grand = paid + Math.min(tenderNum, remaining);
+    if (grand >= payable) goSuccess(tenderKind.toLowerCase(), grand, 0);
+    else onTenderTambah();
   };
 
   const cashTambahReady = tendered > 0;
@@ -267,36 +324,28 @@ export default function PayScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderVoucher = () => {
-    if (isTablet) return null;
-    return <View />;
-  };
-
   const renderTabs = () => {
     if (isTablet) return null;
+    const tabs: { id: Tab; label: string }[] = [
+      { id: 'tunai', label: 'Tunai' },
+      { id: 'nontunai', label: 'Non-Tunai' },
+      { id: 'online', label: 'Online' },
+      { id: 'member', label: 'Deposit' },
+      { id: 'lainnya', label: 'Pluxee/Ultra' },
+    ];
     return (
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'tunai' && styles.tabActive]}
-          onPress={() => setTab('tunai')}>
-          <Text style={[styles.tabText, tab === 'tunai' && styles.tabTextActive]}>Tunai</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'nontunai' && styles.tabActive]}
-          onPress={() => setTab('nontunai')}>
-          <Text style={[styles.tabText, tab === 'nontunai' && styles.tabTextActive]}>Non-Tunai</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, styles.tabWide, tab === 'online' && styles.tabActive]}
-          onPress={() => setTab('online')}>
-          <Text
-            style={[styles.tabText, tab === 'online' && styles.tabTextActive]}
-            numberOfLines={1}
-            adjustsFontSizeToFit>
-            Pembayaran Online
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll}>
+        <View style={styles.tabs}>
+          {tabs.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={[styles.tab, tab === t.id && styles.tabActive]}
+              onPress={() => setTab(t.id)}>
+              <Text style={[styles.tabText, tab === t.id && styles.tabTextActive]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
     );
   };
 
@@ -468,9 +517,6 @@ export default function PayScreen({ navigation, route }: Props) {
           onPress={onCardLanjut}>
           <Text style={styles.lanjutTextPrimary}>Bayar {rp(remaining)} ›</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.ubahBtn} onPress={onCardUbah}>
-          <Text style={styles.ubahText}>Ubah</Text>
-        </TouchableOpacity>
       </View>
       {edcCode.length !== 6 && (
         <Text style={styles.ctaHint}>Masukkan 6 digit kode dari struk EDC untuk mengaktifkan tombol bayar.</Text>
@@ -483,43 +529,167 @@ export default function PayScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderWalletCard = (id: string, label: string, labelStyle: object) => (
-    <TouchableOpacity
-      key={id}
-      style={[styles.walletCard, wallet === id && styles.walletCardActive]}
-      onPress={() => setWallet(id)}
-      accessibilityRole="radio"
-      accessibilityState={{ selected: wallet === id }}>
-      {wallet === id && <View style={styles.walletCheck}><Text style={styles.walletCheckMark}>✓</Text></View>}
-      <Text style={[styles.walletText, labelStyle]}>{label}</Text>
-    </TouchableOpacity>
-  );
-
   const renderOnline = () => (
     <View>
       <Text style={styles.panelTitle}>Dompet digital & QRIS</Text>
       <View style={styles.grid}>
-        {renderWalletCard('ovo', 'OVO', styles.brandOvo)}
-        {renderWalletCard('gopay', 'GoPay', styles.brandGopay)}
-        {renderWalletCard('dana', 'DANA', styles.brandDana)}
-        {renderWalletCard('qris', 'QRIS', styles.brandQris)}
+        {WALLETS.map((w) => {
+          const active = wallet === w.id;
+          return (
+            <TouchableOpacity
+              key={w.id}
+              style={[styles.walletCard, active && styles.walletCardActive]}
+              onPress={() => setWallet(w.id)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}>
+              {active && <View style={styles.walletCheck}><Text style={styles.walletCheckMark}>✓</Text></View>}
+              {w.img ? (
+                <Image source={w.img} style={styles.walletImg} resizeMode="contain" />
+              ) : (
+                <Text style={[styles.walletText, styles.brandQris]}>{w.name}</Text>
+              )}
+              <Text style={styles.walletName}>{w.name}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
       {!wallet && (
         <Text style={styles.ctaHint}>Pilih salah satu dompet digital di atas untuk melanjutkan.</Text>
+      )}
+
+      {wallet === 'ovo' && (
+        <View style={styles.customRow}>
+          <Text style={styles.fieldLabel}>Nomor OVO pelanggan *</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="phone-pad"
+            placeholder="Contoh: 0812xxxxxxx"
+            placeholderTextColor={colors.faint}
+            value={ovoPhone}
+            onChangeText={(t) => setOvoPhone(t.replace(/[^0-9]/g, '').slice(0, 14))}
+          />
+          <Text style={styles.ctaHint}>Notifikasi tagihan dikirim ke nomor ini — pelanggan setujui di aplikasi OVO.</Text>
+        </View>
       )}
 
       {renderSplits()}
 
       <View style={styles.footerSingle}>
         <TouchableOpacity
-          style={[styles.lanjutBtnFull, styles.lanjutBtnPrimary, !wallet && styles.btnDisabled]}
-          disabled={!wallet}
+          style={[styles.lanjutBtnFull, styles.lanjutBtnPrimary, (!wallet || !ovoPhoneOk) && styles.btnDisabled]}
+          disabled={!wallet || !ovoPhoneOk}
           onPress={onOnlineLanjut}>
           <Text style={styles.lanjutTextPrimary}>
             {wallet ? `Bayar ${rp(remaining)} via ${WALLET_LABEL[wallet] ?? wallet} ›` : `Pilih metode • ${rp(remaining)}`}
           </Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
+
+  const renderMember = () => (
+    <View>
+      <Text style={styles.panelTitle}>Potong saldo deposit member</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Cari nama / ID member"
+        placeholderTextColor={colors.faint}
+        value={memberQ}
+        onChangeText={setMemberQ}
+      />
+      <View style={styles.memberList}>
+        {memberHits.map((m) => {
+          const active = memberSel === m.id;
+          return (
+            <TouchableOpacity
+              key={m.id}
+              style={[styles.memberCard, active && styles.memberCardActive]}
+              onPress={() => setMemberSel(active ? null : m.id)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.memberName}>{m.nama}</Text>
+                <Text style={styles.memberMeta}>{m.id}</Text>
+              </View>
+              <Text style={[styles.memberSaldo, m.saldo <= 0 && styles.memberSaldoEmpty]}>
+                {rp(m.saldo)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+        {memberHits.length === 0 && (
+          <Text style={styles.ctaHint}>Member tidak ditemukan — tambah via layar Member.</Text>
+        )}
+      </View>
+      <TouchableOpacity
+        style={styles.memberLink}
+        onPress={() => navigation?.navigate('Member')}>
+        <Text style={styles.edcLinkText}>Cari / tambah member ›</Text>
+      </TouchableOpacity>
+      {renderSplits()}
+      <View style={styles.footerSingle}>
+        <TouchableOpacity
+          style={[styles.lanjutBtnFull, styles.lanjutBtnPrimary, (!memberPicked || memberPicked.saldo <= 0) && styles.btnDisabled]}
+          disabled={!memberPicked || memberPicked.saldo <= 0}
+          onPress={onDepositLanjut}>
+          <Text style={styles.lanjutTextPrimary}>
+            {memberPicked
+              ? `Potong ${rp(Math.min(memberPicked.saldo, remaining))} dari ${memberPicked.nama} ›`
+              : `Pilih member • ${rp(remaining)}`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      {memberPicked && memberPicked.saldo < remaining && (
+        <Text style={styles.ctaHint}>Saldo kurang — sisanya bisa dibayar tunai/non-tunai (split).</Text>
+      )}
+    </View>
+  );
+
+  const renderLainnya = () => (
+    <View>
+      <Text style={styles.panelTitle}>Pluxee, Ultra voucher & tender lainnya</Text>
+      <View style={styles.pills}>
+        {(['Pluxee', 'Ultra', 'Lainnya'] as const).map((k) => (
+          <TouchableOpacity
+            key={k}
+            style={[styles.pill, tenderKind === k && styles.pillActive]}
+            onPress={() => setTenderKind(k)}>
+            <Text style={[styles.pillText, tenderKind === k && styles.pillTextActive]}>{k}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={styles.fieldLabel}>Kode voucher {tenderKind} *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Contoh: PLX-882031"
+        placeholderTextColor={colors.faint}
+        value={tenderCode}
+        onChangeText={(t) => setTenderCode(t.toUpperCase())}
+        autoCapitalize="characters"
+      />
+      <Text style={styles.fieldLabel}>Nominal dipakai *</Text>
+      <TextInput
+        style={styles.input}
+        keyboardType="numeric"
+        placeholder="0"
+        placeholderTextColor={colors.faint}
+        value={tenderAmt}
+        onChangeText={setTenderAmt}
+      />
+      {renderSplits()}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.lanjutBtn, styles.lanjutBtnPrimary, !tenderReady && styles.btnDisabled]}
+          disabled={!tenderReady}
+          onPress={onTenderLunas}>
+          <Text style={styles.lanjutTextPrimary}>Bayar {rp(Math.min(tenderNum, remaining))} ›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tambahBtn, !tenderReady && styles.tambahBtnDisabled]}
+          disabled={!tenderReady}
+          onPress={onTenderTambah}>
+          <Text style={styles.tambahText}>+ Tambah</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.ctaHint}>Kode dikunci saat dipakai dan dibakar (burn) setelah lunas.</Text>
     </View>
   );
 
@@ -531,6 +701,8 @@ export default function PayScreen({ navigation, route }: Props) {
           {tab === 'tunai' && renderTunai()}
           {tab === 'nontunai' && renderNonTunai()}
           {tab === 'online' && renderOnline()}
+          {tab === 'member' && renderMember()}
+          {tab === 'lainnya' && renderLainnya()}
         </>
       );
     }
@@ -556,6 +728,8 @@ export default function PayScreen({ navigation, route }: Props) {
           {tab === 'tunai' && renderTunai()}
           {tab === 'nontunai' && renderNonTunai()}
           {tab === 'online' && renderOnline()}
+          {tab === 'member' && renderMember()}
+          {tab === 'lainnya' && renderLainnya()}
         </View>
       </View>
     );
@@ -566,8 +740,8 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderHeader()}
       <ScrollView contentContainerStyle={styles.body}>
         {renderBanner()}
-        {renderVoucher()}
         {renderBody()}
+        <ExtraPaySection onDone={(label) => goSuccess(label, payable, 0)} />
       </ScrollView>
     </View>
   );
@@ -679,27 +853,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   voucherBtnText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.white },
-  tabs: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  tabsScroll: { marginTop: 12 },
+  tabs: { flexDirection: 'row', gap: 8, paddingRight: 12 },
   tab: {
-    flex: 1,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 20,
     paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 0,
   },
   tabActive: { backgroundColor: colors.orange, borderColor: colors.orange },
-  tabWide: { flex: 1.6 },
-  tabText: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    color: colors.muted,
-    textAlign: 'center',
-  },
+  tabText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.muted, textAlign: 'center' },
   tabTextActive: { color: colors.white },
   panelTitle: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, marginTop: 12 },
   subTabs: { flexDirection: 'row', marginTop: 8 },
@@ -775,7 +942,6 @@ const styles = StyleSheet.create({
   },
   lanjutBtnPrimary: { backgroundColor: colors.navy, borderColor: colors.navy },
   lanjutTextPrimary: { fontFamily: fonts.semibold, fontSize: 14, color: colors.white },
-  lanjutText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
   tambahBtn: {
     flex: 1,
     backgroundColor: colors.card,
@@ -788,17 +954,6 @@ const styles = StyleSheet.create({
   },
   tambahBtnDisabled: { opacity: 0.45 },
   tambahText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
-  ubahBtn: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.navy,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 13,
-  },
-  ubahText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
   edcLink: { marginTop: 10, alignItems: 'center', paddingVertical: 6 },
   edcLinkText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
   btnDisabled: { opacity: 0.45 },
@@ -829,20 +984,6 @@ const styles = StyleSheet.create({
   checkMark: { color: colors.white, fontSize: 10, fontFamily: fonts.bold, lineHeight: 12 },
   pillText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted },
   pillTextActive: { color: colors.white },
-  formTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, marginTop: 14, marginBottom: 8 },
-  amountRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  amountInput: { fontFamily: fonts.bold, fontSize: 16 },
-  copyBtn: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.navy,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  copyText: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
-  formGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  formHalf: { width: '48%', flexGrow: 1 },
   walletCard: {
     width: '48%',
     flexGrow: 1,
@@ -850,7 +991,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 8,
-    paddingVertical: 22,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   walletCardActive: { borderColor: colors.orange, backgroundColor: colors.paleOrange, borderWidth: 2 },
@@ -860,11 +1001,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.orange, alignItems: 'center', justifyContent: 'center',
   },
   walletCheckMark: { color: colors.white, fontSize: 11, fontFamily: fonts.bold },
+  walletImg: { width: 72, height: 30 },
+  walletName: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 6 },
   walletText: { fontFamily: fonts.bold, fontSize: 20 },
-  brandOvo: { color: colors.navy },
-  brandGopay: { color: colors.text },
-  brandDana: { color: colors.blue },
   brandQris: { color: colors.text },
+  memberList: { marginTop: 10, gap: 8 },
+  memberCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    padding: 12,
+  },
+  memberCardActive: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  memberName: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
+  memberMeta: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  memberSaldo: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  memberSaldoEmpty: { color: colors.faint },
+  memberLink: { marginTop: 6, alignItems: 'center', paddingVertical: 6 },
   tabletSplit: { flexDirection: 'row', gap: 12, marginTop: 12, alignItems: 'flex-start' },
   sidebar: { width: 220, backgroundColor: colors.navy, borderRadius: 12, padding: 10, gap: 10 },
   sideBtn: {

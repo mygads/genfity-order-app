@@ -8,6 +8,8 @@ import { StatusBar } from 'expo-status-bar';
 import { colors } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
 import { getSession, loginDemo, logout, subscribeSession } from './src/session';
+import { initDb } from './src/lib/db';
+import { loadServerState } from './src/config/server';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
@@ -44,6 +46,25 @@ import KitchenScreen from './src/screens/history/KitchenScreen';
 import PrintersScreen from './src/screens/settings/PrintersScreen';
 import SettingsScreen from './src/screens/settings/SettingsScreen';
 import CustomerDisplayScreen from './src/screens/display/CustomerDisplayScreen';
+import WebViewScreen from './src/screens/misc/WebViewScreen';
+import SplitBillScreen from './src/screens/cashier/SplitBillScreen';
+import MoveItemsScreen from './src/screens/cashier/MoveItemsScreen';
+import MoveTableScreen from './src/screens/cashier/MoveTableScreen';
+import PromotionListScreen from './src/screens/cashier/PromotionListScreen';
+import MenuPrintingScreen from './src/screens/settings/MenuPrintingScreen';
+import StockScreen from './src/screens/settings/StockScreen';
+import TableTimerScreen from './src/screens/settings/TableTimerScreen';
+import SyncScreen from './src/screens/settings/SyncScreen';
+import LogScreen from './src/screens/settings/LogScreen';
+import AboutScreen from './src/screens/settings/AboutScreen';
+import HelpScreen from './src/screens/settings/HelpScreen';
+import MenuManagementScreen from './src/screens/settings/MenuManagementScreen';
+import IdleScreen from './src/screens/display/IdleScreen';
+import TopupDepositScreen from './src/screens/member/TopupDepositScreen';
+import PettyCashScreen from './src/screens/cash/PettyCashScreen';
+import PettyCashFormScreen from './src/screens/cash/PettyCashFormScreen';
+import PettyCashDetailScreen from './src/screens/cash/PettyCashDetailScreen';
+import ExpenseScreen from './src/screens/cash/ExpenseScreen';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -68,6 +89,7 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
         <Stack.Screen name="CreatePin" component={CreatePinScreen} options={{ title: 'Buat PIN', headerBackVisible: false }} />
         <Stack.Screen name="ForgotPin" component={ForgotPinScreen} options={{ title: 'Lupa PIN' }} />
         <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Masuk', headerShown: false }} />
+        <Stack.Screen name="WebView" component={WebViewScreen} options={{ title: 'Halaman Web', headerShown: false }} />
       </Stack.Navigator>
     );
   }
@@ -107,6 +129,25 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       <Stack.Screen name="Printers" component={PrintersScreen} options={{ title: 'Printer' }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Pengaturan' }} />
       <Stack.Screen name="CustomerDisplay" component={CustomerDisplayScreen} options={{ title: 'Tampilan Pelanggan', headerShown: false }} />
+      <Stack.Screen name="WebView" component={WebViewScreen} options={{ title: 'Halaman Web', headerShown: false }} />
+      <Stack.Screen name="SplitBill" component={SplitBillScreen} options={{ title: 'Bagi Bill' }} />
+      <Stack.Screen name="MoveItems" component={MoveItemsScreen} options={{ title: 'Pindah Item' }} />
+      <Stack.Screen name="MoveTable" component={MoveTableScreen} options={{ title: 'Pindah Meja' }} />
+      <Stack.Screen name="PromotionList" component={PromotionListScreen} options={{ title: 'Promo' }} />
+      <Stack.Screen name="MenuPrinting" component={MenuPrintingScreen} options={{ title: 'Cetakan Menu' }} />
+      <Stack.Screen name="Stock" component={StockScreen} options={{ title: 'Stok' }} />
+      <Stack.Screen name="TableTimer" component={TableTimerScreen} options={{ title: 'Timer Meja' }} />
+      <Stack.Screen name="Sync" component={SyncScreen} options={{ title: 'Sinkronisasi' }} />
+      <Stack.Screen name="Log" component={LogScreen} options={{ title: 'Log' }} />
+      <Stack.Screen name="About" component={AboutScreen} options={{ title: 'Tentang' }} />
+      <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Bantuan' }} />
+      <Stack.Screen name="MenuManagement" component={MenuManagementScreen} options={{ title: 'Menu' }} />
+      <Stack.Screen name="Idle" component={IdleScreen} options={{ title: 'Layar Idle', headerShown: false }} />
+      <Stack.Screen name="TopupDeposit" component={TopupDepositScreen} options={{ title: 'Topup Deposit' }} />
+      <Stack.Screen name="PettyCash" component={PettyCashScreen} options={{ title: 'Kas Kecil' }} />
+      <Stack.Screen name="PettyCashForm" component={PettyCashFormScreen} options={{ title: 'Form Kas Kecil' }} />
+      <Stack.Screen name="PettyCashDetail" component={PettyCashDetailScreen} options={{ title: 'Detail Kas Kecil' }} />
+      <Stack.Screen name="Expense" component={ExpenseScreen} options={{ title: 'Pengeluaran' }} />
     </Stack.Navigator>
   );
 }
@@ -127,6 +168,11 @@ export default function App() {
   }, [loaded]);
 
   useEffect(() => subscribeSession(() => setLoggedIn(getSession() !== null)), []);
+
+  useEffect(() => {
+    loadServerState().catch(() => {});
+    initDb().catch(() => {});
+  }, []);
 
   if (!loaded) {
     return (

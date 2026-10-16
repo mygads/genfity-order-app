@@ -11,7 +11,10 @@ import {
 } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
 
-type Props = { navigation?: any };
+type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
+type Props = { navigation?: Nav };
+
+type VoucherStatus = 'tersedia' | 'terkunci' | 'terpakai' | 'kadaluwarsa';
 
 type Voucher = {
   id: string;
@@ -21,26 +24,36 @@ type Voucher = {
   nilai: number;
   minBelanja: number;
   berlakuHingga: string;
-  status: 'tersedia' | 'terpakai' | 'kadaluwarsa';
+  status: VoucherStatus;
 };
 
-const DUMMY: Voucher[] = [
+const SEED: Voucher[] = [
   { id: '1', kode: 'HEMAT20', nama: 'Diskon 20rb', jenis: 'Diskon (Rp)', nilai: 20000, minBelanja: 100000, berlakuHingga: '31 Des 2026', status: 'tersedia' },
   { id: '2', kode: 'GIFT50', nama: 'Gift Voucher 50rb', jenis: 'Gift Voucher', nilai: 50000, minBelanja: 0, berlakuHingga: '31 Jan 2027', status: 'tersedia' },
-  { id: '3', kode: 'ULTRA10', nama: 'Ultra Voucher 10%', jenis: 'Diskon (%)', nilai: 10, minBelanja: 50000, berlakuHingga: '15 Nov 2026', status: 'terpakai' },
+  { id: '3', kode: 'ULTRA10', nama: 'Ultra Voucher 10%', jenis: 'Diskon (%)', nilai: 10, minBelanja: 50000, berlakuHingga: '15 Nov 2026', status: 'terkunci' },
   { id: '4', kode: 'LAMA5', nama: 'Voucher Lama', jenis: 'Diskon (Rp)', nilai: 5000, minBelanja: 0, berlakuHingga: '1 Jan 2026', status: 'kadaluwarsa' },
 ];
+
+const STATUS_TXT: Record<VoucherStatus, string> = {
+  tersedia: 'Voucher dapat dipakai',
+  terkunci: 'Terkunci — dipakai transaksi berjalan',
+  terpakai: 'Voucher sudah terpakai (burn)',
+  kadaluwarsa: 'Voucher telah kadaluarsa',
+};
 
 export default function VoucherScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState<'semua' | Voucher['status']>('semua');
+  const [filter, setFilter] = useState<'semua' | VoucherStatus>('semua');
   const [kodeManual, setKodeManual] = useState('');
+  const [msg, setMsg] = useState('');
+  const [items, setItems] = useState<Voucher[]>(SEED);
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const hasil = DUMMY.filter(
+  const hasil = items.filter(
     (v) =>
       (filter === 'semua' || v.status === filter) &&
       (q.trim() === '' ||
@@ -48,10 +61,63 @@ export default function VoucherScreen({ navigation }: Props) {
         v.nama.toLowerCase().includes(q.toLowerCase())),
   );
 
-  const apply = (v: Voucher) => {
-    if (v.status !== 'tersedia') return;
-    setApplied(v);
-    navigation?.goBack?.();
+  const setStatus = (id: string, status: VoucherStatus) =>
+    setItems((list) => list.map((v) => (v.id === id ? { ...v, status } : v)));
+
+  /** Validasi kode manual (mock validate). */
+  const validate = () => {
+    const kode = kodeManual.trim().toUpperCase();
+    if (kode.length < 3) {
+      setMsg('Masukkan minimal 3 karakter kode voucher.');
+      return;
+    }
+    const found = items.find((v) => v.kode === kode);
+    if (!found) {
+      setMsg(`Kode ${kode} tidak valid / tidak dikenal.`);
+      return;
+    }
+    if (found.status === 'kadaluwarsa') {
+      setMsg(`Kode ${kode} sudah kadaluarsa.`);
+      return;
+    }
+    if (found.status === 'terpakai') {
+      setMsg(`Kode ${kode} sudah terpakai (burn).`);
+      return;
+    }
+    setQ(kode);
+    setMsg(`Kode ${kode} valid — ${found.nama}. Kunci sebelum dipakai.`);
+  };
+
+  /** Kunci voucher agar tidak dipakai transaksi lain (mock lock). */
+  const lock = (v: Voucher) => {
+    if (v.status !== 'tersedia' || busy) return;
+    setBusy(v.id);
+    setTimeout(() => {
+      setStatus(v.id, 'terkunci');
+      setBusy(null);
+    }, 800);
+  };
+
+  /** Buka kunci (mock unlock). */
+  const unlock = (v: Voucher) => {
+    if (v.status !== 'terkunci' || busy) return;
+    setBusy(v.id);
+    setTimeout(() => {
+      setStatus(v.id, 'tersedia');
+      setBusy(null);
+    }, 800);
+  };
+
+  /** Terapkan = bakar voucher (mock burn) lalu kembali. */
+  const burn = (v: Voucher) => {
+    if (v.status !== 'terkunci' || busy) return;
+    setBusy(v.id);
+    setTimeout(() => {
+      setStatus(v.id, 'terpakai');
+      setBusy(null);
+      setApplied(v);
+      navigation?.goBack?.();
+    }, 800);
   };
 
   return (
@@ -75,32 +141,24 @@ export default function VoucherScreen({ navigation }: Props) {
             onChangeText={(t) => {
               setKodeManual(t);
               setQ(t);
+              setMsg('');
             }}
           />
-          <TouchableOpacity
-            style={s.checkBtn}
-            onPress={() => {
-              setQ(kodeManual);
-            }}>
+          <TouchableOpacity style={s.checkBtn} onPress={validate}>
             <Text style={s.checkTxt}>Cek</Text>
           </TouchableOpacity>
         </View>
+        {msg ? <Text style={s.msg}>{msg}</Text> : null}
       </View>
 
       <View style={s.filters}>
-        {(['semua', 'tersedia', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
+        {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
           <TouchableOpacity
             key={f}
             style={[s.filterChip, filter === f && s.filterActive]}
             onPress={() => setFilter(f)}>
             <Text style={[s.filterTxt, filter === f && s.filterTxtActive]}>
-              {f === 'semua'
-                ? 'Semua Voucher'
-                : f === 'tersedia'
-                  ? 'Tersedia'
-                  : f === 'terpakai'
-                    ? 'Terpakai'
-                    : 'Kadaluwarsa'}
+              {f === 'semua' ? 'Semua' : f === 'tersedia' ? 'Tersedia' : f === 'terkunci' ? 'Terkunci' : f === 'terpakai' ? 'Terpakai' : 'Kadaluwarsa'}
             </Text>
           </TouchableOpacity>
         ))}
@@ -116,9 +174,9 @@ export default function VoucherScreen({ navigation }: Props) {
           </View>
         ) : (
           hasil.map((v) => {
-            const usable = v.status === 'tersedia';
+            const loading = busy === v.id;
             return (
-              <View key={v.id} style={[s.card, !usable && s.cardDim]}>
+              <View key={v.id} style={[s.card, v.status !== 'tersedia' && v.status !== 'terkunci' && s.cardDim]}>
                 <View style={s.cardTop}>
                   <View style={s.voucherBadge}>
                     <Text style={s.voucherKode}>{v.kode}</Text>
@@ -126,17 +184,9 @@ export default function VoucherScreen({ navigation }: Props) {
                   <Text
                     style={[
                       s.statusTxt,
-                      v.status === 'tersedia'
-                        ? s.statusOk
-                        : v.status === 'terpakai'
-                          ? s.statusUsed
-                          : s.statusExp,
+                      v.status === 'tersedia' ? s.statusOk : v.status === 'terkunci' ? s.statusLock : v.status === 'terpakai' ? s.statusUsed : s.statusExp,
                     ]}>
-                    {v.status === 'tersedia'
-                      ? 'Voucher dapat dipakai'
-                      : v.status === 'terpakai'
-                        ? 'Voucher sudah terpakai'
-                        : 'Voucher telah kadaluarsa'}
+                    {STATUS_TXT[v.status]}
                   </Text>
                 </View>
                 <Text style={s.voucherName}>{v.nama}</Text>
@@ -151,14 +201,35 @@ export default function VoucherScreen({ navigation }: Props) {
                   </Text>
                 ) : null}
                 <Text style={s.voucherMeta}>Berlaku hingga {v.berlakuHingga}</Text>
-                <TouchableOpacity
-                  style={[s.applyBtn, !usable && s.applyDisabled]}
-                  disabled={!usable}
-                  onPress={() => apply(v)}>
-                  <Text style={s.applyTxt}>
-                    {usable ? 'Terapkan' : v.status === 'terpakai' ? 'Terpakai' : 'Kadaluwarsa'}
-                  </Text>
-                </TouchableOpacity>
+                {v.status === 'tersedia' && (
+                  <TouchableOpacity
+                    style={[s.applyBtn, loading && s.applyDisabled]}
+                    disabled={loading}
+                    onPress={() => lock(v)}>
+                    <Text style={s.applyTxt}>{loading ? 'Mengunci…' : 'Kunci & Pakai'}</Text>
+                  </TouchableOpacity>
+                )}
+                {v.status === 'terkunci' && (
+                  <View style={s.lockRow}>
+                    <TouchableOpacity
+                      style={[s.unlockBtn, loading && s.applyDisabled]}
+                      disabled={loading}
+                      onPress={() => unlock(v)}>
+                      <Text style={s.unlockTxt}>{loading ? '…' : 'Buka Kunci'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.burnBtn, loading && s.applyDisabled]}
+                      disabled={loading}
+                      onPress={() => burn(v)}>
+                      <Text style={s.applyTxt}>{loading ? '…' : 'Terapkan (Burn)'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {(v.status === 'terpakai' || v.status === 'kadaluwarsa') && (
+                  <View style={[s.applyBtn, s.applyDisabled]}>
+                    <Text style={s.applyTxt}>{v.status === 'terpakai' ? 'Terpakai' : 'Kadaluwarsa'}</Text>
+                  </View>
+                )}
               </View>
             );
           })
@@ -241,6 +312,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   checkTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
+  msg: { fontSize: 12, fontFamily: fonts.medium, color: colors.navy, marginTop: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', padding: 12 },
   filterChip: {
     borderWidth: 1,
@@ -286,6 +358,7 @@ const s = StyleSheet.create({
   voucherKode: { color: colors.white, fontSize: 13, fontFamily: fonts.bold },
   statusTxt: { fontSize: 11, fontFamily: fonts.medium },
   statusOk: { color: colors.green },
+  statusLock: { color: colors.blue },
   statusUsed: { color: colors.orange },
   statusExp: { color: colors.red },
   voucherName: {
@@ -311,6 +384,13 @@ const s = StyleSheet.create({
   },
   applyDisabled: { backgroundColor: colors.faint },
   applyTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
+  lockRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  unlockBtn: {
+    flex: 1, borderWidth: 1, borderColor: colors.navy, borderRadius: 8,
+    paddingVertical: 10, alignItems: 'center',
+  },
+  unlockTxt: { color: colors.navy, fontSize: 14, fontFamily: fonts.bold },
+  burnBtn: { flex: 2, backgroundColor: colors.orange, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   empty: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
   emptySub: {

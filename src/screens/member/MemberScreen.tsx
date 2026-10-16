@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -9,9 +10,10 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { colors, fonts, rp, rpNum } from '../../theme';
+import { colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 
-type Props = { navigation?: any };
+type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
+type Props = { navigation?: Nav };
 
 type Member = {
   id: string;
@@ -22,11 +24,29 @@ type Member = {
   poin: number;
 };
 
+type Riwayat = { id: string; tanggal: string; keterangan: string; nominal: string };
+
 const DUMMY: Member[] = [
   { id: 'M001', nama: 'Budi Santoso', noHp: '081234567890', tipe: 'Regular', saldo: 150000, poin: 120 },
   { id: 'M002', nama: 'Sinta Dewi', noHp: '081987654321', tipe: 'Gold', saldo: 500000, poin: 450 },
   { id: 'M003', nama: 'Andi Pratama', noHp: '082112233445', tipe: 'Regular', saldo: 0, poin: 30 },
 ];
+
+/** Riwayat mock per member: deposit, transaksi, tukar poin. */
+const RIWAYAT: Record<string, Riwayat[]> = {
+  M001: [
+    { id: 'r1', tanggal: '14 Okt 2026', keterangan: 'Top up deposit (Tunai)', nominal: '+Rp 100.000' },
+    { id: 'r2', tanggal: '12 Okt 2026', keterangan: 'Bayar TRX-041 (Deposit)', nominal: '−Rp 86.400' },
+    { id: 'r3', tanggal: '10 Okt 2026', keterangan: 'Poin dari TRX-038', nominal: '+86 poin' },
+  ],
+  M002: [
+    { id: 'r1', tanggal: '15 Okt 2026', keterangan: 'Top up deposit (QRIS)', nominal: '+Rp 500.000' },
+    { id: 'r2', tanggal: '13 Okt 2026', keterangan: 'Bayar TRX-040 (Deposit)', nominal: '−Rp 124.000' },
+  ],
+  M003: [
+    { id: 'r1', tanggal: '11 Okt 2026', keterangan: 'Poin dari TRX-035', nominal: '+30 poin' },
+  ],
+};
 
 /** Samarkan nomor HP di daftar: 0812•••7890 (privasi kasir). */
 function maskHp(hp: string): string {
@@ -61,6 +81,10 @@ export default function MemberScreen({ navigation }: Props) {
         );
 
   const saveMember = () => {
+    if (nama.trim() && noHp.trim()) {
+      const id = `M${String(members.length + 1).padStart(3, '0')}`;
+      setMembers((ms) => [...ms, { id, nama: nama.trim(), noHp: noHp.trim(), tipe: 'Regular', saldo: 0, poin: 0 }]);
+    }
     setAddVisible(false);
     setNama('');
     setNoHp('');
@@ -84,6 +108,12 @@ export default function MemberScreen({ navigation }: Props) {
     setDepositNominal('');
   };
 
+  const goTopup = () => {
+    if (!selected) return;
+    setDepositVisible(false);
+    navigation?.navigate('TopupDeposit', { memberId: selected.id, nama: selected.nama, saldo: selected.saldo });
+  };
+
   const list = (
     <ScrollView contentContainerStyle={s.body}>
       <Text style={s.count}>
@@ -91,6 +121,7 @@ export default function MemberScreen({ navigation }: Props) {
       </Text>
       {hasil.length === 0 ? (
         <View style={s.empty}>
+          <Image source={require('../../../assets/images/member_not_found.webp')} style={s.emptyImg} resizeMode="contain" />
           <Text style={s.emptyTitle}>Maaf, Member Tidak Terdeteksi</Text>
           <Text style={s.emptySub}>Coba kata kunci lain atau tambah member baru</Text>
           <TouchableOpacity style={s.primaryBtn} onPress={() => setAddVisible(true)}>
@@ -128,20 +159,22 @@ export default function MemberScreen({ navigation }: Props) {
   const detail = (
     <View style={s.detailSide}>
       {selected ? (
-        <>
-          <View style={s.detailAvatar}>
-            <Text style={s.detailAvatarTxt}>{selected.nama.charAt(0)}</Text>
+        <ScrollView contentContainerStyle={s.detailScroll}>
+          <View style={s.memberCardWrap}>
+            <Image source={require('../../../assets/images/member_card.webp')} style={s.memberCardImg} resizeMode="cover" />
+            <View style={s.memberCardOverlay}>
+              <Text style={s.memberCardName}>{selected.nama}</Text>
+              <Text style={s.memberCardId}>{selected.id} • {selected.tipe}</Text>
+              <Text style={s.memberCardSaldo}>{rp(selected.saldo)}</Text>
+              <Text style={s.memberCardPoin}>{selected.poin} poin</Text>
+            </View>
           </View>
-          <Text style={s.detailName}>{selected.nama}</Text>
           <Text style={s.detailMeta}>
             {selected.id} • {maskHp(selected.noHp)}
           </Text>
-          <Text style={[s.cardTipe, selected.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>
-            {selected.tipe} Member{selected.tipe === 'Gold' ? ' ★' : ''}
-          </Text>
           <View style={s.detailStats}>
             <View style={s.detailStat}>
-              <Text style={s.detailStatLabel}>Saldo</Text>
+              <Text style={s.detailStatLabel}>Saldo Deposit</Text>
               <Text style={s.detailStatValue}>{rp(selected.saldo)}</Text>
             </View>
             <View style={s.detailStat}>
@@ -149,9 +182,22 @@ export default function MemberScreen({ navigation }: Props) {
               <Text style={s.detailStatValue}>{selected.poin} poin</Text>
             </View>
           </View>
+          <Text style={s.riwayatTitle}>Riwayat Member</Text>
+          {(RIWAYAT[selected.id] ?? []).map((r) => (
+            <View key={r.id} style={s.riwayatRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.riwayatKet}>{r.keterangan}</Text>
+                <Text style={s.riwayatTgl}>{r.tanggal}</Text>
+              </View>
+              <Text style={s.riwayatNominal}>{r.nominal}</Text>
+            </View>
+          ))}
+          {(RIWAYAT[selected.id] ?? []).length === 0 && (
+            <Text style={s.emptySub}>Belum ada riwayat transaksi member ini.</Text>
+          )}
           <TouchableOpacity
             style={s.ghostBtnFull}
-            onPress={() => setDepositVisible(true)}>
+            onPress={goTopup}>
             <Text style={s.ghostTxt}>Deposit / Top Up</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -159,11 +205,11 @@ export default function MemberScreen({ navigation }: Props) {
             onPress={() => navigation?.goBack?.()}>
             <Text style={s.applyTxt}>Terapkan Member</Text>
           </TouchableOpacity>
-        </>
+        </ScrollView>
       ) : (
         <View style={s.detailEmpty}>
           <Text style={s.emptyTitle}>Pilih member</Text>
-          <Text style={s.emptySub}>Ketuk salah satu member di daftar untuk melihat detail</Text>
+          <Text style={s.emptySub}>Ketuk salah satu member di daftar untuk melihat kartu, saldo & riwayat</Text>
         </View>
       )}
     </View>
@@ -200,7 +246,7 @@ export default function MemberScreen({ navigation }: Props) {
       </View>
 
       {isTablet ? (
-        <View style={s.split}>
+        <View style={[s.split, wideCenterLg]}>
           <View style={s.listSide}>{list}</View>
           {detail}
         </View>
@@ -211,7 +257,7 @@ export default function MemberScreen({ navigation }: Props) {
             <View style={s.footer}>
               <TouchableOpacity
                 style={s.ghostBtn}
-                onPress={() => setDepositVisible(true)}>
+                onPress={goTopup}>
                 <Text style={s.ghostTxt}>Deposit / Top Up</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -263,7 +309,7 @@ export default function MemberScreen({ navigation }: Props) {
         </View>
       </Modal>
 
-      {/* Deposit */}
+      {/* Deposit cepat */}
       <Modal visible={depositVisible} transparent animationType="slide">
         <View style={s.modalBg}>
           <View style={s.modalCard}>
@@ -303,7 +349,10 @@ export default function MemberScreen({ navigation }: Props) {
               ))}
             </View>
             <TouchableOpacity style={s.primaryBtn} onPress={saveDeposit}>
-              <Text style={s.primaryTxt}>Lanjut Deposit</Text>
+              <Text style={s.primaryTxt}>Deposit Cepat</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.primaryBtnOutline} onPress={goTopup}>
+              <Text style={s.primaryOutlineTxt}>Form Top Up Lengkap ›</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={s.cancelBtn}
@@ -345,33 +394,33 @@ const s = StyleSheet.create({
   },
   count: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted, marginBottom: 4 },
   body: { padding: 16, paddingBottom: 110 },
-  split: { flex: 1, flexDirection: 'row' },
+  split: { flex: 1, flexDirection: 'row', width: '100%', alignSelf: 'center' },
   listSide: { flex: 1 },
   detailSide: {
     flex: 1,
     backgroundColor: colors.card,
     borderLeftWidth: 1,
     borderLeftColor: colors.line,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  detailAvatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.navy,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  detailAvatarTxt: { color: colors.white, fontSize: 30, fontFamily: fonts.bold },
-  detailName: { fontSize: 19, fontFamily: fonts.bold, color: colors.text, marginTop: 12 },
-  detailMeta: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 4 },
-  detailStats: { flexDirection: 'row', gap: 12, marginTop: 16, marginBottom: 20 },
+  detailScroll: { padding: 24, alignItems: 'center', paddingBottom: 40 },
+  memberCardWrap: { width: '100%', borderRadius: 14, overflow: 'hidden', backgroundColor: colors.navy },
+  memberCardImg: { width: '100%', height: 150 },
+  memberCardOverlay: { position: 'absolute', left: 16, right: 16, top: 14, bottom: 14, justifyContent: 'space-between' },
+  memberCardName: { fontSize: 17, fontFamily: fonts.bold, color: colors.white },
+  memberCardId: { fontSize: 12, fontFamily: fonts.medium, color: colors.navyTint },
+  memberCardSaldo: { fontSize: 20, fontFamily: fonts.bold, color: colors.white },
+  memberCardPoin: { fontSize: 12, fontFamily: fonts.medium, color: colors.navyTint },
+  detailMeta: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 10 },
+  detailStats: { flexDirection: 'row', gap: 12, marginTop: 12, marginBottom: 8 },
   detailStat: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, minWidth: 130, alignItems: 'center' },
   detailStatLabel: { fontSize: 12, fontFamily: fonts.regular, color: colors.muted },
   detailStatValue: { fontSize: 16, fontFamily: fonts.bold, color: colors.navy, marginTop: 4 },
-  detailEmpty: { alignItems: 'center' },
+  riwayatTitle: { fontSize: 14, fontFamily: fonts.bold, color: colors.text, alignSelf: 'flex-start', marginTop: 12, marginBottom: 6 },
+  riwayatRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 10, padding: 10, marginTop: 6, width: '100%' },
+  riwayatKet: { fontSize: 13, fontFamily: fonts.medium, color: colors.text },
+  riwayatTgl: { fontSize: 11, fontFamily: fonts.regular, color: colors.faint, marginTop: 2 },
+  riwayatNominal: { fontSize: 13, fontFamily: fonts.bold, color: colors.navy },
+  detailEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1, padding: 24 },
   ghostBtnFull: {
     width: '100%',
     borderWidth: 1,
@@ -380,6 +429,7 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 10,
+    marginTop: 14,
   },
   applyBtnFull: {
     width: '100%',
@@ -424,6 +474,7 @@ const s = StyleSheet.create({
   saldoTxt: { fontSize: 13, fontFamily: fonts.bold, color: colors.navy },
   poinTxt: { fontSize: 13, fontFamily: fonts.medium, color: colors.muted },
   empty: { alignItems: 'center', paddingVertical: 48 },
+  emptyImg: { width: 160, height: 120, marginBottom: 12 },
   emptyTitle: { fontSize: 16, fontFamily: fonts.bold, color: colors.text },
   emptySub: {
     fontSize: 13,
@@ -439,6 +490,15 @@ const s = StyleSheet.create({
     marginTop: 16,
   },
   primaryTxt: { color: colors.white, fontSize: 15, fontFamily: fonts.bold },
+  primaryBtnOutline: {
+    borderWidth: 1,
+    borderColor: colors.navy,
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  primaryOutlineTxt: { color: colors.navy, fontSize: 14, fontFamily: fonts.bold },
   footer: {
     position: 'absolute',
     bottom: 0,

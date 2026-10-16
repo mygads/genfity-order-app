@@ -150,6 +150,9 @@ export default function EndShiftScreen({ navigation }: Props) {
             <Text style={s.errorTxt}>{error}</Text>
           </View>
         ) : null}
+        <TouchableOpacity onPress={() => navigation?.navigate?.('Recap')}>
+          <Text style={s.link}>Cek dulu → Rekap penjualan shift ini</Text>
+        </TouchableOpacity>
         <View style={{ height: 90 }} />
       </ScrollView>
 
@@ -457,4 +460,5 @@ const s = StyleSheet.create({
   pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
   cancelBtn: { marginTop: 12, padding: 10 },
   cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },
+  link: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark, marginTop: 12, textAlign: 'center' },
 });
