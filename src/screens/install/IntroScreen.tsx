@@ -45,7 +45,7 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
   const last = page === PAGES.length - 1;
 
   return (
-    <View style={styles.root}>
+    <ScreenRoot style={styles.root}>
       <ScrollView
         contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
         showsVerticalScrollIndicator={false}>
@@ -93,7 +93,7 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
           />
         )}
       </View>
-    </View>
+    </ScreenRoot>
   );
 }
 

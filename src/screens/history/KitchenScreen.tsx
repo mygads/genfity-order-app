@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
-  Image, Modal,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { kitchenTickets, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga master per menu (fakta: harga resmi datang dari pullMenu/pullBranchMenu * ke ms_menu; tabel di bawah hanya fallback offline untuk mock tiket yang * tidak membawa harga). Dapur tidak menghitung qty*15000 lagi. */const MENU_PRICE: Record<string, number> = { 'Nasi Goreng Spesial': 25000, 'Es Teh Manis': 8000, 'Ayam Geprek': 18000, 'Mie Goreng Jawa': 22000, 'Jus Alpukat': 15000, 'Soto Ayam': 17000, 'Tempe Mendoan': 12000, 'Es Jeruk': 10000,};const FALLBACK_PRICE = 15000;/** * T9: harga live dari pull menu (ms_menu via apiSource, offline = dummy lokal) * menang atas fallback di bawah; fallback hanya bila SQLite + pull kosong. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + (live?.[it.name] ?? MENU_PRICE[it.name] ?? FALLBACK_PRICE) * it.qty, 0);}function priceOf(name: string, live?: Record<string, number>): number { return live?.[name] ?? MENU_PRICE[name] ?? FALLBACK_PRICE;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}function stationOf(t: KitchenTicket, live?: Record<string, string>, menuStation?: Record<string, string>): 'Dapur' | 'Checker' {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import { kitchenTickets, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga master per menu (fakta: harga resmi datang dari pullMenu/pullBranchMenu * ke ms_menu; tabel di bawah hanya fallback offline untuk mock tiket yang * tidak membawa harga). Dapur tidak menghitung qty*15000 lagi. */const MENU_PRICE: Record<string, number> = { 'Nasi Goreng Spesial': 25000, 'Es Teh Manis': 8000, 'Ayam Geprek': 18000, 'Mie Goreng Jawa': 22000, 'Jus Alpukat': 15000, 'Soto Ayam': 17000, 'Tempe Mendoan': 12000, 'Es Jeruk': 10000,};const FALLBACK_PRICE = 15000;/** * T9: harga live dari pull menu (ms_menu via apiSource, offline = dummy lokal) * menang atas fallback di bawah; fallback hanya bila SQLite + pull kosong. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + (live?.[it.name] ?? MENU_PRICE[it.name] ?? FALLBACK_PRICE) * it.qty, 0);}function priceOf(name: string, live?: Record<string, number>): number { return live?.[name] ?? MENU_PRICE[name] ?? FALLBACK_PRICE;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}function stationOf(t: KitchenTicket, live?: Record<string, string>, menuStation?: Record<string, string>): 'Dapur' | 'Checker' {
   const raw = String( (t as { stationId?: unknown }).stationId ?? (t as { station?: unknown }).station ?? '', ).trim(); if (raw) { const hit = live?.[raw] ?? live?.[raw.toLowerCase()]; if (hit) { const n = normStationName(hit); if (n) return n; } const direct = normStationName(raw); if (direct) return direct; } if (menuStation) { for (const it of t.items) { const sid = menuStation[it.name.trim().toLowerCase()]; if (!sid) continue; const hit = live?.[sid] ?? live?.[sid.toLowerCase()]; if (hit) { const n = normStationName(hit); if (n) return n; } const direct = normStationName(sid); if (direct) return direct; } } return t.mode === 'ESB Order' || t.table === 'Online' ? 'Checker' : 'Dapur';}function statusStyle(s: KitchenStatus) {
   if (s === 'Baru') return { bg: colors.red, fg: colors.white, label: 'BARU' };
   if (s === 'Diproses') return { bg: colors.orange, fg: colors.white, label: 'DIMASAK' };
@@ -35,7 +35,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
 }export default function KitchenScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<(typeof filters)[number]>('Semua');
+  const { lang, setLang, t } = useLang(); const [filter, setFilter] = useState<(typeof filters)[number]>('Semua');
   const [station, setStation] = useState<StationFilter>('Semua');
   const [selected, setSelected] = useState<KitchenTicket | null>(null);
   const [moved, setMoved] = useState<Record<string, KitchenStatus>>({});
@@ -63,11 +63,11 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
 
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
     <View style={styles.root}>
-      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable>
+      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text></Pressable>
       </View>
 
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><View style={styles.tabs}>
+      } /><View style={styles.tabs}>
         {filters.map((f) => (
           <Pressable key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive]}>
             <Text style={[styles.tabText, filter === f && styles.tabTextActive]}>{filterLabel(f)}</Text>
@@ -113,7 +113,7 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
               {item.items.map((it, idx) => (
                 <Text key={idx} style={styles.ticketItem}>{it.qty}x {it.name}</Text>
               ))}
-              <Text style={styles.ticketTotal}>{rp(ticketTotal(item, livePrice))}</Text> {item.priority ? <Text style={styles.priority}>★ {t('kit_priority')}</Text> : null}
+              <Text style={styles.ticketTotal}>{rp(ticketTotal(item, livePrice))}</Text>{item.priority ? <Text style={styles.priority}>★ {t('kit_priority')}</Text> : null}
             </Pressable>
           );
         }}
@@ -140,9 +140,9 @@ async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): P
                       <Text style={styles.detailName}>{it.name}</Text>
                       {it.note ? <Text style={styles.detailNote}>{t('kit_note')}: {it.note}</Text> : null}
                     </View>
-                  <Text style={styles.detailPrice}>{rp(priceOf(it.name, livePrice) * it.qty)}</Text> </View>
+                  <Text style={styles.detailPrice}>{rp(priceOf(it.name, livePrice) * it.qty)}</Text></View>
                 ))}
-                <View style={styles.divider} /><View style={styles.totalRow}> <Text style={styles.totalLabel}>{t('kit_total')}</Text> <Text style={styles.totalValue}>{rp(ticketTotal(selected, livePrice))}</Text> </View><View style={styles.sheetBtns}>
+                <View style={styles.divider} /><View style={styles.totalRow}><Text style={styles.totalLabel}>{t('kit_total')}</Text><Text style={styles.totalValue}>{rp(ticketTotal(selected, livePrice))}</Text></View><View style={styles.sheetBtns}>
                   <AppButton title={t('c_close')} variant="secondary" onPress={() => setSelected(null)} fullWidth={false} size="md" style={styles.sheetBtn} />
                   <AppButton
                     title={t('c_reprint')}

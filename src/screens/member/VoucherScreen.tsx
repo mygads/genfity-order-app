@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -15,7 +14,6 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
@@ -92,7 +90,6 @@ export default function VoucherScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | VoucherStatus>('semua');
   const [kodeManual, setKodeManual] = useState('');
@@ -383,16 +380,8 @@ export default function VoucherScreen({ navigation }: Props) {
             <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
               <Text style={s.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text>
             </Pressable>
-            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
-              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-            </Pressable>
           </View>
         }
-      />
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => navigation?.navigate(r)}
       />
 
       {!isTablet ? (

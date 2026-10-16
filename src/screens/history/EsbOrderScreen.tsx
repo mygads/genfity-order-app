@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { esbOrders, type EsbOrder, type EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: mock hanya kenal Baru/Diproses/Selesai, penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal (Omit agar status mock yang sempit tertimpa). */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Hari mock per order: esb1-2 hari ini, esb3 kemarin, esb4 dalam 7 hari. */const ORDER_DAY: Record<string, 'today' | 'yesterday' | 'older'> = { esb1: 'today', esb2: 'today', esb3: 'yesterday', esb4: 'older',};/** Jadwal mock per order (waktu diminta pelanggan). */const SCHEDULE: Record<string, string> = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { esbOrders, type EsbOrder, type EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** Status lokal: mock hanya kenal Baru/Diproses/Selesai, penolakan dicatat sebagai Batal. */type EsbStatusLocal = EsbStatus | 'Batal';/** Baris ESB dengan status lokal (Omit agar status mock yang sempit tertimpa). */type EsbRow = Omit<EsbOrder, 'status'> & { status: EsbStatusLocal; rejectReason?: string };const tabs: EsbStatusLocal[] = ['Baru', 'Diproses', 'Selesai', 'Batal'];const typeFilters = ['Semua', 'Diantar', 'Ambil Sendiri'] as const;type HistoryKey = 'today' | 'yesterday' | 'week';const historyKeys: HistoryKey[] = ['today', 'yesterday', 'week'];/** Hari mock per order: esb1-2 hari ini, esb3 kemarin, esb4 dalam 7 hari. */const ORDER_DAY: Record<string, 'today' | 'yesterday' | 'older'> = { esb1: 'today', esb2: 'today', esb3: 'yesterday', esb4: 'older',};/** Jadwal mock per order (waktu diminta pelanggan). */const SCHEDULE: Record<string, string> = {
   esb1: 'Segera - maks 13:00',
   esb2: 'Terjadwal - 13:30',
   esb3: 'Segera - maks 12:15',
@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import {
 return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam salesDate. */function scheduleOf(o: EsbRow): string { const s = SCHEDULE[o.id]; if (s) return s; return o.time && o.time !== '--:--' ? o.time : 'Segera';}interface SalePullItem { name?: unknown; qty?: unknown; unitPrice?: unknown; price?: unknown; note?: unknown;}interface SalePull { salesNum?: unknown; salesDate?: unknown; salesMode?: unknown; tableNo?: unknown; customerName?: unknown; subtotal?: unknown; ongkir?: unknown; ongkirNet?: unknown; items?: SalePullItem[];}export default function EsbOrderScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tab, setTab] = useState<EsbStatusLocal>('Baru');
+  const { lang, setLang, t } = useLang(); const [tab, setTab] = useState<EsbStatusLocal>('Baru');
   const [typeFilter, setTypeFilter] = useState<(typeof typeFilters)[number]>('Semua');
   const [history, setHistory] = useState<HistoryKey>('today');
   const [selected, setSelected] = useState<EsbRow | null>(null);
@@ -58,8 +58,8 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
-        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8}>
+        <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text></Pressable></View> } />
         <View style={styles.statRow}>
           {(Object.keys(counts) as EsbStatusLocal[]).map((k) => (
             <View key={k} style={styles.stat}>
@@ -67,7 +67,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
               <Text style={styles.statLabel}>{tabLabel(k)}</Text>
             </View>
           ))}
-        <View style={[styles.stat, styles.statLive]}> <Text style={styles.statNum}>{liveNew}</Text> <Text style={styles.statLabel}>Live</Text> </View>
+        <View style={[styles.stat, styles.statLive]}><Text style={styles.statNum}>{liveNew}</Text><Text style={styles.statLabel}>Live</Text></View>
       </View>
 
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}<View style={styles.tabs}>
@@ -153,7 +153,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                 </Text>
                 <Text style={styles.detailMeta}>{t('esb_schedule')}: {scheduleOf(selected)}</Text>
                 {selected.note ? <Text style={styles.detailNote}>{t('kit_note')}: {selected.note}</Text> : null}
-                {selected.status === 'Batal' ? ( <Text style={styles.rejectedNote}>{t('esb_rejected_note')}{selected.rejectReason ? ` - ${selected.rejectReason}` : ''}</Text> ) : null}<View style={styles.divider} />
+                {selected.status === 'Batal' ? (<Text style={styles.rejectedNote}>{t('esb_rejected_note')}{selected.rejectReason ? ` - ${selected.rejectReason}` : ''}</Text> ) : null}<View style={styles.divider} />
                 {selected.items.map((it, idx) => (
                   <View key={idx} style={styles.itemRow}>
                     <View style={styles.itemLeft}>
@@ -164,7 +164,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   </View>
                 ))}
                 <View style={styles.divider} />
-                {(() => { const tt = totalsOf(selected, liveOngkir[selected.id]); return ( <><View style={styles.row}>
+                {(() => { const tt = totalsOf(selected, liveOngkir[selected.id]); return (<><View style={styles.row}>
                   <Text style={styles.rowLabel}>{t('c_subtotal')}</Text>
                   <Text style={styles.rowVal}>{rp(tt.sub)}</Text>
                 </View>
@@ -186,7 +186,7 @@ return 'today';}/** T9: jadwal - mock ikut SCHEDULE; baris live tampil jam sales
                   <Text style={styles.rowVal}>{rp(tt.rounding)}</Text>
                 </View>
                 ) : null}
-                <View style={styles.row}> <Text style={styles.rowLabel}>{t('esb_grand')}</Text> <Text style={styles.rowTotal}>{rp(tt.grand)}</Text> </View> </> ); })()} {selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /></View></>) : null}<View style={styles.sheetBtns}>
+                <View style={styles.row}><Text style={styles.rowLabel}>{t('esb_grand')}</Text><Text style={styles.rowTotal}>{rp(tt.grand)}</Text></View></> ); })()}{selected.type === 'Diantar' ? (<><View style={styles.divider} /><View style={styles.row}><Text style={styles.rowLabel}>{t('dlv_title')}</Text><Text style={styles.rowVal}>{scheduleOf(selected)}</Text></View><Text style={styles.detailNote}>{t('dlv_search_hint')}</Text>{dlvMsg ? (<Text style={styles.detailNote}>{dlvMsg}</Text>) : null}<View style={styles.sheetBtns}><AppButton title={t('dlv_search')} variant="secondary" onPress={() => void queryDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /><AppButton title={t('dlv_schedule')} variant="secondary" onPress={() => void scheduleDelivery(selected.code)} disabled={dlvBusy} fullWidth={false} size="md" style={styles.sheetBtn} /></View></>) : null}<View style={styles.sheetBtns}>
                   {selected.status === 'Baru' && (
                     <>
                       <AppButton title={t('esb_reject')} variant="danger" onPress={() => { setRejectText(''); setRejectFor(selected); }} fullWidth={false} size="md" style={styles.sheetBtn} />

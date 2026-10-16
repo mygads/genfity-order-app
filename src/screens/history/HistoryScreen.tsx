@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';import {
   FlatList,
-  Image, Modal,
+  Modal,
   Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { transactions, type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { lang, setLang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
+  const { lang, setLang, t } = useLang(); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState<TxnStatus | null>(null);
   const [fPayment, setFPayment] = useState<string | null>(null);
@@ -103,7 +103,7 @@ import { useEffect, useMemo, useState } from 'react';import {
     setPicker(null);
   };
 
-  const langToggle = ( <Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8} accessibilityLabel="Ganti bahasa / Switch language"> <Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text> </Pressable> ); const detail = selected ? (
+  const langToggle = (<Pressable onPress={() => setLang(lang === 'id' ? 'en' : 'id')} hitSlop={8} accessibilityLabel="Ganti bahasa / Switch language"><Text style={styles.langTxt}>{lang === 'id' ? 'EN' : 'ID'}</Text></Pressable> ); const detail = selected ? (
     <DetailPanel
       txn={selected}
       payment={payOf(selected, payOver)}
@@ -129,10 +129,7 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}> {langToggle}<Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </Pressable>
-        </View>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}>{langToggle}</View>} />
 
       <View style={[styles.searchRow, !isTablet && styles.searchRowPhone]}>
         {isTablet && <Text style={styles.searchIcon}>⌕</Text>}
@@ -188,11 +185,11 @@ import { useEffect, useMemo, useState } from 'react';import {
       </View>
 
       <View style={styles.recapCard}><View style={styles.recapTop}><View style={{ flex: 1 }}>
-        <Text style={styles.recapLabel}>{t('hist_omzet')}</Text> <Text style={styles.recapValue}>{rp(recap.omzet)}</Text> <Text style={styles.recapSub}> {recap.count} {t('hist_trx')} - {t('hist_sales_on')} : {fDate ?? t('c_all')} </Text> {Object.entries(recap.byPay).slice(0, 4).map(([m, v]) => (
+        <Text style={styles.recapLabel}>{t('hist_omzet')}</Text><Text style={styles.recapValue}>{rp(recap.omzet)}</Text><Text style={styles.recapSub}> {recap.count} {t('hist_trx')} - {t('hist_sales_on')} : {fDate ?? t('c_all')} </Text>{Object.entries(recap.byPay).slice(0, 4).map(([m, v]) => (
         <Text key={m} style={styles.recapLine}> {m} - {rp(v)} </Text> ))}
       </View>
 
-      <View style={[styles.onlinePill, !isTablet && styles.onlinePillPhone]}><View style={styles.onlineDot} /> <Text style={[styles.onlineText, !isTablet && styles.onlineTextPhone]}>{t('hist_online')}</Text> </View> </View><View style={styles.recapBtns}><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}> <Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text> </Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}> <Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text> </Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}> <Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text> </Pressable> </View> </View> {isTablet ? (
+      <View style={[styles.onlinePill, !isTablet && styles.onlinePillPhone]}><View style={styles.onlineDot} /><Text style={[styles.onlineText, !isTablet && styles.onlineTextPhone]}>{t('hist_online')}</Text></View></View><View style={styles.recapBtns}><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}><Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}><Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}><Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text></Pressable></View></View>{isTablet ? (
         <View style={styles.split}>
           <View style={styles.splitList}>
             <TxnList
@@ -320,7 +317,7 @@ import { useEffect, useMemo, useState } from 'react';import {
                 style={styles.dialogBtn}
               />
             </View>
-          <AppButton title={voidConfirming ? '...' : t('hist_void_print')} disabled={!voidNote.trim() || !voidPinOk} onPress={doVoidAndPrint} /> </View>
+          <AppButton title={voidConfirming ? '...' : t('hist_void_print')} disabled={!voidNote.trim() || !voidPinOk} onPress={doVoidAndPrint} /></View>
         </View>
       </Modal>
 
@@ -463,7 +460,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
         <Text style={styles.rowValue}>{payment}</Text>
       </View>
 
-      <View style={styles.payRow}> <Text style={styles.rowLabel}>{t('hist_mode')}</Text> <Text style={styles.rowValue}>{txn.mode}</Text> </View><View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_table')}</Text> <Text style={styles.rowValue}>{txn.table ?? '-'}</Text> </View><View style={styles.payRow}> <Text style={styles.rowLabel}>{t('c_cashier')}</Text> <Text style={styles.rowValue}>{txn.cashier}</Text> </View><View style={styles.divider} />
+      <View style={styles.payRow}><Text style={styles.rowLabel}>{t('hist_mode')}</Text><Text style={styles.rowValue}>{txn.mode}</Text></View><View style={styles.payRow}><Text style={styles.rowLabel}>{t('c_table')}</Text><Text style={styles.rowValue}>{txn.table ?? '-'}</Text></View><View style={styles.payRow}><Text style={styles.rowLabel}>{t('c_cashier')}</Text><Text style={styles.rowValue}>{txn.cashier}</Text></View><View style={styles.divider} />
       {txn.items.map((it, idx) => (
         <View key={idx} style={styles.itemRow}>
           <View style={styles.qtyCircle}>
@@ -487,7 +484,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
       </View>
       <View style={styles.row}>
         <Text style={styles.rowLabel}>{t('c_subtotal')}</Text>
-        <Text style={styles.rowValue}>{rp(txn.subtotal)}</Text> </View><View style={styles.row}> <Text style={styles.totalLabel}>{t('c_total')}</Text> <Text style={styles.totalValue}>{rp(txn.total)}</Text>
+        <Text style={styles.rowValue}>{rp(txn.subtotal)}</Text></View><View style={styles.row}><Text style={styles.totalLabel}>{t('c_total')}</Text><Text style={styles.totalValue}>{rp(txn.total)}</Text>
       </View>
 
       <View style={styles.detailBtns}>

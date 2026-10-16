@@ -36,8 +36,8 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // Drawer Android asli meluncur dari KIRI - samakan (sebelumnya panel di kanan).
   // Lebar adaptif: 300 phone, 340 tablet.
   const drawerW = isTablet ? 340 : 300;
-  // Satu nilai progress (0 tertutup → 1 terbuka) menggerakkan panel DAN scrim
-  // sekaligus, jadi keduanya selalu sinkron dalam satu clock animasi.
+  // Satu-satunya animasi adalah panel meluncur (translateX, satu clock);
+  // scrim tampil instan tanpa fade agar tak terbaca sebagai animasi kedua.
   // Modal sendiri pakai animationType="none" agar tidak ada animasi fade ganda.
   const progress = useRef(new Animated.Value(0)).current;
   // Tetap me-mount selama animasi tutup berjalan, baru unmount setelah selesai.
@@ -94,7 +94,6 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   }, [visible, shiftOpenProp]);
   const shiftOpen = shiftOpenProp ?? shiftDbOpen;
   const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-drawerW, 0] });
-  const scrimOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 0.55] });
   if (!rendered) return null;
   // Ikon nav_* bawaan APK: 8 berkas utk 10 item - Tables memakai nav_order
   // (sama-sama permukaan order) dan Expense memakai nav_petty_cash
@@ -172,9 +171,9 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
             <Text style={styles.logoutText}>{t('action_logout')}</Text>
           </Pressable>
         </Animated.View>
-        <Animated.View style={[styles.scrimWrap, { opacity: scrimOpacity }]}>
+        <View style={styles.scrimWrap}>
           <Pressable style={styles.scrim} onPress={onClose} />
-        </Animated.View>
+        </View>
       </View>
     </Modal>
   );
@@ -182,7 +181,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
 
 const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row' },
-  scrimWrap: { flex: 1 },
+  scrimWrap: { flex: 1, opacity: 0.55 },
   scrim: { flex: 1, backgroundColor: colors.navyDark },
   panel: { backgroundColor: colors.white, paddingBottom: 24 },
   head: { backgroundColor: colors.navy, paddingTop: 56, paddingBottom: 18, paddingHorizontal: 18 },
