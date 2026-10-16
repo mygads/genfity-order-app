@@ -11,6 +11,7 @@
  * menampilkan pratinjau struk. Byte ESC/POS dirakit di src/lib/escpos.ts.
  */
 import { Platform } from 'react-native';
+import GenfityPrinterSpec from '../specs/GenfityPrinter';
 
 export type PrinterTransport = 'lan' | 'bt' | 'usb';
 export type PrintResult =
@@ -31,17 +32,14 @@ interface NativePrinter {
   printUsb?: (vid: number, pid: number, base64: string) => Promise<number>;
   listBondedBt?: () => Promise<Array<{ name: string; mac: string }>>;
   openDrawer?: (target: string) => Promise<boolean>;
+  startWsService?: () => Promise<boolean>;
+  stopWsService?: () => Promise<boolean>;
 }
 
-// Modul native hanya ada di dev-client; di Expo Go/web: undefined.
+// Modul native hanya ada di dev-client/APK produksi; di Expo Go/web:
+// src/specs/GenfityPrinter me-resolve null (NativeModules kosong).
 function native(): NativePrinter | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const m = require('../specs/GenfityPrinter').default;
-    return (m ?? null) as NativePrinter | null;
-  } catch {
-    return null;
-  }
+  return (GenfityPrinterSpec ?? null) as NativePrinter | null;
 }
 
 /** True bila modul native printer tersedia (dev-client / APK produksi). */
@@ -125,4 +123,21 @@ export async function openCashDrawer(target: PrinterTarget): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Foreground service WS realtime (Android dev-client/APK). Best-effort:
+ * false di Expo Go/web atau bila modul tak menyediakan — realtime JS
+ * (lib/realtime.ts) tetap jalan selama aplikasi foreground.
+ */
+export async function setWsForeground(on: boolean): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const n = native();
+  try {
+    if (on && n?.startWsService) return await n.startWsService();
+    if (!on && n?.stopWsService) return await n.stopWsService();
+  } catch {
+    /* abaikan */
+  }
+  return false;
 }

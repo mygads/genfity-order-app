@@ -1,7 +1,7 @@
 import { Alert, Platform } from 'react-native';
-import { buildReceiptBytes, type EscReceipt } from './escpos';
+import { buildKitchenTicketBytes, buildReceiptBytes, type EscKitchenTicket, type EscReceipt } from './escpos';
 import { getJSON } from './storage';
-import { printBytes, type PrinterTarget } from '../native/printer';
+import { openCashDrawer, printBytes, type PrinterTarget } from '../native/printer';
 
 export type PrintOutcome =
   | { ok: true; bytes: number; printer: string }
@@ -19,6 +19,26 @@ interface StoredStation {
 
 const LS_STATIONS = 'genfity.printer.stations';
 
+/** Petakan satu station tersimpan ke target kirim (BT MAC / LAN IP:port / USB VID/PID). */
+function targetOf(d: StoredStation): PrinterTarget | null {
+  if (d.conn === 'LAN') {
+    const [host, portRaw] = d.address.split(':');
+    const h = (host ?? '').trim();
+    if (!h) return null;
+    return { transport: 'lan', host: h, port: Number(portRaw ?? 9100) || 9100 };
+  }
+  if (d.conn === 'Star') {
+    const m = d.address.match(/(\d+)\s*\/\s*(\d+)/);
+    return {
+      transport: 'usb',
+      vendorId: m ? Number(m[1]) : 0,
+      productId: m ? Number(m[2]) : 0,
+    };
+  }
+  if (!d.address.trim()) return null;
+  return { transport: 'bt', address: d.address.trim() };
+}
+
 /** Target kirim dari stasiun default (kasir) yang tersimpan di pengaturan. */
 async function defaultStation(): Promise<{ target: PrinterTarget; name: string } | null> {
   try {
@@ -29,28 +49,32 @@ async function defaultStation(): Promise<{ target: PrinterTarget; name: string }
       stations.find((s) => s.role === 'Kasir') ??
       stations[0];
     if (!d) return null;
-    if (d.conn === 'LAN') {
-      const [host, portRaw] = d.address.split(':');
-      const h = (host ?? '').trim();
-      if (!h) return null;
-      return {
-        target: { transport: 'lan', host: h, port: Number(portRaw ?? 9100) || 9100 },
-        name: d.name,
-      };
-    }
-    if (d.conn === 'Star') {
-      const m = d.address.match(/(\d+)\s*\/\s*(\d+)/);
-      return {
-        target: {
-          transport: 'usb',
-          vendorId: m ? Number(m[1]) : 0,
-          productId: m ? Number(m[2]) : 0,
-        },
-        name: d.name,
-      };
-    }
-    if (!d.address.trim()) return null;
-    return { target: { transport: 'bt', address: d.address.trim() }, name: d.name };
+    const target = targetOf(d);
+    if (!target) return null;
+    return { target, name: d.name };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cari station dapur/checker: cocokkan id kanonis (ST-DAPUR/st-dapur/…)
+ * atau peran, tanpa peduli huruf. Kembalikan target + nama bila alamat ada.
+ */
+async function kitchenStation(want: string): Promise<{ target: PrinterTarget; name: string } | null> {
+  try {
+    const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
+    const key = want.trim().toLowerCase();
+    const role = /check/.test(key) ? 'checker' : /label/.test(key) ? 'label' : /dapur|kitchen|bar/.test(key) ? 'dapur' : '';
+    const d =
+      stations.find((s) => s.id.toLowerCase() === key) ??
+      stations.find((s) => role && s.role.toLowerCase() === role) ??
+      stations.find((s) => role && s.id.toLowerCase().includes(role === 'dapur' ? 'dapur' : role)) ??
+      null;
+    if (!d) return null;
+    const target = targetOf(d);
+    if (!target) return null;
+    return { target, name: d.name };
   } catch {
     return null;
   }
@@ -91,6 +115,48 @@ export async function printReceiptData(r: EscReceipt): Promise<PrintOutcome> {
     return { ok: false, reason: res.reason, detail: res.detail };
   }
   return { ok: true, bytes: res.bytes, printer: d.name };
+}
+
+/**
+ * Cetak tiket dapur/checker ke station perannya (bukan printer kasir).
+ * `station`: id kanonis ('ST-DAPUR') atau nama peran ('Dapur'/'Checker').
+ */
+export async function printKitchenTicket(station: string, t: EscKitchenTicket): Promise<PrintOutcome> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.print === 'function') {
+    window.print();
+    return { ok: true, bytes: 0, printer: 'OS print' };
+  }
+  const bytes = buildKitchenTicketBytes({ ...t, station });
+  const d = await kitchenStation(station);
+  if (!d) {
+    Alert.alert(
+      'Cetak Tiket Dapur',
+      `Station "${station}" belum punya alamat printer. Atur di Pengaturan → Printer lalu coba lagi.`,
+    );
+    return { ok: false, reason: 'no-printer' };
+  }
+  const res = await printBytes(d.target, bytes);
+  if (!res.ok) {
+    Alert.alert(
+      'Cetak Tiket Dapur',
+      res.reason === 'need-dev-client'
+        ? `Tiket ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
+        : `Kirim ke ${d.name} gagal: ${res.detail ?? res.reason}.`,
+    );
+    return { ok: false, reason: res.reason, detail: res.detail };
+  }
+  return { ok: true, bytes: res.bytes, printer: d.name };
+}
+
+/**
+ * Tendang laci kas via printer default. Best-effort (false = tak ada
+ * printer native / gagal) — pemanggil (struk tunai) boleh abaikan.
+ */
+export async function openDefaultDrawer(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const d = await defaultStation();
+  if (!d) return false;
+  return openCashDrawer(d.target);
 }
 
 /**

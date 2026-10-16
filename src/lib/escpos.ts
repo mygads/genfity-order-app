@@ -15,12 +15,27 @@ export interface EscReceipt {
   addr?: string;
   trx?: string;
   cashier?: string;
+  datetime?: string;
   items: EscItem[];
   subtotal: number;
   discount?: number;
+  /** Service charge eksklusif (Rp). Label cetak "Service 5%". */
   service?: number;
+  /** PPN inklusif 11/111 — info-only, TIDAK menambah total. */
+  tax?: number;
+  /** Fee platform ESB/marketplace 5% (kontrak §5). */
+  feeESB?: number;
+  voucherCode?: string;
+  voucherAmount?: number;
+  ongkir?: number;
+  /** Pembulatan ke Rp 100 (bisa negatif). */
+  rounding?: number;
   total: number;
   method?: string;
+  /** Tunai diterima (Rp). */
+  paid?: number;
+  /** Kembalian (Rp). */
+  change?: number;
   footer?: string;
 }
 
@@ -82,23 +97,73 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.addr) text(out, r.addr);
   if (r.trx) text(out, r.trx);
   if (r.cashier) text(out, r.cashier);
+  if (r.datetime) text(out, r.datetime);
   push(out, ESC, 0x61, 0); // rata kiri
   text(out, '-'.repeat(ESC_COLS));
   for (const i of r.items) {
     row2(out, `${i.qty}x ${i.name}`, escRp(i.qty * i.price));
   }
   text(out, '-'.repeat(ESC_COLS));
+  // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
+  // eksklusif → PPN info-only → feeESB → voucher → ongkir → rounding → total.
   row2(out, 'Subtotal', escRp(r.subtotal));
-  if (r.discount) row2(out, 'Diskon', `-${escRp(r.discount).replace('Rp ', 'Rp ')}`);
+  if (r.discount) row2(out, 'Diskon', `-${escRp(r.discount)}`);
   if (r.service) row2(out, 'Service 5%', escRp(r.service));
+  if (r.tax) row2(out, 'PPN (Inkl.)', escRp(r.tax));
+  if (r.feeESB) row2(out, 'Fee Layanan', escRp(r.feeESB));
+  if (r.voucherCode || r.voucherAmount) {
+    row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${escRp(r.voucherAmount)}` : '-');
+  }
+  if (r.ongkir) row2(out, 'Ongkir', escRp(r.ongkir));
+  if (r.rounding) row2(out, 'Pembulatan', escRp(r.rounding));
   push(out, ESC, 0x45, 1); // tebal
   row2(out, 'TOTAL', escRp(r.total));
   push(out, ESC, 0x45, 0);
-  if (r.method) row2(out, 'Bayar', r.method);
+  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${escRp(r.paid)}` : r.method);
+  if (r.change) row2(out, 'Kembali', escRp(r.change));
   push(out, ESC, 0x61, 1);
   text(out, r.footer ?? 'Terima kasih');
   push(out, LF, LF, LF, LF);
   push(out, GS, 0x56, 0x00); // potong kertas
+  return Uint8Array.from(out);
+}
+
+export interface EscKitchenTicket {
+  station: string;
+  no: string;
+  table?: string;
+  mode?: string;
+  time?: string;
+  cashier?: string;
+  items: { name: string; qty: number; note?: string }[];
+}
+
+/** Tiket dapur/checker: tanpa harga (opsional total estimasi), tanpa potong? tetap potong. */
+export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
+  const out: number[] = [];
+  push(out, ESC, 0x40);
+  push(out, ESC, 0x61, 1);
+  push(out, GS, 0x21, 0x11);
+  text(out, t.station.toUpperCase());
+  push(out, GS, 0x21, 0x00);
+  push(out, ESC, 0x45, 1);
+  text(out, t.no);
+  push(out, ESC, 0x45, 0);
+  if (t.table) text(out, `Meja: ${t.table}`);
+  if (t.mode) text(out, t.mode);
+  if (t.time) text(out, t.time);
+  if (t.cashier) text(out, t.cashier);
+  push(out, ESC, 0x61, 0);
+  text(out, '-'.repeat(ESC_COLS));
+  for (const i of t.items) {
+    push(out, ESC, 0x45, 1);
+    text(out, `${i.qty}x ${i.name}`);
+    push(out, ESC, 0x45, 0);
+    if (i.note) text(out, `  * ${i.note}`);
+  }
+  text(out, '-'.repeat(ESC_COLS));
+  push(out, LF, LF, LF, LF);
+  push(out, GS, 0x56, 0x00);
   return Uint8Array.from(out);
 }
 
