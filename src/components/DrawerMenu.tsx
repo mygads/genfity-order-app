@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
 import { logout } from '../session';
@@ -36,40 +36,10 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // Drawer Android asli meluncur dari KIRI - samakan (sebelumnya panel di kanan).
   // Lebar adaptif: 300 phone, 340 tablet.
   const drawerW = isTablet ? 340 : 300;
-  // Satu-satunya animasi adalah panel meluncur (translateX, satu clock);
-  // scrim tampil instan tanpa fade agar tak terbaca sebagai animasi kedua.
-  // Modal sendiri pakai animationType="none" agar tidak ada animasi fade ganda.
-  const progress = useRef(new Animated.Value(0)).current;
-  // Tetap me-mount selama animasi tutup berjalan, baru unmount setelah selesai.
-  const [rendered, setRendered] = useState(visible);
-  useEffect(() => {
-    let anim: Animated.CompositeAnimation | undefined;
-    if (visible) {
-      setRendered(true);
-      anim = Animated.timing(progress, {
-        toValue: 1,
-        duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      });
-      anim.start();
-    } else if (rendered) {
-      anim = Animated.timing(progress, {
-        toValue: 0,
-        duration: 200,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      });
-      anim.start(({ finished }) => {
-        // finished=false berarti animasi disela (mis. dibuka lagi dengan cepat):
-        // jangan unmount agar reversal berjalan mulus dari posisi saat ini.
-        if (finished) setRendered(false);
-      });
-    }
-    // Hentikan animasi sebelumnya saat toggle cepat → tidak ada flicker/tumpuk.
-    return () => anim?.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, progress]);
+  // Drawer tampil/hilang SEKEtika tanpa animasi apa pun (keputusan produk:
+  // slide + scrim terbaca sebagai dua animasi berurutan di HP).
+  // Modal tetap animationType="none". Buka-tutup dikontrol murni oleh `visible`.
+  if (!visible) return null;
   // Status shift nyata ala CashierScreen (tr_shiftlog): hijau = buka,
   // merah = tutup, kuning = belum termuat/DB kosong. Prop shiftOpen menimpa.
   const [shiftDbOpen, setShiftDbOpen] = useState<boolean | null>(null);
@@ -93,8 +63,6 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     };
   }, [visible, shiftOpenProp]);
   const shiftOpen = shiftOpenProp ?? shiftDbOpen;
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-drawerW, 0] });
-  if (!rendered) return null;
   // Ikon nav_* bawaan APK: 8 berkas utk 10 item - Tables memakai nav_order
   // (sama-sama permukaan order) dan Expense memakai nav_petty_cash
   // (sama-sama arus kas keluar); Member memakai nav_attendance (direktori orang).
@@ -115,9 +83,9 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     navigate(route);
   };
   return (
-    <Modal visible={rendered} transparent animationType="none" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.root}>
-        <Animated.View style={[styles.panel, { width: drawerW, transform: [{ translateX }] }]}>
+        <View style={[styles.panel, { width: drawerW }]}>
           <View style={styles.head}>
             <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? 'ESB Cabang Poris'}</Text>
             <View style={styles.shiftRow}>
@@ -170,7 +138,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
             }}>
             <Text style={styles.logoutText}>{t('action_logout')}</Text>
           </Pressable>
-        </Animated.View>
+        </View>
         <View style={styles.scrimWrap}>
           <Pressable style={styles.scrim} onPress={onClose} />
         </View>
