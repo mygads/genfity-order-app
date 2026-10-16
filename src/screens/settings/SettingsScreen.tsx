@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
 import { useLang, type Lang } from '../../lib/i18n';
-import { logout } from '../../session';
+import { getSession, logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
+import { requireAccess } from '../../lib/access';
 import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -74,13 +75,42 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const go = (route: string) => navigation?.navigate(route);
 
+  /** Kunci akses RBAC: userId sesi bila ada, else username. */
+  const sessionKey = () => {
+    const s = getSession();
+    return s?.userId || s?.username || '';
+  };
+
+  /**
+   * Gate RBAC settings.edit: deny = Alert + block (tanpa eskalasi).
+   * Fail-open: DB belum siap / tanpa baris = allow.
+   */
+  const guardSettingsEdit = async (): Promise<boolean> => {
+    try {
+      const gate = await requireAccess(sessionKey(), 'settings.edit');
+      if (!gate.ok) {
+        Alert.alert('Akses ditolak / Access denied', `Akses ditolak: perlu supervisor/admin (${gate.reason})`);
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
   const pickEnv = (e: ServerEnv) => {
-    setServerEnv(e);
-    setServerEnvState(e);
+    void guardSettingsEdit().then((ok) => {
+      if (!ok) return;
+      setServerEnv(e);
+      setServerEnvState(e);
+    });
   };
 
   const saveCustom = () => {
-    setCustomBaseUrl(customUrl);
+    void guardSettingsEdit().then((ok) => {
+      if (!ok) return;
+      setCustomBaseUrl(customUrl);
+    });
   };
 
   /** Push/pull langsung dari Pengaturan (pola sama dengan SyncScreen).
@@ -123,10 +153,13 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const saveTerminal = () => {
-    const next = { terminalCode: draftCode.trim(), branchId: draftBranchId.trim(), branchName: draftBranchName.trim() };
-    setTerminal(next);
-    setTerminalState(next);
-    setTerminalOpen(false);
+    void guardSettingsEdit().then((ok) => {
+      if (!ok) return;
+      const next = { terminalCode: draftCode.trim(), branchId: draftBranchId.trim(), branchName: draftBranchName.trim() };
+      setTerminal(next);
+      setTerminalState(next);
+      setTerminalOpen(false);
+    });
   };
 
   const pickLang = (l: Lang) => setLang(l);

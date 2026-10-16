@@ -7,6 +7,10 @@ import { getItem, removeItem, setItem } from './lib/storage';
 export interface Session {
   name: string;
   username: string;
+  /** Peran hasil login (mis. 'admin'/'supervisor'/'kasir'); default 'kasir'. */
+  role?: string;
+  /** Id user login (kunci tabel ms_posuseraccess); fallback username bila kosong. */
+  userId?: string;
   outlet: string;
   shift: string;
   clockIn: string;
@@ -16,6 +20,7 @@ export interface Session {
 const DEMO: Session = {
   name: 'Gista',
   username: 'gista.kasir',
+  role: 'kasir',
   outlet: 'Genfity Cabang Poris',
   shift: 'Shift Pagi',
   clockIn: '08:57',
@@ -45,7 +50,10 @@ function restore(): void {
   void getItem(LS_SESSION).then((raw) => {
     if (!raw || current) return;
     try {
-      current = JSON.parse(raw) as Session;
+      const parsed = JSON.parse(raw) as Session;
+      // Kompatibel mundur: sesi lama tanpa role dibaca sebagai 'kasir'.
+      if (!parsed.role) parsed.role = 'kasir';
+      current = parsed;
       emit();
     } catch {
       /* abaikan */
@@ -55,6 +63,7 @@ function restore(): void {
 
 export function getSession(): Session | null {
   restore();
+  if (current && !current.role) current.role = 'kasir';
   return current;
 }
 
@@ -77,13 +86,16 @@ export function loginDemo(): Session {
  * validateEmployee; outlet/shift/kas ikut sesi berjalan bila ada,
  * else default demo. loginDemo tetap ada untuk kompatibilitas alur lain.
  */
-export function loginEmployee(e: { nama: string; username: string }): Session {
+export function loginEmployee(e: { nama: string; username: string; role?: string; userId?: string }): Session {
   restore();
   const base = current ?? DEMO;
+  const userId = (e.userId ?? '').trim();
   current = {
     ...base,
     name: e.nama.trim() || base.name,
     username: e.username.trim() || base.username,
+    role: (e.role ?? '').trim() || 'kasir',
+    ...(userId ? { userId } : {}),
   };
   persist();
   emit();

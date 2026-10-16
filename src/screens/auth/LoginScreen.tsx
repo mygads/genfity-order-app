@@ -139,7 +139,7 @@ export default function LoginScreen({ navigation }: Props) {
     } catch {
       /* hash lokal opsional - server tetap sumber benar */
     }
-    loginEmployee({ nama: s.nama, username: uname });
+    loginEmployee({ nama: s.nama, username: uname, role: s.role, userId: s.userId });
     // Realtime global nyala sekali saat login (sebelumnya hanya nyala bila
     // pengguna membuka layar Dapur/ESB/Display). Foreground service
     // best-effort di dev-client/APK agar WS hidup saat layar mati.

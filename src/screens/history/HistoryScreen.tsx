@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
-  useLang } from '../../lib/i18n';function statusColor(s: TxnStatus) {
+  useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
   return colors.orangeDark;}function statusBg(s: TxnStatus) {
@@ -72,7 +72,16 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   /** Tandai void di state DB langsung (tanpa overlay demo); persist via persistVoidDb. */ const markVoided = (id: string) => {
     setDbTxns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev)); }; /** PIN supervisor 6 digit wajib sebelum void (pola authorizeSupervisor ala CancelScreen, fail-closed saat offline). */ const voidPinOk = voidPin.replace(/\D/g, '').length === 6 && !voidConfirming; const runVoidAuthed = (print: boolean) => { if (!selected || !voidPinOk) return; const target = selected; const reason = voidNote.trim(); if (!reason) return; setVoidConfirming(true); setVoidAuthMsg(''); void authorizeSupervisor(voidPin).then((res) => { if (!res.ok) {
-      setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setVoidConfirming(false); return; } void persistVoid(target, reason).catch(() => undefined); markVoided(target.id); setVoidConfirming(false); setConfirmVoid(false); setVoidNote(''); setVoidPin(''); setVoidAuthMsg(''); if (print) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, }); } }); }; const doVoid = () => { runVoidAuthed(false); };
+      setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setVoidConfirming(false); return; } void persistVoid(target, reason).catch(() => undefined); markVoided(target.id); setVoidConfirming(false); setConfirmVoid(false); setVoidNote(''); setVoidPin(''); setVoidAuthMsg(''); if (print) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, }); } }); };   /** Gate RBAC order.void: deny = eskalasi ke PIN supervisor di modal
+   * (bukan hard block); fail-open (allow/db-unready) buka modal biasa. */
+  const guardVoidOpen = async () => {
+    try {
+      const s = getSession();
+      const gate = await requireAccess(s?.userId || s?.username || '', 'order.void');
+      if (!gate.ok) setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+    } catch { /* abaikan - modal PIN tetap dibuka */ }
+    setConfirmVoid(true);
+  }; const doVoid = () => { runVoidAuthed(false); };
 
   const doVoidAndPrint = () => { runVoidAuthed(true); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
     if (!selected) return;
@@ -111,7 +120,7 @@ import { useEffect, useMemo, useState } from 'react';import {
         items: selected?.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: selected?.discount ?? 0, mode: selected?.mode, ...(selected?.table ? { table: selected.table } : {}), })
       }
       onChangePay={() => setPayModal(true)}
-      onVoid={() => setConfirmVoid(true)}
+      onVoid={() => { void guardVoidOpen(); }}
       onVoidItem={() => navigation?.navigate('Cancel', { orderId: selected?.no, table: selected?.table ?? '-', cashier: selected?.cashier ?? '-', total: selected?.total ?? 0, }) }
       onEmail={() => { setMailMsg(''); setMailTo(''); setMailOpen(true); }}
       onClose={() => setSelectedId(null)}
