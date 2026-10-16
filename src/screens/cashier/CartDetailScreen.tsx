@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = {
@@ -8,22 +10,42 @@ type Nav = {
   goBack: () => void;
 };
 
-type Voucher = { code: string; amount: number };
+type Voucher = { code: string; amount: number; kind?: string };
 
 type Props = {
   navigation?: Nav;
-  route?: { params?: { items?: CartItem[]; total?: number; voucher?: Voucher } };
+  route?: {
+    params?: {
+      items?: CartItem[];
+      total?: number;
+      voucher?: Voucher;
+      mode?: string;
+      table?: string;
+      customer?: string;
+      ongkir?: number;
+      subtotal?: number;
+    };
+  };
 };
 
 export default function CartDetailScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const [items, setItems] = useState<CartItem[]>(route?.params?.items ?? []);
   const [voucher, setVoucher] = useState<Voucher | null>(route?.params?.voucher ?? null);
+  const [mode] = useState(route?.params?.mode ?? 'DINE IN');
+  const [table] = useState(route?.params?.table ?? '');
+  const [customer] = useState(route?.params?.customer ?? '');
+  /** Ongkir fungsional - dibawa dari kasir, bisa diubah di sini, diteruskan ke Pay. */
+  const [ongkir, setOngkir] = useState(route?.params?.ongkir ?? 0);
+  const [showOngkir, setShowOngkir] = useState(false);
+  const [ongkirDraft, setOngkirDraft] = useState('');
   /** Sinkron ulang saat kembali dari PromotionList (params di-merge ke rute yang sudah ada). */
   useEffect(() => {
     if (route?.params?.voucher) setVoucher(route.params.voucher);
     if (route?.params?.items && route.params.items.length > 0) setItems(route.params.items);
+    if (route?.params?.ongkir !== undefined) setOngkir(Math.max(0, route.params.ongkir));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params]);
   const routeTotal = route?.params?.total;
@@ -39,11 +61,22 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     [active],
   );
   const discountTotal = useMemo(() => active.reduce((s, c) => s + c.discount, 0), [active]);
-  const voucherAmt = Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
+  /** Voucher ongkir (GRATISONGKIR) memotong ongkir bila ongkir > 0, selain itu diskon flat. */
+  const isOngkirVoucher = voucher?.code === 'GRATISONGKIR' || voucher?.kind === 'Ongkir';
+  const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
+  const voucherAmt = useOngkirCut
+    ? 0
+    : Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
   const subtotal = subtotalGross - discountTotal - voucherAmt;
   const service = Math.round(subtotal * 0.05);
-  const pb1incl = Math.round((subtotal * 10) / 110);
-  const total = subtotal + service;
+  /** PPN 11% inclusive (info-only): dasar sudah termasuk pajak. */
+  const ppnIncl = Math.round((subtotal * 11) / 111);
+  const ongkirCut = useOngkirCut ? Math.min(voucher?.amount ?? 0, ongkir) : 0;
+  const ongkirNet = ongkir - ongkirCut;
+  const bruto = subtotal + service + ongkirNet;
+  /** Pembulatan ke kelipatan Rp 100 terdekat. */
+  const total = Math.round(bruto / 100) * 100;
+  const rounding = total - bruto;
   const itemCount = active.reduce((s, c) => s + c.qty, 0);
 
   const incQty = (id: string) =>
@@ -75,24 +108,47 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     setEditingId(null);
   };
 
+  const saveOngkir = () => {
+    const n = Math.max(0, Number(ongkirDraft.replace(/[^0-9]/g, '')) || 0);
+    setOngkir(n);
+    setShowOngkir(false);
+  };
+
+  const modeLabel = table ? `${mode} · ${t('table')} ${table}` : mode;
+
   const goPay = () =>
-    navigation?.navigate('Pay', { total, items, ...(voucher ? { voucher: voucher.code } : {}) });
-  const goPromo = () => navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal });
+    navigation?.navigate('Pay', {
+      total,
+      items,
+      ...(voucher ? { voucher: voucher.code } : {}),
+      mode,
+      ...(table ? { table } : {}),
+      ...(customer ? { customer } : {}),
+      ongkir: ongkirNet,
+    });
+  const goPromo = () =>
+    navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal, ongkir });
   const goSave = () => {
     setSavedTick(true);
-    navigation?.navigate('LoadOrder');
+    navigation?.navigate('LoadOrder', {
+      newOrder: {
+        title: `${modeLabel} · ${customer.trim() || t('guestFallback')}`,
+        mode,
+        ...(table ? { table } : {}),
+        items,
+        ongkir: ongkirNet,
+      },
+    });
   };
 
   return (
     <View style={styles.root}>
-      {/* Header navy */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation?.goBack()} hitSlop={12}>
-          <Text style={styles.back}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Detail Pesanan</Text>
-        <Text style={styles.headerCount}>{itemCount} item</Text>
-      </View>
+      {/* Header navy judul tengah + sub mode/meja */}
+      <ScreenHeader
+        title={t('orderDetail')}
+        sub={`${modeLabel} · ${itemCount} item`}
+        onBack={() => navigation?.goBack()}
+      />
 
       <ScrollView style={styles.list} contentContainerStyle={[styles.listContent, isTablet && wideCenter]}>
         {items.map((c, idx) => (
@@ -126,7 +182,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                       style={[styles.stepBtn, c.qty <= 1 && styles.stepOff]}
                       onPress={() => decQty(c.id)}
                       disabled={c.qty <= 1}>
-                      <Text style={styles.stepT}>−</Text>
+                      <Text style={styles.stepT}>-</Text>
                     </TouchableOpacity>
                     <Text style={styles.stepQty}>{c.qty}</Text>
                     <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(c.id)}>
@@ -186,10 +242,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               style={styles.emptyImg}
               resizeMode="contain"
             />
-            <Text style={styles.emptyTitle}>Keranjang masih kosong</Text>
-            <Text style={styles.emptySub}>Tambah menu dari kasir untuk mulai mencatat pesanan.</Text>
+            <Text style={styles.emptyTitle}>{t('cartEmpty')}</Text>
+            <Text style={styles.emptySub}>{t('cartEmptyHint')}</Text>
             <TouchableOpacity style={styles.emptyCta} onPress={() => navigation?.navigate('Cashier')}>
-              <Text style={styles.emptyCtaText}>＋ Tambah Menu</Text>
+              <Text style={styles.emptyCtaText}>＋ {t('addMenu')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -197,12 +253,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {/* Voucher / promo ringkas */}
         {items.length > 0 && (
           <View style={styles.promoCard}>
-            <Text style={styles.promoTitle}>Voucher / Promo</Text>
+            <Text style={styles.promoTitle}>{t('voucherPromo')}</Text>
             {voucher ? (
               <View style={styles.promoRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.promoCode}>{voucher.code}</Text>
-                  <Text style={styles.promoDesc}>Potongan {rp(voucherAmt)}</Text>
+                  <Text style={styles.promoDesc}>{useOngkirCut ? `Potongan ongkir ${rp(ongkirCut)}` : `Potongan ${rp(voucherAmt)}`}</Text>
                 </View>
                 <TouchableOpacity onPress={() => setVoucher(null)} hitSlop={10}>
                   <Text style={styles.promoRemove}>Hapus ✕</Text>
@@ -210,12 +266,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               </View>
             ) : (
               <TouchableOpacity style={styles.promoBtn} onPress={goPromo}>
-                <Text style={styles.promoBtnT}>＋ Pakai Promo / Voucher</Text>
+                <Text style={styles.promoBtnT}>＋ {t('usePromo')}</Text>
               </TouchableOpacity>
             )}
             {voucher ? (
               <TouchableOpacity onPress={goPromo}>
-                <Text style={styles.promoChange}>Ganti voucher ›</Text>
+                <Text style={styles.promoChange}>{t('changeVoucher')}</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -225,35 +281,59 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {items.length > 0 && (
           <View style={styles.totals}>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Subtotal (bruto)</Text>
+              <Text style={styles.sumLabel}>{t('subtotalGross')}</Text>
               <Text style={styles.sumValue}>{rp(subtotalGross)}</Text>
             </View>
             {discountTotal > 0 && (
               <View style={styles.sumRow}>
-                <Text style={styles.sumLabel}>Diskon item</Text>
+                <Text style={styles.sumLabel}>{t('itemDiscount')}</Text>
                 <Text style={[styles.sumValue, styles.red]}>-{rp(discountTotal)}</Text>
               </View>
             )}
-            {voucher && (
+            {voucher && !useOngkirCut && (
               <View style={styles.sumRow}>
                 <Text style={styles.sumLabel}>Voucher {voucher.code}</Text>
                 <Text style={[styles.sumValue, styles.red]}>-{rp(voucherAmt)}</Text>
               </View>
             )}
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Subtotal (net)</Text>
+              <Text style={styles.sumLabel}>{t('subtotalNet')}</Text>
               <Text style={styles.sumValue}>{rp(subtotal)}</Text>
             </View>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Pajak PB1 (incl)</Text>
-              <Text style={styles.sumValue}>{rp(pb1incl)}</Text>
+              <Text style={styles.sumLabel}>{t('taxIncl')}</Text>
+              <Text style={styles.sumValue}>{rp(ppnIncl)}</Text>
             </View>
             <View style={styles.sumRow}>
-              <Text style={styles.sumLabel}>Service 5% (excl)</Text>
+              <Text style={styles.sumLabel}>{t('serviceExcl')}</Text>
               <Text style={styles.sumValue}>{rp(service)}</Text>
             </View>
+            <View style={styles.sumRow}>
+              <Text style={styles.sumLabel}>{t('deliveryFee')}</Text>
+              <View style={styles.ongkirVal}>
+                <Text style={styles.sumValue}>{rp(ongkirNet)}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setOngkirDraft(ongkir > 0 ? String(ongkir) : '');
+                    setShowOngkir(true);
+                  }}
+                  hitSlop={8}>
+                  <Text style={styles.ongkirEdit}>{ongkir > 0 ? t('editAction') : t('fillAction')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            {voucher && useOngkirCut && (
+              <View style={styles.sumRow}>
+                <Text style={styles.sumLabel}>Voucher {voucher.code}</Text>
+                <Text style={[styles.sumValue, styles.red]}>-{rp(ongkirCut)}</Text>
+              </View>
+            )}
+            <View style={styles.sumRow}>
+              <Text style={styles.sumLabel}>Rounding</Text>
+              <Text style={styles.sumValue}>{rp(rounding)}</Text>
+            </View>
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalLabel}>{t('total')}</Text>
               <Text style={styles.totalValue}>{rp(total)}</Text>
             </View>
           </View>
@@ -263,54 +343,80 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         {items.length > 0 && (
           <View style={styles.linksRow}>
             <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', { items, total })}>
-              <Text style={styles.link}>Bagi Bill ›</Text>
+              <Text style={styles.link}>{t('splitBill')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}>
-              <Text style={styles.link}>Pindah Item ›</Text>
+              <Text style={styles.link}>{t('moveItems')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate('BillPreview')}>
-              <Text style={styles.link}>Pratinjau Bill ›</Text>
+              <Text style={styles.link}>{t('billPreview')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}>
-              <Text style={styles.link}>Pindah Meja ›</Text>
+              <Text style={styles.link}>{t('moveTable')}</Text>
             </TouchableOpacity>
           </View>
         )}
       </ScrollView>
 
-      {/* Simpan / Cetak / Bayar — sembunyi saat keranjang 0, ganti CTA tambah menu */}
+      {/* Dialog ongkir: input nominal biaya antar */}
+      <Modal visible={showOngkir} transparent animationType="fade" onRequestClose={() => setShowOngkir(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('ongkirTitle')}</Text>
+            <Text style={styles.modalLabel}>{t('ongkirNominal')}</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={ongkirDraft}
+              onChangeText={setOngkirDraft}
+              keyboardType="numeric"
+              placeholder={rp(0)}
+              placeholderTextColor={colors.faint}
+            />
+            <View style={styles.modalRow}>
+              <TouchableOpacity style={styles.modalGhost} onPress={() => setShowOngkir(false)}>
+                <Text style={styles.modalGhostT}>{t('cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalPrimary} onPress={saveOngkir}>
+                <Text style={styles.modalPrimaryT}>{t('save')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Simpan / Cetak / Bayar - sembunyi saat keranjang 0, ganti CTA tambah menu */}
       <View style={styles.footer}>
         {routeTotal !== undefined && routeTotal !== total && items.length > 0 && (
           <Text style={styles.footerNote}>
-            Total diperbarui dari {rp(routeTotal)} → {rp(total)} setelah perubahan item
+            {t('totalUpdatedA')}{rp(routeTotal)} → {rp(total)}{t('totalUpdatedB')}
           </Text>
         )}
         {savedTick && items.length > 0 && (
-          <Text style={styles.footerNote}>Order tersimpan — buka kembali via Muat.</Text>
+          <Text style={styles.footerNote}>{t('orderSavedNote')}</Text>
         )}
         {items.length === 0 ? (
           <TouchableOpacity style={styles.payBtn} onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={styles.payText}>＋ Tambah Menu ›</Text>
+            <Text style={styles.payText}>＋ {t('addMenu')} ›</Text>
           </TouchableOpacity>
         ) : (
           <>
             <View style={styles.footerRow}>
               <TouchableOpacity style={styles.saveBtn} onPress={goSave}>
-                <Text style={styles.saveText}>🧺 Simpan</Text>
+                <Text style={styles.saveText}>🧺 {t('save')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.printBtn}
                 onPress={() => navigation?.navigate('LoadOrder')}>
-                <Text style={styles.printText}>📂 Muat</Text>
+                <Text style={styles.printText}>📂 {t('load')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.printBtn}
-                onPress={() => navigation?.navigate('Receipt', { total })}>
-                <Text style={styles.printText}>🖨 Cetak</Text>
+                onPress={() => navigation?.navigate('Receipt', { total, mode })}>
+                <Text style={styles.printText}>🖨 {t('printReceipt')}</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity style={styles.payBtn} onPress={goPay}>
-              <Text style={styles.payText}>Bayar | {rp(total)} ›</Text>
+              <Text style={styles.payText}>{t('pay')} | {rp(total)} ›</Text>
             </TouchableOpacity>
           </>
         )}
@@ -321,17 +427,6 @@ export default function CartDetailScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: {
-    backgroundColor: colors.navy,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  back: { color: colors.white, fontSize: 26, fontFamily: fonts.bold },
-  headerTitle: { flex: 1, color: colors.white, fontFamily: fonts.bold, fontSize: 16 },
-  headerCount: { color: colors.navyTint, fontFamily: fonts.regular, fontSize: 12 },
   list: { flex: 1 },
   listContent: { padding: 12, paddingBottom: 24 },
   row: {
@@ -438,6 +533,8 @@ const styles = StyleSheet.create({
   sumLabel: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   sumValue: { fontFamily: fonts.medium, fontSize: 13, color: colors.text },
   red: { color: colors.red },
+  ongkirVal: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  ongkirEdit: { fontFamily: fonts.semibold, fontSize: 12, color: colors.blue },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -478,4 +575,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   payText: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  modalCard: { width: '100%', maxWidth: 360, backgroundColor: colors.white, borderRadius: 12, padding: 16 },
+  modalTitle: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
+  modalLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 12, marginBottom: 6 },
+  modalInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text,
+  },
+  modalRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  modalGhost: { flex: 1, borderWidth: 1, borderColor: colors.line, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
+  modalGhostT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
+  modalPrimary: { flex: 2, backgroundColor: colors.navy, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
+  modalPrimaryT: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
 });

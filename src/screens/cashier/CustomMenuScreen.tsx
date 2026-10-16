@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { colors, fonts, rp, wideCenter } from '../../theme';
+import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav };
+type Route = { params?: { itemId?: string; id?: string; itemName?: string; name?: string } };
+type Props = { navigation?: Nav; route?: Route };
 
 const STATIONS = ['Dapur Utama', 'Bar / Minuman', 'Dessert', 'Lainnya'];
 const QUICK = ['Less Sugar', 'Less Ice', 'Extra Pedas', 'Tanpa MSG', 'Matang Sempurna', 'Sambal Pisah'];
 
-/** Menu custom (custom_menu) — item dadakan harga manual + station dapur + notes. */
-export default function CustomMenuScreen({ navigation }: Props) {
+/** Menu custom (custom_menu) - item dadakan harga manual + station dapur + notes. */
+export default function CustomMenuScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { t } = useLang();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('25000');
   const [qty, setQty] = useState('1');
@@ -21,6 +25,11 @@ export default function CustomMenuScreen({ navigation }: Props) {
   const [added, setAdded] = useState<string[]>([]);
   const [warn, setWarn] = useState('');
 
+  // Item yang sedang diedit/dipilih - id dikirim pemanggil via params route.
+  // Fallback 'p11' mempertahankan perilaku lama bila params belum dikirim.
+  const targetId = route?.params?.itemId ?? route?.params?.id ?? 'p11';
+  const targetName = route?.params?.itemName ?? route?.params?.name ?? 'Sudirman Coffee';
+
   const priceNum = Number(price.replace(/[^0-9]/g, '')) || 0;
   const qtyNum = Math.max(1, Number(qty.replace(/[^0-9]/g, '')) || 1);
 
@@ -29,15 +38,15 @@ export default function CustomMenuScreen({ navigation }: Props) {
 
   const add = () => {
     if (!name.trim()) {
-      setWarn('Isi nama item dulu.');
+      setWarn(t('fillNameFirst'));
       return;
     }
     if (priceNum <= 0) {
-      setWarn('Harga harus lebih dari Rp 0.');
+      setWarn(`${t('pricePositiveA')}${rp(0)}${t('pricePositiveB')}`);
       return;
     }
     setWarn('');
-    const label = `${qtyNum}× ${name.trim()} — ${rp(priceNum * qtyNum)} · ${station}`;
+    const label = `${qtyNum}x ${name.trim()} - ${rp(priceNum * qtyNum)} · ${station}`;
     setAdded((l) => [...l, label]);
     setName('');
     // Teruskan ke cart kasir agar benar-benar masuk order (dulu dead-end lokal).
@@ -49,30 +58,32 @@ export default function CustomMenuScreen({ navigation }: Props) {
   const saveNotes = () => {
     const note = [...notes, free].filter(Boolean).join(' · ');
     // Tempel notes ke item kasir (dulu hilang tanpa params).
-    navigation?.navigate('Cashier', { itemNote: { id: 'p11', note } });
+    navigation?.navigate('Cashier', { itemNote: { id: targetId, note } });
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}>
+      <ScreenHeader title={t('customMenuTitle')} onBack={() => navigation?.goBack()} />
+      <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
       <Text style={styles.meta}>TRX-047 · tambah item di luar katalog</Text>
-      <Text style={styles.sec}>Tambah Menu Custom</Text>
-      <Text style={styles.hint}>Untuk item dadakan — harga manual, tetap masuk struk & dapur.</Text>
+      <Text style={styles.sec}>{t('customMenuSec')}</Text>
+      <Text style={styles.hint}>{t('customMenuHint')}</Text>
       {added.length === 0
-        ? <Text style={styles.empty}>Belum ada item custom — isi form lalu Tambah ke Order.</Text>
+        ? <Text style={styles.empty}>{t('emptyCustom')}</Text>
         : added.map((a) => <Text key={a} style={styles.added}>• {a}</Text>)}
 
-      <Text style={styles.label}>Nama item</Text>
+      <Text style={styles.label}>{t('itemName')}</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="cth: Nasi + Ayam" placeholderTextColor={colors.faint} />
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Harga (Rp)</Text>
-          <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="numeric" />
+          <Text style={styles.label}>{t('price')}</Text>
+          <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="numeric" placeholder={rp(0)} placeholderTextColor={colors.faint} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Qty</Text>
+          <Text style={styles.label}>{t('qty')}</Text>
           <View style={styles.qtyRow}>
             <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(Math.max(1, qtyNum - 1)))}>
-              <Text style={styles.qtyT}>−</Text>
+              <Text style={styles.qtyT}>-</Text>
             </TouchableOpacity>
             <TextInput style={[styles.input, styles.qtyInput]} value={qty} onChangeText={setQty} keyboardType="numeric" />
             <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(qtyNum + 1))}>
@@ -81,7 +92,7 @@ export default function CustomMenuScreen({ navigation }: Props) {
           </View>
         </View>
       </View>
-      <Text style={styles.label}>Station dapur</Text>
+      <Text style={styles.label}>{t('kitchenStation')}</Text>
       <View style={styles.chips}>
         {STATIONS.map((st) => (
           <TouchableOpacity key={st} style={[styles.chip, station === st && styles.chipOn]} onPress={() => setStation(st)}>
@@ -92,12 +103,12 @@ export default function CustomMenuScreen({ navigation }: Props) {
       <Text style={styles.sub2}>{station === 'Dapur Utama' ? 'gorengan · nasi' : station === 'Bar / Minuman' ? 'kopi · jus' : station === 'Dessert' ? 'cake · es' : 'tanpa routing'} · {rp(priceNum)} × {qtyNum} = {rp(priceNum * qtyNum)}</Text>
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <TouchableOpacity style={styles.primary} onPress={add}>
-        <Text style={styles.primaryT}>Tambah ke Order ›</Text>
+        <Text style={styles.primaryT}>{t('addToOrder')}</Text>
       </TouchableOpacity>
 
-      <Text style={styles.sec}>Notes Item</Text>
-      <Text style={styles.hint}>Catatan diteruskan ke KDS / struk dapur.</Text>
-      <Text style={styles.label}>Item · Sudirman Coffee ×1</Text>
+      <Text style={styles.sec}>{t('itemNotes')}</Text>
+      <Text style={styles.hint}>{t('notesHint')}</Text>
+      <Text style={styles.label}>Item · {targetName} ×1</Text>
       <View style={styles.chips}>
         {QUICK.map((q) => (
           <TouchableOpacity key={q} style={[styles.chip, notes.includes(q) && styles.chipOn]} onPress={() => toggleNote(q)}>
@@ -105,26 +116,28 @@ export default function CustomMenuScreen({ navigation }: Props) {
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.label}>Catatan bebas</Text>
-      <TextInput style={styles.input} value={free} onChangeText={setFree} placeholder="Catatan bebas" placeholderTextColor={colors.faint} />
+      <Text style={styles.label}>{t('freeNote')}</Text>
+      <TextInput style={styles.input} value={free} onChangeText={setFree} placeholder={t('freeNote')} placeholderTextColor={colors.faint} />
       <View style={styles.preview}>
         <Text style={styles.prevTitle}>Pratinjau KDS · {station}</Text>
-        <Text style={styles.prevLine}>1× Sudirman Coffee — {[...notes, free].filter(Boolean).join(' · ')}</Text>
+        <Text style={styles.prevLine}>1x {targetName} - {[...notes, free].filter(Boolean).join(' · ')}</Text>
       </View>
       <View style={styles.actions}>
         <TouchableOpacity style={styles.ghost} onPress={() => navigation?.navigate('Kitchen')}>
-          <Text style={styles.ghostT}>Lihat Dapur</Text>
+          <Text style={styles.ghostT}>{t('viewKitchen')}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.primary2} onPress={saveNotes}>
-          <Text style={styles.primaryT}>Simpan Notes ›</Text>
+          <Text style={styles.primaryT}>{t('saveNotes')}</Text>
         </TouchableOpacity>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  list: { flex: 1 },
   body: { padding: 16, paddingBottom: 40 },
   meta: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   sec: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginTop: 16 },
@@ -132,7 +145,7 @@ const styles = StyleSheet.create({
   empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, backgroundColor: colors.card, borderRadius: 10, padding: 14, marginTop: 6 },
   added: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 4 },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8 },
-  label: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text, marginTop: 12, marginBottom: 6 },
+  label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 12, marginBottom: 6 },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   duo: { flexDirection: 'row', gap: 10 },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },

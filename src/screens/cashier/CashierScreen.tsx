@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { colors, fonts, rp } from '../../theme';
+import { useLang } from '../../lib/i18n';
 import DrawerMenu from '../../components/DrawerMenu';
 
 type Nav = {
@@ -24,7 +26,8 @@ type Props = {
     params?: {
       table?: string;
       mode?: string;
-      voucher?: { code: string; amount: number };
+      ongkir?: number;
+      voucher?: { code: string; amount: number; kind?: string };
       customItem?: { name: string; price: number; qty: number; note?: string };
       itemNote?: { id: string; note: string };
       loadItems?: CartItem[];
@@ -40,7 +43,7 @@ export type CartItem = {
   qty: number;
   modifiers: CartModifier[];
   discount: number;
-  /** Catatan per item — diteruskan ke KDS / struk dapur. */
+  /** Catatan per item - diteruskan ke KDS / struk dapur. */
   note?: string;
   /** Item void tetap tampil di daftar tapi tidak dihitung ke total. */
   voided?: boolean;
@@ -83,7 +86,7 @@ export const itemTotal = (c: CartItem) =>
 
 export const unitPrice = (c: CartItem) => c.basePrice + c.modifiers.reduce((s, m) => s + m.price, 0);
 
-/** Vektor kaca pembesar — tidak ada aset magnifier di APK, jadi digambar tajam via View. */
+/** Vektor kaca pembesar - tidak ada aset magnifier di APK, jadi digambar tajam via View. */
 function SearchGlyph({ size = 16, color = colors.navy }: { size?: number; color?: string }) {
   const r = size * 0.62;
   return (
@@ -113,7 +116,7 @@ function SearchGlyph({ size = 16, color = colors.navy }: { size?: number; color?
   );
 }
 
-/** Placeholder foto menu — katalog lokal belum ada foto, pakai aset kosong bawaan. */
+/** Placeholder foto menu - katalog lokal belum ada foto, pakai aset kosong bawaan. */
 function MenuThumb({ size = 52 }: { size?: number }) {
   return (
     <Image
@@ -127,6 +130,7 @@ function MenuThumb({ size = 52 }: { size?: number }) {
 export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+  const { t } = useLang();
   const [activeCategory, setActiveCategory] = useState('Makanan');
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -136,9 +140,13 @@ export default function CashierScreen({ navigation, route }: Props) {
   const catScrollRef = useRef<ScrollView>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [table, setTable] = useState(route?.params?.table ?? '');
-  const [voucher, setVoucher] = useState<{ code: string; amount: number } | null>(
+  const [voucher, setVoucher] = useState<{ code: string; amount: number; kind?: string } | null>(
     route?.params?.voucher ?? null,
   );
+  /** Ongkir - diisi via dialog tombol Ongkir, default 0, diteruskan ke CartDetail/Pay. */
+  const [ongkir, setOngkir] = useState(Math.max(0, Number(route?.params?.ongkir) || 0));
+  const [ongkirOpen, setOngkirOpen] = useState(false);
+  const [ongkirDraft, setOngkirDraft] = useState('0');
   const [cart, setCart] = useState<CartItem[]>([
     {
       id: 'p11',
@@ -167,6 +175,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (!p) return;
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
+    if (p.ongkir !== undefined) setOngkir(Math.max(0, Number(p.ongkir) || 0));
     if (p.mode && MODES.includes(p.mode)) {
       setMode(p.mode);
       setShowModes(false);
@@ -283,14 +292,25 @@ export default function CashierScreen({ navigation, route }: Props) {
     0,
   );
   const discountTotal = activeCart.reduce((s, c) => s + c.discount, 0);
-  const voucherAmt = Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
+  /** Voucher ongkir (GRATISONGKIR) memotong ongkir bila ongkir > 0, selain itu diskon flat. */
+  const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
+  const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
+  const ongkirDiscount = useOngkirCut ? Math.min(voucher?.amount ?? 0, ongkir) : 0;
+  const ongkirNet = ongkir - ongkirDiscount;
+  const voucherAmt = useOngkirCut
+    ? 0
+    : Math.min(voucher?.amount ?? 0, Math.max(0, subtotalGross - discountTotal));
   const subtotal = subtotalGross - discountTotal - voucherAmt;
   const service = Math.round(subtotal * 0.05);
-  const pb1incl = Math.round((subtotal * 10) / 110);
-  const total = subtotal + service;
+  /** PPN 11% inclusive (info-only): dasar sudah termasuk pajak. */
+  const ppnIncl = Math.round((subtotal * 11) / 111);
+  const bruto = subtotal + service + ongkirNet;
+  /** Pembulatan ke kelipatan Rp 100 terdekat. */
+  const total = Math.round(bruto / 100) * 100;
+  const rounding = total - bruto;
   const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
 
-  /** Qty cart per kategori — badge di chip agar footer lintas-kategori bisa diaudit sekilas. */
+  /** Qty cart per kategori - badge di chip agar footer lintas-kategori bisa diaudit sekilas. */
   const cartQtyByCat = useMemo(() => {
     const map: Record<string, number> = {};
     for (const c of activeCart) {
@@ -305,9 +325,69 @@ export default function CashierScreen({ navigation, route }: Props) {
     navigation?.navigate('CartDetail', {
       items: cart,
       total,
+      mode,
+      table,
+      ongkir,
+      customer: customer.trim(),
       ...(voucher ? { voucher } : {}),
     });
-  const goSaved = () => navigation?.navigate('LoadOrder');
+  /** Dialog nominal ongkir - dibuka dari tombol Ongkir di toolbar. */
+  const openOngkir = () => {
+    setOngkirDraft(String(ongkir));
+    setOngkirOpen(true);
+  };
+  const saveOngkir = () => {
+    setOngkir(Math.max(0, Number(String(ongkirDraft).replace(/[^0-9]/g, '')) || 0));
+    setOngkirOpen(false);
+  };
+
+  /** Mode marketplace (antar via kurir pihak ketiga) - tampilkan info penyiapan. */
+  const isMarketplace = mode === 'GOFOOD' || mode === 'GRABFOOD' || mode === 'SHOPEEFOOD';
+
+  const renderOngkirDialog = () => (
+    <Modal visible={ongkirOpen} transparent animationType="fade" onRequestClose={() => setOngkirOpen(false)}>
+      <View style={styles.dialogOverlay}>
+        <View style={styles.dialogCard}>
+          <Text style={styles.dialogTitle}>{t('ongkirTitle')}</Text>
+          <Text style={styles.dialogSub}>{t('ongkirNominal')}</Text>
+          <TextInput
+            style={styles.dialogInput}
+            value={ongkirDraft}
+            onChangeText={setOngkirDraft}
+            keyboardType="numeric"
+            placeholder={rp(0)}
+            placeholderTextColor={colors.faint}
+          />
+          <View style={styles.dialogRow}>
+            <TouchableOpacity style={styles.dialogGhost} onPress={() => setOngkirOpen(false)}>
+              <Text style={styles.dialogGhostT}>{t('cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dialogPrimary} onPress={saveOngkir}>
+              <Text style={styles.dialogPrimaryT}>{t('save')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderModeNote = () =>
+    isMarketplace ? (
+      <View style={styles.modeNote}>
+        <Text style={styles.modeNoteT}>{t('modeMarketplaceNoteA')}{mode}{t('modeMarketplaceNoteB')}</Text>
+      </View>
+    ) : null;
+  /** Simpan membawa payload agar muncul di Muat Order (dulu navigate tanpa params). */
+  const goSaved = () =>
+    navigation?.navigate('LoadOrder', {
+      newOrder: {
+        title: `${mode}${table ? ` · ${t('table')} ${table}` : ''} · ${customer.trim() || 'QoQi'}`,
+        mode,
+        ...(table ? { table } : {}),
+        items: cart,
+        ongkir,
+      },
+    });
 
   const today = new Date().toLocaleDateString('id-ID', {
     weekday: 'long',
@@ -321,29 +401,29 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (editingId !== c.id) return null;
     return (
       <View style={styles.editor}>
-        <Text style={styles.editorLabel}>Catatan item (ke dapur)</Text>
+        <Text style={styles.editorLabel}>{t('noteKitchen')}</Text>
         <TextInput
           style={styles.editorInput}
           value={noteDraft}
           onChangeText={setNoteDraft}
-          placeholder="cth: Level 3, es sedikit"
+          placeholder={t('notePh')}
           placeholderTextColor={colors.faint}
         />
-        <Text style={styles.editorLabel}>Diskon item (Rp)</Text>
+        <Text style={styles.editorLabel}>{t('discItemRp')}</Text>
         <TextInput
           style={styles.editorInput}
           value={discDraft}
           onChangeText={setDiscDraft}
-          placeholder="0"
+          placeholder={rp(0)}
           placeholderTextColor={colors.faint}
           keyboardType="numeric"
         />
         <View style={styles.editorRow}>
           <TouchableOpacity style={styles.editorVoid} onPress={() => voidItem(c.id)}>
-            <Text style={styles.editorVoidT}>Void Item</Text>
+            <Text style={styles.editorVoidT}>{t('voidItem')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.editorSave} onPress={saveEditor}>
-            <Text style={styles.editorSaveT}>Simpan</Text>
+            <Text style={styles.editorSaveT}>{t('save')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -388,7 +468,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <TouchableOpacity style={styles.modeBtn} onPress={() => setShowModes((v) => !v)}>
         <Image source={require('../../../assets/icons/icon_category.webp')} style={styles.toolIcon} resizeMode="contain" />
         <Text style={styles.modeText}>
-          {isWide ? 'Mode Transaksi' : mode} <Text style={styles.modeDim}>▾</Text>
+          {isWide ? t('modeTx') : mode} <Text style={styles.modeDim}>▾</Text>
         </Text>
       </TouchableOpacity>
       {isWide && (
@@ -407,26 +487,26 @@ export default function CashierScreen({ navigation, route }: Props) {
       </TouchableOpacity>
       <TouchableOpacity style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]} onPress={goSaved}>
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>Tersimpan</Text>
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('saved')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
         onPress={() => navigation?.navigate('CustomMenu')}>
         <Image source={require('../../../assets/icons/add_notes_black.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>Custom</Text>
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('custom')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
-        onPress={() => setShowModes(true)}>
+        onPress={openOngkir}>
         <Image source={require('../../../assets/icons/store_courier.webp')} style={styles.toolIconSm} resizeMode="contain" />
-        <Text style={styles.toolBtnWideText} numberOfLines={1}>Ongkir</Text>
+        <Text style={styles.toolBtnWideText} numberOfLines={1}>{t('ongkir')}{ongkir > 0 ? ` ${rp(ongkir)}` : ''}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone]}
         onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier', subtotal })}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={styles.toolBtnWideText} numberOfLines={1}>
-          {voucher ? voucher.code : 'Promo'}
+          {voucher ? voucher.code : t('promo')}
         </Text>
       </TouchableOpacity>
     </ScrollView>
@@ -446,7 +526,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         style={styles.catScroll}>
         {CATEGORIES.map((c) => {
           const active = c.name === activeCategory;
-          // Favorit virtual (overlap) — tanpa badge agar jumlah badge = Jumlah footer.
+          // Favorit virtual (overlap) - tanpa badge agar jumlah badge = Jumlah footer.
           const inCart = c.name === 'Favorit' ? 0 : (cartQtyByCat[c.name] ?? 0);
           return (
             <TouchableOpacity
@@ -487,7 +567,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.crumbActive}>{activeSub}</Text>
         </>
       )}
-      <Text style={styles.crumbDim}> · {filtered.length} menu · PB1 incl, service excl</Text>
+      <Text style={styles.crumbDim}> · {filtered.length} menu · PPN 11% incl, service excl</Text>
     </View>
   );
 
@@ -548,14 +628,14 @@ export default function CashierScreen({ navigation, route }: Props) {
               {inCart && !inCart.voided && (
                 <TouchableOpacity onPress={() => openEditor(inCart)} style={styles.cardEdit}>
                   <Text style={styles.cardEditT}>
-                    {inCart.note ? `📝 ${inCart.note}` : '✎ Catatan / diskon'}
+                    {inCart.note ? `📝 ${inCart.note}` : `✎ ${t('editNoteDisc')}`}
                     {inCart.discount > 0 ? ` · -${rp(inCart.discount)}` : ''}
                   </Text>
                 </TouchableOpacity>
               )}
               {inCart?.voided && (
                 <TouchableOpacity onPress={() => unvoidItem(inCart.id)} style={styles.cardEdit}>
-                  <Text style={styles.voidRestoreT}>Void — ketuk untuk kembalikan</Text>
+                  <Text style={styles.voidRestoreT}>{t('voidRestore')}</Text>
                 </TouchableOpacity>
               )}
               {renderItemEditor(inCart ?? { id: item.id, name: item.name, basePrice: item.price, qty: 0, modifiers: [], discount: 0 })}
@@ -572,7 +652,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   <Text style={styles.rowPrice}>{rp(item.price)}</Text>
                   {inCart?.note ? <Text style={styles.rowNote} numberOfLines={1}>📝 {inCart.note}</Text> : null}
                   {inCart && inCart.discount > 0 ? (
-                    <Text style={styles.rowDisc}>Diskon -{rp(inCart.discount)}</Text>
+                    <Text style={styles.rowDisc}>{t('discount')} -{rp(inCart.discount)}</Text>
                   ) : null}
                   {inCart?.voided ? <Text style={styles.voidBadge}>Void</Text> : null}
                 </View>
@@ -580,7 +660,7 @@ export default function CashierScreen({ navigation, route }: Props) {
               {qty > 0 ? (
                 <View style={styles.stepperInline}>
                   <TouchableOpacity style={styles.stepBtnSm} onPress={() => decQty(item.id)}>
-                    <Text style={styles.stepTxtSm}>−</Text>
+                    <Text style={styles.stepTxtSm}>-</Text>
                   </TouchableOpacity>
                   <Text style={styles.stepQtySm}>{qty}</Text>
                   <TouchableOpacity style={styles.stepBtnSm} onPress={() => incQty(item.id)}>
@@ -589,7 +669,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                 </View>
               ) : (
                 <TouchableOpacity style={styles.addBtnLg} onPress={() => addToCart(item)}>
-                  <Text style={styles.addBtnLgText}>+ Tambah</Text>
+                  <Text style={styles.addBtnLgText}>+ {t('addMenu')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -598,13 +678,13 @@ export default function CashierScreen({ navigation, route }: Props) {
                 onPress={() => (editingId === inCart.id ? setEditingId(null) : openEditor(inCart))}
                 style={styles.rowEditBtn}>
                 <Text style={styles.rowEditT}>
-                  {editingId === inCart.id ? 'Tutup editor ▴' : '✎ Catatan / diskon / void ▾'}
+                  {editingId === inCart.id ? 'Tutup editor ▴' : `✎ ${t('editNoteDisc')} ▾`}
                 </Text>
               </TouchableOpacity>
             )}
             {inCart?.voided && (
               <TouchableOpacity onPress={() => unvoidItem(inCart.id)} style={styles.rowEditBtn}>
-                <Text style={styles.voidRestoreT}>Void — ketuk untuk kembalikan</Text>
+                <Text style={styles.voidRestoreT}>{t('voidRestore')}</Text>
               </TouchableOpacity>
             )}
             {inCart ? renderItemEditor(inCart) : null}
@@ -630,7 +710,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
-          {mode}{table ? ` · Meja ${table}` : ''} - {itemCount} item - {customer.trim() || 'QoQi'}
+          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || 'QoQi'}
         </Text>
       </View>
       <FlatList
@@ -646,7 +726,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   style={[styles.stepBtn, item.qty <= 1 && styles.stepBtnDisabled]}
                   onPress={() => decQty(item.id)}
                   disabled={item.qty <= 1}>
-                  <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>−</Text>
+                  <Text style={[styles.stepTxt, item.qty <= 1 && styles.stepTxtDisabled]}>-</Text>
                 </TouchableOpacity>
                 <Text style={styles.stepQty}>{item.qty}</Text>
                 <TouchableOpacity style={styles.stepBtn} onPress={() => incQty(item.id)}>
@@ -672,17 +752,17 @@ export default function CashierScreen({ navigation, route }: Props) {
                 ))}
                 {item.note ? <Text style={styles.cartNote}>📝 {item.note}</Text> : null}
                 {item.discount > 0 && (
-                  <Text style={styles.cartDisc}>Diskon -{rp(item.discount)}</Text>
+                  <Text style={styles.cartDisc}>{t('discount')} -{rp(item.discount)}</Text>
                 )}
                 {item.voided ? (
                   <TouchableOpacity onPress={() => unvoidItem(item.id)}>
-                    <Text style={styles.voidRestoreT}>Kembalikan item</Text>
+                    <Text style={styles.voidRestoreT}>{t('restoreItem')}</Text>
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
                     onPress={() => (editingId === item.id ? setEditingId(null) : openEditor(item))}>
                     <Text style={styles.cartEditLink}>
-                      {editingId === item.id ? 'Tutup ▴' : '✎ Catatan / diskon / void'}
+                      {editingId === item.id ? 'Tutup ▴' : `✎ ${t('editNoteDisc')}`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -697,21 +777,21 @@ export default function CashierScreen({ navigation, route }: Props) {
             {renderItemEditor(item)}
           </View>
         )}
-        ListEmptyComponent={<Text style={styles.empty}>Keranjang kosong</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{t('cartEmpty')}</Text>}
       />
       <View style={styles.totals}>
         <View style={styles.totalsSeparator} />
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Subtotal (bruto)</Text>
+          <Text style={styles.totalLabel}>{t('subtotalGross')}</Text>
           <Text style={styles.totalVal}>{rp(subtotalGross)}</Text>
         </View>
         {discountTotal > 0 && (
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Diskon item</Text>
+            <Text style={styles.totalLabel}>{t('itemDiscount')}</Text>
             <Text style={[styles.totalVal, styles.discVal]}>-{rp(discountTotal)}</Text>
           </View>
         )}
-        {voucher && (
+        {voucher && !useOngkirCut && (
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Voucher {voucher.code}</Text>
             <TouchableOpacity onPress={() => setVoucher(null)}>
@@ -721,24 +801,40 @@ export default function CashierScreen({ navigation, route }: Props) {
         )}
         {voidCount > 0 && (
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Item void</Text>
-            <Text style={styles.totalVal}>{voidCount} item tidak dihitung</Text>
+            <Text style={styles.totalLabel}>{t('voidRow')}</Text>
+            <Text style={styles.totalVal}>{voidCount} {t('voidNotCounted')}</Text>
           </View>
         )}
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Subtotal (net)</Text>
+          <Text style={styles.totalLabel}>{t('subtotalNet')}</Text>
           <Text style={styles.totalVal}>{rp(subtotal)}</Text>
         </View>
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Pajak PB1 (incl)</Text>
-          <Text style={styles.totalVal}>{rp(pb1incl)}</Text>
+          <Text style={styles.totalLabel}>{t('taxIncl')}</Text>
+          <Text style={styles.totalVal}>{rp(ppnIncl)}</Text>
         </View>
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Service 5% (excl)</Text>
+          <Text style={styles.totalLabel}>{t('serviceExcl')}</Text>
           <Text style={styles.totalVal}>{rp(service)}</Text>
         </View>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>{t('deliveryFee')}</Text>
+          <Text style={styles.totalVal}>{rp(ongkirNet)}</Text>
+        </View>
+        {ongkirDiscount > 0 && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Voucher {voucher?.code} (ongkir)</Text>
+            <TouchableOpacity onPress={() => setVoucher(null)}>
+              <Text style={[styles.totalVal, styles.discVal]}>-{rp(ongkirDiscount)} ✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Rounding</Text>
+          <Text style={styles.totalVal}>{rp(rounding)}</Text>
+        </View>
         <View style={[styles.totalRow, styles.grandRow]}>
-          <Text style={styles.grandLabel}>Total</Text>
+          <Text style={styles.grandLabel}>{t('total')}</Text>
           <Text style={styles.grandVal}>{rp(total)}</Text>
         </View>
       </View>
@@ -746,11 +842,11 @@ export default function CashierScreen({ navigation, route }: Props) {
         <View style={styles.cartActionsRow}>
           <TouchableOpacity style={styles.btnSave} onPress={goSaved}>
             <Image source={require('../../../assets/icons/export.webp')} style={styles.btnIcon} resizeMode="contain" />
-            <Text style={styles.btnSaveText}>Simpan</Text>
+            <Text style={styles.btnSaveText}>{t('save')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.btnPrint} onPress={() => navigation?.navigate('Receipt', { total })}>
+          <TouchableOpacity style={styles.btnPrint} onPress={() => navigation?.navigate('Receipt', { total, mode, ...(table ? { table } : {}) })}>
             <Image source={require('../../../assets/icons/print_blue.webp')} style={styles.btnIcon} resizeMode="contain" />
-            <Text style={styles.btnPrintText}>Cetak Struk</Text>
+            <Text style={styles.btnPrintText}>{t('printReceipt')}</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
@@ -758,7 +854,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           disabled={activeCart.length === 0}
           onPress={goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
-          <Text style={styles.btnPayText}>Bayar | {rp(total)}</Text>
+          <Text style={styles.btnPayText}>{t('pay')} | {rp(total)}</Text>
           <Text style={styles.btnPayArrow}>›</Text>
         </TouchableOpacity>
       </View>
@@ -786,7 +882,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                     onPress={() => {
                       setMode(m);
                       setShowModes(false);
-                      if (m === 'DINE IN') navigation?.navigate('DineIn');
+                      if (m === 'DINE IN') navigation?.navigate('DineIn', { mode: m, ...(table ? { table } : {}) });
                     }}>
                     <Text style={[styles.modeOptionText, m === mode && styles.modeOptionTextActive]}>
                       {m}
@@ -795,12 +891,13 @@ export default function CashierScreen({ navigation, route }: Props) {
                 ))}
               </View>
             )}
+            {renderModeNote()}
             {showSearch && (
               <View style={styles.searchWrap}>
                 <SearchGlyph size={15} color={colors.faint} />
                 <TextInput
                   style={styles.search}
-                  placeholder="Cari menu…"
+                  placeholder={t('searchMenu')}
                   placeholderTextColor={colors.faint}
                   value={query}
                   onChangeText={setQuery}
@@ -814,6 +911,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           </View>
           {renderCartPanel()}
         </View>
+        {renderOngkirDialog()}
       </View>
     );
   }
@@ -836,13 +934,14 @@ export default function CashierScreen({ navigation, route }: Props) {
               onPress={() => {
                 setMode(m);
                 setShowModes(false);
-                if (m === 'DINE IN') navigation?.navigate('DineIn');
+                if (m === 'DINE IN') navigation?.navigate('DineIn', { mode: m, ...(table ? { table } : {}) });
               }}>
               <Text style={[styles.modeOptionText, m === mode && styles.modeOptionTextActive]}>{m}</Text>
             </TouchableOpacity>
           ))}
         </View>
       )}
+      {renderModeNote()}
       {renderCats()}
       {renderBreadcrumb()}
       {renderSubs()}
@@ -873,7 +972,14 @@ export default function CashierScreen({ navigation, route }: Props) {
           ) : null;
         })()}
         {voucher ? (
-          <Text style={styles.ctaNote}>Voucher {voucher.code} terpakai (-{rp(voucherAmt)}) — ketuk Promo untuk ganti.</Text>
+          <Text style={styles.ctaNote}>
+            {useOngkirCut
+              ? `Voucher ${voucher.code} · ${t('deliveryFee')} -${rp(ongkirDiscount)}`
+              : `Voucher ${voucher.code} (-${rp(voucherAmt)})`}
+          </Text>
+        ) : null}
+        {ongkir > 0 && !voucher ? (
+          <Text style={styles.ctaNote}>{t('deliveryFee')} {rp(ongkirNet)} - {t('needOngkirHint')}</Text>
         ) : null}
         <TouchableOpacity
           style={[styles.cta, activeCart.length === 0 && styles.ctaDisabled]}
@@ -881,16 +987,17 @@ export default function CashierScreen({ navigation, route }: Props) {
           onPress={goCart}
           activeOpacity={0.85}>
           <View style={styles.ctaCount}>
-            <Text style={styles.ctaCountLabel}>Jumlah</Text>
+            <Text style={styles.ctaCountLabel}>{t('amountCount')}</Text>
             <Text style={styles.ctaCountValue}>{itemCount}</Text>
           </View>
           <View style={styles.ctaDivider} />
           <Text style={styles.ctaText}>
-            Lihat Pesanan | {rp(total)}
+            {t('viewOrder')} | {rp(total)}
           </Text>
           <Text style={styles.ctaArrow}>›</Text>
         </TouchableOpacity>
       </View>
+      {renderOngkirDialog()}
     </View>
   );
 }
@@ -1330,4 +1437,61 @@ const styles = StyleSheet.create({
   ctaDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.4)', marginRight: 12, flexShrink: 0 },
   ctaText: { flex: 1, minWidth: 0, color: colors.white, fontFamily: fonts.bold, fontSize: 15 },
   ctaArrow: { color: colors.white, fontSize: 22, fontFamily: fonts.bold, flexShrink: 0 },
+  modeNote: {
+    backgroundColor: colors.paleAmber,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  modeNoteT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, textAlign: 'center' },
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  dialogCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  dialogTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, textAlign: 'center' },
+  dialogSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 4 },
+  dialogInput: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    padding: 11,
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    color: colors.text,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  dialogRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  dialogGhost: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  dialogGhostT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  dialogPrimary: {
+    flex: 1,
+    backgroundColor: colors.orange,
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  dialogPrimaryT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
 });
