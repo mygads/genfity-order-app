@@ -92,7 +92,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.langWrap}> {(['id', 'en'] as Lang[]).map((l) => ( <TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}> <Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text> </TouchableOpacity> ))} </View><View style={styles.modeRow}>
+      <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View><View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
           <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive]}>
             <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>

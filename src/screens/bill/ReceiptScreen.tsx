@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printReceiptData, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printReceiptData, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const no = route?.params?.no ?? '#148';
@@ -50,20 +50,30 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
    * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
    * kas ala POSLite (best-effort). */
   const doPrint = async () => { if (printing) return; setPrinting(true); try { const res = await printReceiptData({ shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${mode}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), }); if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
-  const paper = ( <View style={styles.paper}>
-      <Text style={styles.shop}>{shopName}</Text> <Text style={styles.addr}>{shopAddr}</Text> <Text style={styles.line}>No: {no}    {mode}</Text>
+  /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
+   * lain (pratinjau/arsip/void) tetap manual via tombol. */
+  const autoPrinted = useRef(false);
+  useEffect(() => {
+    if (route?.params?.autoPrint === true && !autoPrinted.current) {
+      autoPrinted.current = true;
+      void doPrint();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const paper = (<View style={styles.paper}>
+      <Text style={styles.shop}>{shopName}</Text><Text style={styles.addr}>{shopAddr}</Text><Text style={styles.line}>No: {no}    {mode}</Text>
       <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
       <View style={styles.div} />
-      {hasItems ? ( cartItems.map((it) => ( <View key={it.id}><View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View> {(it.modifiers ?? []).map((m) => ( <Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))} </View> )) ) : null}
-      <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.item}>{rp(subtotal)}</Text></View> {discount > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('rc_discount')}</Text><Text style={styles.item}>-{rp(discount)}</Text></View> )} {service > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.item}>{rp(service)}</Text></View> )} {feeESB > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )} {tax > 0 && (
-      <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )} {voucherCode ? (
-      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null} {approvalCode ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null} {edcLine ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null} {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} {rounding !== 0 && ( <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
+      {hasItems ? ( cartItems.map((it) => (<View key={it.id}><View style={styles.row}><Text style={styles.item}>{it.qty}x {it.name}</Text><Text style={styles.item}>{rp(lineTotal(it))}</Text></View>{(it.modifiers ?? []).map((m) => (<Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))}</View> )) ) : null}
+      <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.item}>{rp(subtotal)}</Text></View>{discount > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('rc_discount')}</Text><Text style={styles.item}>-{rp(discount)}</Text></View> )}{service > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.item}>{rp(service)}</Text></View> )}{feeESB > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )}{tax > 0 && (
+      <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )}{voucherCode ? (
+      <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
       <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
-      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View> {hasVoid && ( <><View style={styles.div} /> <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> {voidLines.map((l) => ( <View key={l.name} style={styles.row}> <Text style={styles.voidItem}>{l.qty}x {l.name}</Text> <Text style={styles.item}>-{rp(l.qty * l.price)}</Text> </View> ))} {voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View> </> )}
+      <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View>{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={styles.item}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View></> )}
       {isCash && cash > 0 ? (
         <>
           <View style={styles.row}><Text style={styles.item}>{t('rc_cashin')}</Text><Text style={styles.item}>{rp(cash)}</Text></View>
@@ -72,7 +82,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
       ) : (
         <View style={styles.row}><Text style={styles.item}>{t('rc_change')}</Text><Text style={styles.item}>{rp(0)}</Text></View>
       )}
-      <Text style={styles.thanks}>{t('rc_thanks')}</Text> {customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}
+      <Text style={styles.thanks}>{t('rc_thanks')}</Text>{customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}
     </View>
   );
 
@@ -138,11 +148,11 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, V
             <View style={styles.row}><Text style={styles.item}>{t('rc_no')}</Text><Text style={styles.item}>{no}</Text></View>
             <View style={styles.row}><Text style={styles.item}>{t('rc_mode')}</Text><Text style={styles.item}>{mode}</Text></View>
             <View style={styles.row}><Text style={styles.item}>{t('rc_method')}</Text><Text style={styles.item}>{method}</Text></View>
-            {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
+            {ongkir > 0 && (<View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
             <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>
-          </ScrollView> {mailModal}
+          </ScrollView>{mailModal}
         </View>
       </View>
     );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
+import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import type { CartItem } from './CashierScreen';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { newOrder?: { title: string; mode: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string };
 
 }; };};interface Saved { id: string; badge: string; mode: string; title: string; detail: string; table?: string; items: CartItem[]; ongkir?: number; salesNum?: string; }const SEED: Saved[] = [
   {
@@ -33,20 +33,17 @@ import { useEffect, useRef, useState } from 'react';import { Alert, Image, Scrol
 
   /** Order yang baru disimpan dari kasir/cart langsung masuk daftar (dulu Simpan tanpa payload). */ const appliedRef = useRef(''); useEffect(() => { const n = route?.params?.newOrder; if (!n) return; const key = JSON.stringify(n); if (appliedRef.current === key) return; appliedRef.current = key; const count = n.items.reduce((s, c) => s + c.qty, 0); const sum = n.items.reduce((s, c) => s + (c.basePrice + (c.modifiers ?? []).reduce((m, x) => m + x.price, 0)) * c.qty - (c.discount ?? 0), 0); const badge = n.mode === 'DINE IN' ? 'DI' : n.mode === 'TAKE AWAY' ? 'TA' : n.mode === 'GOFOOD' ? 'GF' : n.mode === 'GRABFOOD' ? 'GF' : n.mode === 'SHOPEEFOOD' ? 'SF' : 'OL'; const label = n.mode === 'DINE IN' ? 'Dine In' : n.mode === 'TAKE AWAY' ? 'Take Away' : n.mode; setOrders((prev) => [ { id: `saved-${Date.now()}`, badge, mode: label, title: n.title, detail: `${count} item · ${rp(sum + (n.ongkir ?? 0))}`, table: n.table, items: n.items, ongkir: n.ongkir, ...(typeof n.salesNum === 'string' && n.salesNum.trim() ? { salesNum: n.salesNum.trim() } : {}) }, ...prev, ]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route?.params?.newOrder]); /** Muat order ke kasir - minta konfirmasi dulu sesuai teks hint (dulu langsung tanpa payload). */
+  }, [route?.params?.newOrder]); /** Muat order ke kasir - sekali ketuk langsung buka kasir
+   * (tanpa dialog konfirmasi: Alert.alert no-op di web sehingga tombol mati,
+   * dan di HP butuh dua ketukan). */
   const muat = (o: Saved) => {
-    Alert.alert(t('loadConfirmTitle'), `${o.title}\n${t('loadConfirmBodyA')}`, [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: t('loadAction'),
-        onPress: () =>
-          navigation?.navigate('Cashier', {
-            loadItems: o.items,
-            ...(o.table ? { table: o.table } : {}),
-             mode: MODE_TO_CASHIER[o.mode] ?? 'DINE IN', ...(o.ongkir ? { ongkir: o.ongkir } : {}), ...(o.salesNum ? { salesNum: o.salesNum } : {}),
-          }),
-      },
-    ]);
+    navigation?.navigate('Cashier', {
+      loadItems: o.items,
+      ...(o.table ? { table: o.table } : {}),
+      mode: MODE_TO_CASHIER[o.mode] ?? 'DINE IN',
+      ...(o.ongkir ? { ongkir: o.ongkir } : {}),
+      ...(o.salesNum ? { salesNum: o.salesNum } : {}),
+    });
   };
 
   return (

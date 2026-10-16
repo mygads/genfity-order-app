@@ -63,7 +63,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         await initDb();
         const tables = await query<{ tableNo: string }>(
           `SELECT DISTINCT tableNo FROM tr_saleshead
-           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo) <> ''`,
+           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
         const names = tables.map((r) => r.tableNo.trim()).filter(Boolean);
         if (!on || names.length === 0) return;

@@ -89,7 +89,7 @@ const SEED: Txn[] = [
                 <Text style={[s.jumlah, x.arus === 'Masuk' ? s.jumlahIn : s.jumlahOut]}>
                   {x.arus === 'Masuk' ? '+' : '-'}{rp(x.jumlah)}
                 </Text>
-                {x.disetujui ? ( <Text style={s.okTxt}>{t('petty.approved')}</Text> ) : ( <TouchableOpacity onPress={() => approve(x.id)} hitSlop={8}> <Text style={s.waitTxt}>{t('petty.pending')}</Text> </TouchableOpacity> )}
+                {x.disetujui ? (<Text style={s.okTxt}>{t('petty.approved')}</Text> ) : (<TouchableOpacity onPress={() => approve(x.id)} hitSlop={8}><Text style={s.waitTxt}>{t('petty.pending')}</Text></TouchableOpacity> )}
               </View>
             </TouchableOpacity>
           ))

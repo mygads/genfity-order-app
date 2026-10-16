@@ -65,7 +65,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         await initDb();
         const heads = await query<{ tableNo: string; customerName: string | null; grandTotal: number | null }>(
           `SELECT tableNo, customerName, grandTotal FROM tr_saleshead
-           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo) <> ''`,
+           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
         if (!on || heads.length === 0) return;
         const byTable = new Map<string, { guest: string; bills: number; total: number }>();
@@ -80,7 +80,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         const itemRows = await query<{ tableNo: string; n: number }>(
           `SELECT h.tableNo AS tableNo, COUNT(*) AS n FROM tr_salesmenu m
            INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
-           WHERE h.status <> 'paid' AND h.tableNo IS NOT NULL AND TRIM(h.tableNo) <> ''
+           WHERE h.status <> 'paid' AND h.tableNo IS NOT NULL AND TRIM(h.tableNo)<> ''
            GROUP BY h.tableNo`,
         );
         const itemCount = new Map(itemRows.map((r) => [String(r.tableNo).trim(), Number(r.n) || 0]));

@@ -35,7 +35,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
         <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /><View style={[s.body, isTablet && wideCenter]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('petty.doneTitle')}</Text>
-          <Text style={s.sub}>{done.arus} - {done.coa} - {rp(done.jumlah)}</Text> {done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
+          <Text style={s.sub}>{done.arus} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
           <AppButton title={t('petty.detailTitle')} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString('id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })} />
           <AppButton title={t('petty.viewList')} variant="secondary" onPress={() => navigation?.navigate('PettyCash')} />
           <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }} />

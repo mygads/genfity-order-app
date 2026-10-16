@@ -186,6 +186,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 {c.name} x{c.qty}
                 {c.voided ? ' (Void)' : ''}
               </Text>
+              {/* Harga satuan selalu terlihat (dulu hanya di dalam panel edit) */}
+              {!c.voided && <Text style={styles.unit}>@ {rp(c.basePrice)}</Text>}
               {/* Modifier biru */}
               {c.modifiers.map((m, i) => (
                 <Text key={i} style={styles.modifier}>
@@ -214,21 +216,23 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                     </TouchableOpacity>
                   </View>
                   <TouchableOpacity
+                    style={[styles.editBtn, editingId === c.id && styles.editBtnOn]}
+                    hitSlop={8}
                     onPress={() => (editingId === c.id ? setEditingId(null) : openEditor(c))}>
-                    <Text style={styles.editLink}>
-                      {editingId === c.id ? 'Tutup ▴' : '✎ Harga / catatan'}
+                    <Text style={[styles.editBtnT, editingId === c.id && styles.editBtnTOn]}>
+                      {editingId === c.id ? t('cartEditClose') : t('cartEditPrice')}
                     </Text>
                   </TouchableOpacity>
                 </View>
               )}
               {editingId === c.id && !c.voided && (
                 <View style={styles.editor}>
-                  <Text style={styles.editorLabel}>Harga satuan (Rp)</Text>
+                  <Text style={styles.editorLabel}>{t('unitPriceRp')}</Text>
                   <AppInput
                     boxStyle={styles.editorInput}
                     style={styles.fieldText}
                     value={priceDraft}
-                    onChangeText={setPriceDraft}
+                    onChangeText={(v) => setPriceDraft(v.replace(/[^0-9]/g, ''))}
                     keyboardType="numeric"
                     placeholder="0"
                   />
@@ -438,7 +442,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               boxStyle={styles.modalInput}
               style={styles.fieldText}
               value={ongkirDraft}
-              onChangeText={setOngkirDraft}
+              onChangeText={(v) => setOngkirDraft(v.replace(/[^0-9]/g, ''))}
               keyboardType="numeric"
               placeholder={rp(0)}
             />
@@ -586,6 +590,13 @@ const styles = StyleSheet.create({
   stepT: { color: colors.navy, fontFamily: fonts.bold, fontSize: 16 },
   stepQty: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 22, textAlign: 'center' },
   editLink: { fontFamily: fonts.medium, fontSize: 12, color: colors.blue },
+  /** Baris harga satuan di bawah nama item - selalu terlihat tanpa buka editor. */
+  unit: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  /** Tombol pil edit harga/catatan - ganti teks mungil agar mudah diketuk. */
+  editBtn: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
+  editBtnOn: { borderColor: colors.orange, backgroundColor: colors.paleOrange },
+  editBtnT: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy },
+  editBtnTOn: { color: colors.orangeDark },
   editor: { backgroundColor: colors.paleBlue, borderRadius: 8, padding: 10, marginTop: 8 },
   editorLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 6 },
   editorInput: {
@@ -636,7 +647,7 @@ const styles = StyleSheet.create({
   promoCode: { fontFamily: fonts.bold, fontSize: 14, color: colors.greenDark },
   promoDesc: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   promoRemove: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red },
-  promoBtn: { backgroundColor: colors.paleOrange, borderWidth: 1, borderColor: colors.orange, borderRadius: 8, padding: 11, alignItems: 'center', marginTop: 8 },
+  promoBtn: { backgroundColor: colors.paleOrange, borderWidth: 1, borderColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, alignItems: 'center', marginTop: 8 },
   promoBtnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.orangeDark },
   promoChange: { fontFamily: fonts.medium, fontSize: 12, color: colors.blue, marginTop: 8 },
   totals: {

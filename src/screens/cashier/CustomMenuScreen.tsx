@@ -72,14 +72,14 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       <Text style={styles.hint}>{t('customMenuHint')}</Text>
       {added.length === 0
         ? <Text style={styles.empty}>{t('emptyCustom')}</Text>
-        : added.map((a) => <Text key={a} style={styles.added}>• {a}</Text>)}
+        : added.map((a) =><Text key={a} style={styles.added}>• {a}</Text>)}
 
       <Text style={styles.label}>{t('itemName')}</Text>
       <AppInput boxStyle={styles.input} style={styles.fieldText} value={name} onChangeText={setName} placeholder="cth: Nasi + Ayam" />
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
           <Text style={styles.label}>{t('price')}</Text>
-          <AppInput boxStyle={styles.input} style={styles.fieldText} value={price} onChangeText={setPrice} keyboardType="numeric" placeholder={rp(0)} />
+          <AppInput boxStyle={styles.input} style={styles.fieldText} value={price} onChangeText={(v) => setPrice(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder={rp(0)} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.label}>{t('qty')}</Text>
@@ -87,7 +87,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
             <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(Math.max(1, qtyNum - 1)))}>
               <Text style={styles.qtyT}>-</Text>
             </TouchableOpacity>
-            <TextInput style={[styles.input, styles.qtyInput]} value={qty} onChangeText={setQty} keyboardType="numeric" />
+            <TextInput style={[styles.input, styles.qtyInput]} value={qty} onChangeText={(v) => setQty(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" />
             <TouchableOpacity style={styles.qtyBtn} onPress={() => setQty(String(qtyNum + 1))}>
               <Text style={styles.qtyT}>+</Text>
             </TouchableOpacity>
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
   added: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 4 },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, marginTop: 8 },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 12, marginBottom: 6 },
-  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text },
+  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, padding: 11, fontFamily: fonts.medium, fontSize: 14, color: colors.text, outlineStyle: 'none' as never },
   /** Teks di dalam AppInput: medium ala form lama. */
   fieldText: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   duo: { flexDirection: 'row', gap: 10 },

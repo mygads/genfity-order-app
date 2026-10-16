@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';import {
   Image, Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -291,8 +292,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
 
       {/* Detail / aksi meja */}
       <Modal visible={!!selected} transparent animationType="slide" onRequestClose={closeModal}>
-        <View style={s.modalBg}>
-          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+        {/* Ketuk area gelap di luar kartu = tutup (kartu menahan sentuhan sendiri). */}
+        <Pressable style={s.modalBg} onPress={closeModal}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]} onStartShouldSetResponder={() => true}>
             {selected ? (
               moveMode ? (
                 <>
@@ -392,13 +394,13 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               )
             ) : null}
           </View>
-        </View>
+        </Pressable>
       </Modal>
 
       {/* Booking */}
       <Modal visible={bookingVisible} transparent animationType="slide" onRequestClose={() => setBookingVisible(false)}>
-        <View style={s.modalBg}>
-          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+        <Pressable style={s.modalBg} onPress={() => setBookingVisible(false)}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]} onStartShouldSetResponder={() => true}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
               {t('tbl_book')}{selected ? ` ${selected.no}` : ''}
             </Text>
@@ -432,9 +434,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('cm_cancel')}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </Pressable>
       </Modal>
-    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /></View>
   );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   burger: { width: 22, height: 22 },

@@ -158,7 +158,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
 
-      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text> {queue.length === 0 && ( <View style={styles.card}> <Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text> </View> )}
+      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text>{queue.length === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
       {queue.map((q) => (
         <View key={q.id} style={styles.card}>
           <View style={styles.qTop}>

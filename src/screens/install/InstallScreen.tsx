@@ -33,8 +33,9 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
   } catch { setError(t('inst_claim_invalid')); } finally { setChecking(false); } };
 
   return (
+    <ScreenRoot style={styles.root}>
     <ScrollView
-      style={styles.root}
+      style={{ flex: 1 }}
       contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
       showsVerticalScrollIndicator={false}>
       <Image source={require('../../../assets/images/claim_terminal.webp')} style={styles.banner} resizeMode="contain" />
@@ -105,6 +106,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
         </View>
       )}
     </ScrollView>
+    </ScreenRoot>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 32 },

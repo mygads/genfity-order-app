@@ -198,7 +198,7 @@ export default function RecapScreen({ navigation }: Props) {
           `SELECT u.voucherCode AS voucherCode, COUNT(*) AS n, COALESCE(SUM(u.voucherAmount), 0) AS total
            FROM tr_salesvoucherusage u INNER JOIN tr_saleshead h ON h.salesNum = u.salesNum
            WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
-             AND u.voucherCode IS NOT NULL AND TRIM(u.voucherCode) <> ''
+             AND u.voucherCode IS NOT NULL AND TRIM(u.voucherCode)<> ''
            GROUP BY u.voucherCode`,
           [since, until],
         );
@@ -206,7 +206,7 @@ export default function RecapScreen({ navigation }: Props) {
           `SELECT voucherCode, COUNT(*) AS n, COALESCE(SUM(voucherAmount), 0) AS total
            FROM tr_saleshead
            WHERE status = 'paid' AND salesDate >= ? AND salesDate < ?
-             AND voucherCode IS NOT NULL AND TRIM(voucherCode) <> ''
+             AND voucherCode IS NOT NULL AND TRIM(voucherCode)<> ''
            GROUP BY voucherCode`,
           [since, until],
         );

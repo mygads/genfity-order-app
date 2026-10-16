@@ -26,7 +26,8 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
   }, [done, navigation, branch]);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <ScreenRoot style={styles.root}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Text style={styles.title}>{t('g_inst_title')}</Text>
       <Text style={styles.desc}>{branch} · {t('g_inst_dont_close')}</Text>
       <View style={styles.card}>
@@ -48,6 +49,7 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
       </View>
       <Text style={styles.pct}>{Math.round((done / STEP_KEYS.length) * 100)}%</Text>
     </ScrollView>
+    </ScreenRoot>
   );
 }
 

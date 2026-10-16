@@ -16,7 +16,8 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const [sent, setSent] = useState(false);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <ScreenRoot style={styles.root}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Image source={require('../../../assets/images/forget_pin.webp')} style={styles.hero} resizeMode="contain" />
       <Text style={styles.title}>{t('g_forgot_title')}</Text>
       {sent ? (
@@ -58,6 +59,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
         </>
       )}
     </ScrollView>
+    </ScreenRoot>
   );
 }
 

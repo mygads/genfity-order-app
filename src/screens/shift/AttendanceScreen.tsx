@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
+import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
   d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [pinMsg, setPinMsg] = useState('');
+  /** Popup ganti PIN (dibuka via tombol, bukan seksi inline). */
+  const [pinModal, setPinModal] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -89,6 +91,7 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
     setOldPin('');
     setNewPin('');
     setConfirmPin('');
+    setPinModal(false);
   };
 
   const clockedIn = inTime !== null && outTime === null;
@@ -167,41 +170,58 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
         <TouchableOpacity onPress={() => navigation?.navigate('Dashboard')}><Text style={styles.link}>{t('att_skip_dash')}</Text></TouchableOpacity>
       </View>
 
-      <Text style={styles.sec}>{t('att_change_pin')}</Text>
-      <View style={styles.card}>
-        <AppInput
-          label={t('att_old_label')}
-          keyboardType="numeric"
-          secureTextEntry
-          maxLength={6}
-          placeholder={t('att_old_ph')}
-          value={oldPin}
-          onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
-          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
-        />
-        <AppInput
-          label={t('att_new_label')}
-          keyboardType="numeric"
-          secureTextEntry
-          maxLength={6}
-          placeholder={t('att_new_ph')}
-          value={newPin}
-          onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
-          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
-        />
-        <AppInput
-          label={t('att_confirm_label')}
-          keyboardType="numeric"
-          secureTextEntry
-          maxLength={6}
-          placeholder={t('att_confirm_ph')}
-          value={confirmPin}
-          onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
-          style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
-        />
-        {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
-        <AppButton size="md" title={t('att_save_pin')} onPress={changePin} />
-      </View>
+      <AppButton
+        size="md"
+        variant="secondary"
+        title={t('att_change_pin')}
+        onPress={() => { setPinMsg(''); setPinModal(true); }}
+        style={{ marginTop: 16 }}
+      />
+      <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
+        {/* Ketuk area gelap di luar kartu = tutup. */}
+        <Pressable style={styles.modalBg} onPress={() => setPinModal(false)}>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>{t('att_change_pin')}</Text>
+              <AppInput
+                label={t('att_old_label')}
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={6}
+                placeholder={t('att_old_ph')}
+                value={oldPin}
+                onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
+              />
+              <AppInput
+                label={t('att_new_label')}
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={6}
+                placeholder={t('att_new_ph')}
+                value={newPin}
+                onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
+              />
+              <AppInput
+                label={t('att_confirm_label')}
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={6}
+                placeholder={t('att_confirm_ph')}
+                value={confirmPin}
+                onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
+              />
+              {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}
+              <AppButton size="md" title={t('att_save_pin')} onPress={changePin} />
+              <TouchableOpacity onPress={() => setPinModal(false)}>
+                <Text style={styles.modalCancel}>{t('cm_cancel')}</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </ScrollView>
  </View> );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
@@ -239,4 +259,8 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line, borderRadius: 10,
     padding: 11, fontFamily: fonts.bold, fontSize: 14, color: colors.text, letterSpacing: 3, textAlign: 'center',
   },
-  pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },});
+  pinMsg: { fontFamily: fonts.medium, fontSize: 13, color: colors.greenDark, marginTop: 8, textAlign: 'center' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '85%' },
+  modalTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, textAlign: 'center', marginBottom: 4 },
+  modalCancel: { fontFamily: fonts.semibold, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 12 },});

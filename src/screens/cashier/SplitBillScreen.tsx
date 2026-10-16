@@ -540,6 +540,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
     textAlign: 'right',
+    outlineStyle: 'none' as never,
   },
   gateMsg: { fontFamily: fonts.semibold, fontSize: 12, color: colors.amberDark, marginTop: 6 },
   billActs: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12 },

@@ -32,7 +32,7 @@ export default function QrHowScreen({ navigation }: Props) {
   };
 
   return (
-    <View style={styles.root}>
+    <ScreenRoot style={styles.root}>
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} hitSlop={12}>
           <Text style={styles.headerBack}>←</Text>
@@ -60,7 +60,7 @@ export default function QrHowScreen({ navigation }: Props) {
                 {t('g_qrhow_visit')} <Text style={styles.link}>erp.esb.co.id</Text>
               </Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text> {t('g_qrhow_and')} <Text style={styles.em}>{t('g_qrhow_password')}</Text> {t('g_qrhow_yours')}</Text>
+                <Text style={styles.stepText}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text>{t('g_qrhow_and')}<Text style={styles.em}>{t('g_qrhow_password')}</Text>{t('g_qrhow_yours')}</Text>
               </Bullet>
               <Bullet>
                 <Text style={styles.stepText}>{t('g_qrhow_then_click')} <Text style={styles.em}>{t('g_qrhow_signin')}</Text></Text>
@@ -76,7 +76,7 @@ export default function QrHowScreen({ navigation }: Props) {
             <>
               <Text style={styles.stepLead}>{t('g_qrhow_s2_lead')}</Text>
               <Bullet>
-                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_burger')}</Text> <BurgerGlyph /></Text>
+                <Text style={styles.stepText}>{t('g_qrhow_tap')} <Text style={styles.em}>{t('g_qrhow_burger')}</Text><BurgerGlyph /></Text>
               </Bullet>
               <Bullet>
                 <Text style={styles.stepText}>{t('g_qrhow_tap_menu')} <Text style={styles.em}>{t('g_qrhow_master')}</Text></Text>
@@ -118,7 +118,7 @@ export default function QrHowScreen({ navigation }: Props) {
           )}
         />
       </ScrollView>
-    </View>
+    </ScreenRoot>
   );
 }
 

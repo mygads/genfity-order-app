@@ -73,6 +73,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   boxError: { borderColor: colors.red },
-  field: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text, height: '100%' },
+  // Hilangkan outline fokus bawaan browser di web (garis hitam) - pola yg sama di CashierScreen/PromotionListScreen.
+  field: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text, height: '100%', outlineStyle: 'none' as never },
   errorText: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8, lineHeight: 19 },
 });

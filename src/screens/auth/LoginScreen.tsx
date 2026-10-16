@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { createElement, useEffect, useRef, useState } from 'react';
 import {
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,11 +11,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
-import { loginDemo, loginEmployee, setPostLoginRoute } from '../../session';
+import { loginEmployee } from '../../session';
 import { startRealtime } from '../../lib/realtime';
 import { setWsForeground } from '../../native/printer';
-import { validateEmployee } from '../../lib/apiSource';
+import { loginByQrCode, parseQrLoginPayload, validateEmployee, type EmployeeSession } from '../../lib/apiSource';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
@@ -100,12 +102,39 @@ export default function LoginScreen({ navigation }: Props) {
   const [serverError, setServerError] = useState('');
   const [busy, setBusy] = useState(false);
   const [help, setHelp] = useState(false);
+  /** Pemindai QR login: kamera dibuka langsung di layar ini (tanpa pindah screen). */
+  const [scanOpen, setScanOpen] = useState(false);
+  const [qrCode, setQrCode] = useState('');
+  const [permission, requestPermission] = useCameraPermissions();
+  const qrBusy = useRef(false);
 
   const filled = username.trim().length > 0 && password.length > 0;
 
   const goBack = () => {
     if (navigation?.goBack) navigation.goBack();
     else navigation?.navigate('Intro');
+  };
+
+  /**
+   * Kunci sesi setelah server menyatakan lolos (dipakai form PIN maupun QR):
+   * cocokkan/seed hash lokal, kunci sesi, nyalakan realtime. Tanpa navigate
+   * manual - GuardedStacks mount stack authed (Dashboard/Shift) sendiri.
+   */
+  const completeLogin = async (s: EmployeeSession, uname: string, pin: string) => {
+    try {
+      const rec = await loadPinRecord(s.userId);
+      if (!rec || !verifyPinHash(pin, rec)) {
+        await savePinHash(s.userId, pin);
+      }
+    } catch {
+      /* hash lokal opsional - server tetap sumber benar */
+    }
+    loginEmployee({ nama: s.nama, username: uname });
+    // Realtime global nyala sekali saat login (sebelumnya hanya nyala bila
+    // pengguna membuka layar Dapur/ESB/Display). Foreground service
+    // best-effort di dev-client/APK agar WS hidup saat layar mati.
+    try { startRealtime(); } catch { /* abaikan */ }
+    try { void setWsForeground(true); } catch { /* abaikan */ }
   };
 
   /**
@@ -133,20 +162,7 @@ export default function LoginScreen({ navigation }: Props) {
           setServerError(t('login_fail'));
           return;
         }
-        try {
-          const rec = await loadPinRecord(s.userId);
-          if (!rec || !verifyPinHash(password, rec)) {
-            await savePinHash(s.userId, password);
-          }
-        } catch {
-          /* hash lokal opsional - server tetap sumber benar */
-        }
-        loginEmployee({ nama: s.nama, username: username.trim() });
-        // Realtime global nyala sekali saat login (sebelumnya hanya nyala bila
-        // pengguna membuka layar Dapur/ESB/Display). Foreground service
-        // best-effort di dev-client/APK agar WS hidup saat layar mati.
-        try { startRealtime(); } catch { /* abaikan */ }
-        try { void setWsForeground(true); } catch { /* abaikan */ }
+        await completeLogin(s, username.trim(), password);
         // JANGAN navigate manual ke Dashboard: GuardedStacks me-render ulang
         // bersyarat (tamu -> authed) dan stack authed mount dengan initial
         // Dashboard/Shift sendiri. Navigate sinkron di sini race melawan
@@ -157,13 +173,54 @@ export default function LoginScreen({ navigation }: Props) {
     })();
   };
 
-  const scanQr = () => {
-    // Kunci sesi demo dulu (guard navigator butuh login), lalu pindai QR asli
-    // di layar kamera QrScan; hasil pindaian meneruskan ke alur kasir.
-    // QrScan hanya ada di stack authed: titip via setPostLoginRoute agar
-    // GuardedStacks mendorongnya setelah stack berganti (tanpa race NAVIGATE).
-    setPostLoginRoute('QrScan');
-    loginDemo();
+  /** Buka kamera pemindai langsung (tanpa pindah screen lain). */
+  const openQrScanner = () => {
+    if (busy) return;
+    setServerError('');
+    void (async () => {
+      if (Platform.OS !== 'web' && !permission?.granted) {
+        try {
+          const res = await requestPermission();
+          if (!res.granted) {
+            setServerError(t('scan_denied'));
+            return;
+          }
+        } catch {
+          setServerError(t('scan_denied'));
+          return;
+        }
+      }
+      setQrCode('');
+      setScanOpen(true);
+    })();
+  };
+
+  /** Hasil pindaian kamera / tempelan manual: kredensial QR dikirim ke BE
+   * (auth/cashier-login) - server yang memutuskan, bukan login lokal. */
+  const handleQrData = (raw: string) => {
+    if (qrBusy.current || busy) return;
+    qrBusy.current = true;
+    setScanOpen(false);
+    setServerError('');
+    setBusy(true);
+    void (async () => {
+      try {
+        const payload = parseQrLoginPayload(raw);
+        if (!payload) {
+          setServerError(t('login_qr_invalid'));
+          return;
+        }
+        const s = await loginByQrCode(payload);
+        if (!s.ok || !s.userId) {
+          setServerError(t('login_fail'));
+          return;
+        }
+        await completeLogin(s, payload.username, payload.pin);
+      } finally {
+        setBusy(false);
+        qrBusy.current = false;
+      }
+    })();
   };
 
   const card = (which: 'email' | 'qr') => {
@@ -307,6 +364,12 @@ export default function LoginScreen({ navigation }: Props) {
             <View style={styles.qrHero}>
               <QrTabletArt />
             </View>
+            {serverError ? (
+              <View style={styles.errorRow}>
+                <Image source={ICONS.fail} style={styles.errorIcon} resizeMode="contain" />
+                <Text style={styles.errorText}>{serverError}</Text>
+              </View>
+            ) : null}
             <View style={styles.spacer} />
             <AppButton
               size="md"
@@ -318,8 +381,9 @@ export default function LoginScreen({ navigation }: Props) {
             />
             <AppButton
               size="md"
-              title={t('g_login_scan')}
-              onPress={scanQr}
+              title={busy ? t('login_verifying') : t('g_login_scan')}
+              onPress={openQrScanner}
+              disabled={busy}
               style={styles.primary}
             />
           </View>
@@ -368,9 +432,60 @@ export default function LoginScreen({ navigation }: Props) {
     </Modal>
   );
 
+  /**
+   * Pemindai QR login: kamera live penuh-layar di atas form login (bukan
+   * screen navigasi lain). Native: CameraView + pindai otomatis sekali.
+   * Web (tanpa kamera): tempel isi QR lalu Pakai Kode - jalur verifikasi sama.
+   */
+  const scanModal = (
+    <Modal visible={scanOpen} transparent={false} animationType="slide" onRequestClose={() => setScanOpen(false)}>
+      <View style={styles.scanRoot}>
+        {Platform.OS === 'web' || !permission?.granted ? (
+          <View style={styles.scanManual}>
+            <Text style={styles.scanTitle}>{t('g_login_scan')}</Text>
+            <Text style={styles.scanManualHint}>{t('login_qr_hint')}</Text>
+            <View style={styles.scanBox}>
+              <TextInput
+                style={styles.scanInput}
+                value={qrCode}
+                onChangeText={setQrCode}
+                placeholder={t('login_qr_paste')}
+                placeholderTextColor={INPUT_BORDER}
+                autoCapitalize="none"
+                multiline
+              />
+            </View>
+            <AppButton
+              size="md"
+              title={t('login_qr_use')}
+              onPress={() => handleQrData(qrCode)}
+              disabled={!qrCode.trim() || busy}
+              style={styles.primary}
+            />
+          </View>
+        ) : (
+          <CameraView
+            style={styles.scanner}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => handleQrData(String(data))}
+          />
+        )}
+        {Platform.OS !== 'web' && permission?.granted ? (
+          <View style={styles.scanBar} pointerEvents="box-none">
+            <Text style={styles.scanHint}>{t('login_qr_hint')}</Text>
+          </View>
+        ) : null}
+        <TouchableOpacity style={styles.scanCancel} onPress={() => setScanOpen(false)} hitSlop={12}>
+          <Text style={styles.scanCancelT}>← {t('cancel')}</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+
   if (isTablet) {
     return (
-      <View style={styles.root}>
+      <ScreenRoot style={styles.root}>
         <View style={styles.split}>
           <ScrollView
             contentContainerStyle={styles.formSide}
@@ -381,12 +496,13 @@ export default function LoginScreen({ navigation }: Props) {
           {infoPanel}
         </View>
         {helpModal}
-      </View>
+        {scanModal}
+      </ScreenRoot>
     );
   }
 
   return (
-    <View style={styles.root}>
+    <ScreenRoot style={styles.root}>
       <ScrollView
         contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
         keyboardShouldPersistTaps="handled"
@@ -394,7 +510,8 @@ export default function LoginScreen({ navigation }: Props) {
         {formBody}
       </ScrollView>
       {helpModal}
-    </View>
+      {scanModal}
+    </ScreenRoot>
   );
 }
 
@@ -449,7 +566,7 @@ const styles = StyleSheet.create({
   },
   inputBoxError: { borderColor: RED },
   fieldIcon: { width: 22, height: 22 },
-  input: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, height: '100%' },
+  input: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, height: '100%', outlineStyle: 'none' as never },
   eyeIcon: { width: 24, height: 24 },
   errorRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'flex-start' },
   errorIcon: { width: 20, height: 20, marginTop: 1 },
@@ -516,4 +633,30 @@ const styles = StyleSheet.create({
     textAlign: 'center', lineHeight: 20, marginTop: 16, marginBottom: 4,
   },
   helpPhone: { fontFamily: fonts.bold },
+  /** Pemindai QR login penuh-layar (di atas form, bukan screen navigasi). */
+  scanRoot: { flex: 1, backgroundColor: '#000000' },
+  scanner: { flex: 1 },
+  scanBar: {
+    position: 'absolute', left: 0, right: 0, bottom: 96,
+    alignItems: 'center', paddingHorizontal: 32,
+  },
+  scanHint: {
+    fontFamily: fonts.medium, fontSize: 14, color: '#FFFFFF',
+    textAlign: 'center', backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, overflow: 'hidden',
+  },
+  scanCancel: {
+    position: 'absolute', left: 16, top: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
+  },
+  scanCancelT: { fontFamily: fonts.bold, fontSize: 15, color: '#FFFFFF' },
+  scanManual: { flex: 1, backgroundColor: '#FFFFFF', paddingHorizontal: 24, paddingTop: 72, paddingBottom: 28 },
+  scanTitle: { fontFamily: fonts.bold, fontSize: 22, color: TITLE_DARK, textAlign: 'center' },
+  scanManualHint: { fontFamily: fonts.regular, fontSize: 14, color: GREY, textAlign: 'center', marginTop: 10 },
+  scanBox: {
+    borderWidth: 1, borderColor: INPUT_BORDER, borderRadius: 14,
+    minHeight: 120, paddingHorizontal: 16, paddingVertical: 12, marginTop: 16, marginBottom: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  scanInput: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, minHeight: 96, outlineStyle: 'none' as never },
 });

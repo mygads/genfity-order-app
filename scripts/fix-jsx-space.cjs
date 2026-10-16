@@ -20,7 +20,8 @@
  * Batasan aman:
  * - tak menyentuh apapun di dalam <Text>...</Text> sebaris (spasi di sana
  *   bisa disengaja, mis. `{nama} <B>Telp</B>`);
- * - lewati baris dengan blok <Text> multi-baris (masuk daftar remaining);
+ * - lewati baris dengan blok <Text> multi-baris (masuk daftar remaining),
+ *   termasuk baris yang seluruhnya berada di dalam blok tersebut;
  * - tutupi string ber-quote ('..' / ".." / `..` tanpa ${}) agar teks
  *   literal seperti 'a > < b' tak ikut berubah.
  *
@@ -100,7 +101,8 @@ function hasMultilineText(line) {
  */
 function hitungTagTeks(line) {
   const m = maskRanges(line, strRanges(line));
-  const buka = (m.match(/<Text[\s>]/g) || []).length;
+  // `<Text` di ujung baris (atribut lanjut di baris berikut) ikut dihitung.
+  const buka = (m.match(/<Text(?=[\s>]|$)/g) || []).length;
   const tutup = (m.match(/<\/Text>/g) || []).length;
   return [buka, tutup];
 }
@@ -137,10 +139,6 @@ for (const file of DIRS.flatMap((d) => [...walk(path.join(ROOT, d))])) {
     PAT_LEAD.lastIndex = 0;
     if (!PAT_TAG.test(line) && !PAT_BRACE.test(line) && !PAT_LEAD.test(line)) return line;
     const baris = idx + 1;
-    if (buka !== tutup || diDalamBlok) {
-      remaining.push(`${rel}:${baris}: ${line.trim().slice(0, 80)}`);
-      return line;
-    }
     const ranges = maskRangesFor(line);
     // Marka JSX dicek dengan string saja yang ditutupi: tag <Text> bukan
     // isi lindung sehingga baris `</Text> {...}` tetap dikenali sebagai JSX,
@@ -166,6 +164,12 @@ for (const file of DIRS.flatMap((d) => [...walk(path.join(ROOT, d))])) {
       kumpul(PAT_BRACE, (match) => !(match[1] === '>' && line[match.index - 1] === '='));
     }
     if (cuts.length === 0) return line;
+    // Baris blok <Text> multi-baris (tak seimbang atau di dalam blok) yang
+    // masih menyimpan kandidat: jangan otomatis, lempar ke manual.
+    if (buka !== tutup || diDalamBlok) {
+      remaining.push(`${rel}:${baris}: ${line.trim().slice(0, 80)}`);
+      return line;
+    }
     // Urutkan + buang yang tumpang tindih (jaga-jaga), lalu hapus dari belakang.
     cuts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const pakai = [];

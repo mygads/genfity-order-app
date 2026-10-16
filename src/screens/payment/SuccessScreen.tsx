@@ -5,7 +5,6 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { printReceipt } from '../../lib/print';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 
 type Nav = {
@@ -91,9 +90,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const miniHidden = miniItems.length - miniShown.length;
   const isCash = method === 'cash' || method.toLowerCase().includes('tunai');
   const doPrint = () => {
-    // Perintah cetak langsung (jangan cuma navigasi) - lalu tampilkan pratinjau struk.
-    void printReceipt();
-    navigation?.navigate('Receipt', receiptParams);
+    // Cetak via layar struk (cetak nyata ESC/POS + tendang laci bila tunai),
+    // bukan dialog info - autoPrint picu sekali saat Receipt dibuka.
+    navigation?.navigate('Receipt', { ...receiptParams, autoPrint: true });
   };
   const receiptParams = {
     total, method: METHOD_LABEL[method] ?? method, cash, change,
@@ -298,7 +297,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
       </View>
 
       <View style={[styles.footer, styles.footerGrid]}>
-        <AppButton title={t('ok_print')} variant="secondary" onPress={() => navigation?.navigate('Receipt', receiptParams)} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={styles.footGridBtn} />
         <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={styles.footGridBtn} />
         <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={styles.footGridBtn} />
         <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={styles.footGridBtn} />

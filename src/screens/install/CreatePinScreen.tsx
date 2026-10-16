@@ -41,7 +41,8 @@ import { loginDemo } from '../../session';import { createPinOnServer } from '../
 
   if (ok) {
     return (
-      <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+      <ScreenRoot style={styles.root}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
         <Image source={require('../../../assets/images/process_success.webp')} style={styles.hero} resizeMode="contain" />
         <Text style={styles.title}>{t('inst_pin_done_title')}</Text>
         <Text style={styles.desc}>{t('inst_pin_done_desc').replace('{b}', branch)}</Text>
@@ -52,11 +53,13 @@ import { loginDemo } from '../../session';import { createPinOnServer } from '../
           style={styles.primary}
         />
       </ScrollView>
+      </ScreenRoot>
     );
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
+    <ScreenRoot style={styles.root}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Text style={styles.title}>{t('inst_pin_title')}</Text>
       <Text style={styles.desc}>
         {branch} · {active === 'pin' ? t('inst_pin_new') : t('inst_pin_confirm')}
@@ -81,6 +84,7 @@ import { loginDemo } from '../../session';import { createPinOnServer } from '../
       </View>
       <Text style={styles.foot}>{t('inst_pin_secure')}</Text>
     </ScrollView>
+    </ScreenRoot>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
   body: { paddingHorizontal: 24, paddingBottom: 32, alignItems: 'center' },

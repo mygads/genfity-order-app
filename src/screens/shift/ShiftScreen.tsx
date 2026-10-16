@@ -168,7 +168,7 @@ const MAX_KAS_AWAL = 10000000;
             textAlign="right"
             value={kasAwalNum ? rpNum(kasAwalNum) : '0'}
             onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
-            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
+            boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange, marginTop: 8 }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
           />
           <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : 'Nol rupiah - masukkan nominal kas awal'}</Text>
@@ -194,7 +194,7 @@ const MAX_KAS_AWAL = 10000000;
             multiline
             value={catatan}
             onChangeText={setCatatan}
-            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start' }}
+            boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start', marginTop: 8 }}
             style={{ textAlignVertical: 'top' }}
           />
         </View>
@@ -256,7 +256,7 @@ const MAX_KAS_AWAL = 10000000;
           </View>
         </View>
       </Modal>
-    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /></View>
   );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   burger: {
@@ -304,7 +304,7 @@ const MAX_KAS_AWAL = 10000000;
     fontFamily: fonts.medium,
     color: colors.muted,
     textAlign: 'right',
-    marginTop: 4,
+    marginTop: 8,
   },
   chipHint: {
     fontSize: 11,

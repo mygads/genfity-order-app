@@ -29,7 +29,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   );
 
   return (
-    <View style={styles.root}>
+    <ScreenRoot style={styles.root}>
       <View style={styles.arc} pointerEvents="none" />
       <ScrollView
         contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
@@ -81,7 +81,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
         {list.length === 0 ? (
           <Text style={styles.empty}>{t('sel_empty')}</Text>
         ) : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null} </>
+        {error ? <Text style={styles.error}>{error}</Text> : null}</>
         )}
       </ScrollView>
       <View style={[styles.footer, isTablet && wideCenterSm]}>
@@ -93,7 +93,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           style={styles.primary}
         />
       </View>
-    </View>
+    </ScreenRoot>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF', overflow: 'hidden' },
   arc: {
@@ -114,7 +114,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
     paddingHorizontal: 14, backgroundColor: '#FFFFFF', marginTop: 14, marginBottom: 12,
   },
   searchGlyph: { fontSize: 20, color: colors.faint },
-  searchInput: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, height: '100%' },
+  searchInput: { flex: 1, fontFamily: fonts.regular, fontSize: 14, color: TITLE_DARK, height: '100%', outlineStyle: 'none' as never },
   card: {
     flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF',
     borderWidth: 1.5, borderColor: colors.line, borderRadius: 12, padding: 14, marginBottom: 10,

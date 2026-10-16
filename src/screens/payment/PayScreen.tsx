@@ -142,9 +142,9 @@ const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 export default function PayScreen({ navigation, route }: Props) {
-  /** Gate E00044 (kontrak §2/§10.4): >7 hari tanpa sync blokir SEMUA jalur
-   * bayar di layar ini (tunai/nontunai/online/member/lainnya + ExtraPay +
-   * Qris/Edc yang hanya bisa dicapai dari sini). */
+  /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya tampil
+   * sebagai peringatan di atas metode bayar - semua jalur (tunai/nontunai/
+   * online/member/lainnya + ExtraPay + Qris/Edc) tetap bisa dipakai. */
   const syncBlocked = syncWarnLevel() === 'block7';
   const total = route?.params?.total ?? 266000;
   const orderMode = route?.params?.mode;
@@ -1036,18 +1036,15 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderHeader()}
       <ScrollView contentContainerStyle={styles.body}>
         {renderBanner()}
-        {syncBlocked ? (
-          <View>
-            <Text style={styles.lanjutTextPrimary}>{t('sync.blocked')}</Text>
-            <Text style={styles.ctaHint}>{t('sync.blockedMsg')}</Text>
-            <AppButton title={`${t('sync.openSync')} ›`} onPress={() => navigation?.navigate('Sync')} size="md" />
+        {syncBlocked && (
+          <View style={styles.syncWarn}>
+            <Text style={styles.syncWarnT}>{t('sync.blocked')}</Text>
+            <Text style={styles.syncWarnSub}>{t('sync.blockedMsg')}</Text>
+            <AppButton title={`${t('sync.openSync')} ›`} onPress={() => navigation?.navigate('Sync')} size="sm" fullWidth={false} style={styles.syncWarnBtn} />
           </View>
-        ) : (
-          <>
-            {renderBody()}
-            <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
-          </>
         )}
+        {renderBody()}
+        <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
       </ScrollView>
     </View>
   );
@@ -1066,6 +1063,11 @@ const styles = StyleSheet.create({
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.white, marginRight: 5 },
   onlineText: { color: colors.white, fontFamily: fonts.semibold, fontSize: 12 },
   body: { padding: 12, paddingBottom: 24 },
+  /** Kartu peringatan sync >7 hari - info saja, pembayaran tetap jalan. */
+  syncWarn: { backgroundColor: colors.paleAmber, borderRadius: 10, padding: 12, marginTop: 10 },
+  syncWarnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.amberDark },
+  syncWarnSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.amberDark, marginTop: 4 },
+  syncWarnBtn: { marginTop: 10, alignSelf: 'flex-start' },
   bannerRow: { gap: 0 },
   bannerRowTablet: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   voucherBarTablet: {

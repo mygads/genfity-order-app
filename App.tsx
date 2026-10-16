@@ -11,6 +11,7 @@ import type { RootStackParamList } from './src/navigation/types';
 import { getSession, loginDemo, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
+import { ensureSeeded } from './src/lib/seed';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { pullMaster } from './src/lib/master';
@@ -292,7 +293,15 @@ export default function App() {
 
   useEffect(() => {
     loadServerState().catch(() => {});
-    initDb().catch(() => {});
+    initDb()
+      .then(async () => {
+        try {
+          await ensureSeeded();
+        } catch (e) {
+          console.warn('[seed] ensureSeeded failed', e);
+        }
+      })
+      .catch(() => {});
     // WS self-order baru → notifikasi lokal + arahkan badge ESB Order.
     const off = onWsMessage((msg) => {
       if (msg.type === 'NEW_SELF_ORDER') {

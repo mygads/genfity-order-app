@@ -236,7 +236,7 @@ import React, { useEffect, useState } from 'react';import {
           </View>
         </View>
       </Modal>
-    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /> </View>
+    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /></View>
   );}function Row({
   label,
   value,
@@ -409,7 +409,7 @@ import React, { useEffect, useState } from 'react';import {
     textAlign: 'center',
     lineHeight: 20,
   },
-  dialogRow: { flexDirection: 'row', marginTop: 18 },
+  dialogRow: { flexDirection: 'row', marginTop: 18, alignSelf: 'stretch' },
   dialogCancel: {
     flex: 1,
     borderWidth: 1,

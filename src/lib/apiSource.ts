@@ -22,6 +22,8 @@ import {
   setServerEnv,
 } from '../config/server';
 import { getItem, setItem } from './storage';
+import { initDb, queryFirst } from './db';
+import { loadPinRecord, verifyPinHash } from './pin';
 
 export type ApiMode = 'dummy' | 'real';
 
@@ -374,9 +376,68 @@ export interface EmployeeSession {
   fromDummy: boolean;
 }
 
+interface LocalPosUserRow {
+  id: string;
+  username: string | null;
+  pinHash: string | null;
+  password: string | null;
+  authKey: string | null;
+  branchId: string | null;
+  role: string | null;
+}
+
+/**
+ * Verifikasi login offline ke SQLite lokal (ms_posuser by username +
+ * hash PIN via lib/pin, fallback perbandingan legacy pinHash/password
+ * untuk baris hasil pull yang belum punya record). Cocok → EmployeeSession
+ * bentuk SAMA seperti jalur online (authKey lokal); tidak cocok → lempar
+ * error kredensial E401 (jangan fallback ke dummy).
+ */
+async function validateEmployeeLocal(
+  username: string,
+  pin: string,
+): Promise<EmployeeSession> {
+  const uname = (username ?? '').trim();
+  await initDb();
+  const row = await queryFirst<LocalPosUserRow>(
+    'SELECT id, username, pinHash, password, authKey, branchId, role FROM ms_posuser WHERE username = ? COLLATE NOCASE LIMIT 1',
+    [uname],
+  );
+  let match = false;
+  if (row) {
+    try {
+      const rec = await loadPinRecord(row.id);
+      if (rec && verifyPinHash(pin, rec)) match = true;
+    } catch {
+      /* lanjut ke fallback legacy di bawah */
+    }
+    if (!match && (row.pinHash === pin || row.password === pin)) match = true;
+  }
+  if (!row || !match) {
+    const err = new Error('username atau PIN salah') as Error & {
+      code?: string;
+    };
+    err.code = 'E401';
+    throw err;
+  }
+  return {
+    ok: true,
+    userId: row.id,
+    // ms_posuser tidak punya kolom nama - pakai username lokal.
+    nama: row.username ?? uname,
+    authKey: row.authKey ?? `local-${row.id}`,
+    role: row.role ?? '',
+    fromDummy: false,
+  };
+}
+
 /**
  * Revalidasi PIN ke server (kontrak §3.4 esb/employee/validate).
  * Wajib dipakai untuk verifikasi login - jangan verifikasi PIN lokal saja.
+ *
+ * Fallback offline (Real Mode tapi fetch gagal/offline): verifikasi ke
+ * SQLite lokal via validateEmployeeLocal - TIDAK jatuh ke dummy. Jalur
+ * online (backend menjawab) dan Dummy Mode tidak berubah.
  */
 export async function validateEmployee(
   username: string,
@@ -384,6 +445,62 @@ export async function validateEmployee(
 ): Promise<EmployeeSession> {
   const r = await apiFetch('esb/employee/validate', {
     body: { username, pin },
+  });
+  if (r.fromDummy && getApiMode() === 'real') {
+    // Fetch gagal/offline padahal base URL terisi: verifikasi lokal SQLite
+    // (melempar E401 bila tidak cocok, bukan dummy).
+    return validateEmployeeLocal(username, pin);
+  }
+  const { success, data } = unwrap<Record<string, unknown>>(r.data);
+  const d = data as {
+    userId?: unknown;
+    nama?: unknown;
+    authKey?: unknown;
+    role?: unknown;
+  };
+  return {
+    ok: success && !!d.userId,
+    userId: String(d.userId ?? ''),
+    nama: String(d.nama ?? ''),
+    authKey: String(d.authKey ?? ''),
+    role: String(d.role ?? ''),
+    fromDummy: r.fromDummy,
+  };
+}
+
+export interface QrLoginPayload {
+  username: string;
+  pin: string;
+  terminalId?: string;
+}
+
+/**
+ * Urai isi QR login dari BE: JSON {username/user, pin/password}
+ * (+terminalId opsional). Null bila bukan QR login yang dikenal.
+ */
+export function parseQrLoginPayload(raw: string): QrLoginPayload | null {
+  const text = (raw ?? '').trim();
+  if (!text) return null;
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+    const username = String(o.username ?? o.user ?? '').trim();
+    const pin = String(o.pin ?? o.password ?? o.passcode ?? '');
+    const terminalId = String(o.terminalId ?? o.terminal ?? '').trim();
+    if (!username || !pin) return null;
+    return { username, pin, ...(terminalId ? { terminalId } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Login kasir via QR dari BE (kontrak auth/cashier-login): kirim kredensial
+ * hasil pindaian apa adanya, server yang memutuskan (jangan login lokal saja).
+ */
+export async function loginByQrCode(p: QrLoginPayload): Promise<EmployeeSession> {
+  const r = await apiFetch(ApiPath.cashierLogin, {
+    body: { username: p.username, pin: p.pin, ...(p.terminalId ? { terminalId: p.terminalId } : {}) },
   });
   const { success, data } = unwrap<Record<string, unknown>>(r.data);
   const d = data as {

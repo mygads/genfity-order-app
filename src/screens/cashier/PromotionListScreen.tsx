@@ -349,6 +349,6 @@ const styles = StyleSheet.create({
   code: { fontFamily: fonts.semibold, fontSize: 13, color: colors.greenDark, marginTop: 2 },
   desc: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   min: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
-  pakai: { backgroundColor: colors.orange, borderRadius: 8, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
+  pakai: { backgroundColor: colors.orange, borderRadius: 8, paddingHorizontal: 12, alignItems: 'center', marginTop: 10 },
   pakaiT: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
 });

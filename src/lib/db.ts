@@ -218,6 +218,11 @@ const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_applog (
     id TEXT PRIMARY KEY, level TEXT, tag TEXT, message TEXT, detail TEXT,
     time TEXT, createdAt TEXT)`,
+  // Draft pesanan kasir yang tersimpan lokal (belum jadi tr_saleshead):
+  // tulis-lokal, ikut pola syncDate NULL = kotor.
+  `CREATE TABLE IF NOT EXISTS tr_draftorder (
+    id TEXT PRIMARY KEY, payload TEXT NOT NULL,
+    createdAt TEXT, updatedAt TEXT, syncDate TEXT)`,
 ];
 
 /**
@@ -299,6 +304,7 @@ const DIRTY_PK: Record<string, string | string[]> = {
   ms_cashmethod: 'id',
   tr_membertransactionlog: 'id',
   tr_kitchenticket: 'id',
+  tr_draftorder: 'id',
 };
 
 /**

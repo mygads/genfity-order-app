@@ -177,6 +177,13 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [mode, setMode] = useState('DINE IN');
   const [showModes, setShowModes] = useState(false);
   const catScrollRef = useRef<ScrollView>(null);
+  /** Posisi x tiap chip kategori (phone) - untuk scroll chip aktif ke view saat diketuk. */
+  const chipX = useRef<Record<string, number>>({});
+  /** Phone: geser baris kategori agar chip yang diketuk terlihat; default x=0 (chip pertama). */
+  const scrollToChip = (name: string) => {
+    if (isWide) return;
+    catScrollRef.current?.scrollTo({ x: Math.max(0, (chipX.current[name] ?? 0) - 16), animated: true });
+  };
   const [showSearch, setShowSearch] = useState(false);
   const [table, setTable] = useState(route?.params?.table ?? '');
   const [voucher, setVoucher] = useState<{ code: string; amount: number; kind?: string } | null>(
@@ -194,8 +201,8 @@ export default function CashierScreen({ navigation, route }: Props) {
   );
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
-  /** Gate E00044 (kontrak §2/§10.4): >7 hari tanpa sync → banner + tombol
-   * Bayar mati (bangun keranjang tetap boleh; Pay mengunci final). */
+  /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya banner info -
+   * tombol Bayar tetap hidup, Pay tampilkan peringatan tapi tetap bisa bayar. */
   const syncBlocked = syncWarnLevel() === 'block7';
   const renderSyncBlock = () =>
     syncBlocked ? (
@@ -793,10 +800,6 @@ export default function CashierScreen({ navigation, route }: Props) {
         ref={catScrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        onContentSizeChange={() => {
-          // Default aktif = Makanan (chip ke-3): geser agar label pcs terlihat di phone.
-          if (!isWide) catScrollRef.current?.scrollTo({ x: 120, animated: false });
-        }}
         contentContainerStyle={[styles.catRow, !isWide && styles.catRowPhone]}
         style={styles.catScroll}>
         {categories.map((c) => {
@@ -807,9 +810,11 @@ export default function CashierScreen({ navigation, route }: Props) {
             <TouchableOpacity
               key={c.name}
               style={[styles.catChip, active && styles.catChipActive]}
+              onLayout={(e) => { chipX.current[c.name] = e.nativeEvent.layout.x; }}
               onPress={() => {
                 setActiveCategory(c.name);
                 setActiveSub(null);
+                scrollToChip(c.name);
               }}>
               <Text style={[styles.catText, active && styles.catTextActive]} numberOfLines={1}>
                 {c.name} ({catCount(c.name)}pcs)
@@ -1152,8 +1157,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={[styles.btnPay, (activeCart.length === 0 || syncBlocked) && styles.ctaDisabled]}
-          disabled={activeCart.length === 0 || syncBlocked}
+          style={[styles.btnPay, activeCart.length === 0 && styles.ctaDisabled]}
+          disabled={activeCart.length === 0}
           onPress={goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
           <Text style={styles.btnPayText} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)}</Text>
