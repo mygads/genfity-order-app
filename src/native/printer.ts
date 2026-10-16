@@ -30,6 +30,7 @@ export interface PrinterTarget {
 interface NativePrinter {
   printBt?: (mac: string, base64: string) => Promise<number>;
   printUsb?: (vid: number, pid: number, base64: string) => Promise<number>;
+  requestUsbPermission?: (vid: number, pid: number) => Promise<boolean>;
   listBondedBt?: () => Promise<Array<{ name: string; mac: string }>>;
   openDrawer?: (target: string) => Promise<boolean>;
   startWsService?: () => Promise<boolean>;
@@ -104,8 +105,25 @@ export async function printBytes(target: PrinterTarget, data: Uint8Array): Promi
       return { ok: true, bytes };
     }
     if (target.transport === 'usb' && n.printUsb) {
-      const bytes = await n.printUsb(target.vendorId ?? 0, target.productId ?? 0, b64);
-      return { ok: true, bytes };
+      const vid = target.vendorId ?? 0;
+      const pid = target.productId ?? 0;
+      try {
+        const bytes = await n.printUsb(vid, pid, b64);
+        return { ok: true, bytes };
+      } catch (e) {
+        // Izin USB belum diberikan (dialog sistem, sekali sampai dicabut):
+        // minta sekali lalu coba ulang satu kali. Penolakan pengguna =
+        // send-failed dengan detail jujur (bukan diam).
+        const msg = e instanceof Error ? e.message : '';
+        if (n.requestUsbPermission && /USB_NO_PERMISSION|USB_DENIED|permission/i.test(msg)) {
+          const granted = await requestUsbPermission(vid, pid);
+          if (granted) {
+            const bytes = await n.printUsb(vid, pid, b64);
+            return { ok: true, bytes };
+          }
+        }
+        throw e;
+      }
     }
     return { ok: false, reason: 'send-failed', detail: 'transport tak didukung modul' };
   } catch (e) {
@@ -126,8 +144,25 @@ export async function openCashDrawer(target: PrinterTarget): Promise<boolean> {
 }
 
 /**
+ * Minta izin USB sistem untuk device VID/PID (dialog Android, sekali sampai
+ * dicabut). false = Expo Go/web (tanpa modul), ditolak pengguna, atau device
+ * tak tersambung. Panggil sebelum printUsb pertama / saat t('...') gagal
+ * USB_NO_PERMISSION.
+ */
+export async function requestUsbPermission(vendorId: number, productId: number): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const n = native();
+  if (!n?.requestUsbPermission) return false;
+  try {
+    return await n.requestUsbPermission(vendorId, productId);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Foreground service WS realtime (Android dev-client/APK). Best-effort:
- * false di Expo Go/web atau bila modul tak menyediakan — realtime JS
+ * false di Expo Go/web atau bila modul tak menyediakan - realtime JS
  * (lib/realtime.ts) tetap jalan selama aplikasi foreground.
  */
 export async function setWsForeground(on: boolean): Promise<boolean> {

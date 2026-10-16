@@ -7,8 +7,10 @@ import android.app.PendingIntent;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
@@ -37,6 +39,7 @@ public class GenfityPrinterModule extends ReactContextBaseJavaModule {
       UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
   private static final String WS_CHANNEL = "genfity-ws";
   private static final int WS_NOTIF_ID = 6101;
+  private static final String ACTION_USB_PERMISSION = "id.genfity.posclone.USB_PERMISSION";
 
   public GenfityPrinterModule(ReactApplicationContext ctx) {
     super(ctx);
@@ -87,6 +90,64 @@ public class GenfityPrinterModule extends ReactContextBaseJavaModule {
         if (socket != null) socket.close();
       } catch (Exception ignored) {
       }
+    }
+  }
+
+  /**
+   * Minta izin akses USB ke device VID/PID (dialog sistem Android, satu kali
+   * sampai device dicabut). Resolve true bila sudah/diizinkan; reject
+   * USB_DENIED bila pengguna menolak, USB_NOT_FOUND bila tak tersambung.
+   */
+  @ReactMethod
+  public void requestUsbPermission(int vendorId, int productId, Promise promise) {
+    try {
+      UsbManager mgr =
+          (UsbManager) getReactApplicationContext().getSystemService(Context.USB_SERVICE);
+      UsbDevice target = null;
+      for (UsbDevice d : mgr.getDeviceList().values()) {
+        if (d.getVendorId() == vendorId && d.getProductId() == productId) {
+          target = d;
+          break;
+        }
+      }
+      if (target == null) {
+        promise.reject("USB_NOT_FOUND", "device tidak tersambung");
+        return;
+      }
+      if (mgr.hasPermission(target)) {
+        promise.resolve(true);
+        return;
+      }
+      final Context ctx = getReactApplicationContext();
+      int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+          ? PendingIntent.FLAG_MUTABLE : 0;
+      PendingIntent pi = PendingIntent.getBroadcast(
+          ctx, target.getDeviceId(), new Intent(ACTION_USB_PERMISSION), flags);
+      final Promise pending = promise;
+      BroadcastReceiver receiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent intent) {
+          try {
+            ctx.unregisterReceiver(this);
+          } catch (Exception ignored) {
+          }
+          if (ACTION_USB_PERMISSION.equals(intent.getAction())) {
+            boolean granted =
+                intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
+            if (granted) pending.resolve(true);
+            else pending.reject("USB_DENIED", "izin USB ditolak pengguna");
+          }
+        }
+      };
+      if (Build.VERSION.SDK_INT >= 33) {
+        ctx.registerReceiver(receiver, new IntentFilter(ACTION_USB_PERMISSION),
+            Context.RECEIVER_NOT_EXPORTED);
+      } else {
+        ctx.registerReceiver(receiver, new IntentFilter(ACTION_USB_PERMISSION));
+      }
+      mgr.requestPermission(target, pi);
+    } catch (Exception e) {
+      promise.reject("USB_PERM_FAILED", e.getMessage());
     }
   }
 
