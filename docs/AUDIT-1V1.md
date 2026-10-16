@@ -19,11 +19,11 @@
 | Pilih Cabang | ✅ | Panah ← dalam layar (tanpa navy header); pin `install_location_pin.webp`; spinner biru saat load; CTA stadium pucat saat loading/kosong |
 | Login email | ✅ | Ikon kartu/input/mata/gagal semua aset asli (`login_username_*`, `login_scanqr_*`, `username/password/show/hide.webp`, `fail_red.webp`); error merah + border merah; Masuk stadium penuh-oranye saat terisi, pucat saat kosong |
 | Login QR | ✅ | Ilustrasi + outline "Cara mendapatkan QR" + "Scan QR" glow; tanpa kotak-simulasi/manual (tidak ada di asli) |
-| QrHow (Cara mendapatkan QR) | ✅ | Header biru + banner `get_qr_banner*.webp` + 4 thumbnail `get_qr_thumbnail_*.webp` + teks langkah verbatim capture how1-4 |
+| QrHow (Cara mendapatkan QR) | ✅ | Header biru + banner `get_qr_banner*.webp` + 4 thumbnail `get_qr_thumbnail_*.webp` + teks langkah verbatim capture how1-4; badge play overlay + tap Alert (URL video asli tak pulih dari dossier — playback nyata tunggu BE/produk) |
 | Help (?) login | ✅ | QR WA asli `whatsapp_qr.webp`; logo ESB; "0822-1066-6969" strip; tombol "Oke" |
 | Show-pass / filled / error states | ✅ | Sesuai `login-showpass`, `05b-login-filled`, `login-error` (ikon abu saat normal, merah saat error) |
 | Ilustrasi tablet-QR mode login | ⏳ | Aproksimasi View (tidak ada aset ini di bundle); jika APK asli dibongkar dan ketemu, ganti Image |
-| Video tutorial QrHow (play) | ⏳ | Thumbnail statis; video butuh URL stream dari backend - belum ada kontraknya |
+| Video tutorial QrHow (play) | ⏳ | Badge play + Alert fallback SUDAH (2026-10-16); playback nyata butuh URL stream dari backend - belum ada kontraknya |
 | Search + kartu cabang | ➕ | Tidak ada di capture (capture = loading); dipertahankan untuk multi-cabang |
 | "Lupa PIN?" di Login | ➕ | Tidak ada di capture; dipertahankan (navigasi wajib, komitmen sebelumnya) |
 
@@ -35,7 +35,7 @@
 | Payment: Qris/Edc/Success/Receipt | ✅ | FauxQr dekoratif jujur (payload asli butuh merchant ID backend); Success orderNo deterministik; Cetak → Receipt dua form-factor; split-bill genap |
 | BillPreview/Cancel split & void | ✅ | Sisa genap; void split toggle; bayar-sisa → Pay; supervisor PIN via server |
 | Cashier ↔ Tables/Booking/Voucher/Member | ✅ | Mode TAKE AWAY; table attach; voucher menempel ke transaksi; riwayat member rp()+offline guard |
-| QrScan kamera | ✅ | CameraView QR asli + tab claim/esb/member/voucher (milik worker lain - jangan sentuh file ini) |
+| QrScan kamera | ✅ | CameraView QR asli + tab claim/esb/member/voucher; auto-start kamera+izin sistem saat mount di native (web tetap manual two-step); implementasi agen-wf saya, ter-commit dalam dc87b52 |
 | Receipt void-lines (T8) | ✅ | Cancel → Receipt oper `voidLines`+`reason`+`table`+`cashier`; Receipt render seksi void + shareText; key `rc_void_*` sudah ada di kamus `src/lib/i18n.ts:383-385` (milik worker lain); Props terima `table`/`cashier`/`customer`/`ongkir`; hardcode 38900/5000 sudah dihapus worker lain (T3 ikut maju) |
 | Shift/History/Cash/Settings | ⏳ | **JANGAN SENTUH** - sedang refactor i18n worker lain (tsc sempat merah `EsbStatus 'Batal'`, sudah hijau lagi 2026-10-16) |
 | Print fisik | ⏳ | `printReceipt` stub; modul `genfity-printer` milik worker lain |
