@@ -106,8 +106,9 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  // Pastikan baris admin lokal ber-role admin (DB lama mungkin berbeda).
-  await run(`UPDATE ms_posuser SET role = 'admin' WHERE id = 'u-admin'`);
+  // Pastikan baris admin lokal ber-role admin HANYA bila role kosong (DB lama
+  // mungkin berbeda); role hasil pull server tidak pernah ditimpa (GAP-11).
+  await run(`UPDATE ms_posuser SET role = 'admin' WHERE id = 'u-admin' AND (role IS NULL OR role = '')`);
 
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,

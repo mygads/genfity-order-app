@@ -119,6 +119,9 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     // Deposit / voucher memakai field `kind` di payload (bukan `op`).
     const k = String(payload?.kind ?? '');
     if (k === 'deposit-topup' || k === 'member-deposit') return ApiPath.depositTopup;
+    // GAP-FIX: member-register offline (MemberScreen) sebelumnya jatuh ke null
+    // dan tak pernah terkirim.
+    if (k === 'member-register') return ApiPath.registerMember;
     if (k === 'voucher-validate') return ApiPath.voucherValidate;
     if (k === 'voucher-lock') return ApiPath.voucherLock;
     if (k === 'voucher-unlock') return ApiPath.voucherUnlock;

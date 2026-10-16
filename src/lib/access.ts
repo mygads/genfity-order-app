@@ -4,15 +4,17 @@
  * Hirarki baca per (userId, accessKey):
  * 1. baris eksak (userId, accessKey) - menang mutlak;
  * 2. baris wildcard (userId, '*') - allow-all (dipakai admin seed u-admin);
- * 3. template peran: peran dibaca dari ms_posuser.role, lalu baris
- *    (role, accessKey) dan (role, '*') - mis. template 'kasir' berisi deny
- *    eksplisit untuk aksi sensitif, template 'supervisor' berisi allow;
+ * 3. template peran: peran dibaca dari ms_posuser.role via id ATAU username
+ *    (dinormalisasi lowercase+trim), lalu baris (role, accessKey) dan
+ *    (role, '*') - mis. template 'kasir' berisi deny eksplisit untuk aksi
+ *    sensitif, template 'supervisor' berisi allow;
  * 4. tanpa baris apa pun = fail-open allow (kompatibilitas kasir offline),
  *    KECUALI ada deny eksplisit di tingkat di atas.
  *
  * Fail-open juga berlaku saat DB belum siap (catch -> allow, reason
- * 'db-unready'). Fungsi ini TIDAK PERNAH melempar. Alur PIN supervisor
- * (lib/pin.ts) tidak disentuh - modul ini hanya membaca tabel akses.
+ * 'db-unready'); tiap jalur fail-open memancarkan console.warn sekali
+ * (warn-once) agar tidak diam. Fungsi ini TIDAK PERNAH melempar. Alur PIN
+ * supervisor (lib/pin.ts) tidak disentuh - modul ini hanya membaca tabel akses.
  */
 import { queryFirst } from './db';
 
@@ -57,6 +59,14 @@ async function findAllow(userId: string, accessKey: string): Promise<number | nu
   return Number(row.flagAllow) ? 1 : 0;
 }
 
+/** Warn-once agar fail-open diam (GAP-12) tetap memancarkan sinyal di log. */
+let warnedFailOpen = false;
+function warnFailOpenOnce(reason: string, userId: string, accessKey: string): void {
+  if (warnedFailOpen) return;
+  warnedFailOpen = true;
+  console.warn(`[access] fail-open allow (${reason}) user=${userId} key=${accessKey}`);
+}
+
 async function decide(userId: string, accessKey: string): Promise<AccessDecision> {
   // 1. Baris eksak per user.
   const exact = await findAllow(userId, accessKey);
@@ -75,11 +85,13 @@ async function decide(userId: string, accessKey: string): Promise<AccessDecision
   }
 
   // 3. Template peran (userId = nama peran): baris eksak lalu wildcard.
+  // Cari peran via id ATAU username (kunci sesi bisa berupa salah satunya);
+  // normalisasi lowercase+trim karena server bisa kirim Admin/SUPERVISOR.
   const urow = await queryFirst<{ role: string | null }>(
-    `SELECT role FROM ms_posuser WHERE id = ? LIMIT 1`,
-    [userId],
+    `SELECT role FROM ms_posuser WHERE id = ? OR username = ? LIMIT 1`,
+    [userId, userId],
   );
-  const role = (urow?.role ?? '').trim();
+  const role = (urow?.role ?? '').trim().toLowerCase();
   if (role) {
     const roleExact = await findAllow(role, accessKey);
     if (roleExact !== null) {
@@ -96,6 +108,7 @@ async function decide(userId: string, accessKey: string): Promise<AccessDecision
   }
 
   // 4. Fail-open: tanpa baris = allow (kompatibilitas kasir offline).
+  warnFailOpenOnce('default-allow', userId, accessKey);
   return { ok: true, reason: 'default-allow' };
 }
 
@@ -107,6 +120,7 @@ export async function hasAccess(userId: string, accessKey: string): Promise<bool
   try {
     return (await decide(userId, accessKey)).ok;
   } catch {
+    warnFailOpenOnce('db-unready', userId, accessKey);
     return true;
   }
 }
@@ -122,6 +136,7 @@ export async function requireAccess(
   try {
     return await decide(userId, accessKey);
   } catch {
+    warnFailOpenOnce('db-unready', userId, accessKey);
     return { ok: true, reason: 'db-unready' };
   }
 }

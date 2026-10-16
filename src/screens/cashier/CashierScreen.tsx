@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
@@ -172,6 +173,12 @@ export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= TABLET_BP;
   const { t } = useLang();
+  const { online, wsConnected } = useConnectivity();
+  // Badge 3-state (mirror DashboardScreen): hijau+Online bila jaringan & WS up,
+  // amber+Offline bila jaringan mati, abu+Local bila tak diketahui (null)/WS putus.
+  // 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Local';
+  const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const [activeCategory, setActiveCategory] = useState('Makanan');
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -841,8 +848,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           </View>
         )}
         <View style={styles.onlineBadge}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>Online</Text>
+          <View style={[styles.onlineDot, connDot]} />
+          <Text style={styles.onlineText}>{connLabel}</Text>
         </View>
       </View>
     </View>
@@ -1455,6 +1462,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   onlineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.white },
+  onlineDotAmber: { backgroundColor: colors.amber },
+  onlineDotGrey: { backgroundColor: colors.stroke },
   onlineText: { color: colors.white, fontFamily: fonts.semibold, fontSize: 12 },
   bodyRow: { flex: 1, flexDirection: 'row' },
   catalog: { flex: 1, minWidth: 0 },

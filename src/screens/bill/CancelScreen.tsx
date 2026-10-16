@@ -25,8 +25,8 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   const remain = orderTotal - voidTotal;
 
   const canConfirm = picked.length > 0 && pin.replace(/\D/g, '').length === 6 && !confirming; /** * Konfirmasi void: otorisasi supervisor 6 digit via server (fail-closed * saat offline), bukan PIN lokal; lalu simpan via outbox + antrean sync. */ const confirm = () => {
-   if (!canConfirm) return; setConfirming(true); setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.void').then((gate) => {
-        // Gate RBAC order.void: deny = eskalasi ke PIN supervisor di bawah
+   if (!canConfirm) return; setConfirming(true); setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.cancel').then((gate) => {
+        // Gate RBAC order.cancel: deny = eskalasi ke PIN supervisor di bawah
         // (bukan hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
         if (!gate.ok) setAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
         return authorizeSupervisor(pin); }).then((res) => { if (!res.ok) {

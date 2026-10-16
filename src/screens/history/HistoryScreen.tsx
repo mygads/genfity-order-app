@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';import {
+  Alert,
   FlatList,
   Image, Modal,
   Keyboard,
@@ -8,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import {
-  useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
+  useLang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
   return colors.orangeDark;}function statusBg(s: TxnStatus) {
@@ -18,7 +19,13 @@ import { useEffect, useMemo, useState } from 'react';import {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
+  const { t } = useLang(); const { online, wsConnected } = useConnectivity();
+  // Pill koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan &
+  // WS up, amber+Offline bila jaringan mati, abu+Local bila tak diketahui
+  // (null)/WS putus. 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('hist_online') : 'Local';
+  const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
+  const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState<TxnStatus | null>(null);
   const [fPayment, setFPayment] = useState<string | null>(null);
@@ -30,6 +37,10 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [voidAuthMsg, setVoidAuthMsg] = useState('');
   const [voidConfirming, setVoidConfirming] = useState(false);
   const [payModal, setPayModal] = useState(false);
+  const [payPin, setPayPin] = useState('');
+  const [payAuthMsg, setPayAuthMsg] = useState('');
+  const [payConfirming, setPayConfirming] = useState(false);
+  const [payPending, setPayPending] = useState<string | null>(null);
   const [payOver, setPayOver] = useState<Record<string, string>>({});
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
@@ -83,7 +94,7 @@ import { useEffect, useMemo, useState } from 'react';import {
     setConfirmVoid(true);
   }; const doVoid = () => { runVoidAuthed(false); };
 
-  const doVoidAndPrint = () => { runVoidAuthed(true); }; const changePay = (method: string) => { if (selected) { void persistPayChange(selected, method).catch(() => undefined); if (dbTxns) { const id = selected.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [selected.id]: method })); } } setPayModal(false); }; const sendMail = () => {
+  const doVoidAndPrint = () => { runVoidAuthed(true); }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } Alert.alert('Akses ditolak / Access denied', `Ubah metode bayar perlu PIN supervisor / Changing payment method needs supervisor PIN (${gate.reason})`); setPayPending(method); setPayPin(''); setPayAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }; const payPinOk = payPin.replace(/\D/g, '').length === 6 && !payConfirming; /** PIN supervisor 6 digit wajib sebelum simpan bila gate sale.refund deny (fail-closed saat offline). */ const confirmPayAuthed = () => { if (!selected || !payPending || !payPinOk) return; const target = selected; const method = payPending; setPayConfirming(true); setPayAuthMsg(''); void authorizeSupervisor(payPin).then((res) => { if (!res.ok) { setPayAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setPayConfirming(false); return; } applyPayChange(target, method); setPayConfirming(false); setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
       setMailMsg(t('hist_mail_bad'));
@@ -197,7 +208,7 @@ import { useEffect, useMemo, useState } from 'react';import {
         <Text key={m} style={styles.recapLine}> {m} - {rp(v)} </Text> ))}
       </View>
 
-      <View style={[styles.onlinePill, !isTablet && styles.onlinePillPhone]}><View style={styles.onlineDot} /><Text style={[styles.onlineText, !isTablet && styles.onlineTextPhone]}>{t('hist_online')}</Text></View></View><View style={styles.recapBtns}><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}><Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}><Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}><Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text></Pressable></View></View>{isTablet ? (
+      <View style={[styles.onlinePill, !isTablet && styles.onlinePillPhone]}><View style={[styles.onlineDot, connDot]} /><Text style={[styles.onlineText, !isTablet && styles.onlineTextPhone]}>{connLabel}</Text></View></View><View style={styles.recapBtns}><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Recap')}><Text style={styles.recapBtnTxt}>{t('hist_detail_recap')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('EsbOrder')}><Text style={styles.recapBtnTxt}>{t('hist_esb')} ›</Text></Pressable><Pressable style={styles.recapBtn} onPress={() => navigation?.navigate('Kitchen')}><Text style={styles.recapBtnTxt}>{t('hist_kitchen')} ›</Text></Pressable></View></View>{isTablet ? (
         <View style={styles.split}>
           <View style={styles.splitList}>
             <TxnList
@@ -267,13 +278,28 @@ import { useEffect, useMemo, useState } from 'react';import {
             {PAY_OPTIONS.map((o) => (
               <Pressable
                 key={o}
-                style={styles.optRow}
+                style={[styles.optRow, payPending === o && styles.optRowActive]}
                 onPress={() => changePay(o)}
               >
-                <Text style={styles.optText}>{o}</Text>
+                <Text style={[styles.optText, payPending === o && styles.optTextActive]}>{o}</Text>
               </Pressable>
             ))}
-            <AppButton title={t('c_cancel')} variant="secondary" onPress={() => setPayModal(false)} />
+            {payPending ? (
+              <View>
+                <AppInput
+                  label={t('cx_pin')}
+                  placeholder={t('cx_pin_ph')}
+                  value={payPin}
+                  onChangeText={(txt) => setPayPin(txt.replace(/\D/g, '').slice(0, 6))}
+                  keyboardType="numeric"
+                  maxLength={6}
+                  secureTextEntry
+                />
+                {payAuthMsg ? <Text style={styles.authErr}>{payAuthMsg}</Text> : null}
+                <AppButton title={payConfirming ? '...' : `${payPending} ›`} disabled={!payPinOk} onPress={confirmPayAuthed} />
+              </View>
+            ) : null}
+            <AppButton title={t('c_cancel')} variant="secondary" onPress={closePayModal} />
           </View>
         </View>
       </Modal>
@@ -535,6 +561,8 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     gap: 5,
   },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.green },
+  onlineDotAmber: { backgroundColor: colors.amber },
+  onlineDotGrey: { backgroundColor: colors.stroke },
   onlineText: { fontFamily: fonts.bold, fontSize: 12, color: colors.green },
 
   searchRow: {

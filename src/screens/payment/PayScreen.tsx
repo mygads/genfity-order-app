@@ -13,6 +13,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { nextSalesNum, saveSale } from '../../lib/sales';
@@ -162,6 +163,12 @@ export default function PayScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  const { online, wsConnected } = useConnectivity();
+  // Badge koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan
+  // & WS up, amber+Offline bila jaringan mati, abu+Local bila tak diketahui
+  // (null)/WS putus. 'Offline'/'Local' netral EN/ID (tanpa kunci i18n baru).
+  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('pay_online') : 'Local';
+  const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const todayStr = useMemo(() => {
     const d = new Date();
     return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
@@ -520,8 +527,8 @@ export default function PayScreen({ navigation, route }: Props) {
       onBack={() => navigation?.goBack()}
       right={
         <View style={styles.onlineBadge}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.onlineText}>{t('pay_online')}</Text>
+          <View style={[styles.onlineDot, connDot]} />
+          <Text style={styles.onlineText}>{connLabel}</Text>
         </View>
       }
     />
@@ -1061,6 +1068,8 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.white, marginRight: 5 },
+  onlineDotAmber: { backgroundColor: colors.amber, marginRight: 5 },
+  onlineDotGrey: { backgroundColor: colors.stroke, marginRight: 5 },
   onlineText: { color: colors.white, fontFamily: fonts.semibold, fontSize: 12 },
   body: { padding: 12, paddingBottom: 24 },
   /** Kartu peringatan sync >7 hari - info saja, pembayaran tetap jalan. */

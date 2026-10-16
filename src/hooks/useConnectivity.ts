@@ -5,8 +5,8 @@ import { getWsConnected, subscribeWsStatus } from '../lib/realtime';
 const POLL_MS = 15000;
 
 export interface Connectivity {
-  /** Jaringan device up (berdasar expo-network). */
-  online: boolean;
+  /** Jaringan device up (berdasar expo-network); null = belum diketahui (awal). */
+  online: boolean | null;
   /** Minimal satu channel WS realtime sedang OPEN. */
   wsConnected: boolean;
 }
@@ -17,7 +17,7 @@ export interface Connectivity {
  * status socket realtime (langganan subscribeWsStatus).
  */
 export function useConnectivity(): Connectivity {
-  const [online, setOnline] = useState(true);
+  const [online, setOnline] = useState<boolean | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(() => getWsConnected());
 
   useEffect(() => {

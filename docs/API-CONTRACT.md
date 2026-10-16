@@ -140,10 +140,11 @@ Server kembalikan hanya baris yang berubah sejak `lastSyncDate`.
 
 | Domain | Endpoint | Isi `data.items[]` → tabel lokal |
 |---|---|---|
-| Cabang & setting | `POST main/get-branch-settings` | `ms_setting`, `ms_terminalsetting`, `ms_station`, `ms_paymentmethod` |
+| Cabang & setting | `POST main/get-branch-settings` | `ms_setting` saja (satu domain `branchsettings`; `ms_terminalsetting`/`ms_station`/`ms_paymentmethod` datang dari domain pull terpisah di bawah) |
 | Menu | `POST main/get-menu` | `ms_menu`, `ms_category`, `ms_menu_group`, `ms_extra`, `ms_menu_image` |
 | Menu cabang | `POST main/get-branch-menu` | `ms_branchmenu`, harga/spesial, sold-out |
 | Pengguna | `POST main/get-user` | `ms_posuser` |
+| Hak akses pengguna | `POST main/get-user-access` [asumsi-clean-room] | `ms_posuseraccess(userId,accessKey,flagAllow)` — REPLACE, server menang; revoke = kirim baris `flagAllow:0` (delete TIDAK merambat; seed lokal `INSERT OR IGNORE` melindungi template peran) |
 | Meja | `POST main/get-table` | `ms_table`, `ms_tablesection` |
 | Promo | `POST main/get-promotion` | 8 tabel `ms_promotion_*` |
 | Voucher | `POST main/get-voucher` | `ms_voucher`, template |
@@ -156,7 +157,8 @@ Server kembalikan hanya baris yang berubah sejak `lastSyncDate`.
 | Log shift | `POST esb_api/main/get-shift-log-data` [FAKTA] | `tr_shiftlog` |
 | Setting terminal | `POST esb_api/pull/pull-terminal-settings` [FAKTA] | `ms_terminalsetting` |
 | Setting terminal (v11) | `POST esb_apiv11/main/get-terminal-settings` [FAKTA] | dibaca langsung (tanpa tabel) |
-| Verifikasi terminal | `POST esb_apiv9/terminal/verification-notify` [FAKTA] | `{ok, verifiedAt}` (tanpa tabel) |
+| Verifikasi terminal | `POST esb_apiv9/terminal/verification-notify` [FAKTA] | `{ok, verifiedAt}` (tanpa tabel) — ini sisi PUSH (dipetakan `terminal-verify` di `pathFor`), bukan pull |
+| Terminal (get/update) | `POST terminal/get-terminal` / `POST terminal/update` (dummy `terminal-get-terminal`, `terminal-update`) | get: `{terminalCode}` → `{terminalId, terminalCode, branchId, branchName, deviceID, claimed}`; update: `{terminalId, settingKey, settingValue}` → `{ok, terminalId}` — tanpa pemanggil kode (reserved); nama `getTerminal` bentrok dengan helper config, bedakan konteks |
 | Payment method | `POST main/get-payment-method` [asumsi-clean-room] | `ms_paymentmethod` |
 
 Contoh item menu:
@@ -398,7 +400,7 @@ POST esb_api/external-voucher/burn     {code, salesNum}    → {burned:true, amo
 POST esb_api/external-voucher/unburn   {code, salesNum}    → {unburned:true, amount}
 POST esb_api/voucher/validate-online-voucher-pos-payment {code, grandTotal} → {valid, amount}
 POST esb_api/voucher/claim-online-voucher-pos-payment    {code, salesNum}   → {claimed:true, amount}
-POST esb_api/voucher/claim-voucher-template {templateId, salesNum} → {code, claimed:true, amount}
+POST esb_api/voucher/claim-voucher-template {templateId, salesNum} → {code, claimed:true, amount} (RESERVED: konstanta ada, tanpa producer/helper/pemanggil — jangan pakai sebelum wiring)
 ```
 
 Helper siap di `src/lib/apiSource.ts`: `validateOnlineVoucher()`,
