@@ -250,8 +250,8 @@ export default function BookingScreen({ navigation }: Props) {
             onPress={() => navigation?.navigate('Cashier', { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu })}>
             <View style={styles.avatar}><Text style={styles.avatarT}>{r.name[0]}</Text></View>
             <View style={styles.info}>
-              <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} tamu · Meja {r.table}</Text>
-              <Text style={[styles.meta, isTablet && styles.metaBig]}>{maskHp(r.phone)} · Catatan: {r.note}</Text>
+              <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} {t('guests')} · {t('c_table')} {r.table}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{maskHp(r.phone)} · {t('kit_note')}: {r.note}</Text>
               <Text style={[styles.meta, isTablet && styles.metaBig]}>
                 {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>
               </Text>
@@ -282,8 +282,8 @@ export default function BookingScreen({ navigation }: Props) {
         <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>Pindah item / meja</Text>
         <Text style={[styles.meta, isTablet && styles.metaBig]}>Pindahan antar meja lewat layar khusus - bukan dari booking.</Text>
         <View style={[styles.links, { flexWrap: 'wrap', gap: 12 }]}>
-          <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>Pindah Item ›</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>Pindah Meja ›</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation?.navigate('MoveItems', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveItems')}</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', {})}><Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveTable')}</Text></TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}><Text style={[styles.link, isTablet && styles.linkBig]}>Denah Meja ›</Text></TouchableOpacity>
         </View>
       </View>

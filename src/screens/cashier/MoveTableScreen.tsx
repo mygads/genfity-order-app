@@ -85,7 +85,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         const itemCount = new Map(itemRows.map((r) => [String(r.tableNo).trim(), Number(r.n) || 0]));
         const occ: Occupied[] = [...byTable.entries()].map(([table, v]) => ({
           table,
-          guest: v.guest || 'Tamu',
+          guest: v.guest || t('guestFallback'),
           items: itemCount.get(table) ?? v.bills,
           total: Math.round(v.total),
         }));
@@ -187,7 +187,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
 
         {src && (
           <View style={styles.card}>
-            <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>Meja {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
+            <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
             <View style={styles.cardRow}>
               <Text style={[styles.cardLabel, isTablet && styles.cardLabelBig]}>Item</Text>
               <Text style={[styles.cardVal, isTablet && styles.cardValBig]}>{src.items} item</Text>

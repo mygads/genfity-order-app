@@ -439,7 +439,7 @@ export default function VoucherScreen({ navigation }: Props) {
           <View style={s.appliedBox}>
             <TouchableOpacity onPress={() => setCancelVisible(true)}>
               <Text style={s.appliedTxt}>
-                Voucher {applied.kode} {t('vou_used').toLowerCase()} - {t('vou_cancel_promo')}
+                {t('ok_voucher')} {applied.kode} {t('vou_used').toLowerCase()} - {t('vou_cancel_promo')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.backCashierBtn} onPress={backToCashier}>

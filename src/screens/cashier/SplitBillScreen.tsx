@@ -297,7 +297,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           </View>
           {voucherEff > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>Voucher{voucherCode ? ` ${voucherCode}` : ''}</Text>
+              <Text style={styles.metaL}>{t('rc_voucher')}{voucherCode ? ` ${voucherCode}` : ''}</Text>
               <Text style={[styles.metaV, styles.metaDisc]}>-{rp(voucherEff)}</Text>
             </View>
           )}
@@ -347,7 +347,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 <Text style={styles.itemName}>{it.qty}× {it.name}</Text>
                 <Text style={styles.itemPrice}>{rp(itemTotal(it))}</Text>
               </View>
-              <Text style={styles.splitBadge}>Bill #{(assign[it.id] ?? 0) + 1} ›</Text>
+              <Text style={styles.splitBadge}>{t('sp_name').replace('{n}', String((assign[it.id] ?? 0) + 1))} ›</Text>
             </TouchableOpacity>
           ))
         ) : splitMode === 'rata' ? (
@@ -436,7 +436,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 )}
                 {voucherEff > 0 && (
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaL}>Voucher{voucherCode ? ` ${voucherCode}` : ''}</Text>
+                    <Text style={styles.metaL}>{t('rc_voucher')}{voucherCode ? ` ${voucherCode}` : ''}</Text>
                     <Text style={[styles.metaV, styles.metaDisc]}>-{rp(voucherShares[i] as number)}</Text>
                   </View>
                 )}

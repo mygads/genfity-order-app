@@ -60,7 +60,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
       <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.item}>{rp(feeESB)}</Text></View> )} {tax > 0 && (
       <View style={styles.row}><Text style={styles.item}>{t('ok_tax')}</Text><Text style={styles.item}>{rp(tax)}</Text></View> )} {voucherCode ? (
       <View style={styles.row}><Text style={styles.item}>{t('rc_voucher')}</Text><Text style={styles.item}>{voucherCode}</Text></View> ) : null} {approvalCode ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_approval')}</Text><Text style={styles.item}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null} {edcLine ? ( <View style={styles.row}><Text style={styles.item}>{t('rc_terminal')}</Text><Text style={styles.item}>{edcLine}</Text></View> ) : null} {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} {rounding !== 0 && ( <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.item}>{rp(rounding)}</Text></View> )} <View style={styles.div} />
-      <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(total)}</Text></View>
+      <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
       <View style={styles.row}><Text style={styles.item}>{method}</Text><Text style={styles.item}>{rp(total)}</Text></View> {hasVoid && ( <> <View style={styles.div} /> <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> {voidLines.map((l) => ( <View key={l.name} style={styles.row}> <Text style={styles.voidItem}>{l.qty}x {l.name}</Text> <Text style={styles.item}>-{rp(l.qty * l.price)}</Text> </View> ))} {voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null} <View style={styles.row}><Text style={styles.item}>{t('rc_void_total')}</Text><Text style={styles.item}>-{rp(voidTotal)}</Text></View> </> )}
       {isCash && cash > 0 ? (
         <>
@@ -76,7 +76,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
 
   // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
   const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...(it.modifiers ?? []).map((m) => ` + ${m.name} ${rp(m.price * it.qty)}`), ]) : [];
-  const shareText = [ `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${t('serviceExcl')}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${t('feeESB')}: ${rp(feeESB)}`] : []), ...(tax > 0 ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `TOTAL: ${rp(total)}`, `${method}: ${rp(total)}`, ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
+  const shareText = [ `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${t('serviceExcl')}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${t('feeESB')}: ${rp(feeESB)}`] : []), ...(tax > 0 ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `${t('c_total').toUpperCase()}: ${rp(total)}`, `${method}: ${rp(total)}`, ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
@@ -102,7 +102,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
         <Text style={styles.ghostT}>⤴ {t('rc_share')}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[styles.ghost, isTablet ? styles.actionCol : styles.actionHalf]} onPress={() => { setMailMsg(''); setMailOpen(true); }}>
-        <Text style={styles.ghostT}>✉ Email</Text>
+        <Text style={styles.ghostT}>✉ {t('ok_email')}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={[styles.primary, isTablet ? styles.actionCol : styles.actionFull]} onPress={() => navigation?.navigate('Cashier')}>
         <Text style={styles.primaryT}>{t('rc_new')}</Text>
@@ -115,7 +115,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
       <View style={styles.wrap}>
         <View style={[styles.dialog, styles.dialogNarrow]}>
           <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
-          <Text style={styles.dSub}>Struk {no} • {rp(total)}</Text>
+          <Text style={styles.dSub}>{t('rc_title')} {no} • {rp(total)}</Text>
           <TextInput
             style={styles.input}
             value={mailTo}
@@ -152,7 +152,7 @@ import { useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, T
             <View style={styles.row}><Text style={styles.item}>{t('rc_mode')}</Text><Text style={styles.item}>{mode}</Text></View>
             <View style={styles.row}><Text style={styles.item}>{t('rc_method')}</Text><Text style={styles.item}>{method}</Text></View>
             {ongkir > 0 && ( <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.item}>{rp(ongkir)}</Text></View> )} <View style={styles.div} />
-            <View style={styles.row}><Text style={styles.total}>TOTAL</Text><Text style={styles.total}>{rp(total)}</Text></View>
+            <View style={styles.row}><Text style={styles.total}>{t('c_total').toUpperCase()}</Text><Text style={styles.total}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>
           </ScrollView> {mailModal}
