@@ -23,7 +23,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
     <View style={s.root}>
       <ScreenHeader title={t('petty.detailTitle')} onBack={() => navigation?.goBack?.()}  />
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.hero}>
           <View style={[s.badge, arus === 'Masuk' ? s.badgeIn : s.badgeOut]}>
             <Text style={[s.badgeTxt, arus === 'Masuk' ? s.badgeInTxt : s.badgeOutTxt]}> {arus === 'Masuk' ? t('petty.in') : t('petty.out')} </Text>

@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang,
 
-type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_DISCOUNT = 5000;const PROMO_PACK_PRICE = 55000;const PROMO_IMAGES = [
+type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_DISCOUNT = 5000;const PROMO_PACK_PRICE = 55000;const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang(); const [idx, setIdx] = useState(0);
+  /** Notice gerbang shift saat ketuk kembali order (shift tutup → ke layar Shift). */
+  const [gateNotice, setGateNotice] = useState('');
+
+  const goCashier = () => {
+    void (async () => {
+      if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
+      setGateNotice('');
+      navigation?.navigate('Cashier');
+    })();
+  };
 
   const promos = [ { id: 'p1', title: t('idle_promo1_title'), desc: `${t('idle_promo1_pre')}${rp(PROMO_DISCOUNT)}${t('idle_promo1_post')}` }, { id: 'p2', title: t('idle_promo2_title'), desc: `${t('idle_promo2_pre')}${rp(PROMO_PACK_PRICE)}` }, { id: 'p3', title: t('idle_promo3_title'), desc: t('idle_promo3_desc') }, ]; useEffect(() => {
     const timer = setInterval(() => setIdx((i) => (i + 1) % promos.length), 5000);
@@ -44,10 +54,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_queue_val')}</Text>
         </View>
       </View>
-      <TouchableOpacity style={styles.cta} onPress={() => navigation?.navigate('Cashier')}>
+      <TouchableOpacity style={styles.cta} onPress={goCashier}>
         <Text style={[styles.ctaText, isTablet && styles.ctaTextBig]}>{t('idle_cta')}</Text>
       </TouchableOpacity>
       <Text style={styles.hint}>{t('idle_hint')}</Text>
+      {gateNotice ? <Text style={[styles.hint, { color: colors.red }]}>{gateNotice}</Text> : null}
     </ScrollView>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.navyDark },

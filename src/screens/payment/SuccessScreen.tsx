@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -311,7 +311,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   body: { flex: 1, alignItems: 'center', padding: 24 },
-  split: { flex: 1, flexDirection: 'row', padding: 24, gap: 20 },
+  split: { flex: 1, flexDirection: 'row', padding: 24, gap: 20, ...wideCenterLg },
   statusSide: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   receiptSide: { flex: 1.2, justifyContent: 'center' },
   checkCircle: {

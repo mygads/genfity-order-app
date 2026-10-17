@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -139,7 +139,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         title={t('bill_title')}
         onBack={() => navigation?.goBack()}
       />
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <Text style={styles.meta}>TRX hari ini · {metaTable} · {metaGuest}</Text>
       {/* Tablet: struk dibatasi sempit + tengahkan agar proporsional. */}
       <View style={[styles.bill, isTablet && wideCenterSm]}>

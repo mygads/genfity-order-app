@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
 type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale } from '../../lib/sales';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -173,7 +173,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
      color: colors.white, fontFamily: fonts.semibold, fontSize: 13, textAlign: 'right' },
 
   body: { flex: 1, alignItems: 'center', padding: 20 },
-  bodyTablet: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: 16, width: '100%', maxWidth: 880, alignSelf: 'center' },
+  bodyTablet: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: 16, ...wideCenterLg },
   mainCol: { flex: 1, alignItems: 'center', maxWidth: 420 },
   sideCol: { width: 260, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.line, padding: 14 },
   sideTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
   applyAutoSyncPrefs,
 
 type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
@@ -91,13 +91,13 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}>
       <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
-
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       {level !== 'ok' ? (
         <View style={[styles.alert, level === 'block7' ? styles.alertBlock : styles.alertWarn]}>
           <Image source={require('../../../assets/images/no_connection.webp')} style={styles.alertImg} resizeMode="contain" />
@@ -176,10 +176,12 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
 
       <AppButton size="md" title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
       <Text style={styles.foot}>{t('sync_foot')}</Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );}const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   body: { paddingBottom: 32 },
 
   groupLabel: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy, marginTop: 18, marginBottom: 2, paddingHorizontal: 16 },

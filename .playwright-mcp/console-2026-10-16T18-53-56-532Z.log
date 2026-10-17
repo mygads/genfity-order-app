@@ -129,3 +129,240 @@ Performance optimizations: OFF. @ http://localhost:8904/index.ts.bundle?platform
 %s
  An error occurred in the <PettyCashFormScreen> component. Consider adding an error boundary to your tree to customize error handling behavior.
 Visit https://react.dev/link/error-boundaries to learn more about error boundaries. @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1240479ms] [WARNING] [access] fail-open allow (default-allow) user=gista.kasir key=settings.edit @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1576512ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1576563ms] [WARNING] [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect. @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1576626ms] [LOG] Running application "main" with appParams:
+ {rootTag: #root, hydrate: undefined} 
+Development-level warnings: ON.
+Performance optimizations: OFF. @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1587245ms] TypeError: (0 , _libDb.getRoundingSetting) is not a function
+    at http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:108491:169
+    at http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:108508:9
+    at Object.react_stack_bottom_frame (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:19765:20)
+    at runWithFiberInDEV (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:7053:70)
+    at commitHookEffectListMount (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:13056:159)
+    at commitHookPassiveMountEffects (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:13093:58)
+    at commitPassiveMountOnFiber (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:14107:27)
+    at recursivelyTraversePassiveMountEffects (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:14090:9)
+    at commitPassiveMountOnFiber (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:14106:11)
+    at recursivelyTraversePassiveMountEffects (http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:14090:9)
+[ 1620925ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Expected corresponding JSX closing tag for <View>. (107:4)
+
+  105 |       })}
+  106 |       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
+> 107 |     </ScrollView>
+      |     ^
+  108 |   );}const styles = StyleSheet.create({
+  109 |   burger: { width: 22, height: 22 },
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+[ 1621963ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Expected corresponding JSX closing tag for <View>. (107:4)
+
+  105 |       })}
+  106 |       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
+> 107 |     </ScrollView>
+      |     ^
+  108 |   );}const styles = StyleSheet.create({
+  109 |   burger: { width: 22, height: 22 },
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+[ 1623030ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Expected corresponding JSX closing tag for <View>. (107:4)
+
+  105 |       })}
+  106 |       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
+> 107 |     </ScrollView>
+      |     ^
+  108 |   );}const styles = StyleSheet.create({
+  109 |   burger: { width: 22, height: 22 },
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+[ 1624101ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Expected corresponding JSX closing tag for <View>. (107:4)
+
+  105 |       })}
+  106 |       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
+> 107 |     </ScrollView>
+      |     ^
+  108 |   );}const styles = StyleSheet.create({
+  109 |   burger: { width: 22, height: 22 },
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+[ 1635062ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Unexpected token, expected "}" (109:8)
+
+  107 |     </ScrollView>
+  108 |   );}const styles = StyleSheet.create({
+> 109 |   burger: { width: 22, height: 22 },
+      |         ^
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+  111 |   body: { paddingBottom: 32 },
+  112 |
+[ 1636133ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Unexpected token, expected "}" (109:8)
+
+  107 |     </ScrollView>
+  108 |   );}const styles = StyleSheet.create({
+> 109 |   burger: { width: 22, height: 22 },
+      |         ^
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+  111 |   body: { paddingBottom: 32 },
+  112 |
+[ 1637167ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Unexpected token, expected "}" (109:8)
+
+  107 |     </ScrollView>
+  108 |   );}const styles = StyleSheet.create({
+> 109 |   burger: { width: 22, height: 22 },
+      |         ^
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+  111 |   body: { paddingBottom: 32 },
+  112 |
+[ 1638245ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\StockScreen.tsx: Unexpected token, expected "}" (109:8)
+
+  107 |     </ScrollView>
+  108 |   );}const styles = StyleSheet.create({
+> 109 |   burger: { width: 22, height: 22 },
+      |         ^
+  110 |   root: { flex: 1, backgroundColor: colors.bg },
+  111 |   body: { paddingBottom: 32 },
+  112 |
+[ 1647809ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\HelpScreen.tsx: Unexpected token, expected "}" (41:8)
+
+  39 |     </ScrollView>
+  40 |   );}const styles = StyleSheet.create({
+> 41 |   burger: { width: 22, height: 22 },
+     |         ^
+  42 |   root: { flex: 1, backgroundColor: colors.bg },
+  43 |   body: { paddingBottom: 32 },
+  44 |
+[ 1648807ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\SyncScreen.tsx: Unexpected token, expected "}" (181:8)
+
+  179 |     </ScrollView>
+  180 |   );}const styles = StyleSheet.create({
+> 181 |   burger: { width: 22, height: 22 },
+      |         ^
+  182 |   root: { flex: 1, backgroundColor: colors.bg },
+  183 |   body: { paddingBottom: 32 },
+  184 |
+[ 1649871ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\AboutScreen.tsx: Unexpected token, expected "}" (35:43)
+
+  33 |       </View>
+  34 |     </ScrollView>
+> 35 |   );}function Row({ label, value }: { label: string; value: string }) {
+     |                                            ^
+  36 |   return (
+  37 |     <View style={styles.row}>
+  38 |       <Text style={styles.rowLabel}>{label}</Text>
+[ 1684432ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1685476ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1686539ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1687624ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1690963ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1692016ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Expected corresponding JSX closing tag for <View>. (459:4)
+
+  457 |         </Text>
+  458 |       ) : null}
+> 459 |     </ScrollView>
+      |     ^
+  460 |   );
+  461 | }
+  462 |
+[ 1695261ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1696324ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1697384ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1698414ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1707335ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1708385ms] SyntaxError: C:\Yoga\Programming\containers\genfity-order\genfity-order-app\src\screens\settings\MenuManagementScreen.tsx: Unexpected token, expected "}" (464:8)
+
+  462 |
+  463 | const styles = StyleSheet.create({
+> 464 |   burger: { width: 22, height: 22 },
+      |         ^
+  465 |   root: { flex: 1, backgroundColor: colors.bg },
+  466 |   body: { paddingBottom: 32 },
+  467 |   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+[ 1710214ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:0
+[ 1710214ms] [ERROR] Refused to execute script from 'http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable' because its MIME type ('application/json') is not executable, and strict MIME type checking is enabled. @ http://localhost:8904/:0
+[ 1710596ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:0
+[ 1710596ms] [ERROR] Refused to execute script from 'http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable' because its MIME type ('application/json') is not executable, and strict MIME type checking is enabled. @ http://localhost:8904/:0
+[ 1711887ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:0
+[ 1711887ms] [ERROR] Refused to execute script from 'http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable' because its MIME type ('application/json') is not executable, and strict MIME type checking is enabled. @ http://localhost:8904/:0
+[ 1728637ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1728683ms] [WARNING] [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect. @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[ 1728744ms] [LOG] Running application "main" with appParams:
+ {rootTag: #root, hydrate: undefined} 
+Development-level warnings: ON.
+Performance optimizations: OFF. @ http://localhost:8904/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104

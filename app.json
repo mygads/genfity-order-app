@@ -28,6 +28,13 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-camera",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Izinkan Genfity Order mengakses galeri untuk melampirkan foto bukti kas kecil.",
+          "cameraPermission": "Izinkan Genfity Order memakai kamera untuk memotret bukti kas kecil."
+        }
+      ],
       "./modules/genfity-printer/app.plugin.js"
     ],
     "extra": {

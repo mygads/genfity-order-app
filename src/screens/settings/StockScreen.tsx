@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
   id: string;
   name: string;
   group: string;
@@ -26,13 +26,13 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   const lowCount = items.filter((x) => x.stock <= lowNum).length; const go = (route: string) => navigation?.navigate(route);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}>
       <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
-
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('stock.tracking')}</Text>
         <View style={styles.rowBetween}>
@@ -104,10 +104,12 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
         );
       })}
       {list.length === 0 ? <Text style={styles.empty}>{t('common.noMatch')}</Text> : null}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );}const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   body: { paddingBottom: 32 },
 
   card: {

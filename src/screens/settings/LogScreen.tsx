@@ -3,7 +3,7 @@ import { FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, 
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, run } from '../../lib/db';
@@ -200,7 +200,7 @@ export default function LogScreen({ navigation }: Props) {
       <FlatList
         data={list}
         keyExtractor={(l) => l.id}
-        contentContainerStyle={[styles.list, isTablet && wideCenter]}
+        contentContainerStyle={[styles.list, isTablet && wideCenterLg]}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Image source={require('../../../assets/images/empty_general.webp')} style={styles.emptyImg} resizeMode="contain" />

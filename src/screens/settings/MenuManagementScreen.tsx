@@ -342,7 +342,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
   const go = (route: string) => navigation?.navigate(route);
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+    <View style={styles.root}>
       <ScreenHeader
         title={t('menu.title')}
         sub={`${soldCount} ${t('menu.soldOut')} - ${missingCount} ${t('menu.imgMissing')}`}
@@ -353,7 +353,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
         }
       />
       <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
-
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.tabs}>
         {groups.map((g) => (
           <Pressable key={g} onPress={() => setGroup(g)} style={[styles.tab, group === g && styles.tabActive]}>
@@ -456,13 +456,15 @@ export default function MenuManagementScreen({ navigation }: Props) {
             : t('common.noMatch')}
         </Text>
       ) : null}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   body: { paddingBottom: 32 },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line },

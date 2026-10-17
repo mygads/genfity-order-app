@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
+import { ensureShiftOpen } from '../../lib/shiftGuard';
 import { initDb, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { enqueueSync } from '../../lib/sync';
@@ -79,6 +80,8 @@ export default function BookingScreen({ navigation }: Props) {
   const [time, setTime] = useState('');
   const [note, setNote] = useState('');
   const [warn, setWarn] = useState('');
+  /** Notice gerbang shift saat buka reservasi ke kasir (shift tutup → ke layar Shift). */
+  const [gateNotice, setGateNotice] = useState('');
   /** Id reservasi yang sedang diedit (null = mode tambah baru). */
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -240,12 +243,21 @@ export default function BookingScreen({ navigation }: Props) {
 
       <Text style={[styles.sec, isTablet && styles.secBig]}>{t('bok_list')}</Text>
       <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('bok_open_hint')}</Text>
+      {gateNotice ? <Text style={styles.warn}>{gateNotice}</Text> : null}
       {shown.length === 0 && <Text style={styles.empty}>{t('bok_empty')}</Text>}
       {shown.map((r) => (
         <View key={r.id} style={styles.card}>
           <TouchableOpacity
             style={styles.cardMain}
-            onPress={() => navigation?.navigate('Cashier', { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu })}>
+            onPress={() => {
+              // Gerbang kasir: shift tutup → notice + buka shift dulu.
+              void (async () => {
+                const params = { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu };
+                if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
+                setGateNotice('');
+                navigation?.navigate('Cashier', params);
+              })();
+            }}>
             <View style={styles.avatar}><Text style={styles.avatarT}>{r.name[0]}</Text></View>
             <View style={styles.info}>
               <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} {t('guests')} · {t('c_table')} {r.table}</Text>
@@ -352,15 +364,14 @@ export default function BookingScreen({ navigation }: Props) {
     <View style={styles.root}>
       <ScreenHeader
         title={t('title_booking')}
-        onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
+        left={
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
             <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </TouchableOpacity>
         }
       />
       {isTablet ? (
-        <View style={styles.split}>
+        <View style={[styles.split, wideCenterLg]}>
           <ScrollView style={styles.listSide} contentContainerStyle={styles.body}>
             {reservasiList}
           </ScrollView>

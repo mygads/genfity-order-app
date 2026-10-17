@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -66,7 +66,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       <ScreenHeader title={t('customMenuTitle')} onBack={() => navigation?.goBack()} />
-      <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.meta}>TRX-047 · tambah item di luar katalog</Text>
       <Text style={styles.sec}>{t('customMenuSec')}</Text>
       <Text style={styles.hint}>{t('customMenuHint')}</Text>

@@ -1,21 +1,23 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const go = (route: string) => navigation?.navigate(route); return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.body}>
+    <View style={styles.root}>
       <ScreenHeader title={t('settings.about')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} /><View style={styles.hero}>{/* Tablet: hero full-bleed, isi dibatasi 560. */}<View style={isTablet ? styles.heroInner : undefined}>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
+      <View style={styles.hero}>{/* Tablet: hero full-bleed, isi dibatasi 1024. */}<View style={isTablet ? styles.heroInner : undefined}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
         <Text style={styles.version}>{t('about.version')}</Text>
         <Text style={styles.heroSub}>{t('about.heroSub')}</Text>
         </View>
       </View>
-      <View style={isTablet ? wideCenterSm : undefined}>
+      <View style={isTablet ? wideCenterLg : undefined}>
       <View style={styles.card}>
         <Row label={t('about.package')} value="Genfity Order (Expo RN)" />
         <Row label={t('about.branch')} value="Genfity Cabang Poris - BR-01" />
@@ -29,7 +31,8 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       </View>
       <Text style={styles.foot}>{t('about.foot')}</Text>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );}function Row({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.row}>
@@ -39,10 +42,11 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   );}const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   body: { paddingBottom: 32 },
   hero: { backgroundColor: colors.navy, paddingTop: 24, paddingBottom: 24, paddingHorizontal: 16, alignItems: 'center' },
-  // Tablet: isi hero ditengahkan max 560 walau hero full-bleed (phone tak tersentuh).
-  heroInner: { width: '100%', maxWidth: 560, alignSelf: 'center', alignItems: 'center' },
+  // Tablet: isi hero ditengahkan max 1024 walau hero full-bleed (phone tak tersentuh).
+  heroInner: { width: '100%', maxWidth: 1024, alignSelf: 'center', alignItems: 'center' },
   logo: { width: 120, height: 60 },
   appName: { fontFamily: fonts.bold, fontSize: 22, color: colors.white, marginTop: 10 },
   version: { fontFamily: fonts.medium, fontSize: 13, color: colors.orange, marginTop: 4 },

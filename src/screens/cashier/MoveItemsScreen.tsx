@@ -258,11 +258,6 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
       <ScreenHeader
         title={t('title_move_items')}
         onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
-            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </TouchableOpacity>
-        }
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {/* Tablet: wizard 2 kolom (sumber+item kiri, tujuan+ringkasan kanan); phone tetap susun vertikal. */}
@@ -364,20 +359,12 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
       </ScrollView>
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => {
-          navigation?.navigate(r);
-        }}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  burger: { width: 22, height: 22 },
   body: { padding: 16, paddingBottom: 40 },
   step: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy, marginTop: 14, marginBottom: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

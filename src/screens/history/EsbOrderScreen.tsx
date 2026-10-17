@@ -55,7 +55,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else 'Segera'. */function sch
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} onBack={() => navigation?.goBack?.()} right={ <View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /> </Pressable> </View> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+      <ScreenHeader title={t('esb_title')} sub={`${histLabel(history)} - ${list.length} order - ${fresh} ${t('esb_new_badge')}`} left={ <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable> } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
         <View style={styles.statRow}>
           {(Object.keys(counts) as EsbStatusLocal[]).map((k) => (
             <View key={k} style={styles.stat}>

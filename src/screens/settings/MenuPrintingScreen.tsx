@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
   id: string;
   group: string;
   items: number;
@@ -104,13 +104,13 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const setOpt = <K extends keyof PrintOpts>(k: K, v: PrintOpts[K]) => setOpts((o) => ({ ...o, [k]: v })); const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');
 
   const go = (route: string) => navigation?.navigate(route); return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+    <View style={styles.root}>
       <ScreenHeader title={t('mprint.title')} sub={t('mprint.sub')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
-
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       {/* Tablet: kartu routing 2 kolom; phone tetap 1 kolom (wadah transparan). */}
       <View style={isTablet ? styles.gridTablet : undefined}>
       {routes.map((r) => (
@@ -159,10 +159,12 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
         </View>
       </View>
       <Text style={styles.foot}>{t('mprint.saved')}</Text>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );}const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   body: { paddingBottom: 32 },
 
   card: {

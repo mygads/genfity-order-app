@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -132,13 +132,13 @@ const MAX_KAS_AWAL = 10000000;
 
   return (
     <View style={s.root}>
-      <ScreenHeader title={t('shf_open_title')} onBack={() => navigation?.goBack?.()} right={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+      <ScreenHeader title={t('shf_open_title')} left={
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}><Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
         </TouchableOpacity>
         } />
 
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_last')}</Text>
           <View style={s.shiftRow}>
@@ -368,7 +368,7 @@ const MAX_KAS_AWAL = 10000000;
     borderTopColor: colors.line,
   },
   // Tablet: isi footer dibatasi lebarnya + tengah.
-  footerInnerTablet: { width: '100%', maxWidth: 880, alignSelf: 'center' },
+  footerInnerTablet: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
   openBtn: {
     backgroundColor: colors.orange,
     borderRadius: 10,

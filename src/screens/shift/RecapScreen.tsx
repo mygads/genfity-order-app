@@ -243,9 +243,8 @@ export default function RecapScreen({ navigation }: Props) {
       <ScreenHeader
         title={t('title_recap')}
         sub={shiftLabel}
-        onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
+        left={
+          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
             <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </TouchableOpacity>
         }

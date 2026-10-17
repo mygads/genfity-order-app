@@ -191,9 +191,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
 
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
     <View style={styles.root}>
-      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} onBack={() => navigation?.goBack?.()} right={<View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable>
-      </View>
-
+      <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} left={<Pressable onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><View style={styles.tabs}>
         {filters.map((f) => (
           <Pressable key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive, isTablet && styles.tabTablet]}>
@@ -319,7 +317,6 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     </View>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
   burger: { width: 22, height: 22 },
   tabs: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 10, gap: 8 },

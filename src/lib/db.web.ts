@@ -84,3 +84,17 @@ export async function resetSyncDate(_table: string, _id: string | number): Promi
 export async function countDirty(_table: string): Promise<number> {
   return 0;
 }
+
+export interface RoundingSetting {
+  /** Nilai mentah ms_setting(Rounding, Mode), '' bila tak ada. */
+  mode: string;
+  /** Nilai numerik Rounding Nearest Value, 0 bila tak ada/tak valid. */
+  nearest: number;
+  /** Nilai numerik Rounding Step, 100 bila tak ada/tak valid. */
+  step: number;
+}
+
+/** Setting pembulatan REA-14 (web: default, tanpa DB). */
+export async function getRoundingSetting(): Promise<RoundingSetting> {
+  return { mode: '', nearest: 0, step: 100 };
+}

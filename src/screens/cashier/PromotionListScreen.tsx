@@ -4,7 +4,6 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath } from '../../config/server';
 import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
 import { initDb, query } from '../../lib/db';
@@ -204,7 +203,6 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   const { t } = useLang();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('Semua');
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const returnTo = route?.params?.returnTo ?? 'CartDetail';
   const subtotal = route?.params?.subtotal;
   const ongkir = route?.params?.ongkir;
@@ -292,16 +290,6 @@ export default function PromotionListScreen({ navigation, route }: Props) {
         title={t('promoVoucher')}
         sub={t('promo_count').replace('{n}', String(shown.length))}
         onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
-            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </TouchableOpacity>
-        }
-      />
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => navigation?.navigate(r)}
       />
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {source === 'fallback' ? (
@@ -364,7 +352,6 @@ export default function PromotionListScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  burger: { width: 24, height: 24 },
   offline: { fontFamily: fonts.medium, fontSize: 12, color: colors.amberDark, backgroundColor: colors.paleAmber, borderRadius: 8, padding: 10, marginBottom: 10, textAlign: 'center' },
   warn: { fontFamily: fonts.semibold, fontSize: 12, color: colors.red, backgroundColor: colors.paleRed, borderRadius: 8, padding: 10, marginTop: 10 },
   body: { padding: 16, paddingBottom: 40 },

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -148,7 +148,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         onBack={() => navigation?.goBack()}
         right={<Text style={styles.headRight}>{rp(total)}</Text>}
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.sub}>{t('edc_sub')}</Text>
       <Text style={styles.steps}>{t('edc_steps')}</Text>
       <View style={[isTablet && styles.split]}>

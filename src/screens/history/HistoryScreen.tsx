@@ -145,10 +145,9 @@ import { useEffect, useMemo, useState } from 'react';import {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} right={ <View style={styles.headRight}><Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
+      <ScreenHeader title={t('hist_title')} sub={`${t('hist_sales_on')} : ${fDate ?? t('c_all')} - ${list.length} ${t('hist_trx')}`} left={ <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
           </Pressable>
-        </View>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
+        } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />
 
       <View style={[styles.searchRow, !isTablet && styles.searchRowPhone]}>
         {isTablet && <Text style={styles.searchIcon}>⌕</Text>}
@@ -543,12 +542,6 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
     </View>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headRight: {
-
-    flexDirection: 'row',
-
-    alignItems: 'center',
-   gap: 12 },
   langTxt: { color: colors.white,  fontFamily: fonts.bold, fontSize: 13 },
   burger: { width: 22, height: 22 },
   onlinePill: {

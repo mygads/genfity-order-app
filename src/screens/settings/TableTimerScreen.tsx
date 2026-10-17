@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
-import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getRoundingSetting, type RoundingSetting } from '../../lib/db';
@@ -69,7 +68,6 @@ export default function TableTimerScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [enabled, setEnabled] = useState(DEFAULT_CFG.enabled);
   const [limit, setLimit] = useState(DEFAULT_CFG.limit);
   const [warnBefore, setWarnBefore] = useState(DEFAULT_CFG.warnBefore);
@@ -161,13 +159,8 @@ export default function TableTimerScreen({ navigation }: Props) {
         title={t('title_timer')}
         sub={t('tmr_sub')}
         onBack={() => navigation?.goBack()}
-        right={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
-            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </TouchableOpacity>
-        }
       />
-      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <View style={styles.card}>
           <View style={styles.rowBetween}>
             <View style={styles.rowLeft}>
@@ -239,13 +232,6 @@ export default function TableTimerScreen({ navigation }: Props) {
           </Text>
         ) : null}
       </ScrollView>
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => {
-          navigation?.navigate(r);
-        }}
-      />
     </View>
   );
 }

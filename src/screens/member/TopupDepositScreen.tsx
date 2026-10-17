@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,7 +11,6 @@ import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
 import { initDb, run } from '../../lib/db';
 import { getSession } from '../../session';
@@ -73,7 +70,6 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const memberId = route?.params?.memberId ?? 'M001';
   const nama = route?.params?.nama ?? 'Budi Santoso';
   const saldoAwal = route?.params?.saldo ?? 150000;
@@ -142,18 +138,6 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           title={t('top_title')}
           sub={`${nama} - ${memberId}`}
           onBack={backToMember}
-          right={
-            <View style={s.headRight}>
-              <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
-                <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-              </Pressable>
-            </View>
-          }
-        />
-        <DrawerMenu
-          visible={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          navigate={(r) => navigation?.navigate(r)}
         />
         <View style={[s.body, isTablet && wideCenterLg]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
@@ -188,18 +172,6 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
         title={t('top_title')}
         sub={`${nama} - ${memberId}`}
         onBack={() => navigation?.goBack?.()}
-        right={
-          <View style={s.headRight}>
-            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
-              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-            </Pressable>
-          </View>
-        }
-      />
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => navigation?.navigate(r)}
       />
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.memberBar}>
@@ -291,9 +263,7 @@ function Row({ label, value }: { label: string; value: string }) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
-  burger: { width: 22, height: 22 },
   body: { padding: 16, paddingBottom: 40, flexGrow: 1 },
   memberBar: { backgroundColor: colors.navy, borderRadius: 12, padding: 16 },
   offlineBanner: {

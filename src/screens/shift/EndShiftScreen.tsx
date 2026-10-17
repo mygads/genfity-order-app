@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';import {
-  Image, Modal,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenter } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
 /** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 200000, penjualanTunai: 1575000, pengeluaran: 75000, fromDb: false, });
   const  [kasFisik, setKasFisik] = useState('');
   const [catatan, setCatatan] = useState('');
@@ -89,13 +88,10 @@ import React, { useEffect, useState } from 'react';import {
 
   return (
     <View style={s.root}>
-      <ScreenHeader title={t('title_close')} onBack={() => navigation?.goBack?.()} right={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}><Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-        </TouchableOpacity>
-        } />
+      <ScreenHeader title={t('title_close')} onBack={() => navigation?.goBack?.()} />
 
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('end_summary')}</Text>
           <Row label="Modal Awal (Kas Awal)" value={rp(modalAwal)} />
@@ -254,7 +250,7 @@ import React, { useEffect, useState } from 'react';import {
           </View>
         </View>
       </Modal>
-    <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => { navigation?.navigate?.(r); }} /></View>
+    </View>
   );}function Row({
   label,
   value,
@@ -391,7 +387,7 @@ import React, { useEffect, useState } from 'react';import {
   // Tablet: isi footer dibatasi lebarnya + tengah.
   footerInnerTablet: {
     width: '100%',
-    maxWidth: 880,
+    maxWidth: 1024,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',

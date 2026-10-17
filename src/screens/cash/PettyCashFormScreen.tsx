@@ -9,36 +9,57 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   const [jumlah, setJumlah] = useState('');
   const [catatan, setCatatan] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
+  const [photoErr, setPhotoErr] = useState('');
   const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); return () => { alive = false; }; }, []);
 
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
 
   const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.5,
-    });
-    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+    setPhotoErr('');
+    try {
+      // Tanpa izin pustaka media, galeri gagal diam-diam di Android (khususnya
+      // Android lawas tanpa photo picker) - minta dulu, tampilkan pesan bila ditolak.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setPhotoErr(t('petty.photoDenied'));
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.5,
+      });
+      if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+    } catch {
+      setPhotoErr(t('petty.photoFailed'));
+    }
   };
 
   const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) return;
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.5 });
-    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+    setPhotoErr('');
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        setPhotoErr(t('petty.photoDenied'));
+        return;
+      }
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.5 });
+      if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+    } catch {
+      setPhotoErr(t('petty.photoFailed'));
+    }
   };
 
   /** Simpan ke tr_branchexpense + dokumen foto, antrekan outbox branch-expenses, lalu tampilkan hasil. */ const save = async () => { if (!ready) return; setSaving(true); const id = `PC-${Date.now()}`; const now = new Date().toISOString(); const signed = arus === 'Masuk' ? jumlahNum : -jumlahNum; const kasir = getSession()?.name ?? ''; const branchId = getTerminal().branchId || 'BR-01'; const note = catatan.trim() ? `${keterangan.trim()} | ${catatan.trim()}` : keterangan.trim(); try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, signed, note, kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [`doc-${Date.now()}`, id, photo], ); } await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo }); }; if (done) {
     return (
       <View style={s.root}>
-        <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /><View style={[s.body, isTablet && wideCenter]}>
+        <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /><View style={[s.body, isTablet && wideCenterLg]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('petty.doneTitle')}</Text>
           <Text style={s.sub}>{done.arus} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
           <AppButton title={t('petty.detailTitle')} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString('id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })} />
           <AppButton title={t('petty.viewList')} variant="secondary" onPress={() => navigation?.navigate('PettyCash')} />
-          <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); }} />
+          <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); setPhotoErr(''); }} />
         </View>
       </View>
     );
@@ -48,7 +69,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
     <View style={s.root}>
       <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()}  />
 
-      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenter]}>
+      <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('petty.flow')}</Text>
           <View style={s.arusRow}>
@@ -136,6 +157,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
               </TouchableOpacity>
             ) : null}
           </View>
+          {photoErr ? <Text style={s.err}>{photoErr}</Text> : null}
         </View>
 
         <AppButton
@@ -189,6 +211,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   photoBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
   del: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
+  err: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8 },
   primary: { backgroundColor: colors.orange, borderRadius: 10, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
   disabled: { opacity: 0.5 },
   primaryT: { color: colors.white, fontSize: 16, fontFamily: fonts.bold },

@@ -397,8 +397,9 @@ export default function CashierScreen({ navigation, route }: Props) {
   }, [dbProducts]);
 
   /** Status shift nyata dari tr_shiftlog untuk header (open bila status open / belum clockOut).
-   * null = DB kosong → fallback menganggap buka agar demo/screenshot tetap jalan. */
-  const [shiftInfo, setShiftInfo] = useState<{ open: boolean } | null>(null);
+   * null = DB kosong → fallback menganggap buka agar demo/screenshot tetap jalan.
+   * hasHistory menandai ada riwayat shift: dipakai jaring pengaman blokir kasir. */
+  const [shiftInfo, setShiftInfo] = useState<{ open: boolean; hasHistory: boolean } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -409,7 +410,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           'SELECT clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
         );
         if (!alive || !row) return;
-        setShiftInfo({ open: row.status === 'open' || !row.clockOut });
+        setShiftInfo({ open: row.status === 'open' || !row.clockOut, hasHistory: true });
       } catch {
         /* DB belum siap - fallback buka */
       }
@@ -834,7 +835,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10}>
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
@@ -1287,6 +1288,30 @@ export default function CashierScreen({ navigation, route }: Props) {
     </View>
   );
 
+  /** Jaring pengaman lintas-entry: lolos gerbang (mis. denah Tables) dengan shift tutup
+   *  → tampilkan layar blokir + tombol Buka Shift, bukan grid kasir. Instalasi fresh
+   *  (tanpa riwayat) dan DB belum siap tetap bebas agar demo/screenshot jalan. */
+  const shiftBlocked = !!shiftInfo?.hasHistory && !shiftInfo.open;
+  if (shiftBlocked) {
+    return (
+      <View style={styles.root}>
+        {renderHeader()}
+        <DrawerMenu
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          navigate={(r) => navigation?.navigate(r)}
+          outlet={outletName}
+          user={shiftLabel}
+        />
+        <View style={styles.blockedWrap}>
+          <Text style={styles.blockedTitle}>{t('dash_shift_closed')}</Text>
+          <Text style={styles.blockedSub}>{`${t('dash_shift_closed')} - ${t('shf_open_btn')}`}</Text>
+          <AppButton title={t('shf_open_btn')} onPress={() => navigation?.navigate('Shift')} />
+        </View>
+      </View>
+    );
+  }
+
   if (isWide) {
     return (
       <View style={styles.root}>
@@ -1453,6 +1478,10 @@ const styles = StyleSheet.create({
   shiftDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
   shiftDotClosed: { backgroundColor: colors.red },
   shiftText: { color: colors.navyTint, fontFamily: fonts.regular, fontSize: 12 },
+  /* Layar blokir jaring pengaman shift tutup: pesan tengah + tombol Buka Shift. */
+  blockedWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  blockedTitle: { fontFamily: fonts.bold, fontSize: 18, color: colors.text, textAlign: 'center' },
+  blockedSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 8, marginBottom: 16, textAlign: 'center' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   headerDateWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dateIcon: { width: 22, height: 22 },

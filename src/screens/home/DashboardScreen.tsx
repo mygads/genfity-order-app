@@ -8,6 +8,7 @@ import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
+import { ensureShiftOpen, getShiftStatus } from '../../lib/shiftGuard';
 import { useConnectivity } from '../../hooks/useConnectivity';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -198,6 +199,16 @@ export default function DashboardScreen({ navigation }: Props) {
       setNotice(`${m.label} ${t('dash_not_available')}`);
       return;
     }
+    // Gerbang kasir live dari DB ( kartu shift bisa basi bila pulang dari Tutup Shift
+    // tanpa remount ) - shift tutup → notice + arahkan buka shift dulu.
+    if (m.route === 'Cashier') {
+      void (async () => {
+        if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setNotice))) return;
+        setNotice('');
+        navigation?.navigate(m.route as string);
+      })();
+      return;
+    }
     setNotice('');
     navigation?.navigate(m.route);
   };
@@ -270,13 +281,21 @@ export default function DashboardScreen({ navigation }: Props) {
       </View>
 
       <TouchableOpacity style={styles.cta} onPress={() => {
-        if (!shift.open) {
-          setNotice(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
-          navigation?.navigate('Shift');
-          return;
-        }
-        setNotice('');
-        navigation?.navigate('Cashier');
+        // Cek live dari DB + segarkan kartu shift (state mount bisa basi sepulang Tutup Shift).
+        void (async () => {
+          const st = await getShiftStatus();
+          if (st) {
+            const hhmm = String(st.clockIn ?? '').slice(11, 16);
+            setShift((prev) => ({ open: st.open, clockIn: hhmm || prev.clockIn, cash: st.cashInDrawer }));
+            if (!st.open) {
+              setNotice(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+              navigation?.navigate('Shift');
+              return;
+            }
+          }
+          setNotice('');
+          navigation?.navigate('Cashier');
+        })();
       }}>
         <Text style={[styles.ctaText, isTablet && styles.ctaTextBig]}>{t('dash_new_trx')}</Text>
       </TouchableOpacity>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
+import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
   claim: '', esb: 'GNF-88121', member: 'MBR-QOQI-342', voucher: 'VC-DISKON10K',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
   claim: 'TRM-XXXX-XXXX',
   esb: 'GNF-XXXXX',
@@ -61,7 +61,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     setResult(true);
   };
 
-  const useCode = () => {
+  const useCode = async () => {
     if (code.trim().length < 3) { setMsg(t('scan_short')); setResult(false); return; } if (tab === 'claim') {
       navigation?.navigate('Install');
       return;
@@ -70,6 +70,8 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       navigation?.navigate('EsbOrder');
       return;
     }
+    // Gerbang kasir: shift tutup → pesan + buka shift dulu.
+    if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setMsg))) return;
     navigation?.navigate('Cashier');
   };
 
@@ -120,7 +122,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
             <TouchableOpacity style={styles.ghost} onPress={() => setResult(false)}>
               <Text style={styles.ghostT}>{t('scan_rescan')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.primary} onPress={useCode}>
+            <TouchableOpacity style={styles.primary} onPress={() => void useCode()}>
               <Text style={styles.primaryT}>{t('scan_use')}</Text>
             </TouchableOpacity>
           </View>
