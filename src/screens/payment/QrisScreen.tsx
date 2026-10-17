@@ -4,7 +4,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number; orderNo?: string; salesNum?: string; splitGroup?: boolean; orderTotal?: number; splits?: { method?: string; amount?: number }[]; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
+  route?: { params?: { total?: number; orderNo?: string; salesNum?: string; splitGroup?: boolean; orderTotal?: number; splits?: { method?: string; amount?: number }[]; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string; };
 };};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
@@ -12,7 +12,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const totalParam = route?.params?.total; const hasTotal = typeof totalParam === 'number' && Number.isFinite(totalParam) && totalParam > 0; const total = hasTotal ? Math.round(totalParam) : 0;
-  const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
+  const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const ongkirCut = Math.max(0, Math.round(Number(route?.params?.ongkirCut) || 0)); const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
   const [pollCount, setPollCount] = useState(0);
@@ -20,6 +20,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   const apiMode = getApiMode();
 
   const pollRef = useRef(0); /** Kode referensi mock - di app nyata dari backend saat generate QR. */
+  /** Guard settle-ganda: poll otomatis + tombol manual bisa panggil berbarengan. */
+  const settledRef = useRef(false);
   const refCode = useMemo(() => {
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
@@ -58,6 +60,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
    * Nomor + kaki split terusan dari Pay dipakai ulang (sisa QRIS = kaki
    * terakhir SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor. */
   const settlePaid = async () => {
+    if (settledRef.current) return;
+    settledRef.current = true;
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
     const p = route?.params ?? {};
     const orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
@@ -79,7 +83,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
         if (await saleHeadExists(groupNo)) {
           await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0 });
         } else {
-          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), };
+          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
           recordSale(gInput);
           try { await saveSale(gInput); } catch { /* DB gagal - kasir tetap jalan */ }
         }
@@ -87,7 +91,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
       return;
     }
-    const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+    const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;

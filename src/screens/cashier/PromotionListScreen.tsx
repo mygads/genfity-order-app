@@ -7,6 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';
 import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
 import { initDb, query } from '../../lib/db';
+import { dbNowLocal } from '../../lib/datefmt';
 import { useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -19,6 +20,10 @@ type Promo = {
   minBelanja: number;
   sampai: string;
   tag: string;
+  /** Persen 0-100 (promo percent; amount = cap nominal tampilan). */
+  rate?: number;
+  /** Cap nominal (Rp) promo percent. */
+  maxAmount?: number;
 };
 
 /** Baca live dari SQLite ms_voucher + ms_promotion (offline-first).
@@ -51,6 +56,8 @@ type VoucherRow = {
   voucherCode: string | null;
   voucherName: string | null;
   amount: number | null;
+  quota: number | null;
+  validFrom: string | null;
   validTo: string | null;
   status: string | null;
 };
@@ -62,6 +69,7 @@ type PromotionRow = {
   value: number | null;
   maxAmount: number | null;
   minSpend: number | null;
+  validFrom: string | null;
   validTo: string | null;
   flagActive: number | null;
 };
@@ -72,22 +80,32 @@ async function loadFromSqlite(): Promise<Promo[]> {
   await initDb();
   const out: Promo[] = [];
   const seen = new Set<string>();
+  const now = dbNowLocal();
   try {
     const rows = await query<VoucherRow>(
-      'SELECT voucherCode, voucherName, amount, validTo, status FROM ms_voucher',
+      'SELECT voucherCode, voucherName, amount, quota, validFrom, validTo, status FROM ms_voucher',
     );
     for (const r of rows) {
       const code = (r.voucherCode ?? '').trim().toUpperCase();
       if (!code || seen.has(code)) continue;
       const st = (r.status ?? 'available').toLowerCase();
       if (st === 'used' || st === 'burned' || st === 'expired') continue;
+      // Cermin kanonis (apiSource/VoucherScreen): kuota habis, nominal 0,
+      // window belum-berlaku/kedaluwarsa = tidak bisa dipakai → sembunyikan.
+      const amount = Math.max(0, Math.round(Number(r.amount) || 0));
+      if (amount <= 0) continue;
+      if (r.quota !== null && r.quota !== undefined && Number(r.quota) <= 0) continue;
+      const vf = String(r.validFrom ?? '').trim();
+      const vt = String(r.validTo ?? '').trim();
+      if (vf && vf > now) continue;
+      if (vt && vt < now) continue;
       const nama = (r.voucherName ?? '').trim() || code;
       seen.add(code);
       out.push({
         code,
         name: nama,
         desc: nama,
-        amount: Math.max(0, Math.round(Number(r.amount) || 0)),
+        amount,
         minBelanja: 0,
         sampai: fmtTgl(r.validTo) || '-',
         tag: tagFor(code, ''),
@@ -98,11 +116,16 @@ async function loadFromSqlite(): Promise<Promo[]> {
   }
   try {
     const pros = await query<PromotionRow>(
-      'SELECT promoCode, promoName, promoType, value, maxAmount, minSpend, validTo, flagActive FROM ms_promotion WHERE flagActive = 1',
+      'SELECT promoCode, promoName, promoType, value, maxAmount, minSpend, validFrom, validTo, flagActive FROM ms_promotion WHERE flagActive = 1',
     );
     for (const p of pros) {
       const code = (p.promoCode ?? '').trim().toUpperCase();
       if (!code || seen.has(code)) continue;
+      // Promo offline juga terikat window: belum-berlaku / kedaluwarsa disembunyikan.
+      const pf = String(p.validFrom ?? '').trim();
+      const pt = String(p.validTo ?? '').trim();
+      if (pf && pf > now) continue;
+      if (pt && pt < now) continue;
       const type = String(p.promoType ?? 'nominal').toLowerCase();
       const value = Math.max(0, Math.round(Number(p.value) || 0));
       const maxAmt = Math.max(0, Math.round(Number(p.maxAmount ?? value) || 0));
@@ -113,11 +136,14 @@ async function loadFromSqlite(): Promise<Promo[]> {
       out.push({
         code,
         name: nama,
-        desc: nama,
+        desc: type === 'percent' ? `${nama} (${value}% - maks ${rp(maxAmt)})` : nama,
         amount,
         minBelanja: Math.max(0, Math.round(Number(p.minSpend) || 0)),
         sampai: fmtTgl(p.validTo) || '-',
         tag: type === 'ongkir' ? 'Ongkir' : type === 'percent' ? 'Member' : 'Voucher',
+        // Rate + cap diteruskan agar totals() hitung persen end-to-end (#15),
+        // bukan flat sebesar cap. Nominal tak perlu maxAmount (amount = nilai pasti).
+        ...(type === 'percent' ? { rate: Math.min(100, value), maxAmount: maxAmt } : {}),
       });
     }
   } catch {
@@ -154,11 +180,12 @@ async function loadFromApi(): Promise<Promo[]> {
       byCode.set(code, {
         code,
         name: nama,
-        desc: nama,
+        desc: type === 'percent' ? `${nama} (${value}% - maks ${rp(maxAmt)})` : nama,
         amount,
         minBelanja: Math.max(0, Math.round(Number(it.minSpend ?? 0) || 0)),
         sampai: fmtTgl(it.validTo) || '-',
         tag: type === 'ongkir' ? 'Ongkir' : type === 'percent' ? 'Member' : 'Voucher',
+        ...(type === 'percent' ? { rate: Math.min(100, value), maxAmount: maxAmt } : {}),
       });
     }
   }
@@ -262,7 +289,8 @@ export default function PromotionListScreen({ navigation, route }: Props) {
     const go = (amount: number) => {
       // Teruskan kind (tag) agar pemanggil tahu voucher ongkir vs diskon belanja.
       // GRATISONGKIR dipotong dari ongkir di layar pemanggil bila ongkir > 0.
-      navigation?.navigate(returnTo, { voucher: { code: p.code, amount, kind: p.tag }, ...(ongkir !== undefined ? { ongkir } : {}) });
+      // Rate/cap/minSpend ikut agar totals() hitung persen + backstop minSpend (#15/#16).
+      navigation?.navigate(returnTo, { voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
     };
     // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
     // server menang bila backend asli menjawab; offline pakai nilai lokal.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll,
+import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke,
   applyAutoSyncPrefs,
 
 type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
@@ -53,6 +53,23 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
     }
   };
   const [tick, setTick] = useState(0);
+  // BACKLOG GABUNGAN (temuan offline-ms-edits-stuck-invisible): antrean ringan
+  // saja tak cukup — tampilkan juga fisik (tr_esoprocessqueue) + baris kotor
+  // (syncDate NULL) + indikator pendingRevoke (O1) bila ada. Label memakai nama
+  // tabel/kolom apa adanya (identifier, tak perlu terjemahan) + key existing.
+  const [physPending, setPhysPending] = useState(0);
+  const [dirtyRows, setDirtyRows] = useState(0);
+  const [pendingRevoke, setPendingRevoke] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [p, d, r] = await Promise.all([countPhysicalQueue(), countDirtyRows(), getPendingRevoke()]);
+        if (alive) { setPhysPending(p); setDirtyRows(d); setPendingRevoke(r); }
+      } catch { /* DB/storage belum siap - panel tetap jalan */ }
+    })();
+    return () => { alive = false; };
+  }, [tick]);
 
   const level = warnLevel(daysAgo);
   const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(LS_OPTS, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
@@ -158,7 +175,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
 
-      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text>{queue.length === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
+      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text>{(physPending > 0 || dirtyRows > 0) && (<View style={styles.card}><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_esoprocessqueue</Text><Text style={styles.wmVal}>{physPending} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>syncDate NULL</Text><Text style={styles.wmVal}>{dirtyRows} {t('sync.pending')}</Text></View></View> )}{pendingRevoke.length > 0 && (<View style={styles.card}><Text style={styles.qDesc}>{t('action_logout')}: {t('sync.pending')} ({pendingRevoke.length})</Text></View> )}{queue.length === 0 && physPending === 0 && dirtyRows === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
       {queue.map((q) => (
         <View key={q.id} style={styles.card}>
           <View style={styles.qTop}>

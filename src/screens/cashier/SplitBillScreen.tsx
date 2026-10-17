@@ -4,14 +4,14 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 
 /** Voucher order: objek {code, amount} dari kasir/CartDetail, string kode (kontrak Pay), atau nominal. */
-type VoucherParam = { code?: unknown; amount?: unknown; kind?: unknown } | string | number | null;
+type VoucherParam = { code?: unknown; amount?: unknown; kind?: unknown; rate?: unknown; maxAmount?: unknown; minSpend?: unknown } | string | number | null;
 
 type SplitParams = {
   items?: unknown;
@@ -171,6 +171,12 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     typeof voucherParam === 'number'
       ? asAmount(voucherParam)
       : asAmount((voucherParam as { amount?: unknown } | null)?.amount);
+  // Ekstra promo percent (rate/cap/minSpend) ikut ke totals() agar persen
+  // dihitung kanonis, bukan flat (#15/#16).
+  const voucherObj = typeof voucherParam === 'object' && voucherParam !== null ? voucherParam : null;
+  const voucherRate = (() => { const n = Number(voucherObj?.rate); return Number.isFinite(n) ? n : undefined; })();
+  const voucherCap = (() => { const n = Math.round(Number(voucherObj?.maxAmount) || 0); return n > 0 ? n : undefined; })();
+  const voucherMin = (() => { const n = Math.round(Number(voucherObj?.minSpend) || 0); return n > 0 ? n : undefined; })();
   const ongkirParam = asAmount(params.ongkir);
 
   const itemSplits = useMemo(() => {
@@ -189,7 +195,12 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const canon = totals({
     gross: itemSum,
     discount: asAmount(params.discount),
-    voucher: { code: voucherCode, kind: voucherKind, amount: voucherRaw },
+    voucher: {
+      code: voucherCode, kind: voucherKind, amount: voucherRaw,
+      ...(voucherRate != null ? { rate: voucherRate } : {}),
+      ...(voucherCap != null ? { maxAmount: voucherCap } : {}),
+      ...(voucherMin != null ? { minSpend: voucherMin } : {}),
+    },
     ongkir: ongkirParam,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
@@ -280,7 +291,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
       ...(ongkirEff > 0 ? { ongkir: ongkirEff } : {}),
-      ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherEff, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+      ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherEff, ...(voucherKind ? { kind: voucherKind } : {}), ...voucherExtras({ rate: voucherRate, maxAmount: voucherCap, minSpend: voucherMin }) } } : {}),
       ...(discountEff + voucherEff > 0 ? { discount: discountEff + voucherEff } : {}),
       ...(serviceEff > 0 ? { service: serviceEff } : {}),
       ...(feeEff > 0 ? { feeESB: feeEff } : {}),

@@ -50,6 +50,10 @@ export interface SaleInput {
   grandTotal: number;
   /** Nomor struk pemanggil (TRX-…) - dipakai saveSale + push agar satu nomor. */
   salesNum?: string;
+  /** client_id UUIDv7 (Q7): diterbitkan sekali per sale (PayScreen), dipakai
+   * ulang apa adanya oleh Qris/settlePaid — JANGAN generate ulang agar QR
+   * yang tampil tak basi. Kunci rekonsiliasi server (upsert by client_id). */
+  clientId?: string;
   subtotal?: number;
   discountTotal?: number;
   vatTotal?: number;
@@ -72,6 +76,8 @@ export interface SaleInput {
   rounding?: number;
   /** Biaya antar - 0/absen = tidak ada. */
   ongkir?: number;
+  /** Porsi voucher yang memotong ongkir (info audit; ongkir di atas = neto). */
+  ongkirCut?: number;
   /** Nama pelanggan (delivery / pencatatan kasir). */
   customer?: string;
 }
@@ -149,6 +155,10 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
   return {
     method: normalizeMethod(s.method),
     ...(s.salesNum ? { salesNum: s.salesNum } : {}),
+    // Kunci stabil QR + rekonsiliasi (Q7). Bentuk camelCase menyamai
+    // clientId outbox fisik (sync.ts drainPhysicalQueue) — satu kunci di
+    // semua payload; BE terima-dua-format selama transisi.
+    ...(s.clientId ? { clientId: s.clientId } : {}),
     total: r(s.grandTotal),
     subtotal: r(subtotal),
     discountTotal: r(s.discountTotal ?? 0),
@@ -168,6 +178,7 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.tableId ? { tableId: s.tableId } : {}),
     ...(s.mode ? { mode: normalizeSalesMode(s.mode), salesMode: normalizeSalesMode(s.mode) } : {}),
     ...(s.ongkir !== undefined && s.ongkir > 0 ? { ongkir: r(s.ongkir) } : {}),
+    ...(s.ongkirCut !== undefined && s.ongkirCut > 0 ? { ongkirCut: r(s.ongkirCut) } : {}),
     ...(s.customer ? { customer: s.customer } : {}),
     ts: new Date().toISOString(),
   };

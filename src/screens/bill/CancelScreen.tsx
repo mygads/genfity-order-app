@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, query, queryFirst, run } from '../../lib/db';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Tulis void nyata via outbox + antrean sync (lihat persistVoid). *//** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. *//** * Tulis void ke DB lokal dulu (sumber kebenaran offline), lalu outbox/sync/POST:
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Tulis void nyata via outbox + antrean sync (lihat persistVoid). *//** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. *//** * Tulis void ke DB lokal dulu (sumber kebenaran offline), lalu outbox/sync/POST:
  * - satu baris tr_cancelmenu per item (alasan + user + syncDate NULL = kotor),
  * - qty tr_salesmenu dikurangi sejumlah void (baris habis = qty 0),
  * - tr_saleshead jadi 'void' bila tak ada sisa, 'open' + total dihitung ulang
@@ -15,15 +15,31 @@ async function applyVoidLocal(
   // Head asal (grand/voucher/member/cabang): void sebagian = grand dikurangi
   // nilai item yang dibatalkan (diskon/fee/pajak TETAP seperti semula — tanpa
   // hitung ulang dari subtotal yang menghapus diskon tercatat).
-  let head: { branchId: string | null; grandTotal: number | null; voucherCode: string | null; memberId: string | null } | null = null;
+  let head: { branchId: string | null; grandTotal: number | null; voucherCode: string | null; memberId: string | null; status: string | null; tableNo: string | null } | null = null;
   try {
-    head = await queryFirst<{ branchId: string | null; grandTotal: number | null; voucherCode: string | null; memberId: string | null }>(
-      'SELECT branchId, grandTotal, voucherCode, memberId FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+    head = await queryFirst<{ branchId: string | null; grandTotal: number | null; voucherCode: string | null; memberId: string | null; status: string | null; tableNo: string | null }>(
+      'SELECT branchId, grandTotal, voucherCode, memberId, status, tableNo FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
       [orderId],
     );
   } catch {
     /* abaikan */
   }
+  // Idempotensi: head sudah 'void' (mis. via History) = tak ada yang
+  // dibalikkan; persistVoid di bawah tetap mengantrekan sync/POST.
+  if ((head?.status ?? '') === 'void') return;
+  // Gerbang stok: saveSale hanya jalan saat bayar (kaki payment ada). Bill
+  // open tanpa kaki bayar tak pernah memotong stok → tak boleh dikembalikan.
+  let payCount = 0;
+  try {
+    const pc = await queryFirst<{ c: number | null }>(
+      'SELECT COUNT(*) AS c FROM tr_salespayment WHERE salesNum = ?',
+      [orderId],
+    );
+    payCount = Math.max(0, Math.round(Number(pc?.c) || 0));
+  } catch {
+    /* abaikan */
+  }
+  const wasPaid = (head?.status ?? '') === 'paid' || payCount > 0;
   let voidedGross = 0;
   for (const ln of lines) {
     const want = Math.max(0, Math.round(Number(ln.qty) || 0));
@@ -52,9 +68,10 @@ async function applyVoidLocal(
         /* abaikan */
       }
       voidedGross += price * cut;
-      // Stok kembali per qty yang dibatalkan (parsial maupun penuh seragam) +
-      // buka flag habis bila pulih. Best-effort per potongan.
-      try {
+      // Stok kembali per qty yang dibatalkan (parsial maupun penuh seragam) —
+      // hanya bila bill pernah bayar (saveSale memotong stok; bill open tanpa
+      // kaki bayar tak memotong). Buka flag habis bila pulih. Best-effort.
+      if (wasPaid) try {
         const branch = head?.branchId;
         const mid = r.menuId;
         if (branch && mid && cut > 0) {
@@ -79,7 +96,7 @@ async function applyVoidLocal(
     }
     const voided = want - left;
     if (voided > 0) {
-      const cid = `cx-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const cid = uuidv7();
       await run(
         `INSERT INTO tr_cancelmenu (id, salesNum, menuId, menuName, qty, reasonId, reasonNote, userId, cancelDate, syncDate)
          VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
@@ -104,23 +121,35 @@ async function applyVoidLocal(
   const fullVoid = restGross <= 0 || newGrand <= 0;
   if (fullVoid) {
     await run('UPDATE tr_saleshead SET status = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['void', 0, now, orderId]);
-    // Balikan void penuh (cermin persistVoidDb History G7): kuota voucher
-    // kembali + available; deposit kembali + ledger refund; dapur Batal.
-    if (head?.voucherCode) {
-      try {
-        await run(
-          `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
-            WHERE UPPER(voucherCode) = UPPER(?)`,
-          [head.voucherCode],
-        );
+    // Balikan void penuh (cermin persistVoidDb History G7): kuota kembali
+    // HANYA untuk kode yang benar-benar terbakar (usage 'burn', head + kaki
+    // tender); deposit kembali + ledger refund; dapur Batal.
+    try {
+      const burned = await query<{ voucherCode: string | null }>(
+        `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
+         WHERE salesNum = ? AND status = 'burn'`,
+        [orderId],
+      );
+      for (const b of burned) {
+        const code = String(b.voucherCode ?? '').trim();
+        if (!code) continue;
         try {
-          await enqueueOutbox('ms_voucher', head.voucherCode.toUpperCase(), 'update');
+          await run(
+            `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
+              WHERE UPPER(voucherCode) = UPPER(?)`,
+            [code],
+          );
+          try {
+            await enqueueOutbox('ms_voucher', code.toUpperCase(), 'update');
+          } catch {
+            /* abaikan */
+          }
         } catch {
           /* abaikan */
         }
-      } catch {
-        /* abaikan */
       }
+    } catch {
+      /* abaikan */
     }
     try {
       if (head?.memberId) {
@@ -145,7 +174,7 @@ async function applyVoidLocal(
           } catch {
             /* abaikan */
           }
-          const rid = `dep-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+          const rid = uuidv7();
           await run(
             `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
              VALUES (?, ?, ?, 'refund', ?, ?, ?, ?, NULL)`,
@@ -176,6 +205,25 @@ async function applyVoidLocal(
     } catch {
       /* abaikan */
     }
+    // Meja dibebaskan (paritas SuccessScreen): hanya bila tak dipakai bill
+    // 'open' lain agar tak membebaskan meja yang sudah diduduki order baru.
+    if (head?.tableNo) try {
+      const other = await queryFirst<{ c: number | null }>(
+        `SELECT COUNT(*) AS c FROM tr_saleshead
+         WHERE TRIM(tableNo) = TRIM(?) AND salesNum <> ? AND status = 'open'`,
+        [head.tableNo, orderId],
+      );
+      if (Math.round(Number(other?.c) || 0) <= 0) {
+        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = TRIM(?)', ['kosong', head.tableNo]);
+        try {
+          enqueueSync('other', { op: 'table-clear', table: head.tableNo, at: now });
+        } catch {
+          /* abaikan */
+        }
+      }
+    } catch {
+      /* abaikan */
+    }
   } else {
     await run('UPDATE tr_saleshead SET status = ?, subtotal = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['open', restGross, newGrand, now, orderId]);
   }
@@ -191,7 +239,7 @@ async function applyVoidLocal(
     const target = fullVoid ? 0 : newGrand;
     if (paidTotal > target) {
       const over = paidTotal - target;
-      const rid = `rf-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const rid = uuidv7();
       await run(
         `INSERT INTO tr_salespayment (id, salesNum, paymentMethod, amount,
           tendered, changeAmount, refNo, syncDate, createdAt)

@@ -28,8 +28,10 @@ import {
   setServerEnv,
 } from '../config/server';
 import { getItem, setItem } from './storage';
+import { dbNowLocal } from './datefmt';
 import { initDb, queryFirst } from './db';
 import { loadPinRecord, verifyPinHash } from './pin';
+import { randomHex as randomHexCsprng } from './uuidv7';
 
 export type ApiMode = 'dummy' | 'real' | 'local';
 
@@ -284,14 +286,15 @@ export async function getDeviceId(): Promise<string> {
   try {
     const cur = await getItem(LS_DEVICE);
     if (cur && /^[0-9a-f]{16}$/.test(cur)) return cur;
-    let id = '';
-    for (let i = 0; i < 16; i += 1) {
-      id += Math.floor(Math.random() * 16).toString(16);
-    }
+    // CSPRNG (Q7): identitas device mengikat triple-bind grant Q6 — tak boleh
+    // dari Math.random, dan tak boleh konstanta sama untuk semua device gagal.
+    const id = randomHexCsprng(16);
     await setItem(LS_DEVICE, id);
     return id;
   } catch {
-    return 'a91f3c07d2e84b5a';
+    // Storage gagal total: kembalikan id sesi ini (unik, tak dipersist) agar
+    // dua device tak pernah berbagi identitas yang sama.
+    return randomHexCsprng(16);
   }
 }
 
@@ -400,11 +403,23 @@ interface LocalVoucherRow {
   status: string | null;
 }
 
+interface LocalPromoRow {
+  promoType: string | null;
+  value: number | null;
+  maxAmount: number | null;
+  minSpend: number | null;
+  validFrom: string | null;
+  validTo: string | null;
+  flagActive: number | null;
+}
+
 /**
  * Validasi voucher ke ms_voucher lokal (seed/pull): kode cocok (case-insensitive),
- * status 'available', kuota > 0, dan dalam jendela validitas. Dipakai bila
- * server tak menjawab (local mode / offline / fallback dummy) agar voucher
- * tetap bisa dipakai offline-first — bukan fixture dummy.
+ * status 'available', kuota > 0, dan dalam jendela validitas — lalu fallback
+ * ke ms_promotion (flagActive=1 + jendela + value>0; persen = sebesar cap,
+ * selaras PromotionList). Dipakai bila server tak menjawab (local mode /
+ * offline / fallback dummy) agar voucher tetap bisa dipakai offline-first —
+ * bukan fixture dummy.
  */
 async function validateVoucherCodeLocal(
   code: string,
@@ -420,10 +435,27 @@ async function validateVoucherCodeLocal(
         WHERE UPPER(voucherCode) = ? LIMIT 1`,
       [clean],
     );
-    if (!row) return nope;
+    if (!row) {
+      // Bukan voucher kuota: coba promo reusable (cermin saveSale backstop).
+      const now = dbNowLocal();
+      const promo = await queryFirst<LocalPromoRow>(
+        `SELECT promoType, value, maxAmount, minSpend, validFrom, validTo, flagActive
+         FROM ms_promotion WHERE UPPER(promoCode) = ? LIMIT 1`,
+        [clean],
+      );
+      if (!promo || Number(promo.flagActive ?? 0) !== 1) return nope;
+      if (promo.validFrom && promo.validFrom > now) return nope;
+      if (promo.validTo && promo.validTo < now) return nope;
+      const pType = String(promo.promoType ?? 'nominal').toLowerCase();
+      const pValue = Math.max(0, Math.round(Number(promo.value) || 0));
+      const pCap = Math.max(0, Math.round(Number(promo.maxAmount ?? pValue) || 0));
+      const pAmt = pType === 'percent' ? pCap : pValue;
+      if (pAmt <= 0) return nope;
+      return { ok: true, amount: pAmt, minSpend: Math.max(0, Math.round(Number(promo.minSpend) || 0)), fromDummy: false };
+    }
     if ((row.status ?? '').toLowerCase() !== 'available') return nope;
     if (Math.round(Number(row.quota) || 0) <= 0) return nope;
-    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const now = dbNowLocal();
     if (row.validFrom && row.validFrom > now) return nope;
     if (row.validTo && row.validTo < now) return nope;
     const amount = Math.round(Number(row.amount) || 0);

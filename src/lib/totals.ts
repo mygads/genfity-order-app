@@ -14,20 +14,43 @@
  * - grandTotal = bulatkan(bruto, step 100); rounding = grandTotal - bruto
  *
  * Voucher:
- * - kind 'Ongkir' / kode GRATISONGKIR -> potong ongkir sebesar min(amount, ongkir)
- * - kind mengandung '%' (mis. 'Diskon (%)' dari VoucherScreen, amount = persen)
- *   -> potong = round(dasar * pct / 100), pct dibatasi 0-100, diterapkan
- *   SEBELUM service/pajak (mengurangi dasar)
- * - selain itu -> diskon flat nominal atas belanja sebesar min(amount, dasar)
+ * - kind 'Ongkir' / kode GRATISONGKIR -> potong ongkir sebesar min(amount, cap, ongkir)
+ * - persen: `rate` 0-100 (promo percent; legacy: kind mengandung '%' + amount = persen)
+ *   -> potong = min(round(dasar * pct / 100), cap, dasar), SEBELUM service/pajak
+ * - selain itu -> diskon flat nominal sebesar min(amount, cap, dasar)
+ * - minSpend: patokan gross (bruto item); tak terpenuhi = voucher diabaikan
+ *   (voucherAmt 0 + ongkirCut 0). Backstop kanonis — entry (PromotionList pakai,
+ *   Pay applyVoucher) sudah menegakkan duluan.
  */
 import { initDb, queryFirst } from './db';
 
 export type TotalsVoucher = {
   code?: string;
   kind?: string;
-  /** Nominal Rp untuk voucher flat/ongkir, atau persen (0-100) untuk kind '%'. */
+  /** Nominal Rp untuk voucher flat/ongkir, atau persen (0-100) untuk kind '%' legacy. */
   amount?: number;
+  /** Persen 0-100 untuk promo percent (diisi loader promo; mengalahkan tafsir legacy). */
+  rate?: number;
+  /** Cap nominal (Rp) untuk voucher persen (dan flat/ongkir bila diisi). */
+  maxAmount?: number;
+  /** Minimum belanja (gross) agar voucher berlaku. */
+  minSpend?: number;
 };
+
+/**
+ * Potongan field promo (rate/maxAmount/minSpend) agar selamat melewati
+ * hop navigasi yang membangun ulang objek voucher {code, amount, kind}.
+ */
+export function voucherExtras(
+  v: TotalsVoucher | null | undefined,
+): { rate?: number; maxAmount?: number; minSpend?: number } {
+  if (!v) return {};
+  return {
+    ...(v.rate != null ? { rate: v.rate } : {}),
+    ...(v.maxAmount != null ? { maxAmount: v.maxAmount } : {}),
+    ...(v.minSpend ? { minSpend: v.minSpend } : {}),
+  };
+}
 
 /** Tarif pajak default 11 (PPN, kontrak §10.3) bila ms_setting(Tax, PPN) tak terbaca. */
 export const TAX_DEFAULT = 11;
@@ -164,20 +187,36 @@ export function totals(input: TotalsInput): TotalsResult {
   })();
 
   const isOngkirVoucher = kind === 'Ongkir' || code === 'GRATISONGKIR';
-  const useOngkirCut = isOngkirVoucher && ongkir > 0;
-  const ongkirCut = useOngkirCut ? Math.min(amount, ongkir) : 0;
+  /** Backstop minSpend (#16): patokan gross; gagal = voucher diabaikan total. */
+  const minSpend = Math.max(0, Math.round(Number(input.voucher?.minSpend) || 0));
+  const meetsMin = gross >= minSpend;
+  const useOngkirCut = isOngkirVoucher && ongkir > 0 && meetsMin;
+  const capRaw = Number(input.voucher?.maxAmount);
+  const cap = Number.isFinite(capRaw) && capRaw >= 0 ? Math.round(capRaw) : null;
+  const cappedFlat = cap != null ? Math.min(amount, cap) : amount;
+  const ongkirCut = useOngkirCut ? Math.min(cappedFlat, ongkir) : 0;
   const ongkirNet = ongkir - ongkirCut;
   /** Dasar belanja sebelum voucher belanja (PARITY seksi 3: subtotal - diskonBelanja parsial). */
   const dasarBelanja = Math.max(0, gross - discount);
-  /** Voucher persen kanonis: potong = round(dasar * pct/100), sebelum service/pajak. */
-  const isPercentVoucher = !isOngkirVoucher && kind.includes('%');
-  const pct = isPercentVoucher ? Math.min(100, amount) : 0;
-  const voucherPctAmt = isPercentVoucher ? Math.round((dasarBelanja * pct) / 100) : 0;
-  const voucherAmt = useOngkirCut
+  /** Voucher persen kanonis (#15): rate eksplisit diutamakan; legacy kind '%'
+   * memakai amount sebagai persen. Cap + minSpend + batas dasar ditegakkan. */
+  const rateRaw = Number(input.voucher?.rate);
+  const hasRate = Number.isFinite(rateRaw);
+  const isPercentVoucher = !isOngkirVoucher && (hasRate || kind.includes('%'));
+  const pct = !isPercentVoucher
     ? 0
-    : isPercentVoucher
-      ? Math.min(voucherPctAmt, dasarBelanja)
-      : Math.min(amount, dasarBelanja);
+    : hasRate
+      ? Math.min(100, Math.max(0, rateRaw))
+      : Math.min(100, amount);
+  const voucherPctAmt = isPercentVoucher ? Math.round((dasarBelanja * pct) / 100) : 0;
+  const cappedPct = cap != null ? Math.min(voucherPctAmt, cap) : voucherPctAmt;
+  const voucherAmt = !meetsMin
+    ? 0
+    : useOngkirCut
+      ? 0
+      : isPercentVoucher
+        ? Math.min(cappedPct, dasarBelanja)
+        : Math.min(cappedFlat, dasarBelanja);
   const subtotal = Math.max(0, gross - discount - voucherAmt);
   const service = Math.round(subtotal * FEE_DEFAULTS.serviceRate);
   /** Pajak inclusive info-only (kontrak §10.3: default 11 -> round(net * 11/111), setting-driven via ms_setting Tax/PPN). */

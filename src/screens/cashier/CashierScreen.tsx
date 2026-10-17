@@ -18,12 +18,14 @@ import DrawerMenu from '../../components/DrawerMenu';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
+import { dbNowLocal } from '../../lib/datefmt';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
 import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
 
@@ -42,7 +44,7 @@ type Props = {
       tamu?: number;
       memberId?: string;
       ongkir?: number;
-      voucher?: { code: string; amount: number; kind?: string };
+      voucher?: NavVoucher;
       /** Kode voucher mentah (mis. dari scan kamera) - divalidasi ke DB lokal di bawah. */
       voucherCode?: string;
       customItem?: { name: string; price: number; qty: number; note?: string };
@@ -199,7 +201,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   };
   const [showSearch, setShowSearch] = useState(false);
   const [table, setTable] = useState(route?.params?.table ?? '');
-  const [voucher, setVoucher] = useState<{ code: string; amount: number; kind?: string } | null>(
+  const [voucher, setVoucher] = useState<NavVoucher | null>(
     route?.params?.voucher ?? null,
   );
   /** Pesan validasi kode voucher mentah (scan) - ditampil jujur, bukan diam. */
@@ -452,7 +454,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
     // Kode voucher mentah (scan kamera QrScan tanpa check()): validasi ke
-    // ms_voucher lokal; tak dikenal = diabaikan + pesan, bukan voucher fiksi.
+    // ms_voucher lokal lalu fallback ms_promotion; tak dikenal = diabaikan
+    // + pesan, bukan voucher fiksi. Window pakai waktu lokal (dbNowLocal).
     if (typeof p.voucherCode === 'string' && p.voucherCode.trim() && !p.voucher) {
       const rawCode = p.voucherCode.trim();
       void (async () => {
@@ -464,16 +467,47 @@ export default function CashierScreen({ navigation, route }: Props) {
           );
           // Cek penuh selaras validateVoucherCodeLocal: status + kuota +
           // jendela validitas + nominal > 0.
-          const nowIso = new Date().toISOString();
+          const nowLocal = dbNowLocal();
           const usable = !!row
             && (row.status ?? '').toLowerCase() === 'available'
             && Math.round(Number(row.quota) || 0) > 0
             && Math.max(0, Math.round(Number(row.amount) || 0)) > 0
-            && !(row.validFrom && row.validFrom > nowIso)
-            && !(row.validTo && row.validTo < nowIso);
+            && !(row.validFrom && row.validFrom > nowLocal)
+            && !(row.validTo && row.validTo < nowLocal);
           if (usable) {
             setVoucher({ code: rawCode.toUpperCase(), amount: Math.max(0, Math.round(Number(row.amount) || 0)) });
             setVoucherMsg('');
+          } else if (!row) {
+            // Bukan voucher kuota: coba promo reusable (cermin saveSale backstop).
+            // Persen diteruskan utuh (rate+cap) agar totals() hitung persen,
+            // bukan flat sebesar cap.
+            const promo = await queryFirst<{ promoName: string | null; promoType: string | null; value: number | null; maxAmount: number | null; minSpend: number | null; validFrom: string | null; validTo: string | null; flagActive: number | null }>(
+              'SELECT promoName, promoType, value, maxAmount, minSpend, validFrom, validTo, flagActive FROM ms_promotion WHERE UPPER(promoCode) = UPPER(?) LIMIT 1',
+              [rawCode],
+            );
+            const pType = String(promo?.promoType ?? 'nominal').toLowerCase();
+            const pValue = Math.max(0, Math.round(Number(promo?.value) || 0));
+            const pCap = Math.max(0, Math.round(Number(promo?.maxAmount ?? pValue) || 0));
+            const pAmt = pType === 'percent' ? pCap : pValue;
+            const pUsable = !!promo
+              && Number(promo.flagActive ?? 0) === 1
+              && pAmt > 0
+              && !(promo.validFrom && promo.validFrom > nowLocal)
+              && !(promo.validTo && promo.validTo < nowLocal);
+            if (pUsable) {
+              const pMin = Math.max(0, Math.round(Number(promo.minSpend) || 0));
+              setVoucher({
+                code: rawCode.toUpperCase(),
+                amount: pAmt,
+                kind: pType === 'ongkir' ? 'Ongkir' : pType === 'percent' ? 'Member' : 'Voucher',
+                ...(pType === 'percent' ? { rate: Math.min(100, pValue), maxAmount: pCap } : {}),
+                ...(pMin > 0 ? { minSpend: pMin } : {}),
+              });
+              setVoucherMsg('');
+            } else {
+              setVoucher(null);
+              setVoucherMsg(t('scan_unknown_voucher'));
+            }
           } else {
             setVoucher(null);
             setVoucherMsg(t('scan_unknown_voucher'));
@@ -879,7 +913,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           ongkir,
           salesNum: num,
           // Rantai draft utuh: voucher/member/tamu ikut agar tak hilang saat dimuat (G4).
-          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+          // Rate/cap/minSpend promo percent ikut agar totals() tujuan hitung persen (#15).
+          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
           ...(memberId ? { memberId } : {}),
           ...(customer.trim() ? { customer: customer.trim() } : {}),
         },

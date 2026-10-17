@@ -94,6 +94,27 @@ export async function exec(source: string): Promise<void> {
 }
 
 /**
+ * Transaksi atomik (#22): cermin db.ts untuk web (WASM). Satu koneksi
+ * dbAsync + BEGIN/COMMIT; gagal = ROLLBACK + lempar ulang. Tidak bersarang.
+ */
+export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  const d = await dbAsync();
+  await d.execAsync('BEGIN');
+  try {
+    const out = await fn();
+    await d.execAsync('COMMIT');
+    return out;
+  } catch (e) {
+    try {
+      await d.execAsync('ROLLBACK');
+    } catch {
+      /* abaikan */
+    }
+    throw e;
+  }
+}
+
+/**
  * Buat semua tabel inti bila belum ada. Idempoten - aman dipanggil tiap
  * start aplikasi. Guard promise ganda agar dua pemanggil bersamaan tidak
  * membuat skema dua kali. (Logika sama dengan db.ts.)

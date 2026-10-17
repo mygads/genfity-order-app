@@ -5,12 +5,12 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Voucher = { code: string; amount: number; kind?: string };
+type Voucher = { code: string; amount: number; kind?: string; rate?: number; maxAmount?: number; minSpend?: number };
 type Props = {
   navigation?: Nav;
   route?: {
@@ -141,7 +141,7 @@ export default function DineInScreen({ navigation, route }: Props) {
           items: active,
           ongkir: ongkirNet,
           ...(num ? { salesNum: num } : {}),
-          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
           ...(memberId ? { memberId } : {}),
           ...(guest.trim() ? { customer: guest.trim() } : {}),
         },

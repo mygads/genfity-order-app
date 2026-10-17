@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -27,6 +27,7 @@ type Props = {
       mode?: string;
       table?: string;
       ongkir?: number;
+      ongkirCut?: number;
       customer?: string;
       memberId?: string;
     };
@@ -51,6 +52,8 @@ export default function EdcScreen({ navigation, route }: Props) {
   const [bank, setBank] = useState(BANKS[0]);
   const [terminal, setTerminal] = useState(TERMINALS[0]);
   const [cardNo, setCardNo] = useState('');
+  /** Guard ketuk-ganda save (direset hanya bila save gagal sebelum navigasi). */
+  const savedRef = useRef(false);
 
   useEffect(() => {
     // Lempar nominal ke aplikasi APOS (pola POSLite). Di Expo Go/web: no-op.
@@ -87,6 +90,9 @@ export default function EdcScreen({ navigation, route }: Props) {
   // SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor.
   const save = async () => {
     if (!canSave) return;
+    // Guard ketuk-ganda: tombol Bayar bisa diketuk dua kali sebelum navigasi.
+    if (savedRef.current) return;
+    savedRef.current = true;
     const p = route?.params ?? {};
     const method = `EDC ${bank}`;
     const cardLast4 = cardNo.slice(-4);
@@ -119,6 +125,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.table ? { tableId: p.table } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
+      ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
     };
     recordSale(input);

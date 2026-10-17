@@ -5,7 +5,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync } from '../../lib/sync';
@@ -19,7 +19,7 @@ type Nav = {
   goBack: () => void;
 };
 
-type Voucher = { code: string; amount: number; kind?: string };
+type Voucher = { code: string; amount: number; kind?: string; rate?: number; maxAmount?: number; minSpend?: number };
 
 type Props = {
   navigation?: Nav;
@@ -216,7 +216,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       // dibayar bisa dihapus tepat sasaran di Success (anti hantu, bug G2).
       ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
       discount: discountTotal + voucherAmt,
-      ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+      ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
       mode,
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
@@ -251,7 +251,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         mode,
         ...(table ? { table } : {}),
         items: active,
-        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
         ...(customer.trim() ? { customer: customer.trim() } : {}),
         ...(sn ? { salesNum: sn } : {}),
@@ -529,7 +529,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
               ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
-              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
             })}>
               <Text style={[styles.link, isTablet && styles.linkBig]}>{t('splitBill')}</Text>
@@ -543,7 +543,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
               ongkir: ongkirNet,
-              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+              ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
               ...(service > 0 ? { service } : {}),
               ...(taxIncl > 0 ? { tax: taxIncl } : {}),

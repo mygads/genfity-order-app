@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   ScrollView,
@@ -104,8 +104,8 @@ type Props = {
 };
 
 type Tab = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
-/** Split parsial: label untuk tampilan, method mentah untuk payload (bank/dompet masing-masing). */
-type Split = { id: string; label: string; method: string; amount: number };
+/** Split parsial: label untuk tampilan, method mentah untuk payload (bank/dompet masing-masing). memberId dibawa kaki deposit agar gate withdraw saveSale jalan. */
+type Split = { id: string; label: string; method: string; amount: number; memberId?: string };
 
 /** Label generik ExtraPay → method mentah agar payload tidak ke-strip. */
 const extraLabelToMethod = (label: string): string => {
@@ -209,6 +209,10 @@ export default function PayScreen({ navigation, route }: Props) {
     orderVoucher && orderIsOngkir && ongkir > 0
       ? Math.min(orderVoucher.amount, ongkir)
       : 0;
+  // Nilai yang dicatat ke DB/payload: hanya jalur langsung (ongkir = bruto).
+  // Jalur splitGroup memakai ongkir residual per kunjungan sehingga potongan
+  // vs-net tak bermakna - catat 0 yang jujur (kode voucher tetap terbakar).
+  const cutToRecord = route?.params?.splitGroup === true ? 0 : orderOngkirCut;
   // Diskon belanja bawaan untuk dicatat (voucher ongkir tidak memotong belanja).
   const orderDiscount = orderVoucher && !orderIsOngkir ? orderVoucher.amount : 0;
   // Voucher yang dipasang di layar ini via kotak validasi server. Ini satu-satunya
@@ -232,6 +236,8 @@ export default function PayScreen({ navigation, route }: Props) {
         : `${t('ok_voucher')} ${orderVoucher.code}`;
 
   const [splits, setSplits] = useState<Split[]>([]);
+  /** Guard ketuk-ganda goSuccess (dideklarasi di sini agar di atas goSuccess). */
+  const goRef = useRef(false);
 
   // Tunai
   const [cashSel, setCashSel] = useState<number | null>(null);
@@ -376,10 +382,10 @@ export default function PayScreen({ navigation, route }: Props) {
     setBoxCode('');
   };
 
-  const addSplit = (label: string, amount: number, method?: string) => {
+  const addSplit = (label: string, amount: number, method?: string, memberId?: string) => {
     if (amount <= 0) return;
     splitSeq += 1;
-    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, method: method ?? label, amount }]);
+    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, method: method ?? label, amount, ...(memberId ? { memberId } : {}) }]);
   };
 
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
@@ -390,8 +396,15 @@ export default function PayScreen({ navigation, route }: Props) {
    * memakai L-timestamp yang beda dari yang tersimpan di DB).
    */
   const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
+    // Guard ketuk-ganda (#8/#21): tiap goSuccess menerbitkan nomor + tulis
+    // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
+    if (goRef.current) return;
+    goRef.current = true;
+    try {
     const orderNo = paramSalesNum || (await nextSalesNum());
-    const saleMemberId = detail?.memberId ?? memberIdParam;
+    // memberId kaki deposit parsial ikut menentukan pemilik (tanpa ini gate
+    // withdraw saveSale tak jalan bila Pay dibuka tanpa memberId params).
+    const saleMemberId = detail?.memberId ?? memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
     // Split grup (dari SplitBill): SATU nomor struk untuk semua kunjungan.
     // Kunjungan pertama = saveSale penuh (status auto 'open'); berikutnya =
     // appendGroupPayment (tanpa stok/voucher/dapur ganda). Struk tampilkan
@@ -426,6 +439,7 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(tableNo ? { tableId: tableNo } : {}),
             ...(orderMode ? { mode: orderMode } : {}),
             ...(ongkir > 0 ? { ongkir } : {}),
+            ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
             ...(customerName ? { customer: customerName } : {}),
           };
           recordSale(gInput);
@@ -475,6 +489,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(tableNo ? { tableId: tableNo } : {}),
       ...(orderMode ? { mode: orderMode } : {}),
       ...(ongkir > 0 ? { ongkir } : {}),
+      ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
       ...(customerName ? { customer: customerName } : {}),
     };
     recordSale(input);
@@ -499,6 +514,9 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(tableNo ? { table: tableNo } : {}),
       ...(customerName ? { customer: customerName } : {}),
     });
+    } finally {
+      goRef.current = false;
+    }
   };
 
   // ---- Tunai actions ----
@@ -546,6 +564,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
         ...(ongkir > 0 ? { ongkir } : {}),
+        ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
         ...(customerName ? { customer: customerName } : {}),
         ...(memberIdParam ? { memberId: memberIdParam } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -578,7 +597,7 @@ export default function PayScreen({ navigation, route }: Props) {
     if (grand >= payable) {
       void goSuccess('deposit', grand, 0, { memberId: memberPicked.id });
     } else {
-      addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit');
+      addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit', memberPicked.id);
       setMemberSel(null);
     }
   };
@@ -989,6 +1008,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(orderMode ? { mode: orderMode } : {}),
           ...(tableNo ? { table: tableNo } : {}),
           ...(ongkir > 0 ? { ongkir } : {}),
+          ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
           ...(customerName ? { customer: customerName } : {}),
           ...(memberIdParam ? { memberId: memberIdParam } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -1219,10 +1239,23 @@ export default function PayScreen({ navigation, route }: Props) {
         )}
         {renderBody()}
         <ExtraPaySection onDone={(label, ref, approver) => {
+          const method = extraLabelToMethod(label);
+          if (method === 'deposit') {
+            // Deposit wajib lewat alur member (cek saldo + memberId): lunas
+            // langsung tanpa member membuat gate withdraw saveSale tak jalan
+            // (saldo tak berkurang, deposit bisa dipakai ulang). Tanpa member
+            // terpilih / saldo kosong → arahkan ke tab member.
+            if (!memberPicked || memberPicked.saldo <= 0) {
+              setTab('member');
+              return;
+            }
+            onDepositLanjut();
+            return;
+          }
           const detail: { approvalCode?: string; approvedBy?: string } = {};
           if (ref) detail.approvalCode = ref;
           if (approver) detail.approvedBy = approver;
-          void goSuccess(extraLabelToMethod(label), payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
+          void goSuccess(method, payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
         }} />
       </ScrollView>
       ) : (

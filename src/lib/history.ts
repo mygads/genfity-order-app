@@ -9,6 +9,7 @@ import { getSession } from '../session';
 import { initDb, query, queryFirst, run } from './db';
 import { enqueueOutbox, enqueueSync } from './sync';
 import { fmtSalesDate } from './datefmt';
+import { uuidv7 } from './uuidv7';
 import type { Transaction, TxnStatus } from '../data/mock';
 
 /** Formatter tanggal kanonik pindah ke lib/datefmt (locale-aware id/en). */
@@ -123,8 +124,42 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
   const userId = (getSession()?.userId || getSession()?.username || '').trim();
   try {
     await initDb();
+    // Idempotensi + gerbang stok: void ganda (mis. CancelScreen lalu History)
+    // tak boleh mengembalikan stok/kuota/deposit dua kali; stok hanya kembali
+    // bila saveSale pernah jalan (kaki bayar ada) — bill 'open' tanpa bayar
+    // tak pernah memotong stok.
+    let preStatus = '';
+    let preTableNo: string | null = null;
+    let payCount = 0;
+    let paidTotal = 0;
+    try {
+      const pre = await queryFirst<{ status: string | null; tableNo: string | null }>(
+        'SELECT status, tableNo FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+        [salesNum],
+      );
+      preStatus = String(pre?.status ?? '');
+      preTableNo = pre?.tableNo ?? null;
+    } catch {
+      /* abaikan */
+    }
+    try {
+      const pc = await queryFirst<{ c: number | null }>(
+        'SELECT COUNT(*) AS c FROM tr_salespayment WHERE salesNum = ?',
+        [salesNum],
+      );
+      payCount = Math.max(0, Math.round(Number(pc?.c) || 0));
+      const ps = await queryFirst<{ s: number | null }>(
+        'SELECT COALESCE(SUM(amount), 0) AS s FROM tr_salespayment WHERE salesNum = ?',
+        [salesNum],
+      );
+      paidTotal = Math.max(0, Math.round(Number(ps?.s) || 0));
+    } catch {
+      /* abaikan */
+    }
+    const alreadyVoid = preStatus === 'void';
+    const stockBack = !alreadyVoid && (preStatus === 'paid' || payCount > 0);
     await run(
-      `UPDATE tr_saleshead SET status = 'void', updatedAt = ?, syncDate = NULL
+      `UPDATE tr_saleshead SET status = 'void', grandTotal = 0, paidAmount = 0, updatedAt = ?, syncDate = NULL
        WHERE salesNum = ?`,
       [now, salesNum],
     );
@@ -139,7 +174,7 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     }
     for (const it of items) {
       try {
-        const cid = `cm-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+        const cid = uuidv7();
         await run(
           `INSERT INTO tr_cancelmenu (id, salesNum, menuId, menuName, qty,
             reasonId, reasonNote, userId, cancelDate, syncDate)
@@ -170,8 +205,9 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     } catch {
       /* abaikan */
     }
-    // 1) Stok kembali + buka flag habis bila qty pulih.
-    for (const it of items) {
+    // 1) Stok kembali + buka flag habis bila qty pulih — hanya bila saveSale
+    // pernah jalan (stockBack); bill open tanpa kaki bayar tak memotong stok.
+    for (const it of (stockBack ? items : [] as typeof items)) {
       try {
         const branch = vHead?.branchId;
         const backQty = Math.max(0, Math.round(Number(it.qty) || 0));
@@ -198,7 +234,8 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     // yang benar-benar terbakar (usage 'burn'). Yang 'rejected' tak pernah
     // menyentuh kuota sehingga tak boleh +1 (backstop saveSale #1/#2).
     // Ambil dari usage agar kaki tender ikut pulih, bukan cuma head.
-    try {
+    // Void ganda (head sudah 'void') = lewati agar tak +1 dua kali.
+    if (!alreadyVoid) try {
       const burned = await query<{ voucherCode: string | null }>(
         `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
          WHERE salesNum = ? AND status = 'burn'`,
@@ -221,8 +258,8 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     } catch {
       /* abaikan */
     }
-    // 3) Deposit kembali ke saldo member + ledger refund.
-    try {
+    // 3) Deposit kembali ke saldo member + ledger refund (lewati bila void ganda).
+    if (!alreadyVoid) try {
       if (vHead?.memberId) {
         const pays = await query<{ paymentMethod: string | null; amount: number | null }>(
           'SELECT paymentMethod, amount FROM tr_salespayment WHERE salesNum = ?',
@@ -245,7 +282,7 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
           } catch {
             /* abaikan */
           }
-          const rid = `dep-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+          const rid = uuidv7();
           await run(
             `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
              VALUES (?, ?, ?, 'refund', ?, ?, ?, ?, NULL)`,
@@ -266,13 +303,46 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     } catch {
       /* abaikan */
     }
-    // 4) Tiket dapur disembunyikan (loader Kitchen melewati status Batal).
-    try {
+    // 4) Tiket dapur disembunyikan (loader Kitchen melewati status Batal; lewati bila void ganda).
+    if (!alreadyVoid) try {
       await run(`UPDATE tr_kitchenticket SET status = 'Batal', updatedAt = ?, syncDate = NULL WHERE salesNum = ?`, [now, salesNum]);
       try {
         await enqueueOutbox('tr_kitchenticket', `kt-${salesNum}`, 'update');
       } catch {
         /* abaikan */
+      }
+    } catch {
+      /* abaikan (dapur) */
+    }
+    // 5) Bersih-bersih finansial void penuh (paritas CancelScreen): baris
+    // Refund negatif agar SUM payment = 0 + meja dibebaskan bila tak dipakai
+    // bill 'open' lain (agar tak membebaskan meja order baru).
+    if (!alreadyVoid) try {
+      if (paidTotal > 0) {
+        const rid = uuidv7();
+        await run(
+          `INSERT INTO tr_salespayment (id, salesNum, paymentMethod, amount,
+            tendered, changeAmount, refNo, syncDate, createdAt)
+           VALUES (?, ?, 'Refund', ?, 0, 0, ?, NULL, ?)`,
+          [rid, salesNum, -paidTotal, reason || null, now],
+        );
+      }
+    } catch {
+      /* abaikan */
+    }
+    if (!alreadyVoid && preTableNo) try {
+      const other = await queryFirst<{ c: number | null }>(
+        `SELECT COUNT(*) AS c FROM tr_saleshead
+         WHERE TRIM(tableNo) = TRIM(?) AND salesNum <> ? AND status = 'open'`,
+        [preTableNo, salesNum],
+      );
+      if (Math.round(Number(other?.c) || 0) <= 0) {
+        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = TRIM(?)', ['kosong', preTableNo]);
+        try {
+          enqueueSync('other', { op: 'table-clear', table: preTableNo, at: now });
+        } catch {
+          /* abaikan */
+        }
       }
     } catch {
       /* abaikan */

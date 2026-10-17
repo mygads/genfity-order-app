@@ -78,11 +78,12 @@ async function loadPoints(): Promise<Record<string, number>> {
     return {};
   }
 }
-/** Tambah poin + kembalikan total overlay (maks dengan nilai server bila ada). */
+/** Tambah poin + kembalikan total overlay (maks dengan nilai server bila ada).
+ * Delta negatif diizinkan (calon redeem) tetapi total tak pernah minus. */
 async function addPoints(memberId: string, delta: number): Promise<number> {
   try {
     const cur = await loadPoints();
-    const next = Math.max(0, Math.round(Number(cur[memberId]) || 0) + Math.max(0, Math.round(delta)));
+    const next = Math.max(0, Math.round(Number(cur[memberId]) || 0) + Math.round(Number(delta) || 0));
     await setJSON(POINTS_KEY, { ...cur, [memberId]: next });
     return next;
   } catch {
@@ -305,6 +306,9 @@ export default function MemberScreen({ navigation, route }: Props) {
         const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
         const items = Array.isArray(data?.items) ? data.items : [];
         if (!live || items.length === 0) return;
+        // Overlay poin lokal: pull tak boleh menimpa earn perangkat dengan
+        // angka server yang lebih kecil (pakai maks keduanya).
+        const overlay = await loadPoints();
         const mapped: Member[] = [];
         for (const [idx, it] of items.entries()) {
           const nama = String(it.name ?? it.memberName ?? '').trim();
@@ -317,11 +321,35 @@ export default function MemberScreen({ navigation, route }: Props) {
             noHp: String(it.phone ?? ''),
             tipe: tierRaw.charAt(0).toUpperCase() + tierRaw.slice(1).toLowerCase(),
             saldo: Math.max(0, Math.round(Number(it.balance ?? it.depositBalance ?? 0) || 0)),
-            poin: Math.max(0, Math.round(Number(it.points ?? 0) || 0)),
+            // Poin = maks(server, overlay lokal): earn sesi lalu / perangkat
+            // ini tak boleh hilang saat pull. (Belum ada alur redeem; saat
+            // redeem dibangun, maks ini harus ditinjau ulang agar poin yang
+            // sudah ditukar tak bangkit lagi.)
+            poin: Math.max(
+              Math.max(0, Math.round(Number(it.points ?? 0) || 0)),
+              Math.max(0, Math.round(Number(overlay[id]) || 0)),
+            ),
           });
         }
         if (!live || mapped.length === 0) return;
         setMembers(mapped);
+        // Tulis balik maks ke overlay agar tahan muat ulang offline.
+        void (async () => {
+          try {
+            const cur = await loadPoints();
+            let dirty = false;
+            const next = { ...cur };
+            for (const m of mapped) {
+              if (Math.round(Number(cur[m.id]) || 0) < m.poin) {
+                next[m.id] = m.poin;
+                dirty = true;
+              }
+            }
+            if (dirty) await setJSON(POINTS_KEY, next);
+          } catch {
+            /* abaikan */
+          }
+        })();
         setSelected((sb) => (sb ? mapped.find((m) => m.id === sb.id) ?? sb : sb));
       } catch {
         /* offline - koleksi SQLite tetap dipakai */

@@ -8,10 +8,11 @@
  * `tr_esoprocessqueue`. Persistensi ringan (outbox JSON + last-sync)
  * memakai lib/storage.ts agar work di web + native.
  */
-import { ApiPath, apiPost, getServerEnv } from '../config/server';
+import { ApiPath, apiPost, getServerEnv, getTerminal } from '../config/server';
 import { all, markDirty, queryFirst, run } from './db';
 import { tr } from './i18n';
 import { getItem, setItem } from './storage';
+import { uuidv7 } from './uuidv7';
 
 export type SyncStatus = 'antre' | 'terkirim' | 'gagal';
 export type SyncKind = 'order' | 'receipt' | 'attendance' | 'other';
@@ -164,7 +165,8 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 export function enqueueSync(kind: SyncKind, payload: Record<string, unknown>): SyncItem {
   hydrate();
   const item: SyncItem = {
-    id: `sync-${Date.now()}-${outbox.length + 1}`,
+    // UUIDv7 (Q7): id antrean = idempotency key retry-aman lintas-device.
+    id: uuidv7(),
     kind,
     payload,
     createdAt: new Date().toISOString(),
@@ -218,64 +220,103 @@ interface PhysicalQueueRow {
 }
 
 /**
- * Kuras outbox fisik `tr_esoprocessqueue`: SELECT antre → POST per baris via
- * tablePushPath → DELETE yang sukses (UPDATE status='gagal' bila gagal) +
- * watermark push per tabel via setWatermark. Tidak pernah melempar
- * (offline-first): DB belum init / offline ditelan per baris.
+ * Identitas pengirim Q7 (§12 SPEC): setiap body push membawa `client_id` +
+ * `uuid` (keduanya = id baris UUIDv7: time-ordered, unik lintas-device),
+ * `branchId`, dan `terminalCode` dari klaim terminal aktif. Kunci camelCase
+ * `clientId` dipertahankan apa adanya (kontrak lama) — field baru ADITIF,
+ * path endpoint tidak berubah.
  */
-async function drainPhysicalQueue(): Promise<PushResult> {
-  let sent = 0;
-  let failed = 0;
-  let rows: PhysicalQueueRow[] = [];
+function identityFields(clientId: string): Record<string, string> {
+  let branchId = '';
+  let terminalCode = '';
   try {
-    rows = await all<PhysicalQueueRow>(
+    const t = getTerminal();
+    branchId = t.branchId ?? '';
+    terminalCode = t.terminalCode ?? '';
+  } catch {
+    /* klaim belum ada — kirim kosong, jangan blokir antrean */
+  }
+  return { client_id: clientId, branchId, terminalCode, uuid: clientId };
+}
+
+/**
+ * SATU-SATUNYA pengecualian FIFO yang diizinkan (temuan
+ * offline-kind-rank-breaks-fifo): baris shift-open boleh dikuras duluan
+ * HANYA bila server mensyaratkan shift terbuka sebelum menerima push lain.
+ * Kontrak BE E01–E28 belum ada sehingga syarat itu belum diketahui —
+ * pengecualian MATI (false) dan drain murni FIFO createdAt ASC. Jangan tambah
+ * pengecualian kind lain tanpa kontrak BE tertulis.
+ */
+const SHIFT_OPEN_FIRST_IF_SERVER_REQUIRES = false;
+
+function isShiftOpenRow(row: PhysicalQueueRow): boolean {
+  return (
+    (row.tableName === 'tr_shiftlog' || row.tableName === 'tr_shiftlogdetail') &&
+    row.op === 'insert'
+  );
+}
+
+function isShiftOpenItem(item: SyncItem): boolean {
+  return String((item.payload as { op?: unknown } | null)?.op ?? '') === 'shift-open';
+}
+
+/** Ambil baris antrean fisik yang belum terkirim, createdAt ASC. */
+async function fetchPhysicalRows(): Promise<PhysicalQueueRow[]> {
+  try {
+    return await all<PhysicalQueueRow>(
       `SELECT id, orderID, serverID, tableName, op, payload, status, createdAt
        FROM tr_esoprocessqueue WHERE status IN ('antre', 'gagal')
        ORDER BY createdAt ASC LIMIT 200`,
     );
   } catch {
-    return { sent, failed };
+    return [];
   }
-  for (const row of rows) {
-    const table = String(row.tableName ?? '');
-    // Master (ms_*) tidak punya endpoint push (§5/M9-3): biarkan antre lokal.
-    if (!table || table.startsWith('ms_')) continue;
-    const path = tablePushPath(table);
-    if (!path) continue;
+}
+
+/**
+ * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
+ * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
+ * (ms_*, server-wins §4/M9-3) atau tanpa endpoint push — biarkan antre lokal,
+ * jangan hitung gagal.
+ */
+async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
+  const table = String(row.tableName ?? '');
+  // Master (ms_*) tidak punya endpoint push (§5/M9-3): biarkan antre lokal.
+  if (!table || table.startsWith('ms_')) return 'skipped';
+  const path = tablePushPath(table);
+  if (!path) return 'skipped';
+  try {
+    let body: Record<string, unknown> = {};
     try {
-      let body: Record<string, unknown> = {};
-      try {
-        body = row.payload ? (JSON.parse(row.payload) as Record<string, unknown>) : {};
-      } catch {
-        body = {};
-      }
-      const res = await apiPost(
-        path,
-        { ...body, table, rowId: row.orderID, op: row.op, clientId: row.id },
-        { idempotencyKey: row.id },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      try {
-        await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
-      } catch {
-        /* abaikan */
-      }
-      sent += 1;
-      try {
-        await setWatermark(table, { push: new Date().toISOString() });
-      } catch {
-        /* abaikan */
-      }
+      body = row.payload ? (JSON.parse(row.payload) as Record<string, unknown>) : {};
     } catch {
-      try {
-        await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
-      } catch {
-        /* abaikan */
-      }
-      failed += 1;
+      body = {};
     }
+    const res = await apiPost(
+      path,
+      { ...body, table, rowId: row.orderID, op: row.op, clientId: row.id, ...identityFields(row.id) },
+      { idempotencyKey: row.id },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    try {
+      await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    try {
+      await setWatermark(table, { push: new Date().toISOString() });
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  } catch {
+    try {
+      await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'failed';
   }
-  return { sent, failed };
 }
 
 // Operasi cermin-lokal tanpa endpoint push di kontrak §5 (status meja di
@@ -308,75 +349,227 @@ export async function pushAll(): Promise<PushResult> {
   }
   let sent = 0;
   let failed = 0;
-  // Kuras outbox fisik dulu (offline-first: gagal DB/jaringan per baris).
-  try {
-    const drained = await drainPhysicalQueue();
-    sent += drained.sent;
-    failed += drained.failed;
-    if (drained.sent > 0) {
-      lastSyncMs = Date.now();
-      lastSync = new Date().toLocaleString('id-ID');
-    }
-  } catch {
-    /* abaikan - antrean ringan di bawah tetap jalan */
-  }
-  // Prioritas kind: "other" (shift-open/shift-close) DULU, lalu "order",
-  // lalu receipt/attendance. FIFO terjaga di dalam tiap grup.
+  const touchSuccess = (): void => {
+    lastSyncMs = Date.now();
+    lastSync = new Date().toLocaleString('id-ID');
+  };
+  // Drain GABUNGAN (temuan offline-kind-rank-breaks-fifo + causal FIFO per
+  // bill): antrean fisik DAN ringan dikuras dalam SATU urutan strict by
+  // createdAt ASC — sale selalu sebelum void/pay-change/move-nya walau keduanya
+  // tercatat di antrean berbeda. Pengurutan ulang by kind ("other" dulu)
+  // DIHAPUS; satu-satunya pengecualian adalah shift-open dan itu pun hanya
+  // bila SHIFT_OPEN_FIRST_IF_SERVER_REQUIRES hidup (mati saat ini).
+  // Baris gagal TIDAK menghentikan drain (offline-first): ditandai 'gagal',
+  // dilewati, dicoba lagi di push berikutnya.
+  const rows = await fetchPhysicalRows();
   const next = [...outbox];
-  const rank = (k: SyncKind): number => (k === 'other' ? 0 : k === 'order' ? 1 : 2);
-  const queue = next
+  const light = next
     .map((item, idx) => ({ item, idx }))
-    .filter(({ item }) => item.status !== 'terkirim')
-    .sort((a, b) => rank(a.item.kind) - rank(b.item.kind) || a.idx - b.idx)
-    .map(({ item }) => item);
-  for (const item of queue) {
-    // Perubahan master lokal (ms_*) tidak punya endpoint push di kontrak §5:
-    // lewati agar tidak terkirim ke order/finish; baris tetap kotor
-    // (syncDate NULL) + tercatat di tr_esoprocessqueue.
-    const itemTable = String((item.payload as { table?: unknown })?.table ?? '');
-    if (itemTable.startsWith('ms_')) {
-      item.note = tr('sync.masterQueued');
-      continue;
+    .filter(({ item }) => item.status !== 'terkirim');
+  interface DrainEntry {
+    createdAt: string;
+    shiftOpen: boolean;
+    physicalFirst: number;
+    seq: number;
+    row?: PhysicalQueueRow;
+    item?: SyncItem;
+  }
+  const entries: DrainEntry[] = [
+    ...rows.map((row, seq): DrainEntry => ({
+      createdAt: String(row.createdAt ?? ''),
+      shiftOpen: isShiftOpenRow(row),
+      physicalFirst: 0,
+      seq,
+      row,
+    })),
+    ...light.map(({ item, idx }): DrainEntry => ({
+      createdAt: String(item.createdAt ?? ''),
+      shiftOpen: isShiftOpenItem(item),
+      physicalFirst: 1,
+      seq: idx,
+      item,
+    })),
+  ];
+  entries.sort((a, b) => {
+    if (SHIFT_OPEN_FIRST_IF_SERVER_REQUIRES && a.shiftOpen !== b.shiftOpen) {
+      return a.shiftOpen ? -1 : 1;
     }
-    // kind "other" tanpa endpoint yang cocok: bedakan cermin-lokal /
-    // deposit-lokal (tandai terkirim, bukan antre selamanya) dari yang
-    // benar-benar menunggu endpoint (tetap antre + tercatat fisik).
-    const path = pathFor(item.kind, item.payload);
-    if (!path) {
-      const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown };
-      const op = String(p.op ?? '');
-      const k = String(p.kind ?? '');
-      if (LOCAL_OPS.has(op) || DEPOSIT_LOCAL_KINDS.has(k)) {
-        item.status = 'terkirim';
-        item.note = tr(op ? 'sync.localOnly' : 'sync.depositLocal');
-        continue;
+    if (a.createdAt < b.createdAt) return -1;
+    if (a.createdAt > b.createdAt) return 1;
+    // createdAt seri (resolusi ms): baris fisik dulu — produsen selalu
+    // mencatat fisik sebelum cermin ringannya (history.ts/sales.ts).
+    if (a.physicalFirst !== b.physicalFirst) return a.physicalFirst - b.physicalFirst;
+    return a.seq - b.seq;
+  });
+  for (const e of entries) {
+    if (e.row) {
+      const outcome = await pushPhysicalRow(e.row);
+      if (outcome === 'sent') {
+        sent += 1;
+        touchSuccess();
+      } else if (outcome === 'failed') {
+        failed += 1;
       }
-      item.note = tr('sync.masterQueued');
       continue;
     }
-    try {
-      const res = await apiPost(path, { ...item.payload, clientId: item.id }, { idempotencyKey: item.id });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      item.status = 'terkirim';
-      item.note = '';
+    if (!e.item) continue;
+    const outcome = await pushLightItem(e.item);
+    if (outcome === 'sent') {
       sent += 1;
-      const nowIso = new Date().toISOString();
-      lastSyncMs = Date.now();
-      lastSync = new Date().toLocaleString('id-ID');
-      try {
-        await setWatermark(itemTable || item.kind, { push: nowIso });
-      } catch {
-        /* abaikan */
-      }
-    } catch (e) {
-      item.status = 'gagal';
-      item.note = e instanceof Error ? e.message : 'Gagal mengirim';
+      touchSuccess();
+    } else if (outcome === 'failed') {
       failed += 1;
     }
   }
   outbox = next;
   persist();
   return { sent, failed };
+}
+
+/**
+ * Dorong satu item ringan (path endpoint tidak berubah). 'sent'/'failed'
+ * dihitung pushAll; 'skipped' = master-menunggu-endpoint atau cermin lokal
+ * (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya).
+ */
+async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipped'> {
+  // Perubahan master lokal (ms_*) tidak punya endpoint push di kontrak §5:
+  // lewati agar tidak terkirim ke order/finish; baris tetap kotor
+  // (syncDate NULL) + tercatat di tr_esoprocessqueue.
+  const itemTable = String((item.payload as { table?: unknown })?.table ?? '');
+  if (itemTable.startsWith('ms_')) {
+    item.note = tr('sync.masterQueued');
+    return 'skipped';
+  }
+  // kind "other" tanpa endpoint yang cocok: bedakan cermin-lokal /
+  // deposit-lokal (tandai terkirim, bukan antre selamanya) dari yang
+  // benar-benar menunggu endpoint (tetap antre + tercatat fisik).
+  const path = pathFor(item.kind, item.payload);
+  if (!path) {
+    const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown };
+    const op = String(p.op ?? '');
+    const k = String(p.kind ?? '');
+    if (LOCAL_OPS.has(op) || DEPOSIT_LOCAL_KINDS.has(k)) {
+      item.status = 'terkirim';
+      item.note = tr(op ? 'sync.localOnly' : 'sync.depositLocal');
+      return 'skipped';
+    }
+    item.note = tr('sync.masterQueued');
+    return 'skipped';
+  }
+  try {
+    const res = await apiPost(
+      path,
+      { ...item.payload, clientId: item.id, ...identityFields(item.id) },
+      { idempotencyKey: item.id },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    item.status = 'terkirim';
+    item.note = '';
+    try {
+      await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  } catch (e) {
+    item.status = 'gagal';
+    item.note = e instanceof Error ? e.message : 'Gagal mengirim';
+    return 'failed';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backlog gabungan untuk SyncScreen (temuan offline-ms-edits-stuck-invisible):
+// kasir harus melihat BOTH antrean ringan + fisik/dirty, bukan satu saja.
+// ---------------------------------------------------------------------------
+
+/** Jumlah baris antrean fisik `tr_esoprocessqueue` yang belum terkirim. */
+export async function countPhysicalQueue(): Promise<number> {
+  try {
+    const row = await queryFirst<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM tr_esoprocessqueue WHERE status IN ('antre', 'gagal')`,
+    );
+    return row?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Total baris kotor (syncDate NULL) di semua tabel lokal. Dihitung dinamis
+ * dari sqlite_master agar tabel baru otomatis ikut tanpa daftar statis;
+ * nama tabel divalidasi pola identifier (anti-injeksi).
+ */
+export async function countDirtyRows(): Promise<number> {
+  try {
+    const tables = await all<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE '%syncDate%'`,
+    );
+    let total = 0;
+    for (const t of tables) {
+      const name = String(t.name ?? '');
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+      try {
+        const row = await queryFirst<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM "${name}" WHERE syncDate IS NULL`,
+        );
+        total += row?.n ?? 0;
+      } catch {
+        /* kolom tak cocok — lewati */
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Logout offline (flow O1 §7 SPEC): revoke server-side (E06) tak terjangkau
+ * saat offline → sessionId ditandai pendingRevoke dan dicoba lagi saat
+ * online. E06 BELUM ADA di BE sehingga flush jaringan belum
+ * diimplementasikan: daftar ini persisten (hanya dihapus saat revoke
+ * sukses) dan SyncScreen menampilkannya sebagai indikator jujur
+ * "needs BE / mode lokal", bukan bypass diam-diam.
+ */
+const LS_REVOKE = 'genfity.sync.pendingRevoke';
+
+export async function getPendingRevoke(): Promise<string[]> {
+  try {
+    const raw = await getItem(LS_REVOKE);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function markPendingRevoke(sessionId: string): Promise<void> {
+  const id = String(sessionId ?? '').trim();
+  if (!id) return;
+  try {
+    const cur = await getPendingRevoke();
+    if (!cur.includes(id)) {
+      cur.push(id);
+      await setItem(LS_REVOKE, JSON.stringify(cur));
+    }
+  } catch {
+    /* storage gagal — pemanggil (logout) tetap lanjut offline */
+  }
+}
+
+export async function clearPendingRevoke(sessionId?: string): Promise<void> {
+  try {
+    if (sessionId === undefined) {
+      await setItem(LS_REVOKE, JSON.stringify([]));
+      return;
+    }
+    const cur = (await getPendingRevoke()).filter((s) => s !== sessionId);
+    await setItem(LS_REVOKE, JSON.stringify(cur));
+  } catch {
+    /* abaikan */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -395,18 +588,24 @@ export interface Watermark {
  * tandai baris sumber kotor (syncDate=NULL) dan masukkan antrean ringan.
  * Tidak pernah melempar - kasir tidak boleh diblokir antrean.
  */
-export async function enqueueOutbox(
+/**
+ * Inti fisik outbox (#22): baris `tr_esoprocessqueue` + tandai kotor — tanpa
+ * menyentuh AsyncStorage. Dipakai di dalam transaksi SQLite agar baris outbox
+ * ikut rollback bila tulis gagal total; pemanggil mem-flush antrean ringan
+ * secara terpisah setelah COMMIT.
+ */
+export async function enqueueOutboxPhysical(
   table: string,
   rowId: string,
   op: OutboxOp,
 ): Promise<void> {
-  hydrate();
   try {
     await run(
       `INSERT INTO tr_esoprocessqueue (id, orderID, serverID, tableName, op, payload, status, createdAt)
        VALUES (?, ?, '', ?, ?, ?, 'antre', ?)`,
       [
-        `q-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+        // UUIDv7 (Q7): id fisik = clientId + Idempotency-Key saat drain.
+        uuidv7(),
         rowId,
         table,
         op,
@@ -422,6 +621,15 @@ export async function enqueueOutbox(
   } catch {
     /* abaikan */
   }
+}
+
+export async function enqueueOutbox(
+  table: string,
+  rowId: string,
+  op: OutboxOp,
+): Promise<void> {
+  hydrate();
+  await enqueueOutboxPhysical(table, rowId, op);
   // Tabel master tidak masuk antrean ringan: kontrak §5 tidak punya endpoint
   // push master sehingga pengiriman ke order/finish adalah endpoint salah
   // (M9-3). Perubahan tetap tersimpan lokal (syncDate NULL + outbox fisik).

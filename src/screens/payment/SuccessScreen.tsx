@@ -123,7 +123,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
     void (async () => {
       try {
         await initDb();
-        await run('DELETE FROM tr_draftorder WHERE payload LIKE ?', [`%${no}%`]);
+        // Hapus draft via salesNum persis: karakter LIKE (\) di-escape agar
+        // nomor tak pernah cocok lebih luas dari dirinya sendiri.
+        const esc = String(no).replace(/[\\%_]/g, (c) => `\\${c}`);
+        await run("DELETE FROM tr_draftorder WHERE payload LIKE ? ESCAPE '\\'", [`%${esc}%`]);
       } catch {
         /* abaikan */
       }

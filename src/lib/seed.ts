@@ -420,6 +420,48 @@ export async function ensureSeeded(): Promise<void> {
       ],
       payments: [{ method: 'qris', amount: 17760 }],
     },
+    // SEED-003: promo nominal reusable (HEMAT10 hanya ada di ms_promotion,
+    // minSpend 50000) — membuktikan jalur fallback promo di backstop saveSale:
+    // usage 'burn' tercatat, kuota tak tersentuh (promo tanpa kuota).
+    // 51000 - 10000 = 41000 + PPN 11% (4510) = 45510.
+    {
+      method: 'qris',
+      salesNum: 'SEED-003',
+      grandTotal: 45510,
+      subtotal: 51000,
+      discountTotal: 10000,
+      vatTotal: 4510,
+      mode: 'TAKE AWAY',
+      customer: 'Dewi',
+      voucherCode: 'HEMAT10',
+      items: [
+        { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 18000, qty: 2 },
+        { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 1 },
+      ],
+      payments: [{ method: 'qris', amount: 45510 }],
+    },
+    // SEED-004: promo ongkir (ONGKIR10 hanya di ms_promotion) — ongkir bruto
+    // 8000 dipotong penuh (ongkirCut 8000), neto tersimpan 0.
+    // 21000 + PPN 11% (2310) + 0 = 23310; tunai 25000, kembali 1690.
+    {
+      method: 'cash',
+      salesNum: 'SEED-004',
+      grandTotal: 23310,
+      subtotal: 21000,
+      vatTotal: 2310,
+      cash: 25000,
+      change: 1690,
+      mode: 'GOFOOD',
+      customer: 'Agus',
+      voucherCode: 'ONGKIR10',
+      ongkir: 0,
+      ongkirCut: 8000,
+      items: [
+        { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 8000, qty: 2 },
+        { id: 'm-es-teh-manis', name: 'Es Teh Manis', basePrice: 5000, qty: 1 },
+      ],
+      payments: [{ method: 'cash', amount: 23310 }],
+    },
   ];
   for (const o of seedOrders) {
     try {

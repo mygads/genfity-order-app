@@ -19,7 +19,7 @@ type Props = {
     params?: {
       items?: OrderItemParam[];
       total?: number; subtotal?: number; discount?: number;
-      voucher?: string | { code: string; amount: number; kind?: string };
+      voucher?: string | { code: string; amount: number; kind?: string; rate?: number; maxAmount?: number; minSpend?: number };
       voucherCode?: string;
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;

@@ -66,6 +66,29 @@ export async function exec(source: string): Promise<void> {
 }
 
 /**
+ * Transaksi atomik (#22): semua run/query di dalam fn berjalan dalam satu
+ * BEGIN/COMMIT pada koneksi tunggal (getDb singleton). Gagal = ROLLBACK +
+ * lempar ulang. TIDAK bersarang (nested BEGIN ditolak SQLite) — hanya untuk
+ * alur tulis tingkat atas seperti saveSale.
+ */
+export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  const d = getDb();
+  await d.execAsync('BEGIN');
+  try {
+    const out = await fn();
+    await d.execAsync('COMMIT');
+    return out;
+  } catch (e) {
+    try {
+      await d.execAsync('ROLLBACK');
+    } catch {
+      /* abaikan */
+    }
+    throw e;
+  }
+}
+
+/**
  * Skema + migrasi tinggal di lib/dbSchema.ts (sumber tunggal untuk native
  * dan web). Alias di sini agar sisa file tidak berubah.
  */

@@ -26,6 +26,14 @@ export function fmtTime(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Waktu lokal format server 'YYYY-MM-DD HH:MM:SS' untuk banding string
+ * window validFrom/validTo di SQLite (kolom DATETIME server = waktu lokal,
+ * BUKAN UTC — toISOString() membunuh voucher X jam lebih awal). */
+export function dbNowLocal(d = new Date()): string {
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /** ISO → { date, time }; aman untuk string rusak ('-' / ''). */
 export function fmtSalesDate(iso: string, lang: Lang = 'id'): { date: string; time: string } {
   const d = new Date(iso);

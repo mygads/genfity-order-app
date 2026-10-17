@@ -25,12 +25,24 @@ export const SCHEMA_STATEMENTS: string[] = [
     flagAutocut INTEGER DEFAULT 1, flagOpenCashdrawer INTEGER DEFAULT 0, syncDate TEXT)`,
 
   // --- Inti transaksi ---
+  // client_id (Q7 CLOSED, SPEC §12 aditif): UUIDv7 stabil per sale, PK
+  // merge-safe lintas-device. salesNum = nomor display tersegmen
+  // TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN} (PK lokal + tampil di struk; join
+  // anak, pull INSERT OR IGNORE, seed tak berubah); server upsert by
+  // client_id, UNIQUE(display_no) + 409 terlihat untuk konflik nomor.
+  // Tabel anak membawa client_id NULL-able (cadangan merge lane BE; join
+  // lokal tetap via salesNum, server resolve via head client_id).
   `CREATE TABLE IF NOT EXISTS tr_saleshead (
-    salesNum TEXT PRIMARY KEY, branchId TEXT, terminalId TEXT, userId TEXT, shiftId TEXT,
+    salesNum TEXT PRIMARY KEY, client_id TEXT, branchId TEXT, terminalId TEXT, userId TEXT, shiftId TEXT,
     salesDate TEXT, salesMode TEXT, tableNo TEXT, customerName TEXT,
     subtotal REAL DEFAULT 0, discount REAL DEFAULT 0, discountName TEXT,
     tax REAL DEFAULT 0, serviceCharge REAL DEFAULT 0,
     voucherAmount REAL DEFAULT 0, voucherCode TEXT, promotionVoucherCode TEXT,
+    -- promotionVoucherCode = CADANGAN yang disengaja tak dipakai (audit 2026-10):
+    -- kode terapan (voucher kuota maupun promo reusable) tercatat di SATU kolom
+    -- voucherCode agar riwayat/void/struk/sync tak bercabang; asal kode selalu
+    -- bisa ditelusur via ms_voucher/ms_promotion. Jangan tulis/baca kolom ini
+    -- tanpa memperbarui receipt/history/void/sync-mapping (master.ts) sekalian.
     platformFee REAL DEFAULT 0, rounding REAL DEFAULT 0, grandTotal REAL DEFAULT 0,
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
@@ -39,26 +51,26 @@ export const SCHEMA_STATEMENTS: string[] = [
     externalId TEXT, onlineOrderId TEXT, cashierName TEXT,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT, printedCount INTEGER DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS tr_salesmenu (
-    id TEXT PRIMARY KEY, salesNum TEXT, menuId TEXT, menuName TEXT,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, menuId TEXT, menuName TEXT,
     qty REAL DEFAULT 0, price REAL DEFAULT 0, discount REAL DEFAULT 0,
     subtotal REAL DEFAULT 0, note TEXT, stationId TEXT, status TEXT,
     promotionVoucherCode TEXT, syncDate TEXT, createdAt TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_salesmenuextra (
-    id TEXT PRIMARY KEY, salesMenuId TEXT, salesNum TEXT, extraId TEXT, extraName TEXT,
+    id TEXT PRIMARY KEY, salesMenuId TEXT, salesNum TEXT, client_id TEXT, extraId TEXT, extraName TEXT,
     qty REAL DEFAULT 0, price REAL DEFAULT 0, subtotal REAL DEFAULT 0, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_salespayment (
-    id TEXT PRIMARY KEY, salesNum TEXT, paymentMethod TEXT, paymentType TEXT,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, paymentMethod TEXT, paymentType TEXT,
     amount REAL DEFAULT 0, tendered REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     refNo TEXT, edcBatch TEXT, syncDate TEXT, createdAt TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_salesvoucherusage (
-    id TEXT PRIMARY KEY, salesNum TEXT, voucherCode TEXT, voucherAmount REAL DEFAULT 0,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, voucherCode TEXT, voucherAmount REAL DEFAULT 0,
     status TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_salesinfo (
-    id TEXT PRIMARY KEY, salesNum TEXT, infoKey TEXT, infoValue TEXT, syncDate TEXT)`,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, infoKey TEXT, infoValue TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_platformfee (
-    id TEXT PRIMARY KEY, salesNum TEXT, platform TEXT, feeAmount REAL DEFAULT 0, syncDate TEXT)`,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, platform TEXT, feeAmount REAL DEFAULT 0, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_cancelmenu (
-    id TEXT PRIMARY KEY, salesNum TEXT, menuId TEXT, menuName TEXT, qty REAL DEFAULT 0,
+    id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, menuId TEXT, menuName TEXT, qty REAL DEFAULT 0,
     reasonId TEXT, reasonNote TEXT, userId TEXT, cancelDate TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_shiftlog (
     id TEXT PRIMARY KEY, branchId TEXT, terminalId TEXT, userId TEXT, shiftName TEXT,
@@ -140,7 +152,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   // Sumber mock tetap di data/mock.ts; tabel ini hanya menimpa STATUS
   // yang sudah di-advance agar bertahan saat aplikasi dibuka ulang.
   `CREATE TABLE IF NOT EXISTS tr_kitchenticket (
-    id TEXT PRIMARY KEY, ticketNo TEXT, salesNum TEXT, status TEXT,
+    id TEXT PRIMARY KEY, ticketNo TEXT, salesNum TEXT, client_id TEXT, status TEXT,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT)`,
   // F9: tabel agregat minimal untuk 3 domain pull kontrak §4 (dummy JSON
   // tersedia). Server menang untuk master (§4): hanya ditulis via pullMaster,
@@ -165,6 +177,25 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_draftorder (
     id TEXT PRIMARY KEY, payload TEXT NOT NULL,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT)`,
+  // Counter nomor display harian per terminal (Q7, T2-opsi-a): tabel khusus
+  // agar transaksional (bukan KV yang bisa dioverwrite pull-server).
+  // ymd = kalender lokal YYYYMMDD; sale lewat tengah malam ikut ymd baru
+  // dengan shiftId lama tetap menempel (atribusi shift != tanggal nomor).
+  `CREATE TABLE IF NOT EXISTS tr_sales_seq (
+    terminalCode TEXT NOT NULL, ymd TEXT NOT NULL, lastN INTEGER DEFAULT 0,
+    PRIMARY KEY (terminalCode, ymd))`,
+  // Indeks client_id untuk upsert/pull-by-client (dibuat tiap initDb,
+  // jadi instalasi lama ikut dapat tanpa migrasi khusus). UNIQUE aman:
+  // SQLite mengizinkan banyak NULL, dan backfill di bawah mengisi nilai
+  // unik (salinan salesNum yang adalah PK) sebelum baris baru ber-UUID.
+  `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
+  // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
+  // logika drain diimplementasikan lane printer belakangan (jangan drain di
+  // lane ini). status: 'antre' | 'cetak' | 'gagal' (kosakata = outbox).
+  `CREATE TABLE IF NOT EXISTS tr_printqueue (
+    id TEXT PRIMARY KEY, payload TEXT, target TEXT,
+    status TEXT DEFAULT 'antre', createdAt TEXT)`,
 ];
 
 /**
@@ -184,4 +215,20 @@ export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE ms_paymentmethod ADD COLUMN voucherCategoryID TEXT',
   'ALTER TABLE ms_paymentmethod ADD COLUMN voucherSourceID TEXT',
   'ALTER TABLE ms_station ADD COLUMN flagAutocut INTEGER DEFAULT 1',
+  // #18: atribusi shift per penjualan untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE tr_saleshead ADD COLUMN shiftId TEXT',
+  // Q7: client_id UUIDv7 aditif untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE tr_saleshead ADD COLUMN client_id TEXT',
+  // Q7: client_id NULL-able cadangan di tabel anak sale (gagal = sudah ada).
+  'ALTER TABLE tr_salesmenu ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_salesmenuextra ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_salespayment ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_salesvoucherusage ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_salesinfo ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_platformfee ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_cancelmenu ADD COLUMN client_id TEXT',
+  'ALTER TABLE tr_kitchenticket ADD COLUMN client_id TEXT',
+  // Backfill deterministik: baris lama client_id = salesNum (unik karena PK,
+  // stabil lintas-retry). Baris baru selalu UUIDv7 dari saveSale.
+  'UPDATE tr_saleshead SET client_id = salesNum WHERE client_id IS NULL',
 ];

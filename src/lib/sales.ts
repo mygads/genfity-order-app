@@ -1,37 +1,52 @@
 /**
- * Simpan penjualan lunas ke SQLite (kontrak §5 + aturan Lampiran B).
+ * Simpan penjualan lunas ke SQLite (kontrak §5 + aturan Lampiran B, identitas
+ * Q7 SPEC §12: client_id UUIDv7 + nomor display tersegmen).
  * Dipanggil fire-and-forget dari PayScreen.goSuccess - TIDAK PERNAH
- * melempar: kasir tidak boleh diblokir database. Baris ditulis dengan
+ * melempar untuk kegagalan DB: kasir tidak boleh diblokir database. SATU
+ * pengecualian fail-closed: device unbound (branch/terminal kosong) melempar
+ * SEBELUM tulis apa pun (tanpa fallback B001). Baris ditulis dengan
  * syncDate NULL (= kotor) agar ikut push berikutnya; pengiriman
  * server tetap lewat antrean ringan `recordSale` (src/lib/payments.ts).
  */
 import { getBranchId, getTerminal, ApiPath } from '../config/server';
 import { getSession } from '../session';
-import { initDb, query, queryFirst, run } from './db';
-import { getItem, setItem } from './storage';
-import { enqueueOutbox, enqueueSync } from './sync';
+import { initDb, query, queryFirst, run, withTransaction } from './db';
+import { dbNowLocal } from './datefmt';
+import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from './sync';
 import { apiFetch } from './apiSource';
 import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
+import { uuidv7 } from './uuidv7';
 
 const r = (n: number) => Math.round(n);
 
-function uid(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+function uid(_prefix: string): string {
+  // UUIDv7 (Q7): semua id baris anak (sm/se/sp/dep/sv/si/kitchen/payment)
+  // merge-safe lintas-device. Prefix debug lama dibuang — kolom TEXT muat 36-char.
+  return uuidv7();
 }
 
 /**
- * Backstop voucher di choke point saveSale (temuan audit #1/#2): cek
- * status/kuota/jendela/nominal langsung ke ms_voucher. Semantik cermin
- * validateVoucherCodeLocal (apiSource.ts): status harus 'available',
- * quota > 0, amount > 0, dalam jendela validFrom/validTo (banding string ISO).
- * Query gagal (DB glitch) = fail-open (perilaku lama) agar kasir tak
- * terblokir; data tak-valid = {ok:false}. Selalu initDb dulu karena
- * dipanggil sebelum/sesudah initDb pemanggil.
+ * Backstop voucher di choke point saveSale (temuan audit #1/#2 + #16b): cek
+ * status/kuota/jendela/nominal/minSpend langsung ke ms_voucher, lalu fallback
+ * ke ms_promotion (promo reusable: flagActive=1 + jendela + value>0, tanpa
+ * kuota). Semantik cermin validateVoucherCodeLocal (apiSource.ts) + totals()
+ * (#16): status harus 'available', quota > 0, amount > 0, dalam jendela
+ * validFrom/validTo (banding string waktu LOKAL via dbNowLocal), dan
+ * gross >= minSpend (base = jumlah kotor per baris SEBELUM diskon item —
+ * cermin subtotalGross CashierScreen; tanpa ongkir/pajak/service).
+ * ms_voucher TAK punya kolom minSpend (server tak mengirimnya — pull voucher
+ * di master.ts tanpa minSpend), jadi voucher kuota tak kena gate belanja;
+ * gate minSpend hanya berlaku untuk promo. Kode promo tercatat di kolom
+ * voucherCode yang sama; UPDATE kuota di bawah no-op untuknya karena baris
+ * ms_voucher-nya tak ada. Query gagal (DB glitch) = fail-open (perilaku
+ * lama) agar kasir tak terblokir; data tak-valid = {ok:false}.
+ * Selalu initDb dulu karena dipanggil sebelum/sesudah initDb pemanggil.
  */
-async function assertVoucherUsable(code: string): Promise<{ ok: boolean; amount: number }> {
+async function assertVoucherUsable(code: string, base: number): Promise<{ ok: boolean; amount: number }> {
   const fail = { ok: false, amount: 0 };
   const c = String(code ?? '').trim();
   if (!c) return fail;
+  const baseR = Math.max(0, Math.round(Number(base) || 0));
   try {
     await initDb();
     const row = await queryFirst<{
@@ -45,47 +60,144 @@ async function assertVoucherUsable(code: string): Promise<{ ok: boolean; amount:
        WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1`,
       [c],
     );
-    if (!row) return fail;
-    if ((row.status ?? '').toLowerCase() !== 'available') return fail;
-    if (Math.round(Number(row.quota) || 0) <= 0) return fail;
-    const amt = Math.max(0, Math.round(Number(row.amount) || 0));
-    if (amt <= 0) return fail;
-    const now = new Date().toISOString();
-    if (row.validFrom && row.validFrom > now) return fail;
-    if (row.validTo && row.validTo < now) return fail;
-    return { ok: true, amount: amt };
+    const now = dbNowLocal();
+    if (row) {
+      if ((row.status ?? '').toLowerCase() !== 'available') return fail;
+      if (Math.round(Number(row.quota) || 0) <= 0) return fail;
+      const amt = Math.max(0, Math.round(Number(row.amount) || 0));
+      if (amt <= 0) return fail;
+      if (row.validFrom && row.validFrom > now) return fail;
+      if (row.validTo && row.validTo < now) return fail;
+      return { ok: true, amount: amt };
+    }
+    // Bukan voucher kuota: coba promo reusable (seed HEMAT10/ONGKIR10 hanya
+    // ada di ms_promotion — tanpa fallback, diskonnya nol diam-diam saat simpan).
+    const promo = await queryFirst<{
+      promoType: string | null;
+      value: number | null;
+      maxAmount: number | null;
+      minSpend: number | null;
+      validFrom: string | null;
+      validTo: string | null;
+      flagActive: number | null;
+    }>(
+      `SELECT promoType, value, maxAmount, minSpend, validFrom, validTo, flagActive
+       FROM ms_promotion WHERE UPPER(promoCode) = UPPER(?) LIMIT 1`,
+      [c],
+    );
+    if (!promo || Number(promo.flagActive ?? 0) !== 1) return fail;
+    if (promo.validFrom && promo.validFrom > now) return fail;
+    if (promo.validTo && promo.validTo < now) return fail;
+    const pType = String(promo.promoType ?? 'nominal').toLowerCase();
+    const pValue = Math.max(0, Math.round(Number(promo.value) || 0));
+    const pCap = Math.max(0, Math.round(Number(promo.maxAmount ?? pValue) || 0));
+    // Persen: amount = cap nominal (selaras PromotionList + totals() via rate).
+    const pAmt = pType === 'percent' ? pCap : pValue;
+    if (pAmt <= 0) return fail;
+    // Gate minSpend cermin totals() meetsMin (gross >= minSpend lolos; gagal =
+    // voucher diabaikan total termasuk ongkirCut). Voucher kuota tak punya
+    // data minSpend sehingga selalu lolos gate ini.
+    const pMin = Math.max(0, Math.round(Number(promo.minSpend) || 0));
+    if (pMin > 0 && baseR < pMin) return fail;
+    return { ok: true, amount: pAmt };
   } catch {
     return { ok: true, amount: 0 };
   }
 }
 
 /**
- * Nomor struk lokal format kontrak §5 (TRX-YYYYMMDD-NNN), sekuens harian
- * per terminal. Unik per (branch, terminal, tanggal); server memakai
- * salesNum ini sebagai id rekonsiliasi saat push.
+ * Kode terminal kanonis Q7: unik per branch, kapital, maks 8 char (lebar
+ * struk 58mm). Validasi penuh milik BE (create-terminal); klien hanya
+ * menegakkan format sebelum menerbitkan nomor.
+ */
+export const TERMINAL_CODE_RE = /^[A-Z0-9]{1,8}$/;
+
+export function normalizeTerminalCode(raw: unknown): string {
+  return String(raw ?? '').trim().toUpperCase();
+}
+
+/** true bila device sudah terikat terminal valid — syarat boleh jualan (Q7). */
+export function isTerminalBound(): boolean {
+  const t = getTerminal();
+  const term = normalizeTerminalCode(t.terminalCode);
+  const branch = String(t.branchId ?? '').trim();
+  return TERMINAL_CODE_RE.test(term) && branch.length > 0;
+}
+
+function terminalUnboundError(): Error {
+  const e = new Error('Terminal belum diklaim - klaim terminal dulu sebelum jualan.');
+  (e as { code?: string }).code = 'terminal-unbound';
+  return e;
+}
+
+/**
+ * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}.
+ * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq —
+ * transaksional (ketuk-ganda tak bikin nomor ganda), tahan reinstall
+ * (bukan AsyncStorage), init dari MAX suffix lokal yang tahan 4 format lama.
+ * padStart(4), overflow >9999 lanjut 5 digit alami (UNIQUE server atas
+ * string penuh; pecahan split -A/-B di atas satu NNN induk, T3-opsi-a).
+ * ymd = kalender lokal; sale lewat tengah malam ikut ymd baru dengan
+ * shiftId lama tetap menempel (T2-opsi-a).
  */
 export async function nextSalesNum(): Promise<string> {
+  const t = getTerminal();
+  const term = normalizeTerminalCode(t.terminalCode);
+  const branch = String(t.branchId ?? '').trim().toUpperCase();
+  if (!TERMINAL_CODE_RE.test(term) || !branch) throw terminalUnboundError();
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  const key = `genfity.sales.seq.${ymd}`;
+  await initDb();
   let n = 1;
-  try {
-    const raw = await getItem(key);
-    n = (raw ? parseInt(raw, 10) + 1 : 1) || 1;
-  } catch {
-    /* storage rusak - mulai dari 1 */
-  }
-  try {
-    await setItem(key, String(n));
-  } catch {
-    /* abaikan */
-  }
-  return `TRX-${ymd}-${String(n).padStart(3, '0')}`;
+  await withTransaction(async () => {
+    const row = await queryFirst<{ lastN: number | null }>(
+      'SELECT lastN FROM tr_sales_seq WHERE terminalCode = ? AND ymd = ?',
+      [term, ymd],
+    );
+    if (row && Number.isFinite(Number(row.lastN))) {
+      n = Math.max(1, Math.round(Number(row.lastN)) + 1);
+    } else {
+      // Init: MAX suffix untuk prefix baru + adopsi MAX format lama hari ini
+      // (TRX-YYYYMMDD-NNN global-per-device, split -A/-B) agar tak mundur.
+      // SEED-xxx / TRX-{timestamp} diabaikan (tak terparse = tak dihitung).
+      let mx = 0;
+      try {
+        const heads = await query<{ salesNum: string | null }>('SELECT salesNum FROM tr_saleshead');
+        const prefix = `TRX-${branch}-${term}-${ymd}-`;
+        for (const h of heads) {
+          const sn = String(h?.salesNum ?? '');
+          if (sn.startsWith(prefix)) {
+            const tail = sn.slice(prefix.length).split('-')[0];
+            if (/^\d+$/.test(tail)) mx = Math.max(mx, parseInt(tail, 10) || 0);
+          } else {
+            const m = sn.match(/^TRX-(\d{8})-(\d+)(?:-[A-Z])?$/);
+            if (m && m[1] === ymd) mx = Math.max(mx, parseInt(m[2], 10) || 0);
+          }
+        }
+      } catch {
+        /* tabel kosong - mulai dari 1 */
+      }
+      n = mx + 1;
+    }
+    await run(
+      `INSERT INTO tr_sales_seq (terminalCode, ymd, lastN) VALUES (?, ?, ?)
+       ON CONFLICT (terminalCode, ymd) DO UPDATE SET lastN = excluded.lastN`,
+      [term, ymd, n],
+    );
+  });
+  return `TRX-${branch}-${term}-${ymd}-${String(n).padStart(4, '0')}`;
 }
 
 /** Tulis head + item + pembayaran dari payload tier-penuh. */
 export async function saveSale(s: SaleInput): Promise<string> {
+  // Gate bound (Q7): device belum ter-bound dilarang bikin sale. nextSalesNum
+  // ikut melempar kode yang sama; pemanggil UI (Pay/Qris/Edc) menangkap
+  // 'terminal-unbound' menjadi pesan klaim-terminal (bukan Success).
+  if (!isTerminalBound()) throw terminalUnboundError();
   const salesNum = s.salesNum ?? (await nextSalesNum());
+  // client_id UUIDv7 (Q7): diterbitkan sekali per sale, kunci rekonsiliasi
+  // server (upsert by client_id) + payload QR + Idempotency-Key push.
+  const clientId = s.clientId ?? uuidv7();
   const now = new Date().toISOString();
   const t = getTerminal();
   const sess = getSession();
@@ -106,27 +218,58 @@ export async function saveSale(s: SaleInput): Promise<string> {
   // gabungan keduanya di discountTotal; tanpa pemisah, nominal voucher di head
   // + usage ter-overstate sebesar diskon item (bug G5).
   const itemDiscSum = r(items.reduce((a, it) => a + r(it.discount ?? 0), 0));
+  // Basis minSpend (#16b): gross cermin totals()/CashierScreen subtotalGross —
+  // jumlah kotor per baris SEBELUM diskon item/voucher, tanpa ongkir/pajak/
+  // service. Dihitung dari items (bukan s.subtotal pemanggil) agar seragam.
+  const grossBase = r(
+    items.reduce(
+      (a, it) => a + (it.basePrice + (it.modifiers ?? []).reduce((m, x) => m + x.price, 0)) * it.qty,
+      0,
+    ),
+  );
   // Backstop voucher head (#2): kode tak-valid (status/kuota/jendela/
-  // nominal) = usage 'rejected', voucherAmt 0, tanpa burn. Penjualan tetap
-  // sah (fail-closed hanya untuk vouchernya, bukan kasirnya).
+  // nominal/minSpend) = usage 'rejected', voucherAmt 0, tanpa burn. Penjualan
+  // tetap sah (fail-closed hanya untuk vouchernya, bukan kasirnya).
   let headVoucherOk = false;
   if (s.voucherCode) {
-    headVoucherOk = (await assertVoucherUsable(s.voucherCode)).ok;
+    headVoucherOk = (await assertVoucherUsable(s.voucherCode, grossBase)).ok;
   }
   const voucherAmt = headVoucherOk ? r(Math.max(0, (s.discountTotal ?? 0) - itemDiscSum)) : 0;
   await initDb();
+  // Transaksi atomik (#22): head + item + payment + stok + voucher + deposit +
+  // dapur + outbox fisik = semua-atau-tidak-sama-sekali. Kill tepat di tengah
+  // tulis tak lagi menyisakan struk setengah (head tanpa item dsb).
+  // Antrean ringan (AsyncStorage) TIDAK ikut transaksi: dikumpulkan di
+  // postCommit lalu di-flush hanya bila COMMIT berhasil.
+  const postCommit: Array<() => void> = [];
+  let committed = false;
+  try {
+  await withTransaction(async () => {
+  // Atribusi shift (#18): head.shiftId = shift terbuka cabang ini (bila ada).
+  // Tanpa shift terbuka = NULL yang jujur (kasir mode bebas/demo).
+  let shiftId: string | null = null;
+  try {
+    const open = await queryFirst<{ id: string | null }>(
+      `SELECT id FROM tr_shiftlog WHERE status = 'open'
+       AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY clockIn DESC LIMIT 1`,
+      [branchId],
+    );
+    shiftId = open?.id ? String(open.id) : null;
+  } catch {
+    /* abaikan */
+  }
   // Mode/ongkir/customer + rincian pajak/service/voucher ikut tersimpan agar
   // struk ulang dan push server konsisten dengan rumus kasir kanonik.
   await run(
-    `INSERT INTO tr_saleshead (salesNum, branchId, terminalId, userId, salesDate,
+    `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
       salesMode, subtotal, discount, tax, serviceCharge, platformFee, rounding,
       voucherAmount, voucherCode,
       grandTotal, paidAmount, changeAmount,
       paymentMethod, memberId, tableNo, customerName, ongkir,
       status, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
-      salesNum, branchId, t.terminalCode || null, cashierId || null, now,
+      salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, now,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
       r(subtotal), r(s.discountTotal ?? 0),
       r(s.vatTotal ?? 0), r(s.serviceTotal ?? 0),
@@ -181,7 +324,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
           [branch, it.id],
         );
         try {
-          await enqueueOutbox('ms_branchmenu', `${branch}:${it.id}`, 'update');
+          await enqueueOutboxPhysical('ms_branchmenu', `${branch}:${it.id}`, 'update');
         } catch {
           /* abaikan */
         }
@@ -205,7 +348,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   const rejectedLegs = new Set<string>();
   const burnedLegs: { code: string; amount: number }[] = [];
   for (const c of legCodes) {
-    const chk = await assertVoucherUsable(c);
+    const chk = await assertVoucherUsable(c, grossBase);
     if (chk.ok) burnedLegs.push({ code: c, amount: chk.amount });
     else rejectedLegs.add(c.toUpperCase());
   }
@@ -254,7 +397,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       const after = before - take;
       await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, s.memberId]);
       try {
-        await enqueueOutbox('ms_member', s.memberId, 'update');
+        await enqueueOutboxPhysical('ms_member', s.memberId, 'update');
       } catch {
         /* abaikan */
       }
@@ -265,12 +408,13 @@ export async function saveSale(s: SaleInput): Promise<string> {
         [depId, s.memberId, branchId || null, take, after, cashierId || null, now],
       );
       try {
-        await enqueueOutbox('tr_memberdeposit', depId, 'insert');
+        await enqueueOutboxPhysical('tr_memberdeposit', depId, 'insert');
+        postCommit.push(() => enqueueSync('other', { table: 'tr_memberdeposit', rowId: depId, op: 'insert' }));
       } catch {
         /* abaikan */
       }
       try {
-        enqueueSync('other', { kind: 'deposit-withdraw', memberId: s.memberId, nominal: take });
+        postCommit.push(() => enqueueSync('other', { kind: 'deposit-withdraw', memberId: s.memberId, nominal: take }));
       } catch {
         /* abaikan */
       }
@@ -355,6 +499,22 @@ export async function saveSale(s: SaleInput): Promise<string> {
       [uid('si'), salesNum, s.approvedBy],
     );
   }
+  // Porsi voucher atas ongkir (bruto = ongkir neto + cut). Kepala
+  // voucherAmount tetap belanja saja; kunci 'ongkirCut' ikut push via
+  // buildSalePayload agar server ikut mencatat.
+  if (s.ongkirCut !== undefined && s.ongkirCut > 0) {
+    await run(
+      `INSERT INTO tr_salesinfo (id, salesNum, infoKey, infoValue, syncDate)
+       VALUES (?, ?, 'ongkirCut', ?, NULL)`,
+      [uid('si'), salesNum, String(Math.round(s.ongkirCut))],
+    );
+  }
+  committed = true;
+  });
+  } catch {
+    /* Gagal total + rollback: kasir tetap jalan via antrean ringan recordSale. */
+  }
+  if (committed) for (const fn of postCommit) { try { fn(); } catch { /* abaikan */ } }
   return salesNum;
 }
 
@@ -608,13 +768,15 @@ export async function moveSaleItems(args: {
   if (!dest) {
     if (!destNum) destNum = await nextSalesNum();
     if (destNum === fromSalesNum) throw new Error('Bill tujuan sama dengan bill asal.');
+    // Bill tujuan = sale baru: client_id UUIDv7 sendiri (Q7). Gabung ke dest
+    // yang ada tetap by salesNum selama transisi terima-dua-format.
     await run(
-      `INSERT INTO tr_saleshead (salesNum, branchId, terminalId, userId, shiftId, salesDate,
+      `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
         salesMode, tableNo, customerName, subtotal, discount, tax, serviceCharge,
         grandTotal, status, cashierName, createdAt, updatedAt, syncDate)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'open', ?, ?, ?, NULL)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'open', ?, ?, ?, NULL)`,
       [
-        destNum, src.branchId, src.terminalId, src.userId, src.shiftId, now,
+        destNum, uuidv7(), src.branchId, src.terminalId, src.userId, src.shiftId, now,
         src.salesMode ?? 'DINE_IN', toTableNo, src.customerName,
         src.cashierName ?? src.userId ?? '', now, now,
       ],

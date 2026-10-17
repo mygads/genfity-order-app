@@ -11,7 +11,7 @@ import {
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
-import { fmtDate } from '../../lib/datefmt';
+import { dbNowLocal, fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
@@ -23,7 +23,7 @@ import * as Network from 'expo-network';
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
-type VoucherStatus = 'tersedia' | 'terkunci' | 'terpakai' | 'kadaluwarsa';
+type VoucherStatus = 'tersedia' | 'terkunci' | 'terpakai' | 'kadaluwarsa' | 'belum_berlaku';
 
 type Voucher = {
   id: string;
@@ -43,6 +43,8 @@ type VoucherRow = {
   voucherCode: string | null;
   voucherName: string | null;
   amount: number | null;
+  quota: number | null;
+  validFrom: string | null;
   validTo: string | null;
   status: string | null;
 };
@@ -50,18 +52,33 @@ type VoucherRow = {
 async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
   await initDb();
   const rows = await query<VoucherRow>(
-    'SELECT id, voucherCode, voucherName, amount, validTo, status FROM ms_voucher ORDER BY validTo',
+    'SELECT id, voucherCode, voucherName, amount, quota, validFrom, validTo, status FROM ms_voucher ORDER BY validTo',
   );
   const out: Voucher[] = [];
+  // "Sekarang" waktu lokal selaras validateVoucherCodeLocal/saveSale agar
+  // perbandingan jendela validitas identik (kolom DATETIME = waktu lokal).
+  const nowStr = dbNowLocal();
   for (const [idx, r] of rows.entries()) {
     const kode = (r.voucherCode ?? '').trim().toUpperCase();
     if (!kode) continue;
     const st = (r.status ?? 'available').toLowerCase();
-    const status: VoucherStatus =
+    let status: VoucherStatus =
       st === 'available' ? 'tersedia'
       : st === 'locked' ? 'terkunci'
       : st === 'used' || st === 'burned' ? 'terpakai'
       : 'kadaluwarsa';
+    const nilai = Math.max(0, Math.round(Number(r.amount) || 0));
+    // Cermin kanonis: status 'available' saja tak cukup — kuota habis /
+    // nominal 0 / di luar jendela = tak bisa dipakai kasir, jadi daftar
+    // menampilkannya apa adanya (bukan 'tersedia' yang menipu).
+    if (status === 'tersedia') {
+      const quota = Math.round(Number(r.quota) || 0);
+      const vf = (r.validFrom ?? '').trim();
+      const vt = (r.validTo ?? '').trim();
+      if (nilai <= 0 || quota <= 0) status = 'terpakai';
+      else if (vf && vf > nowStr) status = 'belum_berlaku';
+      else if (vt && vt < nowStr) status = 'kadaluwarsa';
+    }
     let hingga = String(r.validTo ?? '').slice(0, 10);
     try {
       const d = new Date(String(r.validTo ?? ''));
@@ -74,7 +91,7 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
       kode,
       nama: (r.voucherName ?? '').trim() || kode,
       jenis: 'Diskon (Rp)',
-      nilai: Math.max(0, Math.round(Number(r.amount) || 0)),
+      nilai,
       minBelanja: 0,
       berlakuHingga: hingga,
       status,
@@ -211,6 +228,7 @@ export default function VoucherScreen({ navigation }: Props) {
     terkunci: t('vou_st_locked'),
     terpakai: t('vou_st_used'),
     kadaluwarsa: t('vou_st_expired'),
+    belum_berlaku: t('vou_st_scheduled'),
   };
 
   const hasil = items.filter(
@@ -246,6 +264,10 @@ export default function VoucherScreen({ navigation }: Props) {
       }
       if (found && found.status === 'terpakai') {
         setMsg(t('vou_is_used').replace('{k}', kode));
+        return;
+      }
+      if (found && found.status === 'belum_berlaku') {
+        setMsg(t('vou_not_yet').replace('{k}', kode));
         return;
       }
       if (found && (found.status === 'tersedia' || found.status === 'terkunci')) {
@@ -420,7 +442,7 @@ export default function VoucherScreen({ navigation }: Props) {
   };
 
   const filterLabel = (f: 'semua' | VoucherStatus) =>
-    f === 'semua' ? t('c_all') : f === 'tersedia' ? t('vou_available') : f === 'terkunci' ? t('vou_locked') : f === 'terpakai' ? t('vou_used') : t('vou_expired');
+    f === 'semua' ? t('c_all') : f === 'tersedia' ? t('vou_available') : f === 'terkunci' ? t('vou_locked') : f === 'terpakai' ? t('vou_used') : f === 'kadaluwarsa' ? t('vou_expired') : t('vou_scheduled');
 
   const countTxt = t('vou_promo_count').replace('{n}', String(hasil.length));
 
@@ -491,7 +513,7 @@ export default function VoucherScreen({ navigation }: Props) {
 
       {/* Filter status — satu baris wrap, ikut batas lebar konten. */}
       <View style={[s.filters, isTablet && wideCenterLg]}>
-        {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
+        {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa', 'belum_berlaku'] as const).map((f) => (
           <TouchableOpacity
             key={f}
             style={[s.filterChip, filter === f && s.filterActive]}
@@ -528,7 +550,7 @@ export default function VoucherScreen({ navigation }: Props) {
                   <Text
                     style={[
                       s.statusTxt,
-                      v.status === 'tersedia' ? s.statusOk : v.status === 'terkunci' ? s.statusLock : v.status === 'terpakai' ? s.statusUsed : s.statusExp,
+                      v.status === 'tersedia' ? s.statusOk : v.status === 'terkunci' ? s.statusLock : v.status === 'terpakai' ? s.statusUsed : v.status === 'belum_berlaku' ? s.statusSched : s.statusExp,
                     ]}>
                     {STATUS_TXT[v.status]}
                   </Text>
@@ -575,9 +597,9 @@ export default function VoucherScreen({ navigation }: Props) {
                     />
                   </View>
                 )}
-                {(v.status === 'terpakai' || v.status === 'kadaluwarsa') && (
+                {(v.status === 'terpakai' || v.status === 'kadaluwarsa' || v.status === 'belum_berlaku') && (
                   <View style={[s.applyBtn, s.applyDisabled]}>
-                    <Text style={s.applyTxt}>{v.status === 'terpakai' ? t('vou_used') : t('vou_expired')}</Text>
+                    <Text style={s.applyTxt}>{v.status === 'terpakai' ? t('vou_used') : v.status === 'belum_berlaku' ? t('vou_scheduled') : t('vou_expired')}</Text>
                   </View>
                 )}
               </View>
@@ -741,6 +763,7 @@ const s = StyleSheet.create({
   statusOk: { color: colors.green },
   statusLock: { color: colors.blue },
   statusUsed: { color: colors.orange },
+  statusSched: { color: colors.amberDark },
   statusExp: { color: colors.red },
   voucherName: {
     fontSize: 15,
