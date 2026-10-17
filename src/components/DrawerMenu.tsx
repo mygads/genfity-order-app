@@ -88,6 +88,8 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     { label: t('nav_history'), sub: t('nav_history_sub'), route: 'History', icon: require('../../assets/icons/nav_sales_recap.webp') },
     { label: t('nav_recap'), sub: t('nav_recap_sub'), route: 'Recap', icon: require('../../assets/icons/nav_detail_recap.webp') },
     { label: t('nav_esb'), sub: t('nav_online_orders'), route: 'EsbOrder', icon: require('../../assets/icons/nav_esb_order_dashboard.webp') },
+    { label: t('nav_kitchen'), sub: t('nav_kitchen_sub'), route: 'Kitchen', icon: require('../../assets/icons/nav_order.webp') },
+    { label: t('nav_menu_mgmt'), sub: t('nav_menu_mgmt_sub'), route: 'MenuManagement', icon: require('../../assets/icons/nav_sales_recap.webp') },
     { label: t('nav_member'), sub: t('nav_member_sub'), route: 'Member', icon: require('../../assets/icons/nav_attendance.webp') },
     { label: t('nav_expense'), sub: t('nav_expense_sub'), route: 'Expense', icon: require('../../assets/icons/nav_petty_cash.webp') },
     { label: t('nav_petty'), sub: t('nav_petty_sub'), route: 'PettyCash', icon: require('../../assets/icons/nav_petty_cash.webp') },
@@ -109,6 +111,13 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
           ]
         : ITEMS;
   const go = (route: string) => {
+    // Gerbang kasir: shift tutup (status live dibaca tiap drawer dibuka) →
+    // tutup drawer lalu arahkan buka shift dulu, bukan ke kasir.
+    if (route === 'Cashier' && shiftOpen === false) {
+      onClose();
+      navigate('Shift');
+      return;
+    }
     onClose();
     navigate(route);
   };

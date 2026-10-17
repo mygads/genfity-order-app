@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Image,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +13,6 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query } from '../../lib/db';
@@ -129,7 +126,6 @@ export default function VoucherScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<'semua' | VoucherStatus>('semua');
   const [kodeManual, setKodeManual] = useState('');
@@ -138,13 +134,12 @@ export default function VoucherScreen({ navigation }: Props) {
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  // WIRE REA-7/REA-6: jalur server voucher online + eksternal di samping mock.
-  const [onlineCode, setOnlineCode] = useState('');
-  const [onlineMsg, setOnlineMsg] = useState('');
-  const [onlineBusy, setOnlineBusy] = useState(false);
-  const [extCode, setExtCode] = useState('');
-  const [extMsg, setExtMsg] = useState('');
-  const [extBusy, setExtBusy] = useState(false);
+  // Unified lookup: satu state kode (kodeManual) + satu msg + satu result.
+  // lookup() mencoba: match lokal SQLite → validateVoucherCode → validateOnlineVoucher → external validate.
+  type LookupSource = 'local' | 'online' | 'external';
+  type LookupResult = { source: LookupSource; kode: string; amount: number; minSpend: number };
+  const [result, setResult] = useState<LookupResult | null>(null);
+  const [lookupBusy, setLookupBusy] = useState(false);
 
   // Guard online seperti Member: offline tampilkan banner, operasi antre via outbox.
   const [online, setOnline] = useState(true);
@@ -208,6 +203,7 @@ export default function VoucherScreen({ navigation }: Props) {
       }
     })();
     return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const STATUS_TXT: Record<VoucherStatus, string> = {
@@ -228,118 +224,131 @@ export default function VoucherScreen({ navigation }: Props) {
   const setStatus = (id: string, status: VoucherStatus) =>
     setItems((list) => list.map((v) => (v.id === id ? { ...v, status } : v)));
 
-  /** Validasi kode manual: tanya server dulu (valid/amount/minSpend),
-   * fallback ke data lokal + antrean bila offline. */
-  const validate = async () => {
+  /** Unified lookup: satu kode → lokal SQLite, lalu validateVoucherCode,
+   * lalu validateOnlineVoucher, lalu external validate. Hasil digabung ke
+   * SATU msg + SATU result (source: local|online|external). */
+  const lookup = async () => {
     const kode = kodeManual.trim().toUpperCase();
     if (kode.length < 3) {
+      setResult(null);
       setMsg(t('vou_short'));
       return;
     }
-    const found = items.find((v) => v.kode === kode);
-    if (!found) {
-      setMsg(`Kode ${kode} ${t('vou_unknown')}`);
-      return;
-    }
-    if (found.status === 'kadaluwarsa') {
-      setMsg(`Kode ${kode} ${t('vou_is_expired')}`);
-      return;
-    }
-    if (found.status === 'terpakai') {
-      setMsg(`Kode ${kode} ${t('vou_is_used')}`);
-      return;
-    }
-    // Offline: pakai data lokal SQLite agar kasir tetap jalan.
-    if (!online) {
-      void persistVoucherOp('validate', found);
-      setQ(kode);
-      setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
-      return;
-    }
-    // Online: tampilkan valid/amount/minSpend dari server (apiSource.ts:314).
+    setLookupBusy(true);
+    setResult(null);
     setMsg(t('vou_checking'));
     try {
-      const r = await validateVoucherCode(kode, found.minBelanja);
-      void persistVoucherOp('validate', found);
-      setQ(kode);
-      if (r.ok) {
-        setMsg(t('vou_server_valid').replace('{k}', kode).replace('{a}', rp(r.amount)).replace('{m}', rp(r.minSpend)).replace('{l}', t('vou_lock_first')));
-      } else {
-        setMsg(t('vou_server_invalid').replace('{k}', kode).replace('{u}', t('vou_unknown')).replace('{m}', rp(r.minSpend)));
+      // 1. Match lokal SQLite (offline-first: pull/koleksi kasir).
+      const found = items.find((v) => v.kode === kode);
+      if (found && found.status === 'kadaluwarsa') {
+        setMsg(t('vou_is_expired').replace('{k}', kode));
+        return;
       }
-    } catch {
-      // Server tak terjangkau: pakai data lokal + antrean sync.
-      void persistVoucherOp('validate', found);
-      setQ(kode);
-      setMsg(`Kode ${kode} ${t('vou_valid')} - ${found.nama}. ${t('vou_lock_first')}`);
+      if (found && found.status === 'terpakai') {
+        setMsg(t('vou_is_used').replace('{k}', kode));
+        return;
+      }
+      if (found && (found.status === 'tersedia' || found.status === 'terkunci')) {
+        void persistVoucherOp('validate', found);
+        setQ(kode);
+        setResult({ source: 'local', kode, amount: found.nilai, minSpend: found.minBelanja });
+        setMsg(t('vou_local_valid').replace('{k}', kode).replace('{v}', found.nama).replace('{l}', t('vou_lock_first')));
+        return;
+      }
+      if (!online) {
+        setMsg(t('vou_unknown').replace('{k}', kode));
+        return;
+      }
+      // 2. Server validate (kontrak §5.2 validate {code, grandTotal}).
+      try {
+        const r = await validateVoucherCode(kode, 0);
+        if (r.ok) {
+          setQ(kode);
+          setResult({ source: 'local', kode, amount: r.amount, minSpend: r.minSpend });
+          setMsg(t('vou_server_valid').replace('{k}', kode).replace('{a}', rp(r.amount)).replace('{m}', rp(r.minSpend)).replace('{l}', t('vou_lock_first')));
+          return;
+        }
+      } catch {
+        /* lanjut ke jalur online/eksternal */
+      }
+      // 3. Voucher online (REA-7). Best-effort.
+      try {
+        const r = await validateOnlineVoucher(kode, 0);
+        if (r.ok) {
+          setResult({ source: 'online', kode, amount: r.amount, minSpend: r.minSpend });
+          setMsg(t('vou_online_valid').replace('{k}', kode).replace('{a}', rp(r.amount)).replace('{m}', rp(r.minSpend)));
+          return;
+        }
+      } catch {
+        /* lanjut ke eksternal */
+      }
+      // 4. Voucher eksternal validate (REA-6). Best-effort.
+      try {
+        const r = await externalVoucher('validate', kode);
+        if (r.ok) {
+          setResult({ source: 'external', kode, amount: r.amount, minSpend: 0 });
+          setMsg(t('vou_ext_valid').replace('{k}', kode).replace('{a}', rp(r.amount)));
+          return;
+        }
+      } catch {
+        /* jatuh ke unknown di bawah */
+      }
+      setMsg(t('vou_unknown').replace('{k}', kode));
+    } finally {
+      setLookupBusy(false);
     }
   };
 
-  /** Validasi voucher online via helper REA-7. Best-effort, UI tetap jalan offline. */
-  const validateOnline = async () => {
-    const kode = onlineCode.trim().toUpperCase();
-    if (kode.length < 3) {
-      setOnlineMsg(t('vou_short'));
+  /** Satu action row untuk result, driven by result.source:
+   * local → kunci voucher lokal; online → klaim (REA-7); external → burn (REA-6). */
+  const claimResult = async () => {
+    if (!result || lookupBusy) return;
+    const kode = result.kode;
+    if (result.source === 'local') {
+      const found = items.find((v) => v.kode === kode);
+      if (found && found.status === 'tersedia') lock(found);
+      else setMsg(t('vou_local_valid').replace('{k}', kode).replace('{v}', rp(result.amount)).replace('{l}', t('vou_lock_first')));
       return;
     }
-    setOnlineBusy(true);
+    setLookupBusy(true);
     try {
-      const r = await validateOnlineVoucher(kode, 0);
-      if (r.ok) {
-        setOnlineMsg(`Kode ${kode} ${t('vou_valid')} - ${rp(r.amount)}. Min. belanja ${rp(r.minSpend)}.`);
+      if (result.source === 'online') {
+        const r = await claimOnlineVoucher(kode, `TRX-${Date.now()}`);
+        setMsg(r.ok ? t('vou_online_claim_ok') : t('vou_unknown').replace('{k}', kode));
       } else {
-        setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
+        const r = await externalVoucher('burn', kode);
+        setMsg(r.ok ? t('vou_ext_burn_ok') : t('vou_unknown').replace('{k}', kode));
       }
     } catch {
-      setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
+      setMsg(t('vou_unknown').replace('{k}', kode));
     } finally {
-      setOnlineBusy(false);
+      setLookupBusy(false);
     }
   };
 
-  /** Klaim voucher online ke transaksi berjalan via helper REA-7. Best-effort. */
-  const claimOnline = async () => {
-    const kode = onlineCode.trim().toUpperCase();
-    if (kode.length < 3) {
-      setOnlineMsg(t('vou_short'));
+  /** Batal: lepas result + msg. Eksternal coba unburn dulu (best-effort);
+   * item lokal yang terkunci dibuka via kartu daftar. */
+  const clearResult = async () => {
+    if (!result) {
+      setMsg('');
       return;
     }
-    setOnlineBusy(true);
-    try {
-      const r = await claimOnlineVoucher(kode, `TRX-${Date.now()}`);
-      setOnlineMsg(r.ok ? t('vou_online_claim_ok') : `Kode ${kode} ${t('vou_unknown')}`);
-    } catch {
-      setOnlineMsg(`Kode ${kode} ${t('vou_unknown')}`);
-    } finally {
-      setOnlineBusy(false);
+    if (result.source === 'external') {
+      setLookupBusy(true);
+      try {
+        const r = await externalVoucher('unburn', result.kode);
+        if (r.ok) setMsg(t('vou_ext_unburn_ok'));
+      } catch {
+        /* abaikan */
+      } finally {
+        setLookupBusy(false);
+      }
     }
+    setResult(null);
+    setMsg('');
   };
 
-  /** Voucher eksternal validate/burn/unburn via helper REA-6. Best-effort. */
-  const extOp = async (op: 'validate' | 'burn' | 'unburn') => {
-    const kode = extCode.trim().toUpperCase();
-    if (kode.length < 3) {
-      setExtMsg(t('vou_short'));
-      return;
-    }
-    setExtBusy(true);
-    try {
-      const r = await externalVoucher(op, kode);
-      if (op === 'burn') {
-        setExtMsg(r.ok ? t('vou_ext_burn_ok') : `Kode ${kode} ${t('vou_unknown')}`);
-      } else if (op === 'unburn') {
-        setExtMsg(r.ok ? t('vou_ext_unburn_ok') : `Kode ${kode} ${t('vou_unknown')}`);
-      } else if (r.ok) {
-        setExtMsg(`Kode ${kode} ${t('vou_valid')} - ${rp(r.amount)}.`);
-      } else {
-        setExtMsg(`Kode ${kode} ${t('vou_unknown')}`);
-      }
-    } catch {
-      setExtMsg(`Kode ${kode} ${t('vou_unknown')}`);
-    } finally {
-      setExtBusy(false);
-    }
-  };
+  /* Jalur terpisah REA-7/REA-6 dilebur ke lookup()/claimResult()/clearResult di atas. */
 
   /** Kunci voucher agar tidak dipakai transaksi lain. */
   const lock = (v: Voucher) => {    if (v.status !== 'tersedia' || busy) return;
@@ -413,29 +422,21 @@ export default function VoucherScreen({ navigation }: Props) {
   const filterLabel = (f: 'semua' | VoucherStatus) =>
     f === 'semua' ? t('c_all') : f === 'tersedia' ? t('vou_available') : f === 'terkunci' ? t('vou_locked') : f === 'terpakai' ? t('vou_used') : t('vou_expired');
 
+  const countTxt = t('vou_promo_count').replace('{n}', String(hasil.length));
+
   return (
     <View style={s.root}>
       <ScreenHeader
         title={t('vou_title')}
-        sub={applied ? `${applied.kode} - ${applied.nama}` : `${hasil.length} promo`}
+        sub={applied ? `${applied.kode} - ${applied.nama}` : countTxt}
         onBack={() => navigation?.goBack?.()}
-        right={
-          <View style={s.headRight}>
-            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
-              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-            </Pressable>
-          </View>
-        }
-      />
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => navigation?.navigate(r)}
       />
 
-      {!isTablet ? (
-        <View style={s.searchWrap}>
-          <Text style={s.label}>{t('vou_search_label')}</Text>
+      {/* SATU panel cek: satu input kode + satu tombol + satu pesan hasil. */}
+      <View style={s.searchPanel}>
+        <View style={[s.panelInner, isTablet && wideCenterLg]}>
+          <Text style={s.panelTitle}>{t('vou_search_label')}</Text>
+          <Text style={s.panelHint}>{t('vou_lookup_hint')}</Text>
           <View style={s.manualRow}>
             <View style={s.manualInput}>
               <AppInput
@@ -444,163 +445,52 @@ export default function VoucherScreen({ navigation }: Props) {
                 value={kodeManual}
                 onChangeText={(txt) => {
                   setKodeManual(txt);
-                  setOnlineCode(txt);
-                  setExtCode(txt);
                   setQ(txt);
                   setMsg('');
-                  setOnlineMsg('');
-                  setExtMsg('');
+                  setResult(null);
                 }}
-                boxStyle={s.inputCompact}
+                boxStyle={!isTablet ? s.inputCompact : undefined}
               />
             </View>
             <AppButton
-              title={t('vou_check')}
+              title={lookupBusy ? t('vou_checking_short') : t('vou_check')}
+              disabled={lookupBusy}
               fullWidth={false}
-              style={s.checkCompact}
-              textStyle={s.checkCompactTxt}
-              onPress={validate}
+              style={!isTablet ? s.checkCompact : s.checkTablet}
+              textStyle={!isTablet ? s.checkCompactTxt : undefined}
+              onPress={lookup}
             />
           </View>
           {msg ? <Text style={s.msg}>{msg}</Text> : null}
-          {onlineMsg ? <Text style={s.msg}>{onlineMsg}</Text> : null}
-          {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
-          <View style={s.actCol}>
-            <AppButton
-              title={t('vou_online_claim')}
-              disabled={onlineBusy}
-              style={s.actMd}
-              textStyle={s.actMdTxt}
-              onPress={claimOnline}
-            />
-            <View style={[s.lockRow, s.lockRowPhone]}>
+          {!online && (
+            <Text style={s.offlineBanner}>{t('vou_offline')}</Text>
+          )}
+          {result ? (
+            <View style={s.resultRow}>
               <AppButton
-                title={t('vou_unlock')}
-                variant="secondary"
-                disabled={extBusy}
+                title={result.source === 'local' ? t('vou_lock_use') : result.source === 'online' ? t('vou_online_claim') : t('vou_apply_burn')}
+                disabled={lookupBusy}
                 fullWidth={false}
-                style={[{ flex: 1 }, s.actRowBtn]}
-                textStyle={s.actMdTxt}
-                onPress={() => void extOp('unburn')}
+                style={[s.resultPrimary, !isTablet && s.actRowBtn]}
+                textStyle={!isTablet ? s.actMdTxt : undefined}
+                onPress={claimResult}
               />
               <AppButton
-                title={t('vou_apply_burn')}
-                disabled={extBusy}
+                title={t('c_cancel')}
+                variant="secondary"
+                disabled={lookupBusy}
                 fullWidth={false}
-                style={[{ flex: 2 }, s.actRowBtn]}
-                textStyle={s.actMdTxt}
-                onPress={() => void extOp('burn')}
+                style={[s.resultSecondary, !isTablet && s.actRowBtn]}
+                textStyle={!isTablet ? s.actMdTxt : undefined}
+                onPress={clearResult}
               />
             </View>
-          </View>
+          ) : null}
         </View>
-      ) : (
-      <View style={s.tabletPanels}>
-      <View style={s.searchWrap}>
-        <Text style={s.label}>{t('vou_search_label')}</Text>
-        <View style={s.manualRow}>
-          <View style={s.manualInput}>
-            <AppInput
-              placeholder={t('vou_search_ph')}
-              autoCapitalize="characters"
-              value={kodeManual}
-              onChangeText={(txt) => {
-                setKodeManual(txt);
-                setQ(txt);
-                setMsg('');
-              }}
-            />
-          </View>
-          <AppButton
-            title={t('vou_check')}
-            fullWidth={false}
-            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
-            onPress={validate}
-          />
-        </View>
-        {msg ? <Text style={s.msg}>{msg}</Text> : null}
       </View>
 
-      {!online && (
-        <Text style={s.offlineBanner}>Offline - data dari cache lokal, perubahan disinkron saat online.</Text>
-      )}
-
-      <View style={s.searchWrap}>
-        <Text style={s.label}>{t('vou_online_title')}</Text>
-        <View style={s.manualRow}>
-          <View style={s.manualInput}>
-            <AppInput
-              placeholder={t('vou_search_ph')}
-              autoCapitalize="characters"
-              value={onlineCode}
-              onChangeText={(txt) => {
-                setOnlineCode(txt);
-                setOnlineMsg('');
-              }}
-            />
-          </View>
-          <AppButton
-            title={onlineBusy ? '...' : t('vou_check')}
-            disabled={onlineBusy}
-            fullWidth={false}
-            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
-            onPress={validateOnline}
-          />
-        </View>
-        <View style={s.lockRow}>
-          <AppButton
-            title={t('vou_online_claim')}
-            disabled={onlineBusy}
-            fullWidth={false}
-            style={{ flex: 2, marginTop: 0 }}
-            onPress={claimOnline}
-          />
-        </View>
-        {onlineMsg ? <Text style={s.msg}>{onlineMsg}</Text> : null}
-        <Text style={s.label}>{t('vou_title')}</Text>
-        <View style={s.manualRow}>
-          <View style={s.manualInput}>
-            <AppInput
-              placeholder={t('vou_search_ph')}
-              autoCapitalize="characters"
-              value={extCode}
-              onChangeText={(txt) => {
-                setExtCode(txt);
-                setExtMsg('');
-              }}
-            />
-          </View>
-          <AppButton
-            title={extBusy ? '...' : t('vou_check')}
-            disabled={extBusy}
-            fullWidth={false}
-            style={{ marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy }}
-            onPress={() => void extOp('validate')}
-          />
-        </View>
-        <View style={s.lockRow}>
-          <AppButton
-            title={t('vou_unlock')}
-            variant="secondary"
-            disabled={extBusy}
-            fullWidth={false}
-            style={{ flex: 1, marginTop: 0 }}
-            onPress={() => void extOp('unburn')}
-          />
-          <AppButton
-            title={t('vou_apply_burn')}
-            disabled={extBusy}
-            fullWidth={false}
-            style={{ flex: 2, marginTop: 0 }}
-            onPress={() => void extOp('burn')}
-          />
-        </View>
-        {extMsg ? <Text style={s.msg}>{extMsg}</Text> : null}
-      </View>
-      </View>
-      )}
-
-      <View style={[s.filters, isTablet && s.filtersTablet]}>
+      {/* Filter status — satu baris wrap, ikut batas lebar konten. */}
+      <View style={[s.filters, isTablet && wideCenterLg]}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa'] as const).map((f) => (
           <TouchableOpacity
             key={f}
@@ -613,7 +503,11 @@ export default function VoucherScreen({ navigation }: Props) {
         ))}
       </View>
 
-      <Text style={[s.sectionTitle, isTablet && s.sectionTitleTablet]}>{t('vou_promo_list')}</Text>
+      {/* Judul daftar + jumlah — teks beda dan jelas dari panel cek di atas. */}
+      <View style={[s.titleRow, isTablet && wideCenterLg]}>
+        <Text style={s.sectionTitle}>{t('vou_promo_list')}</Text>
+        <Text style={s.sectionCount}>{countTxt}</Text>
+      </View>
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         {hasil.length === 0 ? (
@@ -661,18 +555,18 @@ export default function VoucherScreen({ navigation }: Props) {
                   />
                 )}
                 {v.status === 'terkunci' && (
-                  <View style={[s.lockRow, !isTablet && s.lockRowPhone]}>
+                  <View style={s.lockRow}>
                     <AppButton
-                      title={loading ? '...' : t('vou_unlock')}
+                      title={loading ? t('vou_checking_short') : t('vou_unlock')}
                       variant="secondary"
                       disabled={loading}
                       fullWidth={false}
-                      style={[{ flex: 1, marginTop: 0 }, !isTablet && s.actRowBtn]}
+                      style={[{ flex: 1, marginTop: 0, marginRight: 8 }, !isTablet && s.actRowBtn]}
                       textStyle={!isTablet ? s.actMdTxt : undefined}
                       onPress={() => unlock(v)}
                     />
                     <AppButton
-                      title={loading ? '...' : t('vou_apply_burn')}
+                      title={loading ? t('vou_checking_short') : t('vou_apply_burn')}
                       disabled={loading}
                       fullWidth={false}
                       style={[{ flex: 2, marginTop: 0 }, !isTablet && s.actRowBtn]}
@@ -741,53 +635,38 @@ export default function VoucherScreen({ navigation }: Props) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
-  burger: { width: 22, height: 22 },
-  searchWrap: {
-    backgroundColor: colors.white,
-    padding: 12,
+  /** Panel cek fixed di atas: full-bleed putih, isi ikut batas lebar konten. */
+  searchPanel: {
+    backgroundColor: colors.card,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
   },
-  // Tablet: panel cek manual/online/eksternal dibatasi lebar + tengah.
-  tabletPanels: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
-  label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginBottom: 2 },
-  search: {
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    fontFamily: fonts.regular,
-    color: colors.text,
+  panelInner: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
+  panelTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text },
+  panelHint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
   manualRow: { flexDirection: 'row', marginTop: 8 },
   manualInput: { flex: 1, marginRight: 8 },
-  checkBtn: {
-    backgroundColor: colors.navy,
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    justifyContent: 'center',
-  },
-  checkTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
-  /** Phone: input cek compact + tombol cek compact + aksi md (h46, font 14). */
-  inputCompact: { height: 46 },
+  /** Phone: input cek compact (h44) + tombol cek compact + aksi (h42, font 13). */
+  inputCompact: { height: 44 },
   checkCompact: {
     marginTop: 0,
-    height: 46,
+    height: 42,
     paddingHorizontal: 14,
     borderRadius: 10,
     backgroundColor: colors.navy,
   },
-  checkCompactTxt: { fontSize: 13 },
-  actCol: { marginTop: 2 },
-  actMd: { height: 46, marginTop: 10, borderRadius: 10 },
-  actMdTxt: { fontSize: 14 },
-  actRowBtn: { height: 46, borderRadius: 10 },
-  lockRowPhone: { marginTop: 8 },
+  checkCompactTxt: { fontSize: 13, textAlign: 'center' },
+  checkTablet: { marginTop: 0, paddingHorizontal: 20, backgroundColor: colors.navy },
+  actMd: { height: 42, marginTop: 10, borderRadius: 10 },
+  actMdTxt: { fontSize: 13, textAlign: 'center' },
+  actRowBtn: { height: 42, borderRadius: 10 },
+  /** Unified result action row: wrap di layar sempit, margin (bukan gap) utk RN lama. */
+  resultRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  resultPrimary: { flex: 2, marginTop: 10, marginRight: 8 },
+  resultSecondary: { flex: 1, marginTop: 10 },
   msg: { fontSize: 12, fontFamily: fonts.medium, color: colors.navy, marginTop: 8 },
   offlineBanner: {
     fontSize: 12,
@@ -796,10 +675,10 @@ const s = StyleSheet.create({
     backgroundColor: colors.paleAmber,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    marginTop: 8,
+    borderRadius: 8,
   },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', padding: 12 },
-  // Tablet: filter ikut batas lebar konten daftar.
-  filtersTablet: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingTop: 12 },
   filterChip: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -813,23 +692,33 @@ const s = StyleSheet.create({
   filterActive: { backgroundColor: colors.navy, borderColor: colors.navy },
   filterTxt: { fontSize: 12, fontFamily: fonts.medium, color: colors.muted },
   filterTxtActive: { color: colors.white },
+  /** Baris judul daftar: judul kiri + jumlah kanan, ikut batas lebar konten. */
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
   sectionTitle: {
     fontSize: 14,
     fontFamily: fonts.bold,
     color: colors.text,
-    paddingHorizontal: 16,
-    paddingBottom: 4,
   },
-  // Tablet: judul seksi ikut batas lebar konten daftar.
-  sectionTitleTablet: { width: '100%', maxWidth: 1024, alignSelf: 'center' },
+  sectionCount: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: colors.faint,
+  },
   body: { padding: 16, paddingTop: 8, paddingBottom: 24 },
   // Tablet: daftar voucher 2 kolom, bukan 1 kolom penuh.
   gridTablet: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.card,
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    padding: 16,
+    marginBottom: 12,
     borderLeftWidth: 4,
     borderLeftColor: colors.orange,
   },
@@ -876,13 +765,7 @@ const s = StyleSheet.create({
   },
   applyDisabled: { backgroundColor: colors.faint },
   applyTxt: { color: colors.white, fontSize: 14, fontFamily: fonts.bold },
-  lockRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  unlockBtn: {
-    flex: 1, borderWidth: 1, borderColor: colors.navy, borderRadius: 8,
-    paddingVertical: 10, alignItems: 'center',
-  },
-  unlockTxt: { color: colors.navy, fontSize: 14, fontFamily: fonts.bold },
-  burnBtn: { flex: 2, backgroundColor: colors.orange, borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  lockRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
   empty: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: { fontSize: 15, fontFamily: fonts.bold, color: colors.text },
   emptySub: {
@@ -893,8 +776,8 @@ const s = StyleSheet.create({
   },
   appliedBox: {
     backgroundColor: colors.paleGreen,
-    borderRadius: 10,
-    padding: 14,
+    borderRadius: 12,
+    padding: 16,
     marginTop: 4,
   },
   appliedTxt: {
@@ -903,14 +786,6 @@ const s = StyleSheet.create({
     color: colors.green,
     textAlign: 'center',
   },
-  backCashierBtn: {
-    backgroundColor: colors.navy,
-    borderRadius: 8,
-    paddingVertical: 11,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  backCashierTxt: { fontSize: 13, fontFamily: fonts.bold, color: colors.white },
   modalBg: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -934,23 +809,4 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
   dialogRow: { flexDirection: 'row', marginTop: 18 },
-  dialogGhost: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  dialogGhostTxt: { fontSize: 13, fontFamily: fonts.medium, color: colors.muted },
-  dialogDanger: {
-    flex: 1,
-    backgroundColor: colors.red,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginLeft: 8,
-  },
-  dialogDangerTxt: { fontSize: 13, fontFamily: fonts.bold, color: colors.white },
 });

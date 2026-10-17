@@ -43,7 +43,7 @@ type OrderCtx = {
 };
 type Props = {
   navigation?: Nav;
-  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number } & Partial<OrderCtx> };
+  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number; from?: string; returnTo?: string } & Partial<OrderCtx> };
 };
 
 type Member = {
@@ -227,6 +227,15 @@ export default function MemberScreen({ navigation, route }: Props) {
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Member punya dua peran: layar akar drawer (dibuka dari sidebar/dashboard,
+  // tanpa params alur) vs layar anak alur transaksi (dibuka dari
+  // Pay/BillPreview/Cashier dengan from/returnTo/konteks order). Anak alur =
+  // header onBack-only TANPA burger/drawer; akar drawer = burger + drawer.
+  const callerParams = route?.params;
+  const openedFromFlow = Boolean(
+    callerParams?.from || callerParams?.returnTo ||
+    callerParams?.items != null || callerParams?.total != null,
+  );
   const [q, setQ] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   const [riwayat, setRiwayat] = useState<Record<string, Riwayat[]>>({});
@@ -526,15 +535,22 @@ export default function MemberScreen({ navigation, route }: Props) {
     navigation?.navigate('TopupDeposit', { memberId: selected.id, nama: selected.nama, saldo: selected.saldo });
   };
 
-  /** Terapkan member ke pembayaran: kirim memberId + nama, plus konteks order
-   * (total/items/mode/table/ongkir/customer/voucher/...) bila tersedia di
-   * params agar Pay tidak me-reset order yang sedang berjalan. */
+  /** Terapkan member: SELALU kembali ke layar pemanggil, tidak pernah
+   * menebak tujuan. `navigate` ke rute yang sudah ada di stack akan kembali
+   * ke instance itu (merge params), bukan menumpuk layar baru - sehingga
+   * order/bill context pemanggil tidak hilang:
+   * - returnTo eksplisit -> ke rute itu;
+   * - from === 'Pay' -> kembali ke Pay yang sama (bukan Pay baru);
+   * - from lain -> kembali ke rute bernama itu;
+   * - konteks order tanpa from (BillPreview) -> kembali ke BillPreview
+   *   yang sama, BUKAN lompat ke Cashier;
+   * - standalone (sidebar/dashboard) -> ke Cashier, BUKAN ke Pay. */
   const applyMember = () => {
     if (!selected) return;
     const p = route?.params;
-    navigation?.navigate('Pay', {
-      memberId: selected.id,
-      nama: selected.nama,
+    const memberPick = { memberId: selected.id, nama: selected.nama, saldo: selected.saldo };
+    const ctx = {
+      ...memberPick,
       ...(p?.total != null ? { total: p.total } : {}),
       ...(p?.items ? { items: p.items } : {}),
       ...(p?.method ? { method: p.method } : {}),
@@ -549,7 +565,20 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...(p?.tax != null ? { tax: p.tax } : {}),
       ...(p?.rounding != null ? { rounding: p.rounding } : {}),
       ...(p?.feeESB != null ? { feeESB: p.feeESB } : {}),
-    });
+    };
+    if (typeof p?.returnTo === 'string' && p.returnTo) {
+      navigation?.navigate(p.returnTo, ctx);
+      return;
+    }
+    if (typeof p?.from === 'string' && p.from) {
+      navigation?.navigate(p.from, ctx);
+      return;
+    }
+    if (p?.items != null || p?.total != null) {
+      navigation?.navigate('BillPreview', ctx);
+      return;
+    }
+    navigation?.navigate('Cashier', memberPick);
   };
 
   const list = (
@@ -675,38 +704,53 @@ export default function MemberScreen({ navigation, route }: Props) {
       <ScreenHeader
         title={t('mem_title')}
         sub={`${members.length} ${t('mem_registered')}`}
-        onBack={() => navigation?.goBack?.()}
-        right={
-          <View style={s.headRight}>
-            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10}>
-              <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
-            </Pressable>
-          </View>
-        }
+        {...(openedFromFlow
+          ? { onBack: () => navigation?.goBack() }
+          : {
+              left: (
+                <Pressable onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+                  <Image source={require('../../../assets/icons/burger.webp')} style={s.burger} resizeMode="contain" />
+                </Pressable>
+              ),
+            })}
       />
-      <DrawerMenu
-        visible={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        navigate={(r) => navigation?.navigate(r)}
-      />
+      {openedFromFlow ? null : (
+        <DrawerMenu
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          navigate={(r) => navigation?.navigate(r)}
+        />
+      )}
 
       <View style={s.searchWrap}>
-        <AppInput
-          label={t('mem_search_label')}
-          placeholder={t('mem_search_ph')}
-          value={q}
-          onChangeText={setQ}
-        />
-        <View style={s.searchLinks}>
-          <TouchableOpacity onPress={() => setAddVisible(true)}>
-            <Text style={s.searchLink}>{t('mem_add_new')} ›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('QrScan')}>
-            <Text style={s.searchLink}>{t('mem_scan')} ›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation?.navigate('Voucher')}>
-            <Text style={s.searchLink}>{t('mem_voucher')} ›</Text>
-          </TouchableOpacity>
+        <View style={[s.searchInner, isTablet && wideCenterLg]}>
+          <View style={s.searchRow}>
+            <View style={s.searchField}>
+              <AppInput
+                placeholder={t('mem_search_ph')}
+                accessibilityLabel={t('mem_search_label')}
+                value={q}
+                onChangeText={setQ}
+                boxStyle={s.searchBox}
+                style={s.searchFieldText}
+              />
+            </View>
+            <TouchableOpacity
+              style={s.searchAction}
+              onPress={() => setAddVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('mem_add_new')}>
+              <Text style={s.searchActionTxt}>{t('mem_new')}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={s.searchLinks}>
+            <TouchableOpacity onPress={() => navigation?.navigate('QrScan')}>
+              <Text style={s.searchLink}>{t('mem_scan')} ›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation?.navigate('Voucher')}>
+              <Text style={s.searchLink}>{t('mem_voucher')} ›</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -718,6 +762,17 @@ export default function MemberScreen({ navigation, route }: Props) {
       ) : (
         <>
           {list}
+          {selected ? (
+            <View style={s.selBar}>
+              <View style={s.selInfo}>
+                <Text style={s.selName} numberOfLines={1}>{selected.nama}</Text>
+                <Text style={s.selMeta} numberOfLines={1}>{rp(selected.saldo)} · {selected.poin} {t('mem_points')}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelected(null)} hitSlop={8} accessibilityRole="button">
+                <Text style={s.selClear}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           {selected ? (
             <View style={s.footer}>
               <AppButton
@@ -829,12 +884,36 @@ export default function MemberScreen({ navigation, route }: Props) {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  headRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   langTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 13 },
   burger: { width: 22, height: 22 },
-  searchWrap: { backgroundColor: colors.white, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
-  searchLinks: { flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 8 },
-  searchLink: { fontFamily: fonts.semibold, fontSize: 13, color: colors.orangeDark },
+  searchWrap: { backgroundColor: colors.white, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  searchInner: { width: '100%' },
+  searchLinks: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 12, marginTop: 6 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  searchField: { flex: 1 },
+  searchBox: { height: 42, paddingHorizontal: 12 },
+  searchFieldText: { fontSize: 13 },
+  searchAction: { backgroundColor: colors.orange, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  searchActionTxt: { color: colors.white, fontFamily: fonts.bold, fontSize: 12 },
+  selBar: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 88,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  selInfo: { flex: 1 },
+  selName: { fontSize: 14, fontFamily: fonts.bold, color: colors.text },
+  selMeta: { fontSize: 12, fontFamily: fonts.medium, color: colors.muted, marginTop: 2 },
+  selClear: { fontSize: 14, fontFamily: fonts.bold, color: colors.muted, paddingHorizontal: 6, paddingVertical: 4 },
+  searchLink: { fontFamily: fonts.semibold, fontSize: 12, color: colors.orangeDark },
   label: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10, marginBottom: 2 },
   search: {
     backgroundColor: colors.bg,
@@ -848,7 +927,7 @@ const s = StyleSheet.create({
     color: colors.text,
   },
   count: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted, marginBottom: 4 },
-  body: { padding: 16, paddingBottom: 110 },
+  body: { padding: 16, paddingBottom: 160 },
   split: { flex: 1, flexDirection: 'row', width: '100%', alignSelf: 'center' },
   listSide: { flex: 1 },
   detailSide: {

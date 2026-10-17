@@ -958,6 +958,7 @@ export default function PayScreen({ navigation, route }: Props) {
       <TouchableOpacity
         style={styles.memberLink}
         onPress={() => navigation?.navigate('Member', {
+          from: 'Pay',
           ...(memberIdParam ? { memberId: memberIdParam } : {}),
           total,
           ...(route?.params?.items ? { items: route.params.items } : {}),

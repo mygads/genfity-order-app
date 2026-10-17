@@ -4,7 +4,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { TABLET_BP, colors, fonts, wideCenter } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { useLang, type Lang } from '../../lib/i18n';
 import { getSession, logout } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
@@ -188,7 +188,7 @@ export default function SettingsScreen({ navigation }: Props) {
     : t('settings.notClaimed');
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, isTablet && wideCenter]}>
+    <View style={styles.root}>
       <ScreenHeader
         title={t('settings.title')}
         sub={t('settings.sub')}
@@ -199,7 +199,7 @@ export default function SettingsScreen({ navigation }: Props) {
         }
       />
       <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
-
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, isTablet && wideCenterLg]}>
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.terminalServer')}</Text>
       <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={openTerminal} />
       <View style={styles.panel}>
@@ -258,7 +258,6 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.printerPrint')}</Text>
       <MenuRow title={t('settings.printConn')} sub={t('settings.printConnSub')} onPress={() => go('Printers')} />
       <MenuRow title={t('settings.menuPrint')} sub={t('settings.menuPrintSub')} onPress={() => go('MenuPrinting')} />
-      <MenuRow title={t('settings.menuMgmt')} sub={t('settings.menuMgmtSub')} onPress={() => go('MenuManagement')} />
       <MenuRow
         title={t('settings.autoCut')}
         sub={t('settings.autoCutSub')}
@@ -270,9 +269,6 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.operational')}</Text>
       <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
       <MenuRow title={t('settings.tableTimer')} sub={t('settings.tableTimerSub')} onPress={() => go('TableTimer')} />
-      <MenuRow title={t('settings.kitchen')} sub={t('settings.kitchenSub')} onPress={() => go('Kitchen')} />
-      <MenuRow title={t('settings.esb')} sub={t('settings.esbSub')} onPress={() => go('EsbOrder')} />
-      <MenuRow title={t('settings.tables')} sub={t('settings.tablesSub')} onPress={() => go('Tables')} />
       <MenuRow
         title={t('settings.newOrderSound')}
         sub={t('settings.newOrderSoundSub')}
@@ -342,7 +338,8 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -374,6 +371,7 @@ function MenuRow({
 const styles = StyleSheet.create({
   burger: { width: 22, height: 22 },
   root: { flex: 1, backgroundColor: colors.bg },
+  scroll: { flex: 1 },
   content: { paddingBottom: 32 },
   groupLabel: {
     fontFamily: fonts.bold,
