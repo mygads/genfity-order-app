@@ -17,6 +17,8 @@ import { loginEmployee } from '../../session';
 import { startRealtime } from '../../lib/realtime';
 import { setWsForeground } from '../../native/printer';
 import { loginByQrCode, parseQrLoginPayload, validateEmployee, type EmployeeSession } from '../../lib/apiSource';
+import { ensureSeeded } from '../../lib/seed';
+import { queryFirst } from '../../lib/db';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
@@ -96,7 +98,7 @@ export default function LoginScreen({ navigation }: Props) {
   // Tablet portrait (lebar < tinggi) pakai satu kolom tengah ala phone;
   // split dua kolom hanya saat landscape agar tiap panel tetap lega.
   const showSplit = isTablet && width > height;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [mode, setMode] = useState<'email' | 'qr'>('email');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -167,8 +169,26 @@ export default function LoginScreen({ navigation }: Props) {
     setBusy(true);
     void (async () => {
       try {
+        // Sembuh-di-titik-butuh: bila seed saat起動 gagal/terlewat (instalasi
+        // lama, storage dibersihkan), pastikan admin lokal ada TEPAT sebelum
+        // validasi. Idempoten — PIN yang sudah diganti tidak ditimpa.
+        try { await ensureSeeded(); } catch { /* validasi yang memutuskan */ }
         const s = await validateEmployee(username.trim(), password);
         if (!s.ok || !s.userId) {
+          // DB lokal kosong total = seed gagal total di perangkat ini. Jangan
+          // tuduh "PIN salah" — beri tahu solusi sebenarnya (literal ID/EN,
+          // bukan kunci i18n baru, sesuai aturan lane beku).
+          let empty = false;
+          try {
+            const c = await queryFirst<{ n: number }>('SELECT COUNT(*) AS n FROM ms_posuser');
+            empty = (c?.n ?? 0) === 0;
+          } catch { empty = false; }
+          if (empty) {
+            setServerError(lang === 'id'
+              ? 'Tidak ada user lokal di perangkat ini. Tutup total aplikasinya lalu buka lagi. Bila memakai APK lama, install ulang versi terbaru.'
+              : 'No local users on this device. Fully close and reopen the app. If using an old APK, reinstall the latest version.');
+            return;
+          }
           setServerError(t('login_fail'));
           return;
         }
