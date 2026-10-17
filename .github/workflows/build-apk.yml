@@ -13,6 +13,10 @@
 #   - ANDROID_KEYSTORE_PASSWORD  : password keystore
 #   - ANDROID_KEY_ALIAS          : alias key (mis. genfity-order)
 #   - ANDROID_KEY_PASSWORD       : password key
+#   - VPS_HOST / VPS_USER / VPS_SSH_KEY (opsional) : hanya untuk publish ke
+#     https://order.genfity.com/downloads/ (job publish-vps). Tanpa ini, APK
+#     tetap tersedia via Actions artifact + GitHub Releases, dan kartu unduh
+#     di website otomatis pakai link GitHub sampai manifest VPS tersedia.
 #
 # Variables (opsional, Settings → Secrets and variables → Actions → Variables):
 #   - EXPO_PUBLIC_API_BASE_URL   : URL backend (kosong = Local Mode/offline SQLite)
@@ -167,6 +171,66 @@ jobs:
           sha256sum --check genfity-order.apk.sha256
           NOTES=$(node -e "const m=require('./release.json');console.log('APK SHA-256: '+m.apkSha256+'\nSigning cert SHA-256: '+m.signingCertificateSha256+'\nCommit: '+m.commit)")
           gh release create "${{ github.ref_name }}" \
-            Genfity-Order-*.apk genfity-order.apk.sha256 \
+            Genfity-Order-*.apk genfity-order.apk genfity-order.apk.sha256 release.json \
             --title "${{ github.ref_name }}" \
             --notes "$NOTES"
+
+  publish-vps:
+    name: Publish APK to website downloads
+    needs: build-apk
+    if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && github.event_name == 'push' && secrets.VPS_HOST != '' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: genfity-order-apk
+          path: dist
+
+      - name: Verify checksum and build website manifest
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum --check genfity-order.apk.sha256
+          APP_VERSION=$(node -p "require('./release.json').version")
+          node -p "require('./release.json').signingCertificateSha256" > genfity-order.cert.sha256
+          node -e "const m=require('./release.json');console.log(JSON.stringify({version:m.version,commit:m.commit,minimumSupportedVersion:m.version,signingCertificateSha256:m.signingCertificateSha256,apkSha256:m.apkSha256,downloadUrl:'https://order.genfity.com/downloads/Genfity-Order-'+m.version+'.apk'}))" > genfity-order.json
+          cp genfity-order.apk "Genfity-Order-$APP_VERSION.apk"
+          cat genfity-order.json
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Publish to downloads folder
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(node -p "require('./dist/release.json').version")
+          scp dist/genfity-order.apk "$VPS_USER@$VPS_HOST:/tmp/genfity-order-${{ github.sha }}.apk"
+          scp "dist/Genfity-Order-$APP_VERSION.apk" "$VPS_USER@$VPS_HOST:/tmp/genfity-order-${{ github.sha }}-versioned.apk"
+          scp dist/genfity-order.apk.sha256 "$VPS_USER@$VPS_HOST:/tmp/genfity-order-${{ github.sha }}.apk.sha256"
+          scp dist/genfity-order.json "$VPS_USER@$VPS_HOST:/tmp/genfity-order-${{ github.sha }}.json"
+          scp dist/genfity-order.cert.sha256 "$VPS_USER@$VPS_HOST:/tmp/genfity-order-${{ github.sha }}.cert.sha256"
+          ssh "$VPS_USER@$VPS_HOST" << ENDSSH
+            set -euo pipefail
+            install -d -m 0755 /var/www/genfity-order-downloads
+            if [ -f /var/www/genfity-order-downloads/genfity-order.signing-certificate.sha256 ]; then
+              cmp /var/www/genfity-order-downloads/genfity-order.signing-certificate.sha256 /tmp/genfity-order-${{ github.sha }}.cert.sha256 || { echo 'APK signing certificate changed; refusing release'; exit 1; }
+            fi
+            install -m 0644 /tmp/genfity-order-${{ github.sha }}.cert.sha256 /var/www/genfity-order-downloads/genfity-order.signing-certificate.sha256
+            install -m 0644 /tmp/genfity-order-${{ github.sha }}.apk /var/www/genfity-order-downloads/genfity-order.apk.new
+            install -m 0644 "/tmp/genfity-order-${{ github.sha }}-versioned.apk" "/var/www/genfity-order-downloads/Genfity-Order-$APP_VERSION.apk"
+            install -m 0644 /tmp/genfity-order-${{ github.sha }}.apk.sha256 /var/www/genfity-order-downloads/genfity-order.apk.sha256.new
+            install -m 0644 /tmp/genfity-order-${{ github.sha }}.json /var/www/genfity-order-downloads/genfity-order.json.new
+            mv /var/www/genfity-order-downloads/genfity-order.apk.new /var/www/genfity-order-downloads/genfity-order.apk
+            mv /var/www/genfity-order-downloads/genfity-order.apk.sha256.new /var/www/genfity-order-downloads/genfity-order.apk.sha256
+            mv /var/www/genfity-order-downloads/genfity-order.json.new /var/www/genfity-order-downloads/genfity-order.json
+            rm -f /tmp/genfity-order-${{ github.sha }}.*
+          ENDSSH
