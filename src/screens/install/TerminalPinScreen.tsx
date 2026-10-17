@@ -1,19 +1,18 @@
 /**
  * B2 — TerminalPin (SPEC B1 langkah 3): entri PIN terminal lalu bind
- * atomik E03 via bindTerminal. Sukses → saveBinding (session, persist
- * lintas logout) + setTerminal (header request) + tag perangkat, lalu
- * Login. Fail-closed: PIN salah / offline / BE absen tak pernah membuat
- * binding — hanya pesan bind_failed / need_be / sup_offline yang jujur.
- * PIN tak pernah disimpan di device.
+ * atomik E03 via bindTerminal. Sukses → adoptTerminalBinding (kontrak
+ * antar-paket: logout + clearGrant + tulis SEMUA store binding sekaligus),
+ * lalu Login. Fail-closed: PIN salah / offline / BE absen / tag tak dikenal
+ * tak pernah membuat binding — hanya pesan bind_failed / need_be /
+ * sup_offline yang jujur. PIN tak pernah disimpan di device.
  */
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
-import { setTerminal } from '../../config/server';
-import { saveBinding } from '../../session';
+import { adoptTerminalBinding } from '../../session';
 import { getDeviceId } from '../../lib/apiSource';
 import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';
-import { bindTerminal } from '../../lib/terminalApi';
+import { bindTerminal, validateTerminalPin } from '../../lib/terminalApi';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -72,6 +71,19 @@ export default function TerminalPinScreen({
     setBusy(true);
     setError('');
     try {
+      // E02: pre-check PIN tanpa efek dulu; pre-check tak terjangkau
+      // (offline) boleh lanjut ke bind (fail-closed di sana) hanya dengan
+      // pesan offline yang jujur — tanpa bypass diam-diam.
+      try {
+        const pre = await validateTerminalPin(terminalId, pin.trim());
+        if (pre.ok && !pre.data.valid) {
+          setError(t('bind_failed'));
+          return;
+        }
+        if (!pre.ok) setError(t('need_be'));
+      } catch {
+        setError(t('need_be'));
+      }
       const deviceId = await getDeviceId();
       const r = await bindTerminal(terminalId, pin.trim(), deviceId);
       if (!r.ok) {
@@ -82,23 +94,34 @@ export default function TerminalPinScreen({
         setError(t('bind_failed'));
         return;
       }
-      // Tag tak dikenal/kosong = explicit default 'full_access' (perilaku
-      // terbuka legacy) — tak pernah '' diam-diam; saveBinding juga menegakkan.
-      const tag = parseDeviceRole((r.data.tag || p.tag || '').trim()) ?? 'full_access';
-      saveBinding({
-        terminalId,
-        terminalCode,
-        branchId,
-        branchName,
-        merchantName: '',
-        tag,
-        ...(r.data.pairedKasirId ? { pairedKasirId: r.data.pairedKasirId } : {}),
-        ...(r.data.pairedViewId ? { pairedViewId: r.data.pairedViewId } : {}),
-        deviceId,
-        boundAt: new Date().toISOString(),
-      });
-      // Kompatibel jalur lama: header request + query lokal tetap baca ini.
-      setTerminal({ terminalCode, branchId, branchName });
+      // F11 fail-closed: tag kosong/tak dikenal → tolak bind (bind_failed).
+      // JANGAN default 'full_access' diam-diam — tag adalah gerbang keamanan.
+      const tag = parseDeviceRole((r.data.tag || p.tag || '').trim());
+      if (!tag) {
+        setError(t('bind_failed'));
+        return;
+      }
+      // Kontrak antar-paket: adoptTerminalBinding = logout + clearGrant +
+      // tulis SEMUA store binding (sesi, kontrak, server) sekaligus — JANGAN
+      // setTerminal/saveBinding terpisah agar tak ada store yang tertinggal.
+      // REBIND-STALE-GRANT: grant basi terminal sebelumnya ikut dicabut di
+      // dalamnya (logout menandai pendingRevoke untuk flush E06/E07).
+      try {
+        await adoptTerminalBinding({
+          terminalId,
+          terminalCode,
+          branchId,
+          branchName,
+          merchantName: branchName,
+          tag,
+          deviceId,
+        });
+      } catch {
+        setError(t('bind_failed'));
+        return;
+      }
+      // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
+      // adopt) — home guard tetap fail-safe bila ini gagal.
       try {
         setDeviceRoleForTag(tag);
       } catch {

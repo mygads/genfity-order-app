@@ -8,11 +8,18 @@
  * `tr_esoprocessqueue`. Persistensi ringan (outbox JSON + last-sync)
  * memakai lib/storage.ts agar work di web + native.
  */
-import { ApiPath, apiPost, getServerEnv, getTerminal } from '../config/server';
+import { ApiPath, apiPost, getCustomBaseUrl, getServerEnv, getTerminal } from '../config/server';
+import { apiFetch } from './apiSource';
 import { all, markClean, markDirty, queryFirst, run } from './db';
 import { tr } from './i18n';
+import { notifyPushSyncSuccess } from './push';
 import { getItem, setItem } from './storage';
+import { logoutRevoke } from './terminalApi';
 import { uuidv7 } from './uuidv7';
+import {
+  clearPendingRevoke as clearSessionPendingRevoke,
+  getPendingRevoke as getSessionPendingRevoke,
+} from '../session';
 
 export type SyncStatus = 'antre' | 'terkirim' | 'gagal';
 export type SyncKind = 'order' | 'receipt' | 'attendance' | 'other';
@@ -24,6 +31,8 @@ export interface SyncItem {
   createdAt: string;
   status: SyncStatus;
   note?: string;
+  /** S21: true = cermin-lokal (LOCAL_OPS/deposit-lokal), tanpa POST server. */
+  local?: boolean;
 }
 
 const LS_OUTBOX = 'genfity.sync.outbox';
@@ -152,6 +161,8 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
   if (kind === 'receipt') return ApiPath.receiptEmail;
   if (kind === 'attendance') {
     const t = String(payload?.type ?? '');
+    // S3: pin-change = LOCAL_OP tanpa POST server (difinalkan di pushLightItem).
+    if (t === 'pin-change') return null;
     if (t === 'clock-out') return ApiPath.clockOut;
     return ApiPath.clockIn;
   }
@@ -217,18 +228,208 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 // main/update-branch-menu), daftarkan di ApiPath + tablePushPath dan
 // aktifkan lagi antrean ringan untuk ms_* di enqueueOutbox.
 
-export function enqueueSync(kind: SyncKind, payload: Record<string, unknown>): SyncItem {
+// ---------------------------------------------------------------------------
+// GO-POS COMPAT (wire-app): backend Go TIDAK melayani path bentuk-ESB
+// (order/finish, order/view, split-bill, move-items, posv1/*, v1/push/*,
+// sales/receipt-email). Yang dilayani: POST api/merchant/orders/pos
+// (create; orderType + items WAJIB — orders_pos_create.go:196-203) dan
+// POST api/merchant/orders/{orderId}/group-bill/payments (router.go:335;
+// butuh orderId server + shareId peserta). Ops sale-create diterjemahkan di
+// sini menjadi body bentuk-POS; ops TANPA padanan backend tetap memakai path
+// ESB (komentar eksplisit per-op di toGoPosRequest + daftar di laporan) —
+// server menjawab 404 jujur → 'gagal' + retry, bukan sukses diam-diam.
+// Kompat ini HANYA path + body; EXPO_PUBLIC_API_BASE_URL tak disentuh.
+// Baris fisik (pushPhysicalRow) tetap ESB: payload-nya {table,rowId,op}
+// tanpa bentuk sale sehingga tak bisa diterjemahkan (dilaporkan).
+// ---------------------------------------------------------------------------
+
+/** Path create POS Go (relatif; digabung ke custom base oleh apiUrl). */
+const GO_POS_CREATE_PATH = 'api/merchant/orders/pos';
+
+/**
+ * Petakan mode kasir → enum orderType Go yang ketat (DINE_IN / TAKEAWAY /
+ * IN_STORE_ORDER / IN_STORE_SERVICE). TAKE_AWAY (underscore) dan DELIVERY /
+ * agregator tak dikenal backend → TAKEAWAY terdekat; default DINE_IN.
+ */
+function goPosOrderType(raw?: unknown): string {
+  const k = String(raw ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (k === 'DINE_IN') return 'DINE_IN';
+  if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
+  if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_SERVICE') return k;
+  if (/DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE/.test(k)) return 'TAKEAWAY';
+  return 'DINE_IN';
+}
+
+/**
+ * Petakan item sale app → item POS Go. menuId numerik → MENU (harga ikut
+ * server, modifier/diskon dilipat ke notes sebagai jejak audit); selainnya
+ * (id lokal 'p1' dsb) → CUSTOM {customName, customPrice} dengan harga satuan
+ * = ((price + modifier) × qty − discount) / qty. Addons selalu [] (butuh
+ * addonItemId numerik yang tak dimiliki katalog lokal). null = kosong/tak
+ * valid (backend akan 400 → biarkan ESB, dilaporkan).
+ */
+function goPosItems(raw: unknown): Record<string, unknown>[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: Record<string, unknown>[] = [];
+  for (const it of raw) {
+    const r = it as {
+      menuId?: unknown; name?: unknown; qty?: unknown; price?: unknown;
+      discount?: unknown; modifiers?: unknown; note?: unknown;
+    };
+    const qty = Math.max(1, Math.round(Number(r.qty) || 1));
+    const price = Math.round(Number(r.price) || 0);
+    const mods = Array.isArray(r.modifiers)
+      ? (r.modifiers as { name?: unknown; price?: unknown }[])
+      : [];
+    const modTotal = mods.reduce((a, m) => a + Math.round(Number(m.price) || 0), 0);
+    const disc = Math.round(Number(r.discount) || 0);
+    const name = String(r.name ?? '').trim() || 'Item';
+    const note = typeof r.note === 'string' ? r.note.trim() : '';
+    const menuRaw = String(r.menuId ?? '').trim();
+    const menuNum = /^[0-9]+$/.test(menuRaw) ? parseInt(menuRaw, 10) : NaN;
+    if (Number.isFinite(menuNum) && menuNum > 0) {
+      // MENU: server menilai dari master (server-wins pricing); selisih
+      // modifier/diskon lokal dicatat di notes, rekonsiliasi di langkah bayar.
+      const audit = [
+        ...(note ? [note] : []),
+        ...mods.map((m) => `+${String(m.name ?? '').trim() || 'modifier'}`),
+        ...(disc > 0 ? [`disc-${disc}`] : []),
+      ].join('; ');
+      out.push({
+        type: 'MENU',
+        menuId: menuNum,
+        quantity: qty,
+        ...(audit ? { notes: audit.slice(0, 500) } : {}),
+        addons: [],
+      });
+    } else {
+      const unit = Math.max(0, Math.round(((price + modTotal) * qty - disc) / qty));
+      out.push({
+        type: 'CUSTOM',
+        customName: name.slice(0, 200),
+        customPrice: unit,
+        quantity: qty,
+        ...(note ? { notes: note.slice(0, 500) } : {}),
+        addons: [],
+      });
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Terjemahan Go-POS untuk satu item ringan. Kembali {path, body} bila ada
+ * padanan backend, null bila ops tetap ESB (pathFor yang memutuskan).
+ * - sale-create (kind 'order' tanpa op, bentuk buildSalePayload) → create POS
+ *   {orderType, items, clientId/displayNo, tableNumber?, customer?}.
+ *   Total/diskon/voucher/payments SENGAJA tak dibawa: server menghitung ulang
+ *   (server-wins) dan rekonsiliasi terjadi di langkah bayar.
+ * - group-payment legs → group-bill/payments (router.go:335) HANYA bila
+ *   payload membawa {orderId, shareId} server; app tak pernah membuat
+ *   group-bill shares sehingga legs kini TANPA identitas itu → null (tetap
+ *   ESB, dilaporkan; bukan 400 berulang ke endpoint yang salah).
+ * - Selainnya (split-bill tanpa orderId server, move-items/move-table tanpa
+ *   endpoint pindah, view / view-by-qr / view-quick-service yang berarah
+ *   display, order-error-log, delivery-push, terminal-verify, shift,
+ *   voucher online/external, deposit, receipt, attendance=lane lain) → null
+ *   (tetap ESB, dilaporkan).
+ */
+function toGoPosRequest(
+  kind: SyncKind,
+  payload: Record<string, unknown>,
+  outboxId?: string,
+): { path: string; body: Record<string, unknown> } | null {
+  if (kind !== 'order') return null;
+  const p = payload as {
+    op?: unknown; items?: unknown; mode?: unknown; salesMode?: unknown;
+    tableId?: unknown; customer?: unknown; orderId?: unknown; order_id?: unknown;
+    shareId?: unknown; share_id?: unknown; salesNum?: unknown;
+    client_id?: unknown; clientId?: unknown;
+  };
+  const op = String(p.op ?? '');
+  if (op === 'group-payment') {
+    const orderId = String(p.orderId ?? p.order_id ?? '').trim();
+    const shareId = String(p.shareId ?? p.share_id ?? '').trim();
+    if (!/^[0-9]+$/.test(orderId) || !shareId) return null;
+    // groupOrderBillPaymentRequest backend: paymentMethod ∈
+    // {CASH_ON_COUNTER, CARD_ON_COUNTER, QRIS} + tenderedAmount wajib menutup
+    // amount untuk tunai (0 untuk kartu/QRIS) + idempotencyKey 16-128 char.
+    const legs = Array.isArray(payload.payments) ? payload.payments : [];
+    const first = (legs[0] ?? {}) as { method?: unknown; amount?: unknown; approvalCode?: unknown };
+    const mKey = String(first.method ?? payload.method ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
+    const method = mKey === 'qris'
+      ? 'QRIS'
+      : (/tunai|cash/.test(mKey) || !mKey ? 'CASH_ON_COUNTER' : 'CARD_ON_COUNTER');
+    const amount = Math.round(Number(first.amount) || 0);
+    return {
+      path: `api/merchant/orders/${orderId}/group-bill/payments`,
+      body: {
+        shareId,
+        paymentMethod: method,
+        amount,
+        tenderedAmount: method === 'CASH_ON_COUNTER' ? amount : 0,
+        // Idempotency key abadi backend = id antrean UUIDv7 (36 char).
+        ...(outboxId ? { idempotencyKey: outboxId } : {}),
+        ...((first.approvalCode ?? payload.approvalCode)
+          ? { notes: String(first.approvalCode ?? payload.approvalCode).slice(0, 500) } : {}),
+      },
+    };
+  }
+  if (op || !Array.isArray(p.items)) return null;
+  const items = goPosItems(p.items);
+  if (!items) return null;
+  const cid = String(p.client_id ?? p.clientId ?? '').trim();
+  const salesNum = String(p.salesNum ?? '').trim();
+  const tableNumber = String(p.tableId ?? '').trim();
+  const customer = String(p.customer ?? '').trim();
+  return {
+    path: GO_POS_CREATE_PATH,
+    body: {
+      orderType: goPosOrderType(p.mode ?? p.salesMode),
+      items,
+      // displayNo tanpa clientId DITOLAK backend; clientId dipastikan di
+      // pushLightItem (fallback id antrean UUIDv7) sebelum kirim.
+      ...(cid ? { clientId: cid } : {}),
+      ...(salesNum ? { displayNo: salesNum } : {}),
+      ...(tableNumber ? { tableNumber } : {}),
+      ...(customer ? { customer: { name: customer.slice(0, 200) } } : {}),
+    },
+  };
+}
+
+/**
+ * S20: pastikan restore boot selesai sebelum persist agar enqueue pertama
+ * sesudah boot tak menimpa item tersimpan di AsyncStorage.
+ */
+async function ensureRestored(): Promise<void> {
   hydrate();
+  if (restorePromise) {
+    try {
+      await restorePromise;
+    } catch {
+      /* best-effort — drain/persist tetap jalan */
+    }
+  }
+}
+
+export function enqueueSync(kind: SyncKind, payload: Record<string, unknown>, id?: string): SyncItem {
+  hydrate();
+  // S6: id eksplisit = twin berbagi client_id dengan POST immediate (tanpa
+  // UUID ganda); idempotent — twin yang sama tak antre dua kali.
+  if (typeof id === 'string' && id) {
+    const prior = outbox.find((o) => o.id === id);
+    if (prior) return prior;
+  }
   const item: SyncItem = {
     // UUIDv7 (Q7): id antrean = idempotency key retry-aman lintas-device.
-    id: uuidv7(),
+    id: typeof id === 'string' && id ? id : uuidv7(),
     kind,
     payload,
     createdAt: new Date().toISOString(),
     status: 'antre',
   };
   outbox = [...outbox, item];
-  persist();
+  void ensureRestored().then(() => persist());
   return item;
 }
 
@@ -321,7 +522,7 @@ async function fetchPhysicalRows(): Promise<PhysicalQueueRow[]> {
     return await all<PhysicalQueueRow>(
       `SELECT id, orderID, serverID, tableName, op, payload, status, createdAt
        FROM tr_esoprocessqueue WHERE status IN ('antre', 'gagal')
-       ORDER BY createdAt ASC LIMIT 200`,
+       ORDER BY CASE WHEN status = 'antre' THEN 0 ELSE 1 END, createdAt ASC LIMIT 200`,
     );
   } catch {
     return [];
@@ -347,10 +548,36 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
     } catch {
       body = {};
     }
+    // S22: baris deposit fisik hanya membawa {table,rowId,op} — perkaya dari
+    // kolom nyata (memberId/amount/trxType) agar server tak terima body kosong.
+    if (table === 'tr_memberdeposit') {
+      try {
+        const d = await queryFirst<{ memberId: string | null; amount: number | null; trxType: string | null }>(
+          'SELECT memberId, amount, trxType FROM tr_memberdeposit WHERE id = ? LIMIT 1',
+          [String(row.orderID ?? '')],
+        );
+        if (d) {
+          body = {
+            ...body,
+            ...(d.memberId ? { memberId: d.memberId } : {}),
+            ...(d.amount != null ? { amount: d.amount } : {}),
+            ...(d.trxType ? { type: d.trxType } : {}),
+          };
+        }
+      } catch {
+        /* abaikan — body generik tetap dikirim */
+      }
+    }
+    // DEPOSIT-SINGLE-POST: baris tr_memberdeposit berbagi kunci idempotensi
+    // dengan POST langsung + light twin-nya (orderID = deposit key `dep-…`,
+    // sama dengan ledger id). row.id fisik (=uuid antrean) tetap dipakai untuk
+    // DELETE/markClean lokal di bawah. Non-deposit tak berubah (physCid=row.id).
+    const depositKey = table === 'tr_memberdeposit' ? String(row.orderID ?? '').trim() : '';
+    const physCid = depositKey || row.id;
     const res = await apiPost(
       path,
-      { ...body, table, rowId: row.orderID, op: row.op, clientId: row.id, ...identityFields(row.id) },
-      { idempotencyKey: row.id },
+      { ...body, table, rowId: row.orderID, op: row.op, clientId: physCid, ...identityFields(physCid) },
+      { idempotencyKey: physCid },
     );
     if (res.status === 409) {
       // BE menegakkan UNIQUE(client_id): 409 = server SUDAH punya baris ini
@@ -416,6 +643,9 @@ const LOCAL_OPS = new Set([
   'booking-create',
   'booking-update',
   'booking-cancel',
+  // S3: ganti PIN = hash lokal di ms_posuser (+ updatePinOnServer bila online
+  // di AttendanceScreen) — item sync-nya cermin-lokal, tanpa POST server.
+  'pin-change',
 ]);
 
 // Kind deposit tanpa endpoint khusus (kontrak hanya punya
@@ -425,10 +655,50 @@ const LOCAL_OPS = new Set([
 // endpoint topup — semantiknya berbalik (kredit vs debit).
 const DEPOSIT_LOCAL_KINDS = new Set(['deposit-refund', 'deposit-withdraw']);
 
+/** S4: jeda pacing antar-item drain. */
+function sleepMs(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** S6: batas timeout immediate-first (dipakai withTimeout/postImmediate). */
+export const IMMEDIATE_TIMEOUT_MS = 8000;
+
+/**
+ * S6: balapkan janji dengan timeout — menolak bila lewat batas. Tak pernah
+ * menelan hasil; pemanggil memutuskan arti timeout (offline → antre twin).
+ */
+export function withTimeout<T>(promise: Promise<T>, ms = IMMEDIATE_TIMEOUT_MS): Promise<T> {
+  const limit = Math.max(1000, Math.floor(ms));
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error('timeout')), limit);
+    }),
+  ]);
+}
+
+/**
+ * S6 (immediate-first): coba POST langsung dengan timeout singkat. True hanya
+ * bila server NYATA menjawab ok (dummy/offline/timeout = false → pemanggil
+ * mengantrekan twin). Tak pernah melempar.
+ */
+export async function postImmediate(path: string, body: Record<string, unknown>): Promise<boolean> {
+  try {
+    const res = await withTimeout(apiFetch(path, { body }));
+    return res.ok && !res.fromDummy;
+  } catch {
+    return false;
+  }
+}
+
 export async function pushAll(): Promise<PushResult> {
   hydrate();
   if (getServerEnv() !== 'custom') {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
+  }
+  // S5: custom tanpa URL = belum dikonfigurasi — tolak SEBELUM drain apa pun.
+  if (!getCustomBaseUrl().trim()) {
+    throw new Error(tr('sync_no_url'));
   }
   // M13 re-drive kepala-kotor: tunggu restore boot selesai sebelum drain.
   // Tanpa ini pushAll pertama setelah boot bisa menguras SEBELUM item
@@ -460,17 +730,18 @@ export async function pushAll(): Promise<PushResult> {
   // Baris gagal TIDAK menghentikan drain (offline-first): ditandai 'gagal',
   // dilewati, dicoba lagi di push berikutnya.
   const rows = await fetchPhysicalRows();
-  const next = [...outbox];
-  const light = next
-    .map((item, idx) => ({ item, idx }))
-    .filter(({ item }) => item.status !== 'terkirim');
+  // S2: snapshot hanya id (+kunci urut); status ditulis ke array LIVE agar
+  // enqueue di tengah drain (antar-await) selamat sampai persist akhir.
+  const lightSnap = outbox
+    .filter((item) => item.status !== 'terkirim')
+    .map((item) => ({ id: item.id, createdAt: item.createdAt, shiftOpen: isShiftOpenItem(item) }));
   interface DrainEntry {
     createdAt: string;
     shiftOpen: boolean;
     physicalFirst: number;
     seq: number;
     row?: PhysicalQueueRow;
-    item?: SyncItem;
+    lightId?: string;
   }
   const entries: DrainEntry[] = [
     ...rows.map((row, seq): DrainEntry => ({
@@ -480,12 +751,12 @@ export async function pushAll(): Promise<PushResult> {
       seq,
       row,
     })),
-    ...light.map(({ item, idx }): DrainEntry => ({
-      createdAt: String(item.createdAt ?? ''),
-      shiftOpen: isShiftOpenItem(item),
+    ...lightSnap.map(({ id, createdAt, shiftOpen }, idx): DrainEntry => ({
+      createdAt: String(createdAt ?? ''),
+      shiftOpen,
       physicalFirst: 1,
       seq: idx,
-      item,
+      lightId: id,
     })),
   ];
   entries.sort((a, b) => {
@@ -499,14 +770,19 @@ export async function pushAll(): Promise<PushResult> {
     if (a.physicalFirst !== b.physicalFirst) return a.physicalFirst - b.physicalFirst;
     return a.seq - b.seq;
   });
+  // S4: pacing ~150ms antar-item + breaker — 3 gagal beruntun = jeda drain
+  // sampai siklus berikut (tulis antre tak pernah hilang, hanya ditunda).
+  let consecFails = 0;
   for (const e of entries) {
     if (e.row) {
       const outcome = await pushPhysicalRow(e.row);
       if (outcome === 'sent') {
         sent += 1;
+        consecFails = 0;
         touchSuccess();
       } else if (outcome === 'failed') {
         failed += 1;
+        consecFails += 1;
       } else if (String(e.row.tableName ?? '').startsWith('ms_')) {
         // Cermin master (server-wins §5/M9-3, tanpa endpoint push): hapus dari
         // antrean fisik agar tak menumpuk selamanya, menggelembungkan badge
@@ -522,17 +798,47 @@ export async function pushAll(): Promise<PushResult> {
       }
       continue;
     }
-    if (!e.item) continue;
-    const outcome = await pushLightItem(e.item);
+    if (!e.lightId) continue;
+    // S2: resolve ke objek LIVE (bisa hilang/terkirim antar-await) — lewati
+    // bila sudah tak ada.
+    const live = outbox.find((o) => o.id === e.lightId);
+    if (!live || live.status === 'terkirim') continue;
+    const outcome = await pushLightItem(live);
     if (outcome === 'sent') {
       sent += 1;
+      consecFails = 0;
       touchSuccess();
     } else if (outcome === 'failed') {
       failed += 1;
+      consecFails += 1;
+    }
+    if (consecFails >= 3) break; // S4: jeda drain sampai siklus berikut
+    await sleepMs(150); // S4: pacing antar-item
+  }
+  // S1: batasi memori — tulis antre ('antre'/'gagal') TAK PERNAH dibuang;
+  // yang terkirim hanya 100 terakhir; total array ~500.
+  const queued = outbox.filter((i) => i.status !== 'terkirim');
+  let keptSent = outbox.filter((i) => i.status === 'terkirim');
+  if (keptSent.length > 100) keptSent = keptSent.slice(-100);
+  outbox = [...queued, ...keptSent];
+  if (outbox.length > 500) {
+    outbox = [...queued, ...keptSent.slice(outbox.length - 500)];
+  }
+  persist();
+  // S13: beri tahu subsistem push (token dsb.) setelah push sukses.
+  if (sent > 0) {
+    try {
+      notifyPushSyncSuccess();
+    } catch {
+      /* abaikan */
     }
   }
-  outbox = next;
-  persist();
+  // S18: flush utang revoke logout (best-effort; gagal = tetap pending).
+  try {
+    await flushPendingRevokes();
+  } catch {
+    /* abaikan */
+  }
   return { sent, failed };
 }
 
@@ -553,18 +859,33 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
   // kind "other" tanpa endpoint yang cocok: bedakan cermin-lokal /
   // deposit-lokal (tandai terkirim, bukan antre selamanya) dari yang
   // benar-benar menunggu endpoint (tetap antre + tercatat fisik).
-  const path = pathFor(item.kind, item.payload);
+  const rawPayloadEarly = (item.payload ?? {}) as Record<string, unknown>;
+  // GO-POS COMPAT: sale-create diterjemahkan ke body bentuk-POS
+  // (orderType/items/clientId-displayNo) menuju api/merchant/orders/pos;
+  // group-payment dengan identitas server menuju group-bill/payments.
+  // null = tanpa padanan backend → path ESB apa adanya (dilaporkan).
+  const compat = toGoPosRequest(item.kind, rawPayloadEarly, item.id);
+  const path = compat ? compat.path : pathFor(item.kind, item.payload);
   if (!path) {
-    const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown };
+    const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown; type?: unknown };
     const op = String(p.op ?? '');
     const k = String(p.kind ?? '');
-    if (LOCAL_OPS.has(op) || DEPOSIT_LOCAL_KINDS.has(k)) {
+    const tp = String(p.type ?? '');
+    if (LOCAL_OPS.has(op) || LOCAL_OPS.has(tp) || DEPOSIT_LOCAL_KINDS.has(k)) {
       item.status = 'terkirim';
-      item.note = tr(op ? 'sync.localOnly' : 'sync.depositLocal');
+      // S21: penanda lokal-only untuk badge SyncScreen.
+      item.local = true;
+      item.note = tr(op || tp ? 'sync.localOnly' : 'sync.depositLocal');
       return 'skipped';
     }
+    // S10: kind 'other' tanpa endpoint (kontrak BE menyusul) — finalkan
+    // 'gagal' SEKALI dengan catatan, bukan antre-selamanya. Siklus berikut
+    // dilewati (skipped) agar hitungan gagal tak bertambah tiap push.
+    // Legacy ms_* (return lebih awal di atas) tak tersentuh.
+    if (item.status === 'gagal') return 'skipped';
+    item.status = 'gagal';
     item.note = tr('sync.masterQueued');
-    return 'skipped';
+    return 'failed';
   }
   try {
     // C1: client_id sale JANGAN PERNAH ditimpa id antrean. buildSalePayload
@@ -573,13 +894,29 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
     // + membuat retry melahirkan sale ganda di server. Hanya isi bila payload
     // belum punya; id antrean dibawa terpisah sebagai outboxId (idempotency
     // key header tetap = item.id, tak berubah).
-    const rawPayload = (item.payload ?? {}) as Record<string, unknown>;
+    // GO-POS COMPAT: basis body = hasil terjemahan bila ada (bentuk-POS),
+    // jika tidak payload ESB mentah; gabung identitas + idempotency di bawah
+    // berlaku untuk keduanya (displayNo selalu berpasangan dengan clientId
+    // final — syarat parsePOSSaleIdentity backend).
+    const rawPayload = compat ? compat.body : ((item.payload ?? {}) as Record<string, unknown>);
     const saleCid = String(rawPayload.client_id ?? rawPayload.clientId ?? '').trim();
-    const sender = identityFields(saleCid || item.id);
-    const body: Record<string, unknown> = saleCid
-      // Touchup: normalisasi kunci campuran — BOTH clientId + client_id = saleCid
-      // (uuid = saleCid tetap) agar server/campur-casing baca kunci yang sama.
-      ? { ...rawPayload, ...sender, clientId: saleCid, client_id: saleCid, uuid: saleCid, outboxId: item.id }
+    // DEPOSIT-SINGLE-POST: light generik {table:'tr_memberdeposit',rowId,op}
+    // (warisan enqueueOutbox) tak membawa clientId — pakai rowId (=deposit key
+    // `dep-…`, sama dengan ledger id + fisik orderID) sebagai identitas klien
+    // agar satu kunci dengan POST langsung + fisik. Header Idempotency-Key
+    // tetap item.id (tak berubah). Logika sale C1 di atas tak tersentuh: sale
+    // tak pernah bertable tr_memberdeposit, dan light 'deposit-topup' baru
+    // sudah membawa clientId=key sehingga saleCid menang lebih dulu.
+    const depositRowId =
+      String(rawPayload.table ?? '') === 'tr_memberdeposit'
+        ? String(rawPayload.rowId ?? '').trim()
+        : '';
+    const lightCid = saleCid || depositRowId;
+    const sender = identityFields(lightCid || item.id);
+    const body: Record<string, unknown> = lightCid
+      // Touchup: normalisasi kunci campuran — BOTH clientId + client_id = lightCid
+      // (uuid = lightCid tetap) agar server/campur-casing baca kunci yang sama.
+      ? { ...rawPayload, ...sender, clientId: lightCid, client_id: lightCid, uuid: lightCid, outboxId: item.id }
       : { ...rawPayload, clientId: item.id, ...sender, outboxId: item.id };
     const res = await apiPost(
       path,
@@ -729,6 +1066,65 @@ export async function clearPendingRevoke(sessionId?: string): Promise<void> {
     await setItem(LS_REVOKE, JSON.stringify(cur));
   } catch {
     /* abaikan */
+  }
+}
+
+/**
+ * S18: kirim utang revoke logout (O1/SPEC §7) via E06 logoutRevoke, lalu
+ * bersihkan slot sync + session yang sudah dikonfirmasi server. Best-effort:
+ * tak pernah melempar; yang gagal tetap pending untuk siklus berikut.
+ * Dipanggil di akhir pushAll yang sukses; pemilik boot/login memanggil
+ * langsung juga (diekspos agar layar di luar cakupan bisa memicu).
+ */
+export async function flushPendingRevokes(): Promise<void> {
+  try {
+    const jobs: { sessionId?: string; userId?: string }[] = [];
+    try {
+      for (const s of await getPendingRevoke()) {
+        if (s) jobs.push({ sessionId: s });
+      }
+    } catch {
+      /* abaikan */
+    }
+    let sessionSid = '';
+    let sessionUid = '';
+    try {
+      const sp = getSessionPendingRevoke();
+      sessionSid = sp?.sessionId ?? '';
+      sessionUid = sp?.userId ?? '';
+      if (sessionSid && !jobs.some((j) => j.sessionId === sessionSid)) {
+        jobs.push({ sessionId: sessionSid });
+      }
+      // Slot session tanpa sessionId (hanya userId, mis. dari logout lokal).
+      if (sessionUid && !sessionSid) jobs.push({ userId: sessionUid });
+    } catch {
+      /* abaikan */
+    }
+    if (jobs.length === 0) return;
+    for (const job of jobs) {
+      try {
+        const r = await logoutRevoke(job);
+        if (!r.ok) continue; // tetap pending — coba lagi siklus berikut
+        if (job.sessionId) {
+          try {
+            await clearPendingRevoke(job.sessionId);
+          } catch {
+            /* abaikan */
+          }
+        }
+        if (job.sessionId === sessionSid || (job.userId && job.userId === sessionUid)) {
+          try {
+            clearSessionPendingRevoke();
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* tetap pending — coba lagi siklus berikut */
+      }
+    }
+  } catch {
+    /* tak pernah melempar */
   }
 }
 

@@ -202,7 +202,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         return next;
       });
       setDoneMsg(
-        `${countSnap} pcs (${rp(totalSnap)}) dipindahkan ${from} ke ${to}${mergeSnap ? ' - digabung ke bill yang sudah ada' : ''}.`,
+        t('mov_done_msg').replace('{n}', String(countSnap)).replace('{t}', rp(totalSnap)).replace('{f}', from).replace('{d}', to).replace('{m}', mergeSnap ? t('mov_done_merge') : ''),
       );
       setPickedQty({});
     };
@@ -278,7 +278,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         {/* Tablet: wizard 2 kolom (sumber+item kiri, tujuan+ringkasan kanan); phone tetap susun vertikal. */}
         <View style={[isTablet && styles.cols]}>
         <View style={[isTablet && styles.col]}>
-        <Text style={[styles.step, isTablet && styles.stepBig]}>1 · Pilih meja sumber</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>{t('mov_step_src')}</Text>
         <View style={styles.chips}>
           {tables.map((tb) => (
             <TouchableOpacity
@@ -290,7 +290,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
           ))}
         </View>
 
-        <Text style={[styles.step, isTablet && styles.stepBig]}>2 · Pilih item dari {from}{SECTION_OF[from] ? ` · ${SECTION_OF[from]}` : ''}</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>{t('mov_step_items').replace('{from}', from)}{SECTION_OF[from] ? ` · ${SECTION_OF[from]}` : ''}</Text>
         {remaining.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Image
@@ -298,7 +298,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
               style={styles.emptyImg}
               resizeMode="contain"
             />
-            <Text style={styles.emptyT}>Semua item {from} sudah dipindahkan.</Text>
+            <Text style={styles.emptyT}>{t('mov_all_moved').replace('{from}', from)}</Text>
           </View>
         ) : (
           remaining.map((it) => {
@@ -335,7 +335,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
 
         </View>
         <View style={[isTablet && styles.col]}>
-        <Text style={[styles.step, isTablet && styles.stepBig]}>3 · Pilih meja tujuan</Text>
+        <Text style={[styles.step, isTablet && styles.stepBig]}>{t('mov_step_dst')}</Text>
         <View style={styles.chips}>
           {destList.map((tb) => (
             <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn]} onPress={() => setTo(tb)}>
@@ -345,13 +345,13 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.summary}>
-          <Text style={[styles.sumTitle, isTablet && styles.sumTitleBig]}>Ringkasan pindah</Text>
+          <Text style={[styles.sumTitle, isTablet && styles.sumTitleBig]}>{t('mov_summary')}</Text>
           <Text style={[styles.sumLine, isTablet && styles.sumLineBig]}>
             {pickedItems.length === 0
-              ? 'Belum ada item dipilih.'
-              : `${pickedCount} pcs · ${rp(pickedTotal)} · ${from} ke ${to}${destOccupied ? ' (gabung)' : ''}`}
+              ? t('mov_empty_pick')
+              : t('mov_pick_line').replace('{n}', String(pickedCount)).replace('{t}', rp(pickedTotal)).replace('{f}', from).replace('{d}', to).replace('{m}', destOccupied ? t('mov_pick_merge') : '')}
           </Text>
-          {sameTable ? <Text style={styles.warn}>Meja tujuan sama dengan asal ({from}) - pilih meja lain.</Text> : null}
+          {sameTable ? <Text style={styles.warn}>{t('mov_same_table').replace('{from}', from)}</Text> : null}
           {doneMsg ? <Text style={[styles.done, isTablet && styles.doneBig]}>{doneMsg}</Text> : null}
         </View>
 
@@ -367,10 +367,10 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
-            <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('mov_view_layout')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Cashier')}>
-            <Text style={[styles.link, isTablet && styles.linkBig]}>Buka di Kasir ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('mov_open_cashier')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

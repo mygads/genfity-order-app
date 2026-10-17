@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import {
+  Alert,
   FlatList,
   Image, Modal,
   Pressable,
@@ -8,9 +9,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';
 /* APP-EVENTS: impor beda-baris agar edit beda lane tak konflik. */
 import { subscribeLocalSale } from '../../lib/display';import { getSession } from '../../session';
-import { getSaleClientId } from '../../lib/sales';import { useIsFocused } from '@react-navigation/native';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga per baris: utamakan harga nyata baris penjualan (tr_salesmenu.price),
- * lalu peta live ms_menu, terakhir fallback konstanta (hanya tiket push
- * tanpa harga). Dapur tidak menghitung qty*15000 lagi. */const MENU_PRICE: Record<string, number> = { 'Nasi Goreng Spesial': 25000, 'Es Teh Manis': 8000, 'Ayam Geprek': 18000, 'Mie Goreng Jawa': 22000, 'Jus Alpukat': 15000, 'Soto Ayam': 17000, 'Tempe Mendoan': 12000, 'Es Jeruk': 10000,};const FALLBACK_PRICE = 15000;/** * T9: harga live dari pull menu (ms_menu via apiSource, offline = dummy lokal) * menang atas fallback di bawah; fallback hanya bila SQLite + pull kosong. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + priceOf(it, live) * it.qty, 0);}function priceOf(it: KitchenItem, live?: Record<string, number>): number { if (Number.isFinite(it.price) && (it.price ?? 0) > 0) return Math.round(it.price ?? 0); return live?.[it.name] ?? MENU_PRICE[it.name] ?? FALLBACK_PRICE;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}/** Label station lokal: 'Semua'→kit_station_all, Dapur/Checker→kunci kamus
+import { getSaleClientId } from '../../lib/sales';import { useIsFocused } from '@react-navigation/native';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga per baris (R15): utamakan harga bawaan baris (tr_salesmenu.price /
+ * harga bawaan payload push), lalu peta live ms_menu. Tanpa harga di mana
+ * pun = 0 (jujur Rp 0) — tak ada lagi konstanta MENU_PRICE/FALLBACK_PRICE
+ * yang mengarang harga. Dapur tak pernah menghitung dari harga tebak. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + priceOf(it, live) * it.qty, 0);}function priceOf(it: KitchenItem, live?: Record<string, number>): number { if (Number.isFinite(it.price) && (it.price ?? 0) > 0) return Math.round(it.price ?? 0); const hit = live?.[it.name]; if (Number.isFinite(hit) && (hit ?? 0) > 0) return Math.round(hit ?? 0); return 0;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}/** Label station lokal: 'Semua'→kit_station_all, Dapur/Checker→kunci kamus
  * (jangan prefix Inggris mentah — lang=id ikut kena, lang=en bocor 'Dapur'). */
 function stationLabel(s: StationFilter, t: (k: string) => string): string {
   if (s === 'Semua') return t('kit_station_all');
@@ -54,6 +56,8 @@ function normalizePushTicket(p: Record<string, unknown>): {
   ticket: KitchenTicket;
   station: 'Dapur' | 'Checker';
   salesNum: string;
+  /** R21: true bila payload membawa salesNum nyata (bukan nomor tiket saja). */
+  hasSalesNum: boolean;
 } | null {
   const salesNum = String(p.salesNum ?? p.orderId ?? '').trim();
   const no = String(p.ticketNo ?? p.no ?? p.ticket ?? salesNum).trim();
@@ -61,12 +65,15 @@ function normalizePushTicket(p: Record<string, unknown>): {
   const rawItems = Array.isArray(p.items) ? p.items : [];
   const items: KitchenItem[] = [];
   for (const raw of rawItems) {
-    const it = raw as { name?: unknown; menuName?: unknown; qty?: unknown; note?: unknown };
+    const it = raw as { name?: unknown; menuName?: unknown; qty?: unknown; note?: unknown; price?: unknown };
     const name = String(it.name ?? it.menuName ?? '').trim();
     if (!name) continue;
+    // R15: bawa harga payload bila ada (unit jujur untuk total tampilan).
+    const unit = Math.round(Number(it.price) || 0);
     items.push({
       name,
       qty: Math.max(1, Math.round(Number(it.qty) || 1)),
+      ...(unit > 0 ? { price: unit } : {}),
       ...(it.note ? { note: String(it.note) } : {}),
     });
   }
@@ -91,6 +98,7 @@ function normalizePushTicket(p: Record<string, unknown>): {
     // salesNum fallback ke nomor agar baris cache head/menu tetap
     // berelasi walau payload hanya membawa nomor tiket.
     salesNum: salesNum || no,
+    hasSalesNum: salesNum.length > 0,
   };
 }
 
@@ -123,9 +131,10 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
       const it = ticket.items[i];
       await run(
         `INSERT INTO tr_salesmenu (id, salesNum, client_id, menuName, qty, price, discount, subtotal, note, status, syncDate, createdAt)
-         VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, 'open', ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'open', ?, ?)
          ON CONFLICT (id) DO NOTHING`,
-        [`sm-${ticket.id}-${i}`, salesNum, cid, it.name, it.qty, it.note ?? null, now, now],
+        // R15: harga bawaan tiket ikut tersimpan (bukan 0 buta).
+        [`sm-${ticket.id}-${i}`, salesNum, cid, it.name, it.qty, Math.round(Number(it.price) || 0), Math.round(Number(it.price) || 0) * it.qty, it.note ?? null, now, now],
       );
     }
   } catch { /* cache best-effort: state in-memory tetap tampil */ }
@@ -139,12 +148,21 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   // Tiket dapur nyata dari tr_kitchenticket (dilahirkan saveSale per order).
   // Kosong = empty-state; mock kitchenTickets sudah dihapus sebagai fallback.
   const [tickets, setTickets] = useState<KitchenTicket[]>([]); const ticketsRef = useRef<KitchenTicket[]>([]); ticketsRef.current = tickets;
+  // R17: effect WS di bawah deps-nya [t] sehingga liveStation/menuStation
+  // state basi di dalam handler — refs ini disegarkan tiap render di bawah
+  // (lihat penugasan setelah deklarasi state) untuk routing per-menu.
+  const liveStationRef = useRef<Record<string, string>>({});
+  const menuStationRef = useRef<Record<string, string>>({});
+  // R18: echo WS persis (id::status sama) — data tetap merge, hanya
+  // side-effect (notif/cetak) yang ditekan. Cap 200, buang terlama.
+  const pushSeenRef = useRef<Set<string>>(new Set());
   const [liveNotice, setLiveNotice] = useState('');
 
   const [now, setNow] = useState(() => Date.now());
   // T9: peta harga + station live (ms_menu/ms_station; pull via apiSource yang
   // offline-jatuh-ke-dummy). Kosong = fallback konstanta tetap dipakai.
-  const [livePrice, setLivePrice] = useState<Record<string, number>>({}); const [liveStation, setLiveStation] = useState<Record<string, string>>({}); const [menuStation, setMenuStation] = useState<Record<string, string>>({}); /** Timer dapur: segarkan elapsed tiap 30 detik (Timer.periodic ala APK). */ useEffect(() => autoSync(30000, () => setNow(Date.now())), []);   /** Konsumen realtime: tiket push dari server (KITCHEN_TICKET, kontrak
+  const [livePrice, setLivePrice] = useState<Record<string, number>>({}); const [liveStation, setLiveStation] = useState<Record<string, string>>({}); const [menuStation, setMenuStation] = useState<Record<string, string>>({}); // R17: segarkan refs routing tiap render (deklarasi setelah state).
+  liveStationRef.current = liveStation; menuStationRef.current = menuStation; /** Timer dapur: segarkan elapsed tiap 30 detik (Timer.periodic ala APK). */ useEffect(() => autoSync(30000, () => setNow(Date.now())), []);   /** Konsumen realtime: tiket push dari server (KITCHEN_TICKET, kontrak
    * terminal §4) + notif tipe warisan. Tiket push disimpan sebagai cache
    * lokal bertanda sync (tanpa outbox - kasir pemilik order yang push). */
   useEffect(() => {
@@ -156,7 +174,21 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
       if (msg.type === 'KITCHEN_TICKET') {
         const tk = normalizePushTicket(msg.payload ?? {});
         if (!tk) return;
-        void cachePushTicket(tk);
+        // R18: echo persis (id::status sudah diproses) — data tetap merge di
+        // bawah agar update item tak hilang; hanya side-effect yang ditekan.
+        const seenKey = `${tk.ticket.id}::${tk.ticket.status}`;
+        const seen = pushSeenRef.current;
+        const isDup = seen.has(seenKey);
+        if (!isDup) {
+          seen.add(seenKey);
+          if (seen.size > 200) {
+            const first = seen.values().next();
+            if (!first.done) seen.delete(first.value);
+          }
+        }
+        // R21: push tanpa salesNum nyata (hanya nomor tiket) = in-memory
+        // saja — jangan fabrikasi baris head/menu di DB.
+        if (tk.hasSalesNum) void cachePushTicket(tk);
         setTickets((prev) => {
           if (!prev.some((x) => x.id === tk.ticket.id)) return [tk.ticket, ...prev];
           // Tiket dikenal (echo / update status server): item selalu segar;
@@ -165,12 +197,16 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
           setMoved((m) => (m[tk.ticket.id] ? m : { ...m, [tk.ticket.id]: tk.ticket.status }));
           return prev.map((x) => (x.id === tk.ticket.id ? { ...x, items: tk.ticket.items } : x));
         });
+        if (isDup) return;
         setLiveNotice(`${t('kit_title')}: ${tk.ticket.no}`);
         void notifyLocal(t('kit_title'), tk.ticket.no, { code: tk.ticket.no }, 'dapur');
         // Perangkat tag dapur (session.terminalTag, fallback peran device legacy): cetak otomatis sesuai preferensi (kontrak §4.3).
         if (kitchenTag() === 'dapur' && getNotif().autoPrintKitchen) {
-          void printKitchenTicket(tk.station, {
-            station: tk.station,
+          // R17: routing per-menu via refs segar (liveStation/menuStation),
+          // bukan heuristik /check/ mentah dari payload.
+          const route = stationOf(tk.ticket, liveStationRef.current, menuStationRef.current);
+          void printKitchenTicket(route, {
+            station: route,
             no: `${t('kit_ticket')} ${tk.ticket.no}`,
             table: tk.ticket.table,
             mode: tk.ticket.mode,
@@ -318,12 +354,58 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
                     onPress={() => {
                       const s = selected;
                       setSelected(null);
-                      // Cetak ulang ikut rantai Q7: clientId diambil dari head agar
-                      // QR struk cetak-ulang tetap terbangun (Receipt butuh
-                      // clientId + no); tanpa ini receiptQr kosong.
+                      // R25: cetak ulang dari DB (head+menu), bukan state
+                      // in-memory — harga/item sesuai yang tersimpan. Sale
+                      // void DITOLAK via Alert (kunci hist_deny_title +
+                      // hist_st_void) agar struk void tak tercetak aktif.
                       void (async () => {
-                        const cid = s?.no ? (await getSaleClientId(s.no)) ?? '' : '';
-                        navigation?.navigate('Receipt', { no: s?.no, total: s ? ticketTotal(s, livePrice) : 0, items: s ? s.items.map((it) => ({ id: it.name, name: it.name, basePrice: priceOf(it, livePrice), qty: it.qty, ...(it.note ? { note: it.note } : {}) })) : [], mode: s?.mode, table: s?.table, discount: 0, ...(cid ? { clientId: cid } : {}) });
+                        try {
+                          await initDb();
+                          const key = String((s as { salesNum?: unknown })?.salesNum ?? s?.no ?? '').trim();
+                          const head = key
+                            ? await queryFirst<{ status: string | null; client_id: string | null; salesMode: string | null; tableNo: string | null }>(
+                                'SELECT status, client_id, salesMode, tableNo FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+                                [key],
+                              )
+                            : null;
+                          if (head && String(head.status ?? '').trim().toLowerCase() === 'void') {
+                            Alert.alert(t('hist_deny_title'), t('hist_st_void'));
+                            return;
+                          }
+                          const rows = key
+                            ? await query<{ menuName: string | null; qty: number | null; price: number | null; discount: number | null; note: string | null }>(
+                                'SELECT menuName, qty, price, discount, note FROM tr_salesmenu WHERE salesNum = ?',
+                                [key],
+                              )
+                            : [];
+                          const items = rows.length > 0
+                            ? rows.map((mr) => ({
+                                id: String(mr.menuName ?? '-'),
+                                name: String(mr.menuName ?? '-'),
+                                basePrice: Math.round(Number(mr.price) || 0),
+                                qty: Math.max(1, Math.round(Number(mr.qty) || 0)),
+                                ...(Number(mr.discount) ? { discount: Math.round(Number(mr.discount)) } : {}),
+                                ...(mr.note ? { note: String(mr.note) } : {}),
+                              }))
+                            : (s ? s.items.map((it) => ({ id: it.name, name: it.name, basePrice: priceOf(it, livePrice), qty: it.qty, ...(it.note ? { note: it.note } : {}) })) : []);
+                          const total = items.reduce((sum, it) => sum + it.basePrice * it.qty, 0);
+                          const cid =
+                            (head?.client_id ? String(head.client_id) : null) ??
+                            (key ? (await getSaleClientId(key)) ?? '' : '');
+                          navigation?.navigate('Receipt', {
+                            no: key || s?.no,
+                            total,
+                            items,
+                            mode: head?.salesMode ?? s?.mode,
+                            table: head?.tableNo ?? s?.table,
+                            discount: 0,
+                            ...(cid ? { clientId: cid } : {}),
+                          });
+                        } catch {
+                          // DB gagal: fallback in-memory lama agar tak diam.
+                          const cid = s?.no ? (await getSaleClientId(s.no)) ?? '' : '';
+                          navigation?.navigate('Receipt', { no: s?.no, total: s ? ticketTotal(s, livePrice) : 0, items: s ? s.items.map((it) => ({ id: it.name, name: it.name, basePrice: priceOf(it, livePrice), qty: it.qty, ...(it.note ? { note: it.note } : {}) })) : [], mode: s?.mode, table: s?.table, discount: 0, ...(cid ? { clientId: cid } : {}) });
+                        }
                       })();
                     }}
                     fullWidth={false}

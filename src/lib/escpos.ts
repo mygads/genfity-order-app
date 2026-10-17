@@ -28,6 +28,12 @@ export interface EscReceipt {
   voucherCode?: string;
   voucherAmount?: number;
   ongkir?: number;
+  /** Potongan ongkir voucher (Rp): dicetak sebagai baris "-Potongan Ongkir"
+   * setelah baris Ongkir (bruto). Tanpa ini struk thermal tak menjumlah
+   * (bruto + total-neto tak berimbang). */
+  ongkirCut?: number;
+  /** Pratinjau belum bayar: cetak penanda BELUM BAYAR di kepala struk. */
+  unpaid?: boolean;
   /** Pembulatan ke Rp 100 (bisa negatif). */
   rounding?: number;
   /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
@@ -36,6 +42,10 @@ export interface EscReceipt {
   logo?: EscMonoImage;
   /** Data QR yang dicetak di bawah struk (mis. nomor transaksi). */
   qr?: string;
+  /** Potong kertas di akhir (R10): default true; false = tanpa GS V (printer
+   *  label / station tanpa autocut). Diisi pemanggil dari station.autocut ??
+   *  setelan global autocut. */
+  cut?: boolean;
   total: number;
   method?: string;
   /** Tunai diterima (Rp). */
@@ -105,10 +115,21 @@ function row2(out: number[], left: string, right: string, cols = ESC_COLS) {
   text(out, `${l}${' '.repeat(space)}${r}`);
 }
 
-/** Decode base64 → byte (tanpa atob agar jalan di semua runtime). */
+/** Decode base64 → byte (tanpa atob agar jalan di semua runtime).
+ * R14: validasi ketat — karakter di luar alfabet base64 atau panjang yang
+ * mustahil (sisa 1 char modulo 4) melempar, bukan dibersihkan diam-diam.
+ * Pemanggil antrean (printqueue.bytesOfPayload) sudah try/catch → baris rusak
+ * dilewati; pemanggil lain wajib memastikan input valid. */
 export function fromBase64(b64: string): Uint8Array {
+  if (!b64) return new Uint8Array(0);
+  if (/[^A-Za-z0-9+/=\s]/.test(b64)) {
+    throw new Error('fromBase64: karakter bukan base64');
+  }
+  const clean = b64.replace(/\s/g, '');
   const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '');
+  if (clean.length % 4 === 1) {
+    throw new Error('fromBase64: panjang base64 tak valid');
+  }
   const out: number[] = [];
   for (let i = 0; i + 3 < clean.length + 3 && i < clean.length; i += 4) {
     const v = (c: string) => (c === '=' || c === undefined ? 0 : abc.indexOf(c));
@@ -125,7 +146,9 @@ export function fromBase64(b64: string): Uint8Array {
 
 /**
  * Perintah cetak bitmap `GS v 0` (raster normal), rata tengah.
- * Lebar dipotong ke 384 dot (58mm) / 576 dot (80mm) bila kelebihan.
+ * BATASAN (R11): lebar dipotong ke 384 dot (58mm) / 576 dot (80mm) bila
+ * kelebihan — piksel di luar batas DIBUANG, bukan diskala; logo > batas harus
+ * dikecilkan dulu (scripts/png2mono.cjs). Baris pendek di-pad NOL (putih).
  */
 export function buildRasterImageBytes(img: EscMonoImage, cols: number): Uint8Array {
   const maxDots = cols >= 48 ? 576 : 384;
@@ -149,8 +172,10 @@ export function buildRasterImageBytes(img: EscMonoImage, cols: number): Uint8Arr
 
 /**
  * Perintah QR Model 2 (`GS ( k`): pilih model → ukuran modul → koreksi
- * error M → simpan data → cetak. Data dibatasi 512 byte agar muat di
- * memori printer. Rata tengah.
+ * error M → simpan data → cetak. Rata tengah.
+ * BATASAN (R12): data dipotong ke 512 byte agar muat di memori printer —
+ * payload lebih panjang (mis. QR verbose) TERCETAK SEBAGIAN tanpa error;
+ * pemanggil wajib menjaga payload tetap pendek (QR sale = client_id + no).
  */
 export function buildQrBytes(data: string): Uint8Array {
   const raw = ascii(data).slice(0, 512);
@@ -186,6 +211,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.trx) text(out, r.trx);
   if (r.cashier) text(out, r.cashier);
   if (r.datetime) text(out, r.datetime);
+  if (r.unpaid) text(out, '** BELUM BAYAR **');
   push(out, ESC, 0x61, 0); // rata kiri
   text(out, '-'.repeat(cols));
   for (const i of r.items) {
@@ -203,6 +229,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
     row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${escRp(r.voucherAmount)}` : '-', cols);
   }
   if (r.ongkir) row2(out, 'Ongkir', escRp(r.ongkir), cols);
+  if (r.ongkirCut) row2(out, 'Potongan Ongkir', `-${escRp(r.ongkirCut)}`, cols);
   if (r.rounding) row2(out, 'Pembulatan', escRp(r.rounding), cols);
   push(out, ESC, 0x45, 1); // tebal
   row2(out, 'TOTAL', escRp(r.total), cols);
@@ -216,7 +243,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   push(out, ESC, 0x61, 1);
   text(out, r.footer ?? 'Terima kasih');
   push(out, LF, LF, LF, LF);
-  push(out, GS, 0x56, 0x00); // potong kertas
+  if (r.cut !== false) push(out, GS, 0x56, 0x00); // potong kertas
   return Uint8Array.from(out);
 }
 
@@ -225,6 +252,8 @@ export interface EscKitchenTicket {
   no: string;
   /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
   cols?: 32 | 48;
+  /** Potong kertas di akhir (R10): default true; false = tanpa GS V. */
+  cut?: boolean;
   table?: string;
   mode?: string;
   time?: string;
@@ -258,7 +287,7 @@ export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
   }
   text(out, '-'.repeat(cols));
   push(out, LF, LF, LF, LF);
-  push(out, GS, 0x56, 0x00);
+  if (t.cut !== false) push(out, GS, 0x56, 0x00);
   return Uint8Array.from(out);
 }
 
@@ -273,6 +302,8 @@ export interface EscQueueSlip {
   branch: string;
   /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
   cols?: 32 | 48;
+  /** Potong kertas di akhir (R10): default true; false = tanpa GS V. */
+  cut?: boolean;
   time?: string;
   table?: string;
   mode?: string;
@@ -299,7 +330,7 @@ export function buildQueueSlipBytes(q: EscQueueSlip): Uint8Array {
   push(out, ESC, 0x61, 1);
   text(out, 'Mohon tunggu panggilan');
   push(out, LF, LF, LF, LF);
-  push(out, GS, 0x56, 0x00);
+  if (q.cut !== false) push(out, GS, 0x56, 0x00);
   return Uint8Array.from(out);
 }
 

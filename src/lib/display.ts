@@ -19,7 +19,7 @@ import { getApiMode } from './apiSource';
 import { normalizeTag } from './deviceRole';
 // APP-R3 touchup: impor statis aman — sse.ts hanya bergantung pada
 // config/server + apiSource (tak mengimpor display, tanpa siklus).
-import { isSseConfigured, subscribeSseStatus, subscribeTerminalEvents } from './sse';
+import { isSseConfigured, subscribeSseFeed, subscribeTerminalEvents, terminalFeedId } from './sse';
 
 export type DisplayOrderItem = { name: string; qty: number; price: number };
 
@@ -67,6 +67,23 @@ function scheduleReconnect(): void {
   }, backoff(retry));
 }
 
+/** D7: robek soket WS + heartbeat + retryTimer (tanpa reconnect yatim).
+ * Dipanggil saat konsumen terakhir lepas; onclose dari close() manual
+ * jatuh ke scheduleReconnect yang diam (listeners kosong). */
+function teardownSocket(): void {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  stopBeat();
+  retry = 0;
+  try {
+    socket?.close();
+  } catch {
+    /* abaikan */
+  }
+  socket = null;
+  setWsLive(false);
+}
+
 export function subscribeDisplay(fn: Listener): () => void {
   listeners.add(fn);
   ensureSocket();
@@ -75,6 +92,7 @@ export function subscribeDisplay(fn: Listener): () => void {
     listeners.delete(fn);
     if (listeners.size === 0) {
       teardownSse();
+      teardownSocket();
     }
   };
 }
@@ -226,12 +244,10 @@ export function getLastDisplayAt(): number {
 
 // ---------------------------------------------------------------------------
 // Umur data (SPEC §8: poll fallback "berpenanda stale" + banner umur data).
-// Kunci 'offline_stale' dirender layar via t()/useTranslation — modul ini
-// hanya memakai string kuncinya (OFFLINE_STALE_KEY), tanpa menambah kamus.
+// D13+M1: dataAgeLabel + OFFLINE_STALE_KEY DIHAPUS (nol pemanggil; kunci
+// 'offline_stale' tak ada di kamus) — layar memakai t('disp_stale').
+// dataAgeMs dipertahankan sebagai util murni tanpa kunci i18n.
 // ---------------------------------------------------------------------------
-
-/** Kunci i18n banner data basi (dirender layar, bukan modul ini). */
-export const OFFLINE_STALE_KEY = 'offline_stale';
 
 /** Ambang basi tampilan display (diselaraskan heartbeat 30 dtk). */
 export const DISPLAY_STALE_MS = 30000;
@@ -245,21 +261,6 @@ export function dataAgeMs(ts: number | string | null | undefined, nowMs = Date.n
   } catch {
     return -1;
   }
-}
-
-/**
- * Label banner umur-data: t('offline_stale') bila basi, '' bila segar/tak
- * diketahui. `t` diinjeksikan layar (dari useTranslation/useLang) karena hook
- * tak boleh dipakai di modul lib; default fallback mengembalikan kuncinya.
- */
-export function dataAgeLabel(
-  ts: number | string | null | undefined,
-  t: (key: string) => string = (k) => k,
-  nowMs = Date.now(),
-): string {
-  const age = dataAgeMs(ts, nowMs);
-  if (age < 0) return '';
-  return age > DISPLAY_STALE_MS ? t(OFFLINE_STALE_KEY) : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +344,48 @@ export function resolveDisplaySseTerminalId(): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// D1: namespace pairedKasirId vs kolom terminalId (CLOSED 2026-10-17).
+// FAKTA: kolom lokal tr_saleshead.terminalId berisi terminalCode (sales.ts
+// menulis t.terminalCode, mis. "K01"); pairedKasirId berisi id BE dari
+// bind/E09 (mis. "T01", fixture branch-terminals.json). Predikat
+// `terminalId = pairedKasirId` tak pernah cocok lintas namespace.
+// PILIHAN: samakan di sisi BACA — resolve kode kasir pasangan via daftar
+// terminal E09 (cache per branch+id). Kabel SSE tak disentuh (URL tetap id
+// BE) dan tulisan kolom tak diubah (milik lane lain + butuh backfill).
+// Gagal resolve (offline/BE absen) = id mentah = kosong jujur (fail-closed).
+// ---------------------------------------------------------------------------
+
+const pairedCodeCache = new Map<string, string>();
+
+/** Kode terminal kasir pasangan untuk predikat SQLite lokal (D1). */
+export async function resolvePairedKasirCode(branchId: string, pairedKasirId: string): Promise<string> {
+  const pid = String(pairedKasirId ?? '').trim();
+  if (!pid) return '';
+  const key = `${String(branchId ?? '').trim()}::${pid}`;
+  const hit = pairedCodeCache.get(key);
+  if (hit) return hit;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const api = require('./terminalApi') as typeof import('./terminalApi');
+    const r = await api.fetchBranchTerminals(String(branchId ?? '').trim());
+    if (r && r.ok) {
+      for (const t of r.data.terminals) {
+        if (String(t?.terminalId ?? '').trim() === pid) {
+          const code = String(t?.terminalCode ?? '').trim();
+          if (code) {
+            pairedCodeCache.set(key, code);
+            return code;
+          }
+        }
+      }
+    }
+  } catch {
+    /* offline/BE absen — fallback id mentah di bawah */
+  }
+  return pid;
+}
+
 function strList(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const out: string[] = [];
@@ -355,9 +398,23 @@ function strList(v: unknown): string[] {
 
 /** Petakan satu event SSE (E26) menjadi 0..N DisplayEvent lokal. */
 function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
-  const t = String(type ?? '').toLowerCase();
-  const d = (data ?? {}) as Record<string, unknown>;
+  // Backend membingkai SETIAP frame sebagai `event: message` dengan JSON
+  // envelope {type, data} (terminal.go:958 snapshot terminal.state, :980
+  // live fan-out + hub terminalEventEnvelope terminal.event) — tipe semantik
+  // ada di data.type BERSARANG, bukan nama event SSE luar. Kupas envelope
+  // dulu; bila tanpa envelope (frame semantik langsung), pakai nama luar.
+  let t = String(type ?? '').toLowerCase();
+  let d = (data ?? {}) as Record<string, unknown>;
+  if (d && typeof d === 'object' && typeof d.type === 'string' && 'data' in d) {
+    t = String(d.type).toLowerCase();
+    d = ((d.data ?? {}) as Record<string, unknown>);
+  }
   const ticket = String(d.ticket ?? d.code ?? d.no ?? d.salesNum ?? '').trim();
+  // D6: UNFIXABLE-client-side: needs E26 client_id — payload E26/E27
+  // (kontrak API-TERMINAL-CONTRACT §4.2 + fixture queue-events.json) tak
+  // membawa client_id; QR live tetap dari kaki lokal (notifySaleSavedLocal)
+  // + kolom SQLite client_id. Bila BE menambahkannya, petakan ke event
+  // order di sini lalu teruskan ke liveClientId layar.
   if (/^(call)$/.test(t)) {
     return ticket ? [{ type: 'call', ticket }] : [];
   }
@@ -430,7 +487,8 @@ function ensureSse(): void {
   teardownSse();
   try {
     sseForId = id;
-    const unsubStatus = subscribeSseStatus((live) => setSseLive(live));
+    // D16: konsumsi status feed milik terminal ini saja (bukan agregat modul).
+    const unsubStatus = subscribeSseFeed(terminalFeedId(id), (s) => setSseLive(s === 'online'));
     const unsubFeed = subscribeTerminalEvents(id, (e) => {
       try {
         const mapped = mapSseToDisplay(e.type, e.data);
@@ -469,9 +527,17 @@ function teardownSse(): void {
   setSseLive(false);
 }
 
-/** Paksa re-resolve SSE (dipanggil setelah (re)bind terminal). */
+/** Paksa re-resolve SSE (dipanggil setelah (re)bind terminal). Idempoten:
+ * feed yang sama tak di-teardown (anti reconnect storm saat dipanggil
+ * periodik oleh layar, D10). */
 export function refreshDisplayTransport(): void {
   if (listeners.size === 0) return;
+  try {
+    const id = resolveDisplaySseTerminalId();
+    if (id && id === sseForId) return;
+  } catch {
+    /* lanjut re-resolve di bawah */
+  }
   sseForId = '';
   ensureSse();
 }

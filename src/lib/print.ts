@@ -3,7 +3,7 @@ import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, type E
 import { getTerminal } from '../config/server';
 import { getJSON } from './storage';
 import { openCashDrawer, printBytes, type PrinterTarget } from '../native/printer';
-import { getBinding, getSessionTag } from '../session';
+import { isViewOnlyTag, resolveEffectiveTag } from './effectiveTag';
 import { drainPrintQueue, enqueuePrint, type QueuedPrintKind } from './printqueue';
 
 export type PrintOutcome =
@@ -22,6 +22,8 @@ interface StoredStation {
   address: string;
   /** Lebar kertas station (32/48) — diteruskan ke builder ESC/POS. */
   cpl?: 32 | 48;
+  /** Potong kertas otomatis — diteruskan ke builder via `cut` (R10). */
+  autocut?: boolean;
   isDefault?: boolean;
   connected?: boolean;
   /**
@@ -84,10 +86,18 @@ function activeScope(): { branchId: string; terminalCode: string } {
   }
 }
 
-/** 0 = terikat terminal aktif, 1 = warisan tanpa binding, 2 = milik terminal lain. */
+/**
+ * R1: ranking per PASANGAN {branchId, terminalCode} — terminalCode cocok
+ * tetapi branchId beda = milik terminal lain (2), bukan binding aktif.
+ * 0 = terikat terminal aktif, 1 = warisan tanpa binding, 2 = milik terminal lain.
+ */
 function scopeRank(s: StoredStation, scope: { branchId: string; terminalCode: string }): number {
   const st = (s.terminalCode ?? '').trim().toUpperCase();
-  if (st && scope.terminalCode && st === scope.terminalCode) return 0;
+  if (st && scope.terminalCode && st === scope.terminalCode) {
+    const sb = (s.branchId ?? '').trim();
+    if (!sb || !scope.branchId || sb === scope.branchId) return 0;
+    return 2;
+  }
   if (!st) return 1;
   return 2;
 }
@@ -112,27 +122,57 @@ async function enqueuePrintJob(
   }
 }
 
+/** Hasil resolusi station: target kirim + nama + lebar kertas + autocut + peran. */
+interface ResolvedStation {
+  target: PrinterTarget;
+  name: string;
+  cols: 32 | 48;
+  /** station.autocut (undefined = ikut setelan global autocut). */
+  autocut?: boolean;
+  /** Peran station (Kasir/Dapur/…) — dipakai drain kind-aware (R3). */
+  role: string;
+}
+
+/** Setelan potong-kertas global (SettingsScreen.AUTOCUT_KEY), default true. */
+async function globalAutocut(): Promise<boolean> {
+  try {
+    return await getJSON<boolean>('genfity.settings.autocut', true);
+  } catch {
+    return true;
+  }
+}
+
 /** Target kirim dari stasiun default (kasir) yang tersimpan di pengaturan. */
-async function defaultStation(): Promise<{ target: PrinterTarget; name: string; cols: 32 | 48 } | null> {
+async function defaultStation(): Promise<ResolvedStation | null> {
   try {
     const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
     const scope = activeScope();
     // Station milik terminal lain disembunyikan dari pool kandidat.
     const pool = stations.filter((s) => scopeRank(s, scope) < 2);
     const bound = pool.filter((s) => scopeRank(s, scope) === 0);
-    const d =
-      bound.find((s) => s.isDefault && s.connected) ??
-      bound.find((s) => s.isDefault) ??
-      bound.find((s) => s.role === 'Kasir') ??
-      bound[0] ??
-      pool.find((s) => s.isDefault && s.connected) ??
-      pool.find((s) => s.isDefault) ??
-      pool.find((s) => s.role === 'Kasir') ??
-      pool[0];
-    if (!d) return null;
-    const target = targetOf(d);
-    if (!target) return null;
-    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32 };
+    // R8: `connected` = penanda preferensi manual ("favorit"), BUKAN hasil
+    // verifikasi liveness — kirim gagal tetap antre persisten, bukan drop.
+    const cands = [
+      bound.find((s) => s.isDefault && s.connected),
+      bound.find((s) => s.isDefault),
+      bound.find((s) => s.role === 'Kasir'),
+      bound[0],
+      pool.find((s) => s.isDefault && s.connected),
+      pool.find((s) => s.isDefault),
+      pool.find((s) => s.role === 'Kasir'),
+      pool[0],
+    ];
+    // R7: lewati station tanpa alamat (targetOf null) — coba kandidat
+    // berikutnya yang bisa dikirimi, bukan gagal karena pilihan pertama buntu.
+    const seen = new Set<string>();
+    for (const d of cands) {
+      if (!d || seen.has(d.id)) continue;
+      seen.add(d.id);
+      const target = targetOf(d);
+      if (!target) continue;
+      return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32, autocut: d.autocut, role: d.role };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -142,7 +182,7 @@ async function defaultStation(): Promise<{ target: PrinterTarget; name: string; 
  * Cari station dapur/checker: cocokkan id kanonis (ST-DAPUR/st-dapur/…)
  * atau peran, tanpa peduli huruf. Kembalikan target + nama bila alamat ada.
  */
-async function kitchenStation(want: string): Promise<{ target: PrinterTarget; name: string; cols: 32 | 48 } | null> {
+async function kitchenStation(want: string): Promise<ResolvedStation | null> {
   try {
     const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
     const scope = activeScope();
@@ -160,37 +200,55 @@ async function kitchenStation(want: string): Promise<{ target: PrinterTarget; na
     if (!d) return null;
     const target = targetOf(d);
     if (!target) return null;
-    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32 };
+    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32, autocut: d.autocut, role: d.role };
   } catch {
     return null;
   }
 }
 
-/** Cari station address book by id kanonis ATAU nama tampilan (case-insensitive). */
-async function stationByKey(key: string): Promise<{ target: PrinterTarget; name: string; cols: 32 | 48 } | null> {
+/** Cari station address book by id kanonis ATAU nama tampilan (case-insensitive).
+ * R2: ter-scoping terminal aktif secara default (milik terminal lain tak
+ * terlihat); `scoped: false` hanya untuk diagnostik. */
+async function stationByKey(key: string, opts?: { scoped?: boolean }): Promise<ResolvedStation | null> {
   const k = key.trim().toLowerCase();
   if (!k) return null;
   try {
     const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
+    const scope = activeScope();
+    const pool = opts?.scoped === false ? stations : stations.filter((s) => scopeRank(s, scope) < 2);
     const d =
-      stations.find((s) => s.id.toLowerCase() === k) ??
-      stations.find((s) => s.name.trim().toLowerCase() === k) ??
+      pool.find((s) => s.id.toLowerCase() === k) ??
+      pool.find((s) => s.name.trim().toLowerCase() === k) ??
       null;
     if (!d) return null;
     const target = targetOf(d);
     if (!target) return null;
-    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32 };
+    return { target, name: d.name, cols: d.cpl === 48 ? 48 : 32, autocut: d.autocut, role: d.role };
   } catch {
     return null;
   }
 }
 
 /**
- * Resolver target pengganti untuk `drainPrintQueue`: petunjuk nama station
- * (baris antrean lawas) dulu, lalu target aktif ter-scoping (terminalCode,
- * branchId). null = printer belum dipair — baris tetap antre.
+ * Resolver target pengganti untuk `drainPrintQueue`, sadar-jenis (R3):
+ * - kind 'kitchen' → station-by-nama peran dapur, lalu station dapur/
+ *   checker/label ter-scoping, atau TETAP ANTRE (null). TIDAK PERNAH jatuh ke
+ *   printer kasir agar tiket dapur tak keluar di kertas struk ber-harga.
+ * - receipt/queue/raw → station-by-nama (baris antrean lawas) lalu default kasir.
  */
 async function resolveDrainTarget(hint: { name: string; kind: QueuedPrintKind }): Promise<{ target: PrinterTarget; name: string } | null> {
+  if (hint.kind === 'kitchen') {
+    if (hint.name) {
+      const byName = await stationByKey(hint.name);
+      // Hanya station peran dapur yang boleh menampung tiket dapur.
+      if (byName && byName.role !== 'Kasir') return { target: byName.target, name: byName.name };
+    }
+    const k =
+      (await kitchenStation('dapur')) ??
+      (await kitchenStation('checker')) ??
+      (await kitchenStation('label'));
+    return k ? { target: k.target, name: k.name } : null;
+  }
   if (hint.name) {
     const byName = await stationByKey(hint.name);
     if (byName) return { target: byName.target, name: byName.name };
@@ -207,28 +265,13 @@ async function resolveDrainTarget(hint: { name: string; kind: QueuedPrintKind })
 export type PrintVariant = 'receipt' | 'kitchen';
 
 /**
- * Tag → varian: `dapur` = tiket dapur tanpa harga; kasir/full_access (dan
- * tag view lain / unknown / legacy) = struk kasir ber-harga. Sumber tag: argumen
- * eksplisit dulu, lalu sesi (backfill binding), lalu binding device
- * (persist lintas logout). Tak pernah melempar.
+ * Tag → varian (R58 via resolveEffectiveTag; SPEC-TERMINAL-SESSION §1):
+ * `dapur` + tag view (view_pelanggan/view_queue) = tiket dapur tanpa harga;
+ * kasir/full_access/unknown/legacy = struk kasir ber-harga. Tak melempar.
  */
 export function variantForTag(tag?: unknown): PrintVariant {
-  const explicit = String(tag ?? '').trim().toLowerCase();
-  if (explicit) return explicit === 'dapur' ? 'kitchen' : 'receipt';
-  let t = '';
-  try {
-    t = String(getSessionTag() ?? '').toLowerCase();
-  } catch {
-    t = '';
-  }
-  if (!t || t === 'full_access') {
-    try {
-      t = (getBinding()?.tag ?? '').trim().toLowerCase() || t;
-    } catch {
-      /* abaikan */
-    }
-  }
-  return t === 'dapur' ? 'kitchen' : 'receipt';
+  const t = resolveEffectiveTag(tag);
+  return t === 'dapur' || isViewOnlyTag(t) ? 'kitchen' : 'receipt';
 }
 
 export interface TagPrintInput {
@@ -245,12 +288,31 @@ export interface TagPrintInput {
 }
 
 /**
- * Dispatcher varian by-tag (pengganti heuristik per-layar): dapur →
- * `buildKitchenTicketBytes`, selainnya → `buildReceiptBytes`. Fallback
- * jujur: varian butuh payload yang tak disediakan → pakai payload yang ada
- * (tak pernah gagal hanya karena varian).
+ * Dispatcher varian by-tag (R5): tag view (pelanggan/antrean) TIDAK PERNAH
+ * menerima struk ber-harga — hanya tiket dapur / slip antrean (tanpa harga);
+ * bila keduanya absen, TOLAK jujur (Alert + outcome gagal), bukan fallback ke
+ * struk. Tag kasir/dapur/full/unknown: dapur → tiket bila ada; selainnya struk
+ * bila ada; fallback jujur ke payload yang ada (tak pernah gagal hanya karena
+ * varian); tanpa payload apa pun → tolak.
  */
 export async function printForTag(input: TagPrintInput): Promise<PrintOutcome> {
+  const tag = resolveEffectiveTag(input.tag);
+  if (isViewOnlyTag(tag)) {
+    if (input.ticket) {
+      return printKitchenTicket(input.station ?? input.ticket.station, input.ticket);
+    }
+    if (input.queue) {
+      return printQueueSlip(input.queue);
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
+      Alert.alert(tOf('hist_deny_title', getLang()), tOf('kit_print_fail', getLang()));
+    } catch {
+      /* abaikan — outcome di bawah tetap jujur */
+    }
+    return { ok: false, reason: 'send-failed', detail: 'printForTag: tag view menolak struk ber-harga' };
+  }
   const variant = variantForTag(input.tag);
   if (variant === 'kitchen' && input.ticket) {
     return printKitchenTicket(input.station ?? input.ticket.station, input.ticket);
@@ -297,7 +359,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target): tercetak otomatis
     // saat printer dipair (drain + resolveDrainTarget) — bukan hilang.
-    const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? 32 });
+    const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? 32, cut: r.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'receipt',
       label: r.trx ?? '',
@@ -306,8 +368,8 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
     return { ok: false, reason: 'no-printer' };
   }
   // Lebar kertas ikut station (chip 32/48 di Pengaturan Printer) kecuali
-  // pemanggil sudah menentukan sendiri.
-  const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? d.cols });
+  // pemanggil sudah menentukan sendiri. R10: cut = payload ?? station ?? global.
+  const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? d.cols, cut: r.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     Alert.alert(
@@ -335,22 +397,23 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
 /**
  * Cetak tiket dapur/checker ke station perannya (bukan printer kasir).
  * `station`: id kanonis ('ST-DAPUR') atau nama peran ('Dapur'/'Checker') —
- * override eksplisit dipertahankan; bila tak ketemu, jatuh ke target aktif
- * 1:1 (bukan Alert langsung). Gagal kirim → antrean + outcome `queued`.
+ * override eksplisit dipertahankan. R4: station tak ketemu = antre persisten
+ * (kind kitchen; drain kind-aware TIDAK PERNAH ke kasir) + Alert jujur —
+ * TANPA fallback diam-diam ke printer struk. Gagal kirim → antrean + `queued`.
  */
 export async function printKitchenTicket(station: string, t: EscKitchenTicket): Promise<PrintOutcome> {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.print === 'function') {
     window.print();
     return { ok: true, bytes: 0, printer: 'OS print' };
   }
-  const d = (await kitchenStation(station)) ?? (await defaultStation());
+  const d = await kitchenStation(station);
   if (!d) {
     Alert.alert(
       'Cetak Tiket Dapur',
       `Station "${station}" belum punya alamat printer. Atur di Pengaturan → Printer lalu coba lagi.`,
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
-    const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32 });
+    const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32, cut: t.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'kitchen',
       label: t.no,
@@ -359,7 +422,7 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
     return { ok: false, reason: 'no-printer' };
   }
   // Lebar kertas ikut station dapur kecuali pemanggil menentukan sendiri.
-  const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols });
+  const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols, cut: t.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     Alert.alert(
@@ -397,7 +460,7 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
       'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.',
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
-    const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? 32 });
+    const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? 32, cut: q.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'queue',
       label: q.queueNo,
@@ -405,7 +468,7 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
     if (queuedId) return { ok: false, reason: 'no-printer', queued: true, queuedId };
     return { ok: false, reason: 'no-printer' };
   }
-  const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? d.cols });
+  const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? d.cols, cut: q.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     Alert.alert(

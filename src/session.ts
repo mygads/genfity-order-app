@@ -3,7 +3,11 @@
  * sesi bertahan restart di web + native. API tetap sinkron seperti semula.
  */
 import { getItem, removeItem, setItem } from './lib/storage';
-import { resolveTerminalTag, type TerminalTag } from './lib/deviceRole';
+import {
+  parseDeviceRole,
+  resolveTerminalTag,
+  type TerminalTag,
+} from './lib/deviceRole';
 import { hashPin, verifyPinHash } from './lib/pin';
 import type { PinRecord } from './lib/pin';
 
@@ -251,6 +255,130 @@ export function clearBinding(): void {
   emit();
 }
 
+/** Masukan adopsi binding (F6): device mengikat tepat satu terminal. */
+export interface AdoptTerminalBindingInput {
+  terminalId: string;
+  terminalCode: string;
+  branchId: string;
+  branchName: string;
+  /** Satu dari 5 tag kanonis (divalidasi parseDeviceRole, fail-closed). */
+  tag: string;
+  deviceId: string;
+  merchantName?: string;
+}
+
+/**
+ * Adopsi binding terminal baru — UNIFIKASI TULIS 3 store (F6+F22):
+ * logout + clearGrant, lalu tulis binding ke SEMUA store: sesi (LS_BINDING
+ * via saveBinding), kontrak terminalContract v1, dan server store
+ * (config/server setTerminal). Tag asing → throw (fail-closed, tanpa default
+ * diam-diam). setPinOpen BUKAN urusan modul ini (milik layar PIN, paket lain).
+ *
+ * Anti-siklus: terminalContract mengimpor statis modul ini, begitu pula
+ * pemakaian lazy-require di config/server — maka kedua store luar ditulis via
+ * lazy-require searah (pola sama dengan logout→realtime di bawah). terminalApi
+ * SENGAJA tak diimpor (jalur network milik paket lain).
+ */
+export function adoptTerminalBinding(
+  input: AdoptTerminalBindingInput,
+): Binding {
+  const terminalId = String(input?.terminalId ?? '').trim();
+  const terminalCode = String(input?.terminalCode ?? '').trim();
+  const branchId = String(input?.branchId ?? '').trim();
+  const branchName = String(input?.branchName ?? '').trim();
+  const deviceId = String(input?.deviceId ?? '').trim();
+  const tag = parseDeviceRole(input?.tag);
+  if (!terminalId || !terminalCode || !branchId || !branchName || !deviceId) {
+    throw new Error('[session] adoptTerminalBinding: binding tak lengkap');
+  }
+  if (!tag) {
+    throw new Error('[session] adoptTerminalBinding: tag terminal tak dikenal');
+  }
+  const prev = binding;
+  const merchantName =
+    String(input?.merchantName ?? '').trim() || prev?.merchantName || '';
+  // Sesi user lama berakhir di device ini; binding lama tak boleh terbawa.
+  logout();
+  clearGrant();
+  const boundAt = new Date().toISOString();
+  const next = saveBinding({
+    terminalId,
+    terminalCode,
+    branchId,
+    branchName,
+    merchantName,
+    tag,
+    // Pairing 1:1 (BE E15) dipertahankan hanya bila terminalnya sama.
+    ...(prev && prev.terminalId === terminalId && prev.pairedKasirId
+      ? { pairedKasirId: prev.pairedKasirId }
+      : {}),
+    ...(prev && prev.terminalId === terminalId && prev.pairedViewId
+      ? { pairedViewId: prev.pairedViewId }
+      : {}),
+    deviceId,
+    boundAt,
+  });
+  // Cermin ke kontrak v1 (async, fire-and-forget — store sesi kanonis sudah
+  // tertulis di atas sehingga kegagalan cermin tak membatalkan bind).
+  try {
+    const tc = require('./lib/terminalContract') as typeof import('./lib/terminalContract');
+    void Promise.resolve(
+      tc.saveBinding({
+        branchId: next.branchId,
+        branchName: next.branchName,
+        terminalId: next.terminalId,
+        terminalCode: next.terminalCode,
+        terminalName: next.terminalCode,
+        tag,
+        deviceId: next.deviceId ?? deviceId,
+        boundAt: next.boundAt,
+      }),
+    ).catch(() => {
+      /* abaikan: cermin best-effort */
+    });
+  } catch {
+    /* abaikan: cermin best-effort */
+  }
+  // Cermin ke server store (sinkron, fire-and-forget di dalamnya).
+  try {
+    const srv = require('./config/server') as typeof import('./config/server');
+    srv.setTerminal({
+      terminalCode: next.terminalCode,
+      branchId: next.branchId,
+      branchName: next.branchName,
+      tag: next.tag,
+    });
+  } catch {
+    /* abaikan: cermin best-effort */
+  }
+  return next;
+}
+
+/**
+ * Keluar dari cabang di SEMUA store (F22, pasangan adoptTerminalBinding):
+ * logout + hapus SEMUA binding (sesi, kontrak v1, server store) + clear
+ * grant. Dipakai unbind/ganti cabang. setPinOpen BUKAN urusan modul ini.
+ */
+export function exitBranchAll(): void {
+  logout();
+  clearGrant();
+  clearBinding();
+  try {
+    const tc = require('./lib/terminalContract') as typeof import('./lib/terminalContract');
+    void Promise.resolve(tc.clearBinding()).catch(() => {
+      /* abaikan: cermin best-effort */
+    });
+  } catch {
+    /* abaikan: cermin best-effort */
+  }
+  try {
+    const srv = require('./config/server') as typeof import('./config/server');
+    srv.setTerminal({ terminalCode: '', branchId: '', branchName: '' });
+  } catch {
+    /* abaikan: cermin best-effort */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Grant cache offline L1 (SPEC-TERMINAL-SESSION §4 + Q6 CLOSED)
 // ---------------------------------------------------------------------------
@@ -407,11 +535,38 @@ export function verifyGrantPin(pin: string): boolean {
 
 /**
  * Perpanjangan sliding window saat auth online sukses (Q6 CLOSED):
- * grantedAt=sekarang, expiresAt=sekarang+policy. false bila tanpa grant.
+ * grantedAt=sekarang, expiresAt=sekarang+policy. G7 fail-closed (audit
+ * 2026-10-17): prasyarat validitas (grant ada + triple cocok + belum
+ * kedaluwarsa) dicek DULU; prasyarat gagal → null TANPA mencetak ulang
+ * (no mint). null = jalur offline ditolak (deny offline path) — pemanggil
+ * non-LoginScreen WAJIB menangani null; LoginScreen dimiliki paket lain.
  */
-export function touchGrant(): boolean {
+export function touchGrant(): Grant | null {
   restoreGrant();
-  if (!grant) return false;
+  restoreBinding();
+  restore();
+  if (!grant) return null;
+  const u = String(current?.userId ?? current?.username ?? '').trim();
+  const t = String(binding?.terminalId ?? current?.terminalId ?? '').trim();
+  let problem: GrantProblem | null;
+  if (u && t) {
+    const d = String(binding?.deviceId ?? current?.deviceId ?? '').trim();
+    problem = describeGrantProblem(u, t, d || undefined);
+  } else {
+    // Tanpa identitas referensi (tak ada sesi/binding): hanya prasyarat
+    // kedaluwarsa yang bisa dinilai — triple-mismatch tak terputus di sini.
+    const now = Date.now();
+    const exp = Date.parse(grant.expiresAt);
+    const grantedMs = Date.parse(grant.grantedAt);
+    const cap = Number.isFinite(grantedMs)
+      ? grantedMs + getMaxOfflineGrantDays() * DAY_MS
+      : exp;
+    problem =
+      !Number.isFinite(exp) || now >= Math.min(exp, cap)
+        ? 'grant-expired'
+        : null;
+  }
+  if (problem !== null) return null;
   const now = Date.now();
   grant = {
     ...grant,
@@ -420,7 +575,7 @@ export function touchGrant(): boolean {
   };
   void setItem(LS_GRANT, JSON.stringify(grant));
   emit();
-  return true;
+  return grant;
 }
 
 /** Policy max_offline_grant_days (server-wins via pull-terminal-settings;
@@ -606,6 +761,22 @@ export function clearPendingRevoke(): void {
   void removeItem(LS_PENDING_REVOKE);
 }
 
+/**
+ * Ambil + hapus revoke terutang sekali-pakai (F22, pola consumeKickNotice):
+ * worker sync mem-flush hasilnya ke E06/E07 lalu membuangnya. null = tak ada
+ * utang. Tak pernah melempar.
+ */
+export function consumePendingRevoke(): PendingRevoke | null {
+  try {
+    restoreRevoke();
+    const r = pendingRevoke;
+    if (r) clearPendingRevoke();
+    return r;
+  } catch {
+    return pendingRevoke;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sesi
 // ---------------------------------------------------------------------------
@@ -614,30 +785,43 @@ export function getSession(): Session | null {
   restore();
   restoreBinding();
   if (current) {
-    if (!current.role) current.role = 'Merchant Staff';
+    // F22: backfill WAJIB persist ke store (bukan sekadar mutasi memori)
+    // agar sesi tersimpan ikut membawa konteks terminal hasil (re)bind.
+    let dirty = false;
+    if (!current.role) {
+      current.role = 'Merchant Staff';
+      dirty = true;
+    }
     // Backfill konteks terminal dari binding bila sesi belum membawanya
     // (mis. sesi lama tersimpan sebelum Fase 1, atau sesudah re-bind).
     // Hanya mengisi yang kosong — cermin paket app-model tak ditimpa.
     if (binding) {
       if (!current.branchId && binding.branchId) {
         current.branchId = binding.branchId;
+        dirty = true;
       }
       if (!current.terminalId && binding.terminalId) {
         current.terminalId = binding.terminalId;
+        dirty = true;
       }
       if (!current.terminalCode && binding.terminalCode) {
         current.terminalCode = binding.terminalCode;
+        dirty = true;
       }
       if (!current.terminalTag && binding.tag) {
         current.terminalTag = binding.tag;
+        dirty = true;
       }
       if (!current.deviceId && binding.deviceId) {
         current.deviceId = binding.deviceId;
+        dirty = true;
       }
       if (!current.merchantName && binding.merchantName) {
         current.merchantName = binding.merchantName;
+        dirty = true;
       }
     }
+    if (dirty) persist();
   }
   return current;
 }
@@ -675,13 +859,25 @@ export function clearSession(): void {
  * sendiri); user berbeda selalu mulai dari basis netral agar identitas,
  * shift, dan kas user sebelumnya tak bocor ke sesi baru.
  *
- * Konteks terminal (branch/terminal/device) milik binding — dipertahankan
- * lintas user agar take-over kick (SPEC §7/Q13) tetap di terminal yang sama.
+ * Konteks terminal (branch/terminal/device) milik binding — F20: binding
+ * SEGAR menang di atas sesi sebelumnya (binding?.x ?? prev?.x) agar take-over
+ * kick (SPEC §7/Q13) tetap di terminal yang sama. ctx terminal opsional
+ * (F17, dari hasil E01 staff-login paket app-login) menang di atas keduanya;
+ * string kosong = tak diubah. Tag ctx divalidasi parseDeviceRole (fail-closed:
+ * tag asing diabaikan, konteks lama dipertahankan).
  * authToken/flag offline selalu dibuang di sini (authKey warisan paket
  * app-login tak disentuh): sesi resmi hanya via saveSession sesudah E01
  * (fail-closed, anti token basi).
  */
-export function loginEmployee(e: { nama: string; username: string; role?: string; userId?: string }): Session {
+export function loginEmployee(
+  e: { nama: string; username: string; role?: string; userId?: string },
+  ctx?: {
+    branchId?: string;
+    terminalCode?: string;
+    terminalTag?: string;
+    deviceId?: string;
+  },
+): Session {
   restore();
   restoreBinding();
   const uname = e.username.trim();
@@ -695,18 +891,30 @@ export function loginEmployee(e: { nama: string; username: string; role?: string
     role: (e.role ?? '').trim() || 'Merchant Staff',
     ...(userId ? { userId } : {}),
   };
-  const keepBranch = prev?.branchId ?? binding?.branchId;
-  const keepTerminalId = prev?.terminalId ?? binding?.terminalId;
-  const keepTerminalCode = prev?.terminalCode ?? binding?.terminalCode;
-  const keepTag = prev?.terminalTag ?? binding?.tag;
-  const keepDevice = prev?.deviceId ?? binding?.deviceId;
-  const keepMerchant = prev?.merchantName ?? binding?.merchantName;
+  // F20: binding segar di atas prev (urutan dibalik dari versi lama).
+  const keepBranch = binding?.branchId ?? prev?.branchId;
+  const keepTerminalId = binding?.terminalId ?? prev?.terminalId;
+  const keepTerminalCode = binding?.terminalCode ?? prev?.terminalCode;
+  const keepTag = binding?.tag ?? prev?.terminalTag;
+  const keepDevice = binding?.deviceId ?? prev?.deviceId;
+  const keepMerchant = binding?.merchantName ?? prev?.merchantName;
   if (keepBranch) current.branchId = keepBranch;
   if (keepTerminalId) current.terminalId = keepTerminalId;
   if (keepTerminalCode) current.terminalCode = keepTerminalCode;
   if (keepTag) current.terminalTag = keepTag;
   if (keepDevice) current.deviceId = keepDevice;
   if (keepMerchant) current.merchantName = keepMerchant;
+  // F17: ctx terminal eksplisit (hasil E01) menang di atas binding + prev.
+  if (ctx) {
+    const cxBranch = String(ctx.branchId ?? '').trim();
+    const cxCode = String(ctx.terminalCode ?? '').trim();
+    const cxDev = String(ctx.deviceId ?? '').trim();
+    const cxTag = parseDeviceRole(ctx.terminalTag);
+    if (cxBranch) current.branchId = cxBranch;
+    if (cxCode) current.terminalCode = cxCode;
+    if (cxTag) current.terminalTag = cxTag;
+    if (cxDev) current.deviceId = cxDev;
+  }
   delete current.authToken;
   delete current.offline;
   current.loginAt = new Date().toISOString();
@@ -746,6 +954,100 @@ export function logout(): void {
     void setWsForeground(false);
   } catch {
     /* abaikan */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KICK-NO-LOCAL-REVOKE + kick-no-live-notify (SPEC §7/Q13): perangkat LAMA
+// yang sesinya digantikan login lain wajib mencabut sesi + grant lokalnya
+// sendiri agar sesi basi tak bisa dipakai lagi. Notif kick disimpan di modul
+// agar layar Login yang tampil pasca-revoke bisa menampilkannya via
+// consumeKickNotice (sekali tampil, pola yang sama dengan approvals).
+// ---------------------------------------------------------------------------
+
+let kickNotice: string | null = null;
+const kickListeners = new Set<Listener>();
+
+/** Simpan notif kick untuk ditampilkan layar berikutnya. Tak pernah melempar. */
+export function setKickNotice(msg: string): void {
+  try {
+    kickNotice = String(msg ?? '');
+    kickListeners.forEach((l) => {
+      try {
+        l();
+      } catch {
+        /* abaikan */
+      }
+    });
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Ambil + kosongkan notif kick (sekali tampil). */
+export function consumeKickNotice(): string | null {
+  const m = kickNotice;
+  kickNotice = null;
+  return m;
+}
+
+/** Intip notif kick tanpa mengonsumsi. */
+export function peekKickNotice(): string | null {
+  return kickNotice;
+}
+
+export function subscribeKickNotice(fn: Listener): () => void {
+  kickListeners.add(fn);
+  return () => {
+    kickListeners.delete(fn);
+  };
+}
+
+/**
+ * Cabut sesi + grant lokal perangkat yang ditendang. kickedUserId opsional:
+ * bila diisi dan tak cocok dengan sesi aktif (userId/username) → abaikan
+ * (false; bukan sesi kami). Tanpa argumen = cabut apa pun yang aktif.
+ * Selalu menandai pendingRevoke (reason 'kicked') agar revoke server-side
+ * menyusul saat E06/E07 mendarat. Tak pernah melempar; true = sesi dicabut.
+ */
+export function revokeKickedSession(kickedUserId?: string): boolean {
+  try {
+    const who = current?.userId ?? current?.username ?? '';
+    const k = String(kickedUserId ?? '').trim();
+    if (k && who && k !== who && k !== (current?.username ?? '')) return false;
+    if (!current && !grant) return false;
+    try {
+      markPendingRevoke({
+        ...(who ? { userId: who } : {}),
+        reason: 'kicked',
+      });
+    } catch {
+      /* abaikan */
+    }
+    try {
+      clearGrant();
+    } catch {
+      /* abaikan */
+    }
+    current = null;
+    postLoginRoute = null;
+    persist();
+    emit();
+    try {
+      const { stopRealtime } = require('./lib/realtime') as typeof import('./lib/realtime');
+      stopRealtime();
+    } catch {
+      /* abaikan */
+    }
+    try {
+      const { setWsForeground } = require('./native/printer') as typeof import('./native/printer');
+      void setWsForeground(false);
+    } catch {
+      /* abaikan */
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 

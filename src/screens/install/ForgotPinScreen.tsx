@@ -17,6 +17,10 @@ import {
 
 type Nav = { goBack: () => void };
 
+/** B9: PIN lemah — semua berulang atau berurutan umum. */
+const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
+const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);
+
 export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -61,6 +65,11 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
       );
       return;
     }
+    // B9: tolak PIN lemah (berulang/berurutan).
+    if (isWeakPin(pin)) {
+      setErr(t('pin_weak'));
+      return;
+    }
     setBusy(true); setErr('');
     try {
       // Scope merchant = branch binding (sesi diutamakan, kontrak fallback):
@@ -74,21 +83,13 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
         ''
       ).trim();
       if (!merchantId) {
-        setErr(
-          lang === 'id'
-            ? 'Perangkat belum terikat terminal — minta owner mengikat dulu atau atur ulang PIN lewat Manajemen User.'
-            : 'Device is not bound to a terminal — ask the owner to bind it first or reset the PIN via User Management.',
-        );
+        setErr(t('forgot_unbound'));
         return;
       }
       const r = await requestPinReset({ userIdOrUsername: u, merchantId, newPin: pin });
       if (r.ok) { setSent('ok'); setPin(''); setConfirm(''); return; }
       if (r.offline) { setSent('offline'); return; }
-      setErr(
-        lang === 'id'
-          ? 'Reset ditolak server — periksa username atau hubungi owner outlet.'
-          : 'Server rejected the reset — check the username or contact the outlet owner.',
-      );
+      setErr(t('forgot_rejected'));
     } finally {
       setBusy(false);
     }
@@ -106,7 +107,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
                 reset langsung — alur lama mengklaim "tautan dikirim ke email
                 supervisor" padahal body baru menyetel PIN langsung. */}
             {sent === 'offline' || offline ? t('g_forgot_offline') : (
-              <>{lang === 'id' ? 'PIN untuk ' : 'PIN for '}<Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{lang === 'id' ? ' berhasil direset. Masuk dengan PIN baru Anda.' : ' has been reset. Sign in with your new PIN.'}</>
+              <>{t('forgot_reset_ok').replace('{user}', username || t('g_forgot_cashier_fb'))}</>
             )}
           </Text>
           <AppButton

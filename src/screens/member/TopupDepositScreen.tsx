@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -11,11 +11,13 @@ import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
+import { getBranchId, getTerminal } from '../../config/server';import { memberErpApi, unwrap } from '../../lib/apiSource';
+import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
-import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
+import { hasOpenShift } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -30,10 +32,14 @@ const MIN_TOPUP = 10000;
 
 /**
  * Simpan top up deposit ikut kontrak §5.2: POST member-deposit-withdrawal/topup
- * {memberId, amount, paymentMethod, note}. Catat ke outbox + antrean sync
- * agar aman offline; inquiry-deposit hanya untuk cek saldo, bukan top up.
+ * {memberId, amount, paymentMethod, note}. SINGLE-POST: satu tap = SATU kunci
+ * `dep-…` bersama untuk direct + fisik + light (direct-or-one-light); 409 =
+ * server sudah punya = posted. inquiry-deposit hanya untuk cek saldo.
  */
 async function persistTopup(memberId: string, nominal: number, method: string, note?: string, balanceAfter?: number): Promise<void> {
+  // SATU kunci idempotensi untuk semua kanal tap ini (ledger id + fisik
+  // orderID + light id/clientId + direct clientId/header).
+  const key = newDepositKey();
   // Saldo member ikut naik di DB lokal (kolom depositBalance, selaras
   // MemberScreen.saveDeposit) agar layar Member + pembayaran deposit langsung
   // konsisten offline; syncDate NULL menandai untuk push berikutnya.
@@ -58,36 +64,46 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
   }
   // FIX2-5: baris ledger lokal tr_memberdeposit (jenis 'topup') agar tiap mutasi
   // tercatat offline-first + ikut outbox/push, bukan hanya update ms_member.
+  // id ledger = kunci bersama (bukan dep-Date.now) agar fisik + light + direct
+  // membawa identitas yang sama.
   try {
     await initDb();
     const nowIso = new Date().toISOString();
-    const depId = `dep-${Date.now()}`;
     // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
     const userId = getSession()?.userId || getSession()?.username || null;
     await run(
       `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
-      [depId, memberId, getTerminal().branchId || null, nominal, after ?? null, userId, nowIso],
+      [key, memberId, getTerminal().branchId || null, nominal, after ?? null, userId, nowIso],
     );
-    await enqueueOutbox('tr_memberdeposit', depId, 'insert');
+    // Fisik SAJA (tanpa light generik kembar {table,rowId,op}): light twin di
+    // bawah sudah membawa kunci yang sama secara eksplisit.
+    await enqueueOutboxPhysical('tr_memberdeposit', key, 'insert');
   } catch {
     /* abaikan: outbox ms_member di atas tetap jalan */
   }
+  // Direct-or-one-light: coba POST langsung dengan kunci bersama; light twin
+  // (id + clientId = kunci sama) HANYA bila direct tak posted (offline/gagal).
+  let posted = false;
   try {
-    enqueueSync('other', { kind: 'deposit-topup', memberId, nominal, method });
+    posted = (await postDepositOnce({ key, memberId, amount: nominal, method, note })).posted;
   } catch {
-    /* abaikan */
+    posted = false;
   }
-  try {
-    await apiFetch(ApiPath.depositTopup, { body: { memberId, amount: nominal, paymentMethod: method, note: note ?? '' } });
-  } catch {
-    /* offline - terkirim via push berikutnya */
+  if (!posted) {
+    try {
+      // Alias kanonis kontrak §5.2 (amount/paymentMethod) di samping kunci
+      // ringan lama (nominal/method) agar server ketat tetap memproses retry.
+      enqueueSync('other', { kind: 'deposit-topup', memberId, nominal, method, amount: nominal, paymentMethod: method, clientId: key }, key);
+    } catch {
+      /* abaikan */
+    }
   }
 }
 
 export default function TopupDepositScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, t } = useLang();
+  const { t } = useLang();
   // Tanpa memberId param = layar dibuka di luar alur (deep-link/dev) — JANGAN
   // tulis ke member contoh. Guard hasMember menonaktifkan submit di bawah.
   const hasMember = !!(route?.params?.memberId && route?.params?.memberId.trim());
@@ -119,6 +135,13 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const [catatan, setCatatan] = useState('');
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Anti double-tap sinkron (cermin depositBusy MemberScreen): state `saving`
+  // baru terlihat render berikutnya + ada await hasOpenShift sebelum persist,
+  // sehingga dua onPress cepat bisa sama-sama lolos `ready` dan mencetak DUA
+  // kunci (= kredit ganda). Ref ini menolak tap kedua sebelum await pertama.
+  const submitBusy = useRef(false);
+  // U3: error gerbang identitas submit (bound terminal + shift buka).
+  const [saveErr, setSaveErr] = useState('');
 
   // Guard online seperti Member: offline tampilkan banner, submit tetap antre via outbox.
   const [online, setOnline] = useState(true);
@@ -156,11 +179,25 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const ready = hasMember && nominalNum >= MIN_TOPUP && method !== '' && !saving;
   const saldoAkhir = saldoAwal + nominalNum;
 
-  /** Submit: persist/outbox dulu, lalu tampilkan sukses (saldo kembali ke Member). */
-  const submit = () => {
-    if (!ready) return;
+  /** Submit: gerbang identitas dulu (fail-closed), lalu persist/outbox + sukses. */
+  const submit = async () => {
+    if (!ready || submitBusy.current) return;
+    submitBusy.current = true;
+    // U3: deposit-save = gerbang bound terminal + shift buka (fail-closed).
+    if (!getBranchId().trim()) {
+      submitBusy.current = false;
+      setSaveErr(t('terminal_unbound_hint'));
+      return;
+    }
+    if (!(await hasOpenShift())) {
+      submitBusy.current = false;
+      setSaveErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+      return;
+    }
+    setSaveErr('');
     setSaving(true);
     void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).finally(() => {
+      submitBusy.current = false;
       setSaving(false);
       setDone(true);
     });
@@ -225,7 +262,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           <Text style={s.offlineBanner}>{t('top_queued')}</Text>
         )}
         {!hasMember && (
-          <Text style={s.offlineBanner}>{lang === 'id' ? 'Buka layar ini dari daftar member agar ID member terbawa.' : 'Open this screen from the member list so the member ID is carried over.'}</Text>
+          <Text style={s.offlineBanner}>{t('top_member_missing')}</Text>
         )}
 
         <View style={s.card}>
@@ -285,8 +322,11 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           size="md"
           title={saving ? '...' : `${t('top_pay')} - ${rp(nominalNum)}`}
           disabled={!ready}
-          onPress={submit}
+          onPress={() => void submit()}
         />
+        {saveErr ? (
+          <Text style={s.offlineBanner}>{saveErr}</Text>
+        ) : null}
         {!ready && !saving && (
           <Text style={s.hint}>{t('top_hint')}</Text>
         )}

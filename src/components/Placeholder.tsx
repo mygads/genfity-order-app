@@ -1,11 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '../theme';
+import { useLang } from '../lib/i18n';
 
 export default function Placeholder({ title }: { title: string }) {
+  const { t } = useLang();
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>{title}</Text>
-      <Text style={styles.sub}>Layar segera hadir</Text>
+      <Text style={styles.sub}>{t('ph_coming_soon')}</Text>
     </View>
   );
 }

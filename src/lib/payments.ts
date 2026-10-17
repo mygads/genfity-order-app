@@ -159,6 +159,11 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
   return {
     method: normalizeMethod(s.method),
     ...(s.salesNum ? { salesNum: s.salesNum } : {}),
+    // displayNo = nomor struk manusiawi untuk kolom backend display_no
+    // (orders_pos_create.go parsePOSSaleIdentity: butuh clientId saudaranya;
+    // tanpa displayNo, backend tak mengisi display_no). salesNum adalah
+    // sumber tunggalnya — satu nomor untuk saveSale + push + QR.
+    ...(s.salesNum ? { displayNo: s.salesNum } : {}),
     // Kunci stabil QR + rekonsiliasi (Q7). Bentuk camelCase menyamai
     // clientId outbox fisik (sync.ts drainPhysicalQueue) — satu kunci di
     // semua payload; BE terima-dua-format selama transisi. Bentuk snake_case

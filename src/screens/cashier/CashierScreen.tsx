@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -178,7 +179,7 @@ function MenuThumb({ size = 52 }: { size?: number }) {
 export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= TABLET_BP;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge 3-state (mirror DashboardScreen): hijau+Online bila jaringan & WS up,
   // amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui (null)/WS putus.
@@ -218,46 +219,52 @@ export default function CashierScreen({ navigation, route }: Props) {
   );
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
-  /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya banner info -
-   * tombol Bayar tetap hidup, Pay tampilkan peringatan tapi tetap bisa bayar.
+  /** G5: sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync = BLOKIR Bayar
+   * (tombol Bayar/CTA mati + banner blokir beraksi Sync di bawah).
    * Local Mode (tanpa server untuk sync): banner TIDAK tampil - tak ada
    * server yang bisa di-sync, dan kasir harus tetap bisa dipakai. */
   const syncBlocked = syncWarnLevel() === 'block7' && getApiMode() !== 'local';
-  /** Gerbang grant terminal E00045 (Q6): grant ADA tapi tak valid
-   * (kedaluwarsa/mismatch) = layar blokir + tombol Masuk Ulang. TANPA grant
-   * sama sekali ('no-grant', pra-grant) = lolos (kompatibilitas + instalasi
-   * fresh), gate login yang menerbitkan grant saat online. Tak pernah
-   * memblokir karena gate gagal dibaca (fail-open, login yang memutuskan). */
+  /** Gerbang grant terminal E00045 (Q6): TANPA grant valid (kedaluwarsa /
+   * mismatch / no-grant) = layar blokir + tombol Masuk Ulang (fail-closed).
+   * Login pertama wajib online untuk menerbitkan grant; tak ada jalan
+   * pra-grant. Tak pernah memblokir karena gate gagal dibaca (fail-open
+   * baca, login yang memutuskan). */
   const [grantDenied, setGrantDenied] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    // restore() session/binding async fire-and-forget: cold start bisa baca
-    // null di mount pertama lalu early-return selamanya (deps []). Coba ulang
-    // s.d. 3x agar blokir E00045 tetap muncul walau restore belum selesai.
-    const check = async (left: number) => {
+  /** G3: cek grant terminal — dipakai ulang saat mount DAN setiap fokus layar
+   * (kembali dari Install/klaim ulang), plus tombol "Coba Lagi" di layar blokir. */
+  const recheckGrant = useCallback(async () => {
+    let left = 3;
+    while (left > 0) {
       try {
         const uid = (getSession()?.userId ?? '').trim();
         const tid = (getBinding()?.terminalId ?? '').trim();
-        if ((!uid || !tid) && left > 0) {
-          timer = setTimeout(() => {
-            if (alive) void check(left - 1);
-          }, 1500);
-          return;
+        // restore() session/binding async fire-and-forget: cold start bisa baca
+        // null di cek pertama — tunggu 1.5 dtk lalu coba lagi (maks 3x) agar
+        // blokir E00045 tetap muncul walau restore belum selesai.
+        if ((!uid || !tid) && left > 1) {
+          await new Promise<void>((res) => setTimeout(res, 1500));
+          left -= 1;
+          continue;
         }
         if (!uid || !tid) return;
         const r = await requireTerminalAccess(uid, tid);
-        if (alive) setGrantDenied(!r.ok && r.reason !== 'no-grant');
+        // Fail-closed penuh: 'no-grant' ikut memblokir (tanpa pass pra-grant).
+        setGrantDenied(!r.ok);
+        return;
       } catch {
         /* gate tak terbaca - fail-open, login gate yang memutuskan */
+        return;
       }
-    };
-    void check(3);
-    return () => {
-      alive = false;
-      if (timer) clearTimeout(timer);
-    };
+    }
   }, []);
+  useEffect(() => {
+    void recheckGrant();
+  }, [recheckGrant]);
+  useFocusEffect(
+    useCallback(() => {
+      void recheckGrant();
+    }, [recheckGrant]),
+  );
   const renderSyncBlock = () =>
     syncBlocked ? (
       <TouchableOpacity style={styles.modeNote} onPress={() => navigation?.navigate('Sync')}>
@@ -272,10 +279,14 @@ export default function CashierScreen({ navigation, route }: Props) {
       return true;
     }
   })();
+  /** B10: branch unbound — banner blokir + tombol Klaim Terminal (fail-closed:
+   *  CTA Bayar ikut mati via branchUnbound, klaim diarahkan ke Install). */
   const renderUnboundNotice = () =>
     branchUnbound ? (
       <View style={styles.modeNote}>
+        <Text style={styles.modeNoteT}>{t('terminal_unbound_title')}</Text>
         <Text style={styles.modeNoteT}>{t('terminal_unbound_hint')}</Text>
+        <AppButton title={t('inst_claim_btn')} onPress={() => navigation?.navigate('Install')} />
       </View>
     ) : null;
   useEffect(() => {
@@ -577,7 +588,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (p.customer !== undefined || p.tamu !== undefined) {
       const nm = (p.customer ?? '').trim();
       const nx = Math.max(0, Number(p.tamu) || 0);
-      setCustomer(nx > 0 ? (nm ? `${nm} (${nx} tamu)` : `${nx} tamu`) : nm);
+      setCustomer(nx > 0 ? (nm ? `${nm} (${nx} ${t('guests')})` : `${nx} ${t('guests')}`) : nm);
     }
     if (p.ongkir !== undefined) setOngkir(Math.max(0, Number(p.ongkir) || 0));
     if (p.mode && MODES.includes(p.mode)) {
@@ -866,7 +877,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     <Modal visible={voidTarget !== null} transparent animationType="fade" onRequestClose={() => setVoidTarget(null)}>
       <View style={styles.dialogOverlay}>
         <View style={styles.dialogCard}>
-          <Text style={styles.dialogTitle}>Supervisor PIN</Text>
+          <Text style={styles.dialogTitle}>{t('cx_pin')}</Text>
           <Text style={styles.dialogSub}>{t('void_dialog_sub')}</Text>
           <AppInput
             boxStyle={styles.dialogInput}
@@ -976,7 +987,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     })();
   };
 
-  const today = new Date().toLocaleDateString('id-ID', {
+  const today = new Date().toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', {
     weekday: 'long',
     day: 'numeric',
     month: 'short',
@@ -1174,7 +1185,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.subTile, subs.length > 2 && (isWide ? styles.subTileEvenWide : styles.subTileEven), !activeSub && styles.subTileActive]}
           onPress={() => setActiveSub(null)}>
-          <Text style={[styles.subTileText, !activeSub && styles.subTileTextActive]}>Semua</Text>
+          <Text style={[styles.subTileText, !activeSub && styles.subTileTextActive]}>{t('c_all')}</Text>
         </TouchableOpacity>
         {subs.map((s) => {
           const active = activeSub === s;
@@ -1254,7 +1265,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   {inCart && inCart.discount > 0 ? (
                     <Text style={styles.rowDisc}>{t('discount')} -{rp(inCart.discount)}</Text>
                   ) : null}
-                  {inCart?.voided ? <Text style={styles.voidBadge}>Void</Text> : null}
+                  {inCart?.voided ? <Text style={styles.voidBadge}>{t('hist_st_void')}</Text> : null}
                 </View>
               </TouchableOpacity>
               {item.soldOut ? (
@@ -1302,7 +1313,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             style={styles.emptyImg}
             resizeMode="contain"
           />
-          <Text style={styles.empty}>Menu tidak ditemukan</Text>
+          <Text style={styles.empty}>{t('common.noMatch')}</Text>
         </View>
       }
       ItemSeparatorComponent={!isWide ? () =><View style={styles.rowSep} /> : undefined}
@@ -1314,7 +1325,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.cartHeader}>
         <Image source={require('../../../assets/icons/check_circle_green.webp')} style={styles.cartCheckIcon} resizeMode="contain" />
         <Text style={styles.cartTitle}>
-          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} item - {customer.trim() || t('guestFallback')}{salesNum.trim() ? ` · ${salesNum.trim()}` : ''}
+          {mode}{table ? ` · ${t('table')} ${table}` : ''} - {itemCount} {t('hist_items')} - {customer.trim() || t('guestFallback')}{salesNum.trim() ? ` · ${salesNum.trim()}` : ''}
         </Text>
       </View>
       <FlatList
@@ -1340,7 +1351,7 @@ export default function CashierScreen({ navigation, route }: Props) {
               <View style={styles.cartInfo}>
                 <Text style={[styles.cartName, item.voided && styles.voidName]}>
                   {item.name}
-                  {item.voided ? ' (Void)' : ''}
+                  {item.voided ? ` (${t('hist_st_void')})` : ''}
                 </Text>
                 {item.modifiers.length === 0 ? (
                   <Text style={styles.cartUnit}>@ {rp(item.basePrice)}</Text>
@@ -1478,8 +1489,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={[styles.btnPay, activeCart.length === 0 && styles.ctaDisabled]}
-          disabled={activeCart.length === 0}
+          style={[styles.btnPay, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
+          disabled={activeCart.length === 0 || branchUnbound || syncBlocked}
           onPress={goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
           <Text style={styles.btnPayText} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)}</Text>
@@ -1506,6 +1517,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <View style={styles.blockedWrap}>
           <Text style={styles.blockedTitle}>{t('grant_blocked')}</Text>
           <Text style={styles.blockedSub}>{`${t('grant_code_block')}: ${t('grant_blocked_msg')}`}</Text>
+          <AppButton title={t('edc_retry')} onPress={() => void recheckGrant()} />
           <AppButton title={t('grant_open_login')} onPress={() => navigation?.navigate('Login')} />
         </View>
       </View>
@@ -1667,8 +1679,8 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.ctaNote}>{t('deliveryFee')} {rp(ongkirNet)} - {t('needOngkirHint')}</Text>
         ) : null}
         <TouchableOpacity
-          style={[styles.cta, activeCart.length === 0 && styles.ctaDisabled]}
-          disabled={activeCart.length === 0}
+          style={[styles.cta, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
+          disabled={activeCart.length === 0 || branchUnbound || syncBlocked}
           onPress={goCart}
           activeOpacity={0.85}>
           <View style={styles.ctaCount}>

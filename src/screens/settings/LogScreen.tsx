@@ -4,7 +4,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
-import { useLang } from '../../lib/i18n';
+import { getLang, useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, run } from '../../lib/db';
 import { shareReceipt } from '../../lib/print';
@@ -42,7 +42,7 @@ export async function logApp(level: LogLevel, tag: string, message: string, deta
     const now = new Date();
     const entry: AppLog = {
       id: `l-${Date.now()}`,
-      time: `${now.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} ${now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`,
+      time: `${now.toLocaleDateString(getLang() === 'en' ? 'en-US' : 'id-ID', { day: 'numeric', month: 'short' })} ${now.toLocaleTimeString(getLang() === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' })}`,
       level,
       tag,
       message,

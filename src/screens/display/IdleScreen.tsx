@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang,
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { DISPLAY_STALE_MS } from '../../lib/display';import { useLang,
 
 type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
@@ -70,22 +70,8 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
             .map((r) => ({ id: String(r.promoCode ?? r.promoName), title: String(r.promoCode ?? ''), desc: String(r.promoName ?? '') })),
         );
       } catch { /* tanpa promo — slide netral toko dipakai */ }
-      // M9: '' = unbound (tanpa fallback B001) — hitungan dilewati agar tak
-      // menampilkan antrean cabang lain; banner unbound tampil di bawah.
-      try {
-        let branchId = '';
-        try { branchId = getBranchId(); } catch { branchId = ''; }
-        if (branchId) {
-          const cnt = await query<{ n: number }>(
-            `SELECT COUNT(*) AS n FROM tr_saleshead WHERE (status IS NULL OR status <> 'paid') AND branchId = ?`,
-            [branchId],
-          );
-          if (live) {
-            setOpenCount(Number(cnt[0]?.n) || 0);
-            setCountAt(Date.now());
-          }
-        }
-      } catch { /* hitungan opsional */ }
+      // D12: hitungan antrean pindah ke efek interval 30 dtk di bawah
+      // (efek ini hanya muat awal: promo + wifi).
       try {
         const ws = await query<{ value1: string | null }>(
           `SELECT value1 FROM ms_setting WHERE key1 = 'Network' AND key2 = 'WifiSsid' LIMIT 1`,
@@ -94,6 +80,30 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
       } catch { /* tanpa SSID — kotak disembunyikan */ }
     })();
     return () => { live = false; };
+  }, []);
+  /** D12: refresh hitungan antrean tiap 30 dtk. M9 dipertahankan: '' =
+   * unbound (tanpa fallback B001) — hitungan dilewati agar tak menampilkan
+   * antrean cabang lain; banner unbound tampil di bawah. */
+  useEffect(() => {
+    let live = true;
+    const loadCount = async () => {
+      try {
+        let branchId = '';
+        try { branchId = getBranchId(); } catch { branchId = ''; }
+        if (!branchId) return;
+        const cnt = await query<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM tr_saleshead WHERE (status IS NULL OR status <> 'paid') AND branchId = ?`,
+          [branchId],
+        );
+        if (live) {
+          setOpenCount(Number(cnt[0]?.n) || 0);
+          setCountAt(Date.now());
+        }
+      } catch { /* hitungan opsional */ }
+    };
+    void loadCount();
+    const timer = setInterval(() => { void loadCount(); }, 30000);
+    return () => { live = false; clearInterval(timer); };
   }, []);
   /** Notice gerbang shift saat ketuk kembali order (shift tutup → ke layar Shift). */
   const [gateNotice, setGateNotice] = useState('');
@@ -117,7 +127,7 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>{online === false ? (
       <View style={styles.offlineBanner}>
-        <Text style={styles.offlineBannerText}>{lang === 'id' ? 'Offline — menunggu koneksi server' : 'Offline — waiting for server connection'}</Text>
+        <Text style={styles.offlineBannerText}>{t('disp_offline_banner')}</Text>
       </View>
       ) : null}{branchUnbound ? (
       <View style={styles.offlineBanner}>
@@ -154,8 +164,8 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
           <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{openCount} {t('idle_queue_suffix')}</Text>
         </View>
       </View>
-      {online === false && countAt !== null ? (
-        <Text style={styles.staleText}>{lang === 'id' ? 'Data antrean basi' : 'Stale queue data'}</Text>
+      {countAt !== null && (online === false || Date.now() - countAt > DISPLAY_STALE_MS) ? (
+        <Text style={styles.staleText}>{t('idle_stale_queue')}</Text>
       ) : null}
       {isViewLocked ? null : (
       <TouchableOpacity style={styles.cta} onPress={goCashier}>

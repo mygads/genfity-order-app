@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { fmtDate, fmtTime } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import { getBranchId } from '../../config/server';import { initDb, query } from '../../lib/db';
-import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Arus = 'Masuk' | 'Keluar';type Txn = {
+import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { fmtDate, fmtTime } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import { getBranchId } from '../../config/server';import { initDb, query } from '../../lib/db';
+import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';import { verifyLocalEscalation } from '../../lib/supervisor';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Arus = 'Masuk' | 'Keluar';type Txn = {
   id: string;
   tanggal: string;
   keterangan: string;
@@ -11,7 +11,7 @@ import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyA
 photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};/** DB kosong = empty-state (tanpa seed). */function fmtTxn(iso: string | null): string { if (!iso) return fmtDate(new Date()); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return `${fmtDate(d)} ${fmtTime(d)}`; } catch { return iso; }}export default function PettyCashScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<'Semua' | Arus>('Semua');
+  const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [filter, setFilter] = useState<'Semua' | Arus>('Semua');
 
   // F7: muat ulang tiap layar jadi fokus agar approve dari Detail langsung
   // terlihat di daftar (focus-listener; aman: guard addListener + alive).
@@ -24,7 +24,28 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
     [items],
   );
 
-  const approve = async (id: string) => { setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x))); await markApproved(id); }; const go = (route: string) => navigation?.navigate(route); return (
+  // WIRE-APPROVAL (row-17 petty): approve = eskalasi PIN owner
+  // (verifyLocalEscalation 'settings.edit'); identitas approver tercatat via
+  // markApproved(id, approver) + rincian by/at + sync. Tanpa PIN = tak approve.
+  const [pin, setPin] = useState('');
+  const [pinVisible, setPinVisible] = useState(false);
+  const [pinErr, setPinErr] = useState('');
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  /** Buka modal PIN owner untuk satu transaksi (audit trail, bukan auto-approve). */
+  const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
+  /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
+  const confirmApprove = async () => {
+    if (!pendingId) return;
+    const esc = await verifyLocalEscalation(pin, 'settings.edit');
+    if (!esc.ok) { setPinErr(esc.message); return; }
+    const approver = (esc.userId ?? '').trim();
+    if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
+    const id = pendingId;
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x)));
+    await markApproved(id, approver);
+    setPinVisible(false); setPin(''); setPendingId(null);
+  }; const go = (route: string) => navigation?.navigate(route); return (
     <View style={s.root}>
       <ScreenHeader title={t('petty.title')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
@@ -82,13 +103,46 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
                 <Text style={[s.jumlah, x.arus === 'Masuk' ? s.jumlahIn : s.jumlahOut]}>
                   {x.arus === 'Masuk' ? '+' : '-'}{rp(x.jumlah)}
                 </Text>
-                {x.disetujui ? (<Text style={s.okTxt}>{t('petty.approved')}</Text> ) : (<TouchableOpacity onPress={() => approve(x.id)} hitSlop={8}><Text style={s.waitTxt}>{t('petty.pending')}</Text></TouchableOpacity> )}
+                {x.disetujui ? (<Text style={s.okTxt}>{t('petty.approved')}</Text> ) : (<TouchableOpacity onPress={() => setujui(x.id)} hitSlop={8}><Text style={s.waitTxt}>{t('petty.pending')}</Text></TouchableOpacity> )}
               </View>
             </TouchableOpacity>
           ))}
           </View>
         )}
       </ScrollView>
+
+      {/* WIRE-APPROVAL: modal PIN owner untuk approve. Judul/petunjuk literal netral ID/EN; tombol batal pakai key existing. */}
+      <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
+        <View style={s.modalBg}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={s.modalTitle}>{t('petty_approve_title')}</Text>
+            <Text style={s.modalHint}>{t('petty_approve_hint')}</Text>
+            <View style={s.pinDots} accessibilityLabel={t('cx_pin')}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />
+              ))}
+            </View>
+            {pinErr ? <Text style={s.pinErr}>{pinErr}</Text> : null}
+            <View style={s.pinPad}>
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'].map((k) => (
+                <TouchableOpacity
+                  key={k}
+                  style={s.pinKey}
+                  onPress={() => {
+                    if (k === 'C') setPin(pin.slice(0, -1));
+                    else if (k === 'OK') void confirmApprove();
+                    else if (pin.length < 6) setPin(pin + k);
+                  }}>
+                  <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => { setPinVisible(false); setPin(''); setPendingId(null); }}>
+              <Text style={s.cancelTxt}>{t('c_cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <View style={s.footer}>
         {isTablet ? (
@@ -157,4 +211,18 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
   // Tablet: isi footer absolute dibatasi lebarnya + tengah.
   footerInnerTablet: { width: '100%', maxWidth: 880, alignSelf: 'center' },
   primary: { backgroundColor: colors.orange, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
-  primaryT: { color: colors.white, fontSize: 15, fontFamily: fonts.bold },});
+  primaryT: { color: colors.white, fontSize: 15, fontFamily: fonts.bold },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, alignItems: 'center' },
+  modalCardTablet: { width: '100%', maxWidth: 520, alignSelf: 'center', borderRadius: 16 },
+  modalTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  modalHint: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 8, textAlign: 'center' },
+  pinDots: { flexDirection: 'row', marginVertical: 18 },
+  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: colors.navy, marginHorizontal: 6 },
+  dotFill: { backgroundColor: colors.navy },
+  pinPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  pinKey: { width: 72, height: 56, borderRadius: 10, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', margin: 5 },
+  pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
+  pinErr: { fontSize: 13, fontFamily: fonts.medium, color: colors.red, textAlign: 'center', marginTop: 4 },
+  cancelBtn: { marginTop: 12, padding: 10 },
+  cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },});

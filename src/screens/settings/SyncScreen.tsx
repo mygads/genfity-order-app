@@ -1,22 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke,
-  applyAutoSyncPrefs, WARN_SYNC_DAYS, FORCE_SYNC_DAYS,
+import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke,
+  applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS,
 
-type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
+type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
+// APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
+import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
   createdAt: string;
-  status: 'antre' | 'terkirim' | 'gagal';}const LS_OPTS = 'genfity.sync.opts';/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string }): string {
+  status: 'antre' | 'terkirim' | 'gagal';}const LS_OPTS = 'genfity.sync.opts';/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). S8:
+ * kind deposit/shift/voucher/member memakai kunci kamus + identifier. */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string; dep: string; shift: string; voucher: string; member: string }): string {
 
-const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `${String(p.method ?? labels.sale)} - ${rp(Number(p.total ?? 0))}`; if (o.kind === 'receipt') return `Email ${String(p.email ?? '')} - ${String(p.no ?? '')}`; if (o.kind === 'attendance') return labels.attendance; return String(p.table ?? p.rowId ?? labels.other);}function fmtTime(iso: string): string
+const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `${String(p.method ?? labels.sale)} - ${rp(Number(p.total ?? 0))}`; if (o.kind === 'receipt') return `Email ${String(p.email ?? '')} - ${String(p.no ?? '')}`; if (o.kind === 'attendance') return labels.attendance;
+  const k = String(p.kind ?? '');
+  const op = String(p.op ?? '');
+  if (k === 'deposit-refund' || k === 'deposit-withdraw' || k === 'deposit-topup' || k === 'member-deposit') {
+    const who = String(p.memberId ?? '');
+    const nom = Number(p.nominal ?? p.amount ?? 0);
+    return `${labels.dep}${who ? ` · ${who}` : ''}${nom > 0 ? ` · ${rp(nom)}` : ''}`;
+  }
+  if (op === 'shift-open' || op === 'shift-close' || k === 'shift-open' || k === 'shift-close') {
+    return `${labels.shift} · ${op || k}`;
+  }
+  if (/voucher/i.test(k) || /voucher/i.test(op)) {
+    const code = String(p.kode ?? p.voucherCode ?? p.code ?? p.id ?? '');
+    return `${labels.voucher}${code ? ` · ${code}` : ''}`;
+  }
+  if (/member/i.test(k)) {
+    const who = String(p.memberId ?? p.nama ?? p.name ?? '');
+    return `${labels.member}${who ? ` · ${who}` : ''}`;
+  }
+  return String(p.table ?? p.rowId ?? labels.other);}function fmtTime(iso: string): string
   { try
   { return new Date(iso).toLocaleString('id-ID',
   { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch
-  { return iso; }}/** Hari sejak sync sukses terakhir: ambang dari lib/sync (satu sumber benar). */
-function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
-  if (daysAgo > FORCE_SYNC_DAYS) return 'block7';
-  if (daysAgo > WARN_SYNC_DAYS) return 'warn3';
-  return 'ok';}export default function SyncScreen({ navigation }: Props) {
+  { return iso; }}/** S7: level umur sync SELALU dari kanonis syncWarnLevel(lib/sync) — layar tak
+ * mengimplementasikan ambang sendiri. daysAgo hari → ms untuk demo/dev. */export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [autoSync, setAutoSync] = useState(true);
@@ -61,18 +80,21 @@ function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
   const [physPending, setPhysPending] = useState(0);
   const [dirtyRows, setDirtyRows] = useState(0);
   const [pendingRevoke, setPendingRevoke] = useState<string[]>([]);
+  // APP-FIXUP(PRN-DRAIN-VISIBILITY): backlog cetak persisten (tr_printqueue
+  // status antre/gagal) — identifier tabel apa adanya, label existing.
+  const [printPending, setPrintPending] = useState(0);
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [p, d, r] = await Promise.all([countPhysicalQueue(), countDirtyRows(), getPendingRevoke()]);
-        if (alive) { setPhysPending(p); setDirtyRows(d); setPendingRevoke(r); }
+        const [p, d, r, pp] = await Promise.all([countPhysicalQueue(), countDirtyRows(), getPendingRevoke(), pendingPrintCount()]);
+        if (alive) { setPhysPending(p); setDirtyRows(d); setPendingRevoke(r); setPrintPending(pp); }
       } catch { /* DB/storage belum siap - panel tetap jalan */ }
     })();
     return () => { alive = false; };
   }, [tick]);
 
-  const level = warnLevel(daysAgo);
+  const level = Number.isFinite(daysAgo) ? syncWarnLevel(Date.now() - daysAgo * 86400000) : syncWarnLevel();
   const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(LS_OPTS, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
     void setJSON(LS_OPTS, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
   // Toggle sync otomatis benar-benar menjadwalkan push berkala (5 mnt) via
@@ -87,11 +109,14 @@ function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
   // Belum pernah sync (ms<=0) = umur tak diketahui = block7, cermin
   // syncWarnLevel kanonis di lib/sync (jangan render 'ok' buta).
   const refreshDaysAgo = () => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); else setDaysAgo(Infinity); };
-  useEffect(() => { refreshDaysAgo(); }, []); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
-      sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind }), createdAt: fmtTime(o.createdAt), status: o.status, })),
+  useEffect(() => { refreshDaysAgo(); }, []); // S19: segarkan umur tiap layar
+  // difokuskan; tak ada emit session-restore di sesi (grep) — focus saja.
+  useFocusEffect(useCallback(() => { refreshDaysAgo(); setTick((x) => x + 1); }, [])); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
+      sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind, dep: t('sync_kind_deposit'), shift: t('sync_kind_shift'), voucher: t('sync_kind_voucher'), member: t('sync_kind_member') }), createdAt: fmtTime(o.createdAt), status: o.status, })),
   [tick, lang], );
 
-  const pending = pendingCount(); const doPush = async () => {
+  const pending = pendingCount(); // S21: hitung lokal-only (flag local) untuk badge.
+  const localN = useMemo(() => listOutbox().filter((o) => !!o.local && o.status !== 'terkirim').length, [tick]); const doPush = async () => {
     if (busy) return;
     setBusy('push'); setMsg(t('sync_push_msg')); try {
       const r = await pushAll(); setTick((x) => x + 1); const last = getLastSync(); if (last) setLastPush(last); refreshDaysAgo(); setMsg(t('sync_push_done').replace('{s}', String(r.sent)).replace('{f}', String(r.failed))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_push_fail')} (${e.message})` : t('sync_push_fail')); } finally { setBusy(null); }
@@ -183,7 +208,7 @@ function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
         <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
 
-      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending} {t('sync.pending')})</Text>{(physPending > 0 || dirtyRows > 0) && (<View style={styles.card}><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_esoprocessqueue</Text><Text style={styles.wmVal}>{physPending} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>syncDate NULL</Text><Text style={styles.wmVal}>{dirtyRows} {t('sync.pending')}</Text></View></View> )}{pendingRevoke.length > 0 && (<View style={styles.card}><Text style={styles.qDesc}>{t('action_logout')}: {t('sync.pending')} ({pendingRevoke.length})</Text></View> )}{queue.length === 0 && physPending === 0 && dirtyRows === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
+      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending + physPending + dirtyRows + printPending} {t('sync.pending')}{localN > 0 ? ` · ${t('sync_local_n').replace('{n}', String(localN))}` : ''})</Text>{(physPending > 0 || dirtyRows > 0 || printPending > 0) && (<View style={styles.card}><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_esoprocessqueue</Text><Text style={styles.wmVal}>{physPending} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>syncDate NULL</Text><Text style={styles.wmVal}>{dirtyRows} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_printqueue</Text><Text style={styles.wmVal}>{printPending} {t('sync.pending')}</Text></View></View> )}{pendingRevoke.length > 0 && (<View style={styles.card}><Text style={styles.qDesc}>{t('action_logout')}: {t('sync.pending')} ({pendingRevoke.length})</Text></View> )}{queue.length === 0 && physPending === 0 && dirtyRows === 0 && printPending === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
       {queue.map((q) => (
         <View key={q.id} style={styles.card}>
           <View style={styles.qTop}>

@@ -8,6 +8,7 @@ import * as Notifications from 'expo-notifications';
 import { ApiPath } from '../config/server';
 import { getNotif } from '../config/device';
 import { apiFetch, getApiMode } from './apiSource';
+import { resolveEffectiveTag } from './effectiveTag';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -138,26 +139,46 @@ export interface NotifyTarget {
   vibrate?: boolean;
 }
 
-/** Tag terminal aktif untuk gating notifikasi (sesi → binding → full_access). */
+/** Tag terminal aktif untuk gating notifikasi (R58: satu sumber via effectiveTag). */
 function activeTag(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sess = require('../session') as typeof import('../session');
-    const st = sess.getSessionTag?.();
-    if (st) return String(st).toLowerCase();
-    const b = sess.getBinding?.()?.tag;
-    if (b) return String(b).toLowerCase();
+    return resolveEffectiveTag();
   } catch {
-    /* abaikan — fallback full_access */
+    return 'full_access';
   }
-  return 'full_access';
 }
 
 /**
- * STUB preferensi suara per-tag (realtime-09): kini mewarisi toggle global
- * Pengaturan "Bunyi order baru" (soundNewOrder) agar perilaku tak berubah.
- * Preferensi per-tag (kasir/dapur beda bunyi) dicolok di sini kelak tanpa
- * mengubah pemanggil — baca dari terminal-settings/server bila BE siap.
+ * R42: dedupe notifikasi lokal — kunci judul+isi+data dalam jendela 60 dtk
+ * (echo WS + panggilan langsung tak membunyikan dua kali). Cap 500 entri
+ * (buang terlama). Best-effort, tak pernah melempar.
+ */
+const NOTIFY_DEDUPE_MS = 60000;
+const NOTIFY_DEDUPE_CAP = 500;
+const notifySeen = new Map<string, number>();
+
+function markNotified(title: string, body: string, data?: Record<string, unknown>): boolean {
+  try {
+    const key = `${title}|${body}|${JSON.stringify(data ?? {})}`;
+    const now = Date.now();
+    const prev = notifySeen.get(key);
+    if (prev !== undefined && now - prev < NOTIFY_DEDUPE_MS) return true;
+    notifySeen.set(key, now);
+    if (notifySeen.size > NOTIFY_DEDUPE_CAP) {
+      const first = notifySeen.keys().next();
+      if (!first.done) notifySeen.delete(first.value);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * R43: preferensi suara per-tag — BELUM ADA kunci i18n / kolom terminal-settings
+ * untuk bunyi per-tag (kasir vs dapur), sehingga tetap mewarisi toggle global
+ * "Bunyi order baru" (perilaku tak berubah). Dicolok di sini kelak tanpa
+ * mengubah pemanggil. Getar per-tag default MATI (perilaku eksisting).
  */
 export function isTagSoundEnabled(_tag?: string): boolean {
   try {
@@ -194,6 +215,7 @@ export async function notifyLocal(
     ).trim().toLowerCase();
     const here = activeTag();
     if (want && here !== 'full_access' && here !== want) return;
+    if (markNotified(title, body, data)) return;
     const soundOn = isTagSoundEnabled(here);
     const buzz =
       (typeof tagOrOpts === 'object' && tagOrOpts?.vibrate === true) || isTagVibrateEnabled(here);

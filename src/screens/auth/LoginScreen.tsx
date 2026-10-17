@@ -15,8 +15,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import {
   buildGrant as buildSessionGrant,
+  consumeKickNotice,
   describeGrantProblem,
   getBinding as getSessionBinding,
+  getMaxOfflineGrantDays,
   getSession,
   hydrateTerminalState,
   loginEmployee,
@@ -24,19 +26,18 @@ import {
   saveSession,
   setMaxOfflineGrantDays,
   subscribeSession,
-  touchGrant as touchSessionGrant,
   verifyGrantPin,
   type Binding as SessionBinding,
   type Session as DeviceSession,
 } from '../../session';
-import { ApiPath, apiPost, getBaseUrl } from '../../config/server';
+import { ApiPath, apiPost } from '../../config/server';
 import { startRealtime } from '../../lib/realtime';
+import { flushPendingRevokes } from '../../lib/sync';
 import { setWsForeground } from '../../native/printer';
-import { loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
+import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
 import {
   getContractDeviceId,
   loadBinding,
-  touchGrant,
   type TerminalBinding as LegacyBinding,
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
@@ -114,11 +115,11 @@ function QrTabletArt() {
 }
 
 /**
- * Rute bind flow: SPEC-TERMINAL-SESSION §3 menamai ini 'BindFlow'; lane
- * navigator belum menambahkannya sehingga dipetakan ke rute 'Install'
- * (alur klaim terminal eksisting). Ganti konstanta ini saat 'BindFlow' mendarat.
+ * Rute bind flow: SPEC-TERMINAL-SESSION §3 menamai ini 'BindFlow'; guest stack
+ * (App.tsx) mendaftarkan alias 'BranchPicker' ke SelectBranchScreen sehingga
+ * unbound mulai di picker cabang-terminal, bukan layar klaim lama.
  */
-const BIND_FLOW_ROUTE = 'Install';
+const BIND_FLOW_ROUTE = 'BranchPicker';
 
 /** Ambil string aman dari payload kontrak. */
 function str(v: unknown, fb = ''): string {
@@ -219,9 +220,12 @@ async function resolveTermCtx(): Promise<TermCtx | null> {
 }
 
 /** E01 staff-login (SPEC §4/§11 E01): dua tahap via satu endpoint.
- * {username,password} → {credentialOk, requiresPin}; +{staffPin} → sesi.
- * Tak pernah melempar: {reached:false} = offline/unconfigured (BE E01
- * mayoritas BELUM ADA — pemanggil wajib lewat gate grant, fail-closed). */
+ * {username,password,terminalCode,deviceId} → {credentialOk, requiresPin};
+ * +{staffPin} → sesi. Payload SELALU bawa terminalCode+deviceId (okupansi
+ * tunggal per terminal).
+ * Tak pernah melempar: {reached:false} = offline/unconfigured (mode 'local'
+ * = tanpa server; BE E01 mayoritas BELUM ADA — pemanggil wajib lewat gate
+ * grant, fail-closed). */
 interface StaffLoginCall {
   reached: boolean;
   status: number;
@@ -230,7 +234,7 @@ interface StaffLoginCall {
 
 async function callStaffLogin(body: Record<string, string>): Promise<StaffLoginCall> {
   try {
-    if (!getBaseUrl()) return { reached: false, status: 0, body: {} };
+    if (getApiMode() === 'local') return { reached: false, status: 0, body: {} };
     const res = await withTimeout(apiPost(ApiPath.staffLogin, body), 12000);
     let json: unknown = null;
     try {
@@ -361,8 +365,10 @@ async function completeOnline(
 
 /**
  * Kunci sesi offline dari grant cache (alur L1): triple match + PIN vs hash
- * sudah lolos di pemanggil; sesi ditandai offline:true untuk rekonsiliasi
- * saat reconnect. Tanpa grant valid fungsi ini tak pernah dipanggil.
+ * sudah lolos di pemanggil (describeGrantProblem + verifyGrantPin); sesi
+ * ditandai offline:true untuk rekonsiliasi saat reconnect. Grant HANYA
+ * diperpanjang saat auth ONLINE sukses (completeOnline) — fungsi ini tak
+ * pernah menyentuh grant. Tanpa grant valid fungsi ini tak pernah dipanggil.
  */
 async function completeOffline(userId: string, username: string, pin: string): Promise<void> {
   const ctx = await resolveTermCtx();
@@ -389,7 +395,6 @@ async function completeOffline(userId: string, username: string, pin: string): P
   };
   if (ctx.merchantName) sess.merchantName = ctx.merchantName;
   saveSession(sess);
-  try { touchSessionGrant(); } catch { /* abaikan */ }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
@@ -456,22 +461,19 @@ export default function LoginScreen({ navigation }: Props) {
     return tpl.split('{merchant}').join(merchant).split('{terminal}').join(term);
   };
 
-  /** need_be: login pertama/offline tanpa grant wajib online. Fallback literal
-   * = pesan offline eksisting file ini sampai STR mendaftarkan kunci kontrak. */
+  /** need_be: login pertama/offline tanpa grant wajib online. Jendela grant
+   * dari policy server (getMaxOfflineGrantDays, server-wins) — tanpa hitungan
+   * hari hardcode (G11). */
   const needBeText = (): string => {
+    const days = getMaxOfflineGrantDays();
+    const win = lang === 'id' ? `(grant ${days} hari)` : `(${days}-day grant)`;
     const v = t('need_be');
-    if (v !== 'need_be') return v;
-    return lang === 'id'
-      ? 'Offline dan belum ada grant login di perangkat ini — login online dulu sekali (grant 7 hari).'
-      : 'Offline with no login grant on this device — sign in online once first (7-day grant).';
+    if (v !== 'need_be') return `${v} ${win}`;
+    return win;
   };
 
   /** grant_expired: blokir eksplisit, tanpa silent local login. */
-  const grantExpiredText = (): string => {
-    const v = t('grant_expired');
-    if (v !== 'grant_expired') return v;
-    return needBeText();
-  };
+  const grantExpiredText = (): string => t('grant_expired');
 
   /** Teks unbound: kunci kanonis terminal_unbound_hint (id+en di kamus). */
   const unboundText = (): string => t('terminal_unbound_hint');
@@ -481,10 +483,19 @@ export default function LoginScreen({ navigation }: Props) {
 
   const pinCandidateLabel = (): string => {
     if (!candidate) return '';
-    const uname = candidate.username;
-    return lang === 'id' ? `PIN staff untuk ${uname}` : `Staff PIN for ${uname}`;
+    return t('login_pin_for').split('{user}').join(candidate.username);
   };
 
+  /** KICK-no-live-notify: sesi perangkat ini dicabut login lain (revoke via
+   * App.tsx) — tampilkan notif kick sekali saat Login tampil. */
+  useEffect(() => {
+    try {
+      const k = consumeKickNotice();
+      if (k) setNotice(k);
+    } catch {
+      /* abaikan */
+    }
+  }, []);
   useEffect(() => {
     let live = true;
     const unsub = subscribeSession(() => {
@@ -552,38 +563,49 @@ export default function LoginScreen({ navigation }: Props) {
     } catch {
       /* hash lokal opsional - server tetap sumber benar */
     }
-    loginEmployee({
-      nama: s.nama,
-      username: uname,
-      role: (ctx?.role ?? '').trim() || s.role,
-      userId: s.userId,
-      ...(ctx?.branchId ? { branchId: ctx.branchId } : {}),
-      ...(ctx?.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
-      ...(ctx?.terminalTag ? { terminalTag: ctx.terminalTag } : {}),
-      ...(ctx?.authKey ?? s.authKey ? { authKey: (ctx?.authKey ?? s.authKey) } : {}),
-    });
+    // F17: konteks terminal diteruskan sebagai argumen ctx loginEmployee
+    // (bukan diselipkan di argumen pertama yang diabaikan implementasi).
+    loginEmployee(
+      {
+        nama: s.nama,
+        username: uname,
+        role: (ctx?.role ?? '').trim() || s.role,
+        userId: s.userId,
+      },
+      {
+        ...(ctx?.branchId ? { branchId: ctx.branchId } : {}),
+        ...(ctx?.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
+        ...(ctx?.terminalTag ? { terminalTag: ctx.terminalTag } : {}),
+      },
+    );
     // M8: QR/DEV login menerbitkan grant rangkap-tiga via penerbit kanonis yang
-    // sama dengan completeOnline (buildSessionGrant + saveSessionGrant) — touch
-    // saja diam bila grant belum ada sehingga sesi QR tak pernah punya grant.
+    // sama dengan completeOnline (buildSessionGrant + saveSessionGrant).
+    // Fail-closed: triple (userId, terminalId, deviceId) tak lengkap = TANPA
+    // grant (tanpa fallback touchGrant — menyentuh grant tanpa triple
+    // memperpanjang grant yang tak terikat sesi ini). Sesi tetap dikunci di
+    // atas (server sudah menyatakan lolos); gate grant yang menolak offline.
+    // B1 fail-closed: QR tanpa ikatan = tolak (cermin gate submit di bawah).
+    const termCtx = await resolveTermCtx();
+    if (!termCtx) throw new Error('unbound');
     try {
-      const termCtx = await resolveTermCtx();
       const terminalId = (termCtx?.terminalId ?? '').trim();
       let deviceId = (termCtx?.deviceId ?? '').trim();
       if (!deviceId) deviceId = await getContractDeviceId();
       if (terminalId && deviceId && s.userId && pin) {
         saveSessionGrant(buildSessionGrant({ userId: s.userId, terminalId, deviceId, staffPin: pin }));
-      } else {
-        await touchGrant();
       }
     } catch (e) {
       console.warn('[login] issue grant gagal:', e);
-      try { await touchGrant(); } catch { /* abaikan */ }
     }
     // Realtime global nyala sekali saat login (sebelumnya hanya nyala bila
     // pengguna membuka layar Dapur/ESB/Display). Foreground service
     // best-effort di dev-client/APK agar WS hidup saat layar mati.
     try { startRealtime(); } catch { /* abaikan */ }
     try { void setWsForeground(true); } catch { /* abaikan */ }
+    // S18: kirim utang revoke logout (fire-and-forget; login sukses = momen
+    // online yang tepat, best-effort tanpa memblokir kasir). flushPendingRevokes
+    // mencakup slot session + antrean umum, jadi satu pemanggil cukup.
+    try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
   };
 
   /**
@@ -626,7 +648,8 @@ export default function LoginScreen({ navigation }: Props) {
         }
         const deviceId = ctx.deviceId || (await getContractDeviceId());
         // B1 langkah 1: E01a — username+password dulu, tanpa staffPin.
-        const first = await callStaffLogin({ username: uname, password });
+        // Payload SELALU bawa terminalCode+deviceId (kontrak E01).
+        const first = await callStaffLogin({ username: uname, password, terminalCode: ctx.terminalCode, deviceId });
         if (isStage1Ok(first)) {
           if (first.body.wasKicked === true || first.body.kicked === true) {
             setNotice(t('kicked_msg'));
@@ -674,9 +697,7 @@ export default function LoginScreen({ navigation }: Props) {
   const submitStaffPin = () => {
     if (pinBusy || !candidate) return;
     if (staffPin.trim().length < 4) {
-      setPinError(lang === 'id'
-        ? 'Masukkan PIN staff (min. 4 digit).'
-        : 'Enter the staff PIN (min. 4 digits).');
+      setPinError(t('login_pin_short'));
       return;
     }
     setPinError('');
@@ -690,7 +711,14 @@ export default function LoginScreen({ navigation }: Props) {
             setPinError(pinWrongText());
             return;
           }
-          await completeOffline(candidate.userId, candidate.username, pin);
+          try {
+            await completeOffline(candidate.userId, candidate.username, pin);
+          } catch (e) {
+            // completeOffline hanya melempar 'unbound' (tanpa ikatan); gate
+            // grant sudah lolos di pemanggil — selain itu = grant basi.
+            setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+            return;
+          }
           setPinOpen(false);
           return;
         }
@@ -701,10 +729,13 @@ export default function LoginScreen({ navigation }: Props) {
           return;
         }
         const deviceId = ctx.deviceId || (await getContractDeviceId());
+        // B1 langkah 2 online: E01b — payload SELALU bawa terminalCode+deviceId.
         const second = await callStaffLogin({
           username: candidate.username,
           password: candidate.password,
           staffPin: pin,
+          terminalCode: ctx.terminalCode,
+          deviceId,
         });
         if (second.reached && second.status >= 200 && second.status < 300) {
           const p = second.body;
@@ -723,6 +754,8 @@ export default function LoginScreen({ navigation }: Props) {
             return;
           }
           await completeOnline(p, pin, ctx, deviceId, candidate.username);
+          // F14-flush: login ONLINE sukses = momen kirim utang revoke.
+          try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
           setPinOpen(false);
           return;
         }
@@ -734,7 +767,13 @@ export default function LoginScreen({ navigation }: Props) {
         const userId = await lookupLocalUserId(candidate.username);
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
         if (!problem && userId && verifyGrantPin(pin)) {
-          await completeOffline(userId, candidate.username, pin);
+          try {
+            await completeOffline(userId, candidate.username, pin);
+          } catch (e) {
+            // completeOffline hanya melempar 'unbound' (tanpa ikatan).
+            setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+            return;
+          }
           setPinOpen(false);
           return;
         }
@@ -785,6 +824,14 @@ export default function LoginScreen({ navigation }: Props) {
     setBusy(true);
     void (async () => {
       try {
+        // Prasyarat sama dengan submit (B1): device ter-bound (fail-closed).
+        // Tanpa ikatan = BLOKIR eksplisit 'unbound', bukan login QR lokal.
+        const termCtx = await resolveTermCtx();
+        if (!termCtx) {
+          setServerError(unboundText());
+          setBlocked({ kind: 'unbound' });
+          return;
+        }
         const payload = parseQrLoginPayload(raw);
         if (!payload) {
           setServerError(t('login_qr_invalid'));
@@ -795,7 +842,13 @@ export default function LoginScreen({ navigation }: Props) {
           setServerError(t('login_fail'));
           return;
         }
-        await completeLogin(s, payload.username, payload.pin);
+        try {
+          await completeLogin(s, payload.username, payload.pin);
+        } catch {
+          // B1 fail-closed (cermin submit): unbound = blokir + tautan klaim.
+          setServerError(unboundText());
+          setBlocked({ kind: 'unbound' });
+        }
       } finally {
         setBusy(false);
         qrBusy.current = false;
@@ -1104,7 +1157,7 @@ export default function LoginScreen({ navigation }: Props) {
               style={styles.pinInput}
               value={staffPin}
               onChangeText={(v) => { setStaffPin(v.replace(/[^0-9]/g, '')); setPinError(''); }}
-              placeholder={lang === 'id' ? 'PIN staff' : 'Staff PIN'}
+              placeholder={t('login_pin_ph')}
               placeholderTextColor={INPUT_BORDER}
               secureTextEntry
               keyboardType="number-pad"
@@ -1158,6 +1211,8 @@ export default function LoginScreen({ navigation }: Props) {
                     }
                     const deviceId = ctx.deviceId || (await getContractDeviceId());
                     await completeOnline(cur.payload, cur.pin, ctx, deviceId, uname);
+                    // F14-flush: takeover terkonfirmasi = login ONLINE sukses.
+                    try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
                     setPinOpen(false);
                   } finally {
                     setPinBusy(false);
@@ -1333,6 +1388,7 @@ export default function LoginScreen({ navigation }: Props) {
       </ScrollView>
       {helpModal}
       {pinModal}
+      {takeoverModal}
       {scanModal}
     </ScreenRoot>
   );

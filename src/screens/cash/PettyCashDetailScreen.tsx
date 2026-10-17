@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';import { getSession } from '../../session';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
+import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';import { verifyLocalEscalation } from '../../lib/supervisor';import { getSession } from '../../session';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
   navigation?: Nav;
   route?: {
     params?: {
@@ -8,7 +8,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   };};export default function PettyCashDetailScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const p = route?.params ?? {};
+  const { lang, t } = useLang(); const p = route?.params ?? {};
   const id = p.id ?? 'PC-002';
   const tanggal = p.tanggal ?? '16 Okt 2026  10:20';
   const keterangan = p.keterangan ?? 'Belanja plastik dan tissue';
@@ -17,9 +17,27 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const jumlah = p.jumlah ?? 45000;
   const kasir = p.kasir ?? getSession()?.name ?? getSession()?.username ?? '';
   const photo = p.photo ?? null;
-  const [disetujui, setDisetujui] = useState(p.disetujui ?? true);
+  // WIRE-APPROVAL: default fail-closed (tanpa param = belum disetujui) +
+  // approve HANYA via eskalasi PIN owner (verifyLocalEscalation
+  // 'settings.edit'); identitas approver tercatat via markApproved(id,
+  // approver) + rincian by/at + sync. Tanpa PIN = tak approve.
+  const [disetujui, setDisetujui] = useState(p.disetujui ?? false);
+  const [pin, setPin] = useState('');
+  const [pinVisible, setPinVisible] = useState(false);
+  const [pinErr, setPinErr] = useState('');
 
-  const approve = async () => { setDisetujui(true); await markApproved(id); }; return (
+  /** Buka modal PIN owner (audit trail, bukan auto-approve). */
+  const setujui = () => { setPin(''); setPinErr(''); setPinVisible(true); };
+  /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
+  const confirmApprove = async () => {
+    const esc = await verifyLocalEscalation(pin, 'settings.edit');
+    if (!esc.ok) { setPinErr(esc.message); return; }
+    const approver = (esc.userId ?? '').trim();
+    if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
+    setDisetujui(true);
+    await markApproved(id, approver);
+    setPinVisible(false); setPin('');
+  }; return (
     <View style={s.root}>
       <ScreenHeader title={t('petty.detailTitle')} onBack={() => navigation?.goBack?.()}  />
 
@@ -57,10 +75,42 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
         </View>
 
         {!disetujui && (
-          <TouchableOpacity style={s.primary} onPress={approve}>
+          <TouchableOpacity style={s.primary} onPress={setujui}>
             <Text style={s.primaryT}>{t('petty.approveTxn')}</Text>
           </TouchableOpacity>
         )}
+        {/* WIRE-APPROVAL: modal PIN owner untuk approve. Judul/petunjuk literal netral ID/EN. */}
+        <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
+          <View style={s.modalBg}>
+            <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+              <Text style={s.modalTitle}>{t('petty_approve_title')}</Text>
+              <Text style={s.modalHint}>{t('petty_approve_hint')}</Text>
+              <View style={s.pinDots} accessibilityLabel={t('cx_pin')}>
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />
+                ))}
+              </View>
+              {pinErr ? <Text style={s.pinErr}>{pinErr}</Text> : null}
+              <View style={s.pinPad}>
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'].map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={s.pinKey}
+                    onPress={() => {
+                      if (k === 'C') setPin(pin.slice(0, -1));
+                      else if (k === 'OK') void confirmApprove();
+                      else if (pin.length < 6) setPin(pin + k);
+                    }}>
+                    <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity style={s.ghostBtn} onPress={() => { setPinVisible(false); setPin(''); }}>
+                <Text style={s.ghostT}>{t('c_cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <TouchableOpacity style={s.ghost} onPress={() => navigation?.navigate('PettyCash')}>
           <Text style={s.ghostT}>{t('petty.backToList')}</Text>
         </TouchableOpacity>
@@ -99,4 +149,17 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   primary: { backgroundColor: colors.green, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
   primaryT: { color: colors.white, fontSize: 15, fontFamily: fonts.bold },
   ghost: { borderWidth: 1, borderColor: colors.navy, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 10 },
-  ghostT: { fontSize: 14, fontFamily: fonts.bold, color: colors.navy },});
+  ghostT: { fontSize: 14, fontFamily: fonts.bold, color: colors.navy },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, alignItems: 'center' },
+  modalCardTablet: { width: '100%', maxWidth: 520, alignSelf: 'center', borderRadius: 16 },
+  modalTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  modalHint: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 8, textAlign: 'center' },
+  pinDots: { flexDirection: 'row', marginVertical: 18 },
+  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: colors.navy, marginHorizontal: 6 },
+  dotFill: { backgroundColor: colors.navy },
+  pinPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  pinKey: { width: 72, height: 56, borderRadius: 10, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', margin: 5 },
+  pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
+  pinErr: { fontSize: 13, fontFamily: fonts.medium, color: colors.red, textAlign: 'center', marginTop: 4 },
+  ghostBtn: { marginTop: 12, padding: 10 },});

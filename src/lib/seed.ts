@@ -10,7 +10,8 @@
  * seed seperti V001/V002, agar edit merchant via CRUD tak pernah ditimpa).
  *
  * Data uji offline-first (cabang/resto, owner+kasir, member, voucher/promo,
- * shift terbuka, 2 order via saveSale nyata - 1 dimundurkan ke kemarin agar
+ * shift terbuka, 4 order contoh via saveSale/direct-insert - 1 dimundurkan
+ * ke kemarin agar
  * History/Dashboard/Rekap ada baseline) disisip TANPA gate flag — sama
  * seperti CoA/RBAC/admin — agar DB lama ikut dapat; idempoten via
  * INSERT OR IGNORE + cek keberadaan.
@@ -27,8 +28,13 @@
 import { initDb, queryFirst, run } from './db';
 import type { BindParams } from './db';
 import { loadPinRecord, removePinHash, savePinHash } from './pin';
-import { saveSale } from './sales';
+import { assertVoucherUsable, isTerminalBound, queueNoOf, saveSale } from './sales';
 import type { SaleInput } from './payments';
+import { normalizeMethod } from './payments';
+import { isMarketplaceMode, totals } from './totals';
+import type { TotalsResult } from './totals';
+import { uuidv7 } from './uuidv7';
+import { trimTestUsers } from './seedUsers';
 
 const SEED_MENUS: Array<{ id: string; name: string; cat: string; price: number }> = [
   { id: 'm-nasi-goreng', name: 'Nasi Goreng', cat: 'c-makanan', price: 15000 },
@@ -53,6 +59,231 @@ const SEED_PAYMENTS: Array<{ id: string; name: string; type: string; order: numb
   { id: 'pm-transfer', name: 'Transfer Bank', type: 'transfer', order: 3 },
   { id: 'pm-edc', name: 'EDC', type: 'edc', order: 4 },
 ];
+
+/** Spesifikasi order contoh — angka final SELALU dihitung via totals() (L25). */
+interface SeedOrderSpec {
+  salesNum: string;
+  method: string;
+  mode: string;
+  tableId?: string;
+  memberId?: string;
+  customer?: string;
+  voucherCode?: string;
+  voucherKind?: string;
+  voucherAmount?: number;
+  voucherMinSpend?: number;
+  ongkir?: number;
+  cash?: number;
+  items: Array<{ id: string; name: string; basePrice: number; qty: number }>;
+}
+
+const SEED_SPECS: SeedOrderSpec[] = [
+  {
+    salesNum: 'SEED-001', method: 'cash', mode: 'DINE IN', tableId: 'A1',
+    memberId: 'M001', customer: 'Budi', cash: 40000,
+    items: [
+      { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 2 },
+      { id: 'm-es-teh-manis', name: 'Es Teh Manis', basePrice: 5000, qty: 1 },
+    ],
+  },
+  {
+    salesNum: 'SEED-002', method: 'qris', mode: 'TAKE AWAY', customer: 'Sinta',
+    voucherCode: 'HEMAT10K', voucherAmount: 10000,
+    items: [
+      { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 18000, qty: 1 },
+      { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 8000, qty: 1 },
+    ],
+  },
+  // SEED-003: promo nominal reusable (HEMAT10 hanya ada di ms_promotion,
+  // minSpend 50000) — membuktikan jalur fallback promo di backstop saveSale:
+  // usage 'burn' tercatat, kuota tak tersentuh (promo tanpa kuota).
+  {
+    salesNum: 'SEED-003', method: 'qris', mode: 'TAKE AWAY', customer: 'Dewi',
+    voucherCode: 'HEMAT10', voucherAmount: 10000, voucherMinSpend: 50000,
+    items: [
+      { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 18000, qty: 2 },
+      { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 1 },
+    ],
+  },
+  // SEED-004: promo ongkir (ONGKIR10 hanya di ms_promotion) — ongkir bruto
+  // 8000 dipotong penuh (ongkirCut 8000), neto tersimpan 0.
+  {
+    salesNum: 'SEED-004', method: 'cash', mode: 'GOFOOD', customer: 'Agus',
+    voucherCode: 'ONGKIR10', voucherKind: 'ongkir', voucherAmount: 10000,
+    ongkir: 8000, cash: 25000,
+    items: [
+      { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 8000, qty: 2 },
+      { id: 'm-es-teh-manis', name: 'Es Teh Manis', basePrice: 5000, qty: 1 },
+    ],
+  },
+];
+
+function seedCanon(spec: SeedOrderSpec): TotalsResult {
+  const gross = spec.items.reduce((a, it) => a + it.basePrice * it.qty, 0);
+  return totals({
+    gross,
+    discount: 0,
+    voucher: spec.voucherCode
+      ? {
+          code: spec.voucherCode,
+          ...(spec.voucherKind ? { kind: spec.voucherKind } : {}),
+          ...(spec.voucherAmount ? { amount: spec.voucherAmount } : {}),
+          ...(spec.voucherMinSpend ? { minSpend: spec.voucherMinSpend } : {}),
+        }
+      : null,
+    ongkir: spec.ongkir ?? 0,
+    esbOrder: isMarketplaceMode(spec.mode),
+    taxRate: 11,
+  });
+}
+
+/** SaleInput saveSale untuk jalur bound (angka = hasil totals() kanonis). */
+function seedSaleInput(spec: SeedOrderSpec, canon: TotalsResult): SaleInput {
+  const r = (x: number) => Math.round(x);
+  return {
+    method: spec.method,
+    salesNum: spec.salesNum,
+    grandTotal: canon.total,
+    subtotal: canon.subtotalGross,
+    // Representasi L8: discount head INCLUDES voucher.
+    discountTotal: canon.voucherAmt,
+    vatTotal: canon.taxIncl,
+    serviceTotal: canon.service,
+    ...(canon.feeESB > 0 ? { feeESB: canon.feeESB } : {}),
+    ...(canon.rounding !== 0 ? { rounding: canon.rounding } : {}),
+    ...(spec.cash !== undefined ? { cash: spec.cash, change: Math.max(0, spec.cash - canon.total) } : { change: 0 }),
+    mode: spec.mode,
+    ...(spec.tableId ? { tableId: spec.tableId } : {}),
+    ...(spec.memberId ? { memberId: spec.memberId } : {}),
+    ...(spec.customer ? { customer: spec.customer } : {}),
+    items: spec.items.map((it) => ({ id: it.id, name: it.name, basePrice: it.basePrice, qty: it.qty })),
+    payments: [{ method: spec.method, amount: canon.total }],
+    ...(spec.voucherCode ? { voucherCode: spec.voucherCode } : {}),
+    ...(canon.ongkirNet > 0 ? { ongkir: canon.ongkirNet } : {}),
+    ...(canon.ongkirCut > 0 ? { ongkirCut: canon.ongkirCut } : {}),
+  };
+}
+
+/**
+ * Sisip baris order contoh LANGSUNG (L9): dipakai saat device unbound
+ * (saveSale melempar terminal-unbound — fail-closed) sehingga order contoh
+ * tetap lahir di instalasi segar. Cermin tulisan saveSale (head + item +
+ * payment + usage/kuota via backstop yang sama + tiket dapur + info ongkirCut
+ * + platformFee) dengan syncDate NULL (= kotor, ikut push). Idempoten via
+ * cek keberadaan di pemanggil. Tak melempar yang fatal: galat dicatat jujur
+ * via console.warn agar terlihat di log startup.
+ */
+async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed: string): Promise<void> {
+  const r = (x: number) => Math.round(x);
+  const no = spec.salesNum;
+  let clientId: string;
+  try {
+    clientId = uuidv7();
+  } catch (e) {
+    // P14: tanpa CSPRNG tak ada client_id merge-safe — fallback jujur ke
+    // salesNum (bukan Math.random) + catat, agar seed tak menggugurkan Q7 diam-diam.
+    console.warn(`[seed] CSPRNG gagal untuk ${no}, client_id = salesNum: ${e instanceof Error ? e.message : e}`);
+    clientId = no;
+  }
+  const gross = canon.subtotalGross;
+  let voucherOk = false;
+  let burnAmount = 0;
+  if (spec.voucherCode) {
+    const chk = await assertVoucherUsable(spec.voucherCode, gross);
+    voucherOk = chk.ok;
+    burnAmount = chk.ok ? chk.amount : 0;
+  }
+  const voucherAmt = voucherOk
+    ? (spec.voucherKind === 'ongkir' ? 0 : Math.min(canon.voucherAmt, gross))
+    : 0;
+  const paid = canon.total;
+  const tendered = spec.cash ?? paid;
+  await run(
+    `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
+      salesMode, subtotal, discount, tax, serviceCharge, platformFee, rounding,
+      voucherAmount, voucherCode, grandTotal, paidAmount, changeAmount,
+      paymentMethod, memberId, tableNo, customerName, ongkir,
+      status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
+     VALUES (?, ?, 'B001', 'T001', 'u-kasir', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'kasir', ?, ?, NULL)`,
+    [
+      no, clientId, nowSeed,
+      spec.mode === 'DINE IN' ? 'DINE_IN' : spec.mode === 'TAKE AWAY' ? 'TAKE_AWAY' : spec.mode,
+      gross, voucherAmt,
+      canon.taxIncl, canon.service,
+      canon.feeESB, canon.rounding,
+      voucherAmt, spec.voucherCode ?? null,
+      canon.total, paid,
+      Math.max(0, tendered - paid), normalizeMethod(spec.method),
+      spec.memberId ?? null, spec.tableId ?? null, spec.customer ?? null, canon.ongkirNet,
+      queueNoOf(no) ?? no, nowSeed, nowSeed,
+    ],
+  );
+  let idx = 0;
+  for (const it of spec.items) {
+    // Stasiun cermin blok stok seed (minuman → kasir, lainnya → dapur).
+    const station = it.id.includes('teh') || it.id.includes('kopi') || it.id.includes('jus')
+      || it.id.includes('soda') || it.id.includes('mineral') ? 'st-kasir' : 'st-dapur';
+    const smId = `${no}-seed-${idx}`;
+    await run(
+      `INSERT INTO tr_salesmenu (id, salesNum, client_id, menuId, menuName, qty, price,
+        discount, subtotal, note, stationId, status, syncDate, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, ?, 'served', NULL, ?)`,
+      [smId, no, clientId, it.id, it.name, it.qty, r(it.basePrice), r(it.basePrice * it.qty), station, nowSeed],
+    );
+    idx += 1;
+  }
+  await run(
+    `INSERT INTO tr_salespayment (id, salesNum, client_id, paymentMethod, amount,
+      tendered, changeAmount, refNo, syncDate, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    [`${no}-pay`, no, clientId, spec.method, paid, r(tendered), Math.max(0, r(tendered - paid)), nowSeed],
+  );
+  if (spec.voucherCode) {
+    if (voucherOk) {
+      await run(
+        `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+         VALUES (?, ?, ?, ?, ?, 'burn', NULL)`,
+        [`${no}-sv`, no, clientId, spec.voucherCode, burnAmount],
+      );
+      await run(
+        `UPDATE ms_voucher SET quota = quota - 1, syncDate = NULL
+          WHERE UPPER(voucherCode) = UPPER(?) AND quota > 0`,
+        [spec.voucherCode],
+      );
+      await run(
+        `UPDATE ms_voucher SET status = 'used', syncDate = NULL
+          WHERE UPPER(voucherCode) = UPPER(?) AND quota IS NOT NULL AND quota <= 0
+            AND (status IS NULL OR status = 'available')`,
+        [spec.voucherCode],
+      );
+    } else {
+      await run(
+        `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+         VALUES (?, ?, ?, ?, 0, 'rejected', NULL)`,
+        [`${no}-sv`, no, clientId, spec.voucherCode],
+      );
+    }
+  }
+  if (canon.ongkirCut > 0) {
+    await run(
+      `INSERT INTO tr_salesinfo (id, salesNum, client_id, infoKey, infoValue, syncDate)
+       VALUES (?, ?, ?, 'ongkirCut', ?, NULL)`,
+      [`${no}-si-ongkir`, no, clientId, String(r(canon.ongkirCut))],
+    );
+  }
+  if (canon.feeESB > 0) {
+    await run(
+      `INSERT INTO tr_platformfee (id, salesNum, client_id, platform, feeAmount, syncDate)
+       VALUES (?, ?, ?, 'total', ?, NULL)`,
+      [`${no}-pf`, no, clientId, r(canon.feeESB)],
+    );
+  }
+  await run(
+    `INSERT OR IGNORE INTO tr_kitchenticket (id, ticketNo, salesNum, client_id, status, createdAt, updatedAt, syncDate)
+     VALUES (?, ?, ?, ?, 'Baru', ?, ?, NULL)`,
+    [`kt-${no}`, no, no, clientId, nowSeed, nowSeed],
+  );
+}
 
 export async function ensureSeeded(): Promise<void> {
   await initDb();
@@ -295,14 +526,15 @@ export async function ensureSeeded(): Promise<void> {
     `UPDATE ms_menu SET stationId = 'st-dapur' WHERE stationId IS NULL OR stationId = ''`,
   );
 
-  // 2 user uji cabang B001: owner (PIN 1111, akses penuh) + kasir
-  // (PIN 2222, peran Staff dengan deny kunci sensitif). PIN hanya diisi bila
-  // record belum ada (PIN yang diganti belakangan dihormati, tidak ditimpa).
+  // 1 user uji cabang B001: kasir (PIN 2222, peran Staff dengan deny kunci
+  // sensitif). PIN hanya diisi bila record belum ada (PIN yang diganti
+  // belakangan dihormati, tidak ditimpa). u-owner/owner DIBUANG (keputusan
+  // "2 user saja": admin + kasir) — sisa baris lama dibersihkan trimTestUsers
+  // di bawah (jaring pengaman DB lama).
   const testUsers: Array<[string, string, string]> = [
-    ['u-owner', 'owner', 'Merchant Owner'],
     ['u-kasir', 'kasir', 'Merchant Staff'],
   ];
-  const testPins: Record<string, string> = { 'u-owner': '1111', 'u-kasir': '2222' };
+  const testPins: Record<string, string> = { 'u-kasir': '2222' };
   for (const [id, username, role] of testUsers) {
     await run(
       `INSERT OR IGNORE INTO ms_posuser (id, username, branchId, role)
@@ -316,13 +548,8 @@ export async function ensureSeeded(): Promise<void> {
       /* abaikan — fallback legacy di apiSource */
     }
   }
-  // Owner uji: satu baris wildcard allow-all per user (seperti u-admin).
   // Kasir uji SENGAJA tanpa baris per user agar jatuh ke template peran
   // 'Merchant Staff' (deny order.void/order.cancel/sale.refund/settings.edit).
-  await run(
-    `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)
-     VALUES ('u-owner', '*', 1)`,
-  );
 
   // 2 member uji (selaras fallback MEMBER_DEPOSIT_DB di PayScreen).
   // INSERT OR IGNORE (bukan REPLACE): REPLACE lama me-reset saldo hasil
@@ -341,12 +568,12 @@ export async function ensureSeeded(): Promise<void> {
     );
     await run(
       `INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
-       VALUES (?, ?, 'B001', 'TOPUP', ?, ?, 'u-owner', ?, ?)`,
+       VALUES (?, ?, 'B001', 'TOPUP', ?, ?, 'u-admin', ?, ?)`,
       [`seed-dep-${id}`, id, bal, bal, nowSeed, nowSeed],
     );
     await run(
       `INSERT OR IGNORE INTO tr_membertransactionlog (id, memberId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
-       VALUES (?, ?, 'TOPUP', ?, ?, 'u-owner', ?, ?)`,
+       VALUES (?, ?, 'TOPUP', ?, ?, 'u-admin', ?, ?)`,
       [`seed-mtl-${id}`, id, bal, bal, nowSeed, nowSeed],
     );
   }
@@ -396,106 +623,48 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  // 2 order uji via jalur saveSale nyata (head + item + payment + tiket
-  // dapur 'Baru'), masing-masing hanya bila nomornya belum ada.
-  const seedOrders: SaleInput[] = [
-    {
-      method: 'cash',
-      salesNum: 'SEED-001',
-      grandTotal: 38850,
-      subtotal: 35000,
-      vatTotal: 3850,
-      cash: 40000,
-      change: 1150,
-      mode: 'DINE IN',
-      tableId: 'A1',
-      memberId: 'M001',
-      customer: 'Budi',
-      items: [
-        { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 2 },
-        { id: 'm-es-teh-manis', name: 'Es Teh Manis', basePrice: 5000, qty: 1 },
-      ],
-      payments: [{ method: 'cash', amount: 38850 }],
-    },
-    {
-      method: 'qris',
-      salesNum: 'SEED-002',
-      grandTotal: 17760,
-      subtotal: 26000,
-      discountTotal: 10000,
-      vatTotal: 1760,
-      mode: 'TAKE AWAY',
-      customer: 'Sinta',
-      voucherCode: 'HEMAT10K',
-      items: [
-        { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 18000, qty: 1 },
-        { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 8000, qty: 1 },
-      ],
-      payments: [{ method: 'qris', amount: 17760 }],
-    },
-    // SEED-003: promo nominal reusable (HEMAT10 hanya ada di ms_promotion,
-    // minSpend 50000) — membuktikan jalur fallback promo di backstop saveSale:
-    // usage 'burn' tercatat, kuota tak tersentuh (promo tanpa kuota).
-    // 51000 - 10000 = 41000 + PPN 11% (4510) = 45510.
-    {
-      method: 'qris',
-      salesNum: 'SEED-003',
-      grandTotal: 45510,
-      subtotal: 51000,
-      discountTotal: 10000,
-      vatTotal: 4510,
-      mode: 'TAKE AWAY',
-      customer: 'Dewi',
-      voucherCode: 'HEMAT10',
-      items: [
-        { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 18000, qty: 2 },
-        { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 1 },
-      ],
-      payments: [{ method: 'qris', amount: 45510 }],
-    },
-    // SEED-004: promo ongkir (ONGKIR10 hanya di ms_promotion) — ongkir bruto
-    // 8000 dipotong penuh (ongkirCut 8000), neto tersimpan 0.
-    // 21000 + PPN 11% (2310) + 0 = 23310; tunai 25000, kembali 1690.
-    {
-      method: 'cash',
-      salesNum: 'SEED-004',
-      grandTotal: 23310,
-      subtotal: 21000,
-      vatTotal: 2310,
-      cash: 25000,
-      change: 1690,
-      mode: 'GOFOOD',
-      customer: 'Agus',
-      voucherCode: 'ONGKIR10',
-      ongkir: 0,
-      ongkirCut: 8000,
-      items: [
-        { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 8000, qty: 2 },
-        { id: 'm-es-teh-manis', name: 'Es Teh Manis', basePrice: 5000, qty: 1 },
-      ],
-      payments: [{ method: 'cash', amount: 23310 }],
-    },
-  ];
-  for (const o of seedOrders) {
+  // 4 order contoh (L9/L25): jalur utama = saveSale nyata (head + item +
+  // payment + tiket dapur 'Baru') bila device bound; bila UNBOUND (instalasi
+  // segar belum klaim terminal — saveSale fail-closed melempar
+  // terminal-unbound) = sisip baris langsung via seedSaleDirect dengan
+  // matematika kanonis totals() yang sama + penomoran SEED-xxx. Masing-masing
+  // hanya bila nomornya belum ada; SEED-001 dimundurkan ke kemarin agar
+  // History/Dashboard/Rekap ada baseline.
+  for (const spec of SEED_SPECS) {
     try {
       const exists = await queryFirst<{ salesNum: string }>(
         `SELECT salesNum FROM tr_saleshead WHERE salesNum = ? LIMIT 1`,
-        [o.salesNum ?? ''],
+        [spec.salesNum],
       );
       if (exists) continue;
-      await saveSale(o);
+      const canon = seedCanon(spec);
+      if (isTerminalBound()) {
+        try {
+          await saveSale(seedSaleInput(spec, canon));
+        } catch (e) {
+          // Bound tapi saveSale gagal (termasuk terminal-unbound di tengah
+          // jalan): fallback baris-langsung yang jujur + catat
+          // (dulu: skip diam-diam).
+          console.warn(`[seed] saveSale ${spec.salesNum} gagal, fallback direct: ${e instanceof Error ? e.message : e}`);
+          await seedSaleDirect(spec, canon, nowSeed);
+        }
+      } else {
+        await seedSaleDirect(spec, canon, nowSeed);
+      }
       // Cap identitas cabang/user/shift uji (saveSale memakai terminal/sesi
-      // aktif yang saat seed pertama kali masih kosong). Kolom shiftId
-      // memang tidak ditulis saveSale (konsisten dengan penjualan kasir
-      // nyata yang direkap per rentang waktu) — seed menautkannya agar
+      // aktif yang saat seed pertama kali masih kosong; jalur direct memakai
+      // identitas uji sejak lahir sehingga UPDATE ini no-op untuknya). Kolom
+      // shiftId memang tidak ditulis saveSale (konsisten dengan penjualan
+      // kasir nyata yang direkap per rentang waktu) — seed menautkannya agar
       // alur Shift/Rekap langsung bisa diuji.
       await run(
         `UPDATE tr_saleshead SET branchId = 'B001', terminalId = 'T001', userId = 'u-kasir',
            cashierName = 'kasir', shiftId = ? WHERE salesNum = ?`,
-        [orderShiftId, o.salesNum ?? ''],
+        [orderShiftId, spec.salesNum],
       );
-    } catch {
-      /* satu order gagal — lanjut ke order berikut, kasir tetap jalan */
+    } catch (e) {
+      // Satu order gagal total — catat jujur lalu lanjut (kasir tetap jalan).
+      console.warn(`[seed] order ${spec.salesNum} dilewati: ${e instanceof Error ? e.message : e}`);
     }
   }
 
@@ -553,6 +722,12 @@ export async function ensureSeeded(): Promise<void> {
   } catch {
     /* abaikan - layar Expense tetap punya empty-state */
   }
+
+  // Jaring pengaman u-owner (DB lama): buang user uji owner + alihkan
+  // jejaknya ke u-admin. Idempoten, tak melempar. SENGAJA sebelum gate flag
+  // seed di bawah: DB lama yang flag-nya sudah '1' (early-return) ikut bersih
+  // — di ujung fungsi panggilan ini takkan tercapai untuk mereka.
+  await trimTestUsers();
 
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,

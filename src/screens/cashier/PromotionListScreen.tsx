@@ -8,7 +8,7 @@ import { ApiPath } from '../../config/server';
 import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
 import { initDb, query } from '../../lib/db';
 import { dbNowLocal } from '../../lib/datefmt';
-import { useLang } from '../../lib/i18n';
+import { getLang, useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number; ongkir?: number } } };
@@ -29,14 +29,14 @@ type Promo = {
 /** Baca live dari SQLite ms_voucher + ms_promotion (offline-first).
  * Kosong = belum ada promo (pemanggil tampilkan empty-state). */
 
-/** Format tanggal server ('2026-10-31 23:59:59') ala Indonesia ('31 Okt 2026'). */
+/** Format tanggal server ('2026-10-31 23:59:59') ikut bahasa aktif. */
 function fmtTgl(raw: unknown): string {
   const s = String(raw ?? '').trim();
   if (!s) return '';
   try {
     const d = new Date(s.replace(' ', 'T'));
     if (!Number.isNaN(d.getTime())) {
-      return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+      return d.toLocaleDateString(getLang() === 'en' ? 'en-US' : 'id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     }
   } catch {
     /* pakai potongan mentah */
@@ -282,7 +282,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
 
   const pakai = async (p: Promo) => {
     if (subtotal !== undefined && subtotal < p.minBelanja) {
-      setWarn(`Belanja ${rp(subtotal)} belum mencapai ${t('minSpend')} ${rp(p.minBelanja)} untuk ${p.code}.`);
+      setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(p.minBelanja)).replace('{code}', p.code));
       return;
     }
     setWarn('');
@@ -302,7 +302,7 @@ export default function PromotionListScreen({ navigation, route }: Props) {
           return;
         }
         if (r.minSpend > 0 && subtotal !== undefined && subtotal < r.minSpend) {
-          setWarn(`Belanja ${rp(subtotal)} belum mencapai ${t('minSpend')} ${rp(r.minSpend)} untuk ${p.code}.`);
+          setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(r.minSpend)).replace('{code}', p.code));
           return;
         }
         // Server menjawab definitif-tak-valid: TOLAK, jangan fail-open ke

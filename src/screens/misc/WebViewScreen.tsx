@@ -2,6 +2,7 @@ import { Linking, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions 
 import { WebView } from 'react-native-webview';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
+import { useLang } from '../../lib/i18n';
 
 type Nav = { goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { url?: string; title?: string } } };
@@ -13,8 +14,9 @@ type Props = { navigation?: Nav; route?: { params?: { url?: string; title?: stri
 export default function WebViewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
+  const { t } = useLang();
   const url = route?.params?.url ?? '';
-  const title = route?.params?.title ?? 'Halaman Web';
+  const title = route?.params?.title ?? t('web_title');
 
   const openExternal = () => {
     if (url) void Linking.openURL(url).catch(() => undefined);
@@ -25,10 +27,10 @@ export default function WebViewScreen({ navigation, route }: Props) {
       <ScreenHeader
         title={title}
         onBack={() => navigation?.goBack()}
-        backLabel="‹ Tutup"
+        backLabel={t('web_close')}
         right={
           <TouchableOpacity onPress={openExternal} hitSlop={10}>
-            <Text style={styles.ext}>Browser ›</Text>
+            <Text style={styles.ext}>{t('web_browser')}</Text>
           </TouchableOpacity>
         }
       />
@@ -36,8 +38,8 @@ export default function WebViewScreen({ navigation, route }: Props) {
         <WebView source={{ uri: url }} style={styles.web} onError={openExternal} />
       ) : (
         <View style={[styles.empty, isTablet && wideCenterSm]}>
-          <Text style={styles.emptyT}>Tidak ada tautan.</Text>
-          <Text style={styles.emptyS}>Buka lewat tombol pendaftaran di layar Klaim Terminal.</Text>
+          <Text style={styles.emptyT}>{t('web_empty')}</Text>
+          <Text style={styles.emptyS}>{t('web_empty_hint')}</Text>
         </View>
       )}
     </View>

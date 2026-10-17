@@ -8,12 +8,13 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, revokeKickedSession, setKickNotice, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { seedIfEmpty } from './src/lib/seed';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
+import { flushPendingRevokes } from './src/lib/sync';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
@@ -207,8 +208,12 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
         const bottom = routes.length > 0 ? routes[0]?.name : undefined;
         // Kunci peran: DAPUR/DISPLAY tak boleh mendarat di rute kasir
         // (mis. deep-link sisa sesi) - kembalikan ke beranda peran.
+        // F13: hanya bila home ada di stack aktif (stack authed sudah
+        // mount); stack tamu yang masih transisi jangan di-reset.
         const allowed = allowedRoutesFor(deviceRole);
         if (allowed && cur && !allowed.has(cur)) {
+          const names = routes.map((r) => r?.name);
+          if (!names.includes(home)) return;
           n.reset?.({ index: 0, routes: [{ name: home }] });
           return;
         }
@@ -221,8 +226,13 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
   }, [loggedIn, nav, shiftClosed, deviceRole, home]);
   /** Kunci peran kontinu: setiap perpindahan rute di luar peran langsung
    * dikembalikan ke beranda peran (deep-link, drawer sisa, dsb). Reset
-   * berhenti sendiri karena beranda selalu diizinkan. */
+   * berhenti sendiri karena beranda selalu diizinkan.
+   * F13: hanya tegakkan di stack authed — butuh loggedIn DAN rute home ada
+   * di stack aktif. Tanpa cek ini, stack tamu (tanpa CustomerDisplay/
+   * Kitchen/ Dashboard) ikut di-reset ke beranda peran saat peran
+   * DISPLAY/DAPUR aktif. */
   useEffect(() => {
+    if (!loggedIn) return undefined;
     const allowed = allowedRoutesFor(deviceRole);
     if (!allowed) return undefined;
     const ctl = nav as unknown as {
@@ -236,13 +246,16 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
         try {
           const st = ctl.getState?.();
           if (!st || !Array.isArray(st.routes) || typeof st.index !== 'number') return;
+          // Stack tamu tak memuat rute home authed — bukan urusan kunci peran.
+          const names = st.routes.map((r) => r?.name);
+          if (!names.includes(home)) return;
           const cur = st.routes[st.index]?.name;
           if (cur && !allowed.has(cur)) ctl.reset?.({ index: 0, routes: [{ name: home }] });
         } catch { /* abaikan */ }
       }, 60);
     });
     return unsub;
-  }, [nav, deviceRole, home]);
+  }, [nav, deviceRole, home, loggedIn]);
   if (!loggedIn) {
     return (
       // key eksplisit: tanpa ini React me-reuse state navigator tamu saat
@@ -372,7 +385,33 @@ export default function App() {
       try {
         await loadServerState();
         const st = await hydrateTerminalState();
+        // B11: restore sesi AsyncStorage berjalan async — tunggu selesai
+        // SEBELUM memilih stack agar guard tak menilai memori dingin
+        // pasca-restart (splash ditahan lewat booted di bawah).
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          let unsub: (() => void) | null = null;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            try { unsub?.(); } catch { /* abaikan */ }
+            resolve();
+          };
+          try {
+            const u = subscribeSession(finish);
+            unsub = u;
+            // Sudah pulih sinkron: cabut listener yang baru dipasang.
+            if (settled) {
+              try { u(); } catch { /* abaikan */ }
+            }
+          } catch { finish(); return; }
+          getSession(); // picu restore()
+          setTimeout(finish, 1000);
+        });
         if (!live) return;
+        // S18: boot = momen online untuk mengirim utang revoke logout
+        // (fire-and-forget, tak menahan splash).
+        try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
         const b = st.binding;
         setBound(!!(b && b.terminalId));
         const tag = b?.tag ? parseDeviceRole(b.tag) : null;
@@ -472,6 +511,34 @@ export default function App() {
         const p = msg.payload as { message?: string };
         void notifyLocal(tr('ws.shiftTitle'), String(p.message ?? ''), { route: 'Shift' });
       }
+      // SPEC §7/Q13 KICK-NO-LOCAL-REVOKE + kick-no-live-notify: sesi perangkat
+      // ini digantikan login lain → cabut sesi + grant lokal agar sesi basi tak
+      // bisa dipakai lagi, lalu notif kick langsung (perangkat BARU sudah
+      // dikabari via tookOver/kickedUserId di alur login/bind). Tanpa identitas
+      // yang cocok dengan sesi aktif = abaikan (bukan untuk kami).
+      if (/session|kick|takeover|revoke|logout/i.test(String(msg.type ?? ''))) {
+        const p = msg.payload as {
+          kickedUserId?: unknown; userId?: unknown; kicked?: unknown;
+          wasKicked?: unknown; terminalId?: unknown;
+        };
+        const named = String(p.kickedUserId ?? p.userId ?? '').trim();
+        const flagged = p.kicked === true || p.wasKicked === true;
+        const term = String(p.terminalId ?? '').trim();
+        const me = getSession();
+        const myTerminal = (getBinding()?.terminalId ?? me?.terminalId ?? '').trim();
+        const forMe =
+          (!!named && (named === (me?.userId ?? '') || named === (me?.username ?? ''))) ||
+          (flagged && (!term || (!!myTerminal && term === myTerminal)));
+        if (forMe && revokeKickedSession(named || undefined)) {
+          const body = tr('kicked_msg');
+          try {
+            setKickNotice(body);
+          } catch {
+            /* abaikan */
+          }
+          void notifyLocal(tr('takeover_title'), body, { route: 'Login' });
+        }
+      }
       // Kontrak §7.1: tarik ulang domain yang diminta server.
       if (msg.type === 'FORCE_PULL') {
         const p = msg.payload as { domains?: unknown };
@@ -520,6 +587,19 @@ export default function App() {
               // ke Login agar hook tak memalsukan identitas.
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (navRef as any).navigate('Login' as never);
+              return;
+            }
+            // B14 fail-closed: sesi tanpa ikatan terminal = ke alur klaim,
+            // bukan rute authed (tanpa binding = tanpa konteks terminal).
+            let boundNow = false;
+            try {
+              boundNow = getBinding() !== null;
+            } catch {
+              boundNow = false;
+            }
+            if (!boundNow) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (navRef as any).navigate('Install' as never);
               return;
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

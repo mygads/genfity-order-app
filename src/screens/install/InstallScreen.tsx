@@ -1,16 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { saveBinding as saveSessionBinding } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
+import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { adoptTerminalBinding } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
   bindTerminal,
   fetchBranches,
   fetchTerminals,
   getContractDeviceId,
   isContractConfigured,
   loadBinding,
-  saveBinding,
   type BranchInfo,
   type ContractTerminal,
   type TerminalBinding,
 } from '../../lib/terminalContract';
-import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { code?: string } } };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation, route }: Props) {
+import ScreenRoot from '../../components/ScreenRoot';
+import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { code?: string } } };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang(); const [code, setCode] = useState(route?.params?.code ?? '');
@@ -68,42 +68,48 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
     return () => { live = false; };
   }, []);
 
-  // Literal netral ID/EN (lane beku: tanpa kunci i18n baru).
+  // B4: teks via t('inst_*') dengan fallback literal netral ID/EN yang
+  // disalin persis dari teks lama — UI tak berubah sampai STR mendaftarkan
+  // kunci ini (t() mengembalikan nama kunci bila belum terdaftar).
+  const tx = (key: string, fb: string): string => {
+    const v = t(key);
+    return v === key ? fb : v;
+  };
   const L = {
-    bindTitle: lang === 'id' ? 'Ikat Perangkat ke Terminal' : 'Bind This Device to a Terminal',
-    bindDesc: lang === 'id'
+    bindTitle: tx('inst_bind_title', lang === 'id' ? 'Ikat Perangkat ke Terminal' : 'Bind This Device to a Terminal'),
+    bindDesc: tx('inst_bind_desc', lang === 'id'
       ? 'Pilih cabang, pilih terminal, lalu masukkan PIN terminal (dari dashboard owner). Ikatan tersimpan di perangkat ini.'
-      : 'Pick a branch, pick a terminal, then enter the terminal PIN (from the owner dashboard). The binding stays on this device.',
-    bindBtn: lang === 'id' ? 'Mulai Ikat Terminal' : 'Start Terminal Binding',
-    rebindBtn: lang === 'id' ? 'Ikat ulang (pindah terminal/cabang)' : 'Re-bind (move terminal/branch)',
-    boundAs: lang === 'id' ? 'Perangkat terikat' : 'Device bound to',
-    pickBranch: lang === 'id' ? 'Pilih cabang' : 'Select a branch',
-    pickTerminal: lang === 'id' ? 'Pilih terminal' : 'Select a terminal',
-    pinTitle: lang === 'id' ? 'PIN terminal' : 'Terminal PIN',
-    pinPh: lang === 'id' ? 'PIN dari dashboard owner' : 'PIN from the owner dashboard',
-    pinShort: lang === 'id' ? 'Masukkan PIN terminal (min. 4 digit).' : 'Enter the terminal PIN (min. 4 digits).',
-    doBind: lang === 'id' ? 'Ikat Terminal' : 'Bind Terminal',
-    loading: lang === 'id' ? 'Memuat...' : 'Loading...',
-    noContract: lang === 'id'
+      : 'Pick a branch, pick a terminal, then enter the terminal PIN (from the owner dashboard). The binding stays on this device.'),
+    bindBtn: tx('inst_bind_btn', lang === 'id' ? 'Mulai Ikat Terminal' : 'Start Terminal Binding'),
+    rebindBtn: tx('inst_rebind_btn', lang === 'id' ? 'Ikat ulang (pindah terminal/cabang)' : 'Re-bind (move terminal/branch)'),
+    boundAs: tx('inst_bound_as', lang === 'id' ? 'Perangkat terikat' : 'Device bound to'),
+    pickBranch: tx('inst_pick_branch', lang === 'id' ? 'Pilih cabang' : 'Select a branch'),
+    pickTerminal: tx('inst_pick_terminal', lang === 'id' ? 'Pilih terminal' : 'Select a terminal'),
+    pinTitle: tx('inst_term_pin_title', lang === 'id' ? 'PIN terminal' : 'Terminal PIN'),
+    pinPh: tx('inst_term_pin_ph', lang === 'id' ? 'PIN dari dashboard owner' : 'PIN from the owner dashboard'),
+    pinShort: tx('inst_term_pin_short', lang === 'id' ? 'Masukkan PIN terminal (min. 4 digit).' : 'Enter the terminal PIN (min. 4 digits).'),
+    doBind: tx('inst_do_bind', lang === 'id' ? 'Ikat Terminal' : 'Bind Terminal'),
+    loading: tx('inst_loading', lang === 'id' ? 'Memuat...' : 'Loading...'),
+    noContract: tx('inst_no_contract', lang === 'id'
       ? 'Backend baru belum terjangkau (atau belum dikonfigurasi) — pakai klaim kode di bawah (server lama).'
-      : 'New backend unreachable (or not configured) — use the code claim below (legacy server).',
-    branchFail: lang === 'id'
+      : 'New backend unreachable (or not configured) — use the code claim below (legacy server).'),
+    branchFail: tx('inst_branch_fail', lang === 'id'
       ? 'Daftar cabang tak terjangkau — periksa koneksi atau pakai klaim kode di bawah.'
-      : 'Branch list unreachable — check the connection or use the code claim below.',
-    termFail: lang === 'id'
+      : 'Branch list unreachable — check the connection or use the code claim below.'),
+    termFail: tx('inst_term_fail', lang === 'id'
       ? 'Daftar terminal tak terjangkau — coba lagi.'
-      : 'Terminal list unreachable — try again.',
-    termEmpty: lang === 'id'
+      : 'Terminal list unreachable — try again.'),
+    termEmpty: tx('inst_term_empty', lang === 'id'
       ? 'Belum ada terminal di cabang ini — minta owner menambahkannya dulu.'
-      : 'No terminals in this branch yet — ask the owner to add one first.',
-    bindFail: lang === 'id'
+      : 'No terminals in this branch yet — ask the owner to add one first.'),
+    bindFail: tx('inst_bind_fail', lang === 'id'
       ? 'Ikat gagal — PIN salah atau terminal ditolak server.'
-      : 'Bind failed — wrong PIN or the server rejected the terminal.',
-    kicked: lang === 'id'
+      : 'Bind failed — wrong PIN or the server rejected the terminal.'),
+    kicked: tx('inst_kicked', lang === 'id'
       ? 'Perangkat ini mengambil alih terminal — sesi perangkat sebelumnya telah digantikan (login baru menang).'
-      : 'This device took over the terminal — the previous device session was replaced (new login wins).',
-    legacyTitle: lang === 'id' ? 'Cara lama (server legacy)' : 'Legacy way (legacy server)',
-    noPinSet: lang === 'id' ? 'belum ada PIN' : 'no PIN yet',
+      : 'This device took over the terminal — the previous device session was replaced (new login wins).'),
+    legacyTitle: tx('inst_legacy_title', lang === 'id' ? 'Cara lama (server legacy)' : 'Legacy way (legacy server)'),
+    noPinSet: tx('inst_no_pin_set', lang === 'id' ? 'belum ada PIN' : 'no PIN yet'),
   };
 
   const startBind = async () => {
@@ -150,45 +156,56 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
     if (busy || !selBranch || !selTerminal) return;
     if (termPin.trim().length < 4) { setBindError(L.pinShort); return; }
     setBusy(true); setBindError('');
+    // Tag terminal lama HANYA dipertahankan untuk bind ULANG ke terminal yang
+    // SAMA (kompatibel terminal warisan tanpa tag); terminal baru/lain tanpa
+    // tag kanonis = tolak fail-closed (tanpa default 'full_access' diam-diam).
+    const prevContract = await loadBinding().catch(() => null);
+    const sameTerminal = !!prevContract && prevContract.terminalId === selTerminal.terminalId;
     try {
       const deviceId = await getContractDeviceId();
       const r = await bindTerminal(selTerminal.terminalId, termPin.trim(), deviceId);
       if (!r.ok || !r.data?.bound) { setBindError(L.bindFail); return; }
+      const tag = parseDeviceRole((selTerminal.tag || '').trim())
+        ?? (sameTerminal ? parseDeviceRole((prevContract?.tag || '').trim()) : null);
+      if (!tag) { setBindError(L.bindFail); return; }
+      // Kontrak antar-paket: adoptTerminalBinding = logout + clearGrant +
+      // tulis SEMUA store binding (sesi, kontrak, server) sekaligus
+      // (REBIND-STALE-GRANT ikut dicabut di dalamnya). JANGAN setTerminal /
+      // saveBinding terpisah agar tak ada store yang tertinggal.
+      try {
+        await adoptTerminalBinding({
+          terminalId: selTerminal.terminalId,
+          terminalCode: selTerminal.terminalCode,
+          branchId: selBranch.id,
+          branchName: selBranch.name,
+          merchantName: selBranch.name,
+          tag,
+          deviceId,
+        });
+      } catch {
+        setBindError(L.bindFail);
+        return;
+      }
+      // Station printer milik terminal lama tak berlaku lintas re-bind
+      // (kunci store 'genfity.printer.stations' milik lib/print.ts — bukan
+      // bagian adopt sehingga dibersihkan di sini).
+      try { await removeItem('genfity.printer.stations'); } catch { /* abaikan */ }
       const b: TerminalBinding = {
         branchId: selBranch.id,
         branchName: selBranch.name,
         terminalId: selTerminal.terminalId,
         terminalCode: selTerminal.terminalCode,
         terminalName: selTerminal.name,
-        tag: parseDeviceRole(selTerminal.tag) ?? 'full_access',
+        tag,
         deviceId,
         boundAt: new Date().toISOString(),
       };
-      await saveBinding(b);
-      // Cermin sesi (D3-01): login/guard/drawer baca store session —
-      // tanpa cermin, bind jalur legacy tak terlihat sesi. Tag selalu kanonis.
+      // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
+      // adopt) — home guard tetap fail-safe bila ini gagal.
       try {
-        saveSessionBinding({
-          terminalId: b.terminalId,
-          terminalCode: b.terminalCode,
-          branchId: b.branchId,
-          branchName: b.branchName,
-          merchantName: b.branchName,
-          tag: b.tag,
-          deviceId: b.deviceId,
-          boundAt: b.boundAt,
-        });
-      } catch { /* binding kontrak sudah tersimpan — sesi menyusul via bridge login */ }
-      try {
-        setDeviceRoleForTag(parseDeviceRole(b.tag) ?? 'full_access');
+        setDeviceRoleForTag(tag);
       } catch { /* peran bertahan — home guard tetap fail-safe */ }
       setBinding(b);
-      // Kompatibel jalur lama: header request + query lokal tetap baca ini.
-      setTerminal({
-        terminalCode: selTerminal.terminalCode,
-        branchId: selBranch.id,
-        branchName: selBranch.name,
-      });
       try { await notifyTerminalVerification('verified'); } catch { /* best-effort */ }
       setShowPin(false);
       // Q13: beritahu perangkat BARU bila ada sesi lama yang digantikan.

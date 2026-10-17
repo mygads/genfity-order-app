@@ -11,6 +11,7 @@ import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
+import { authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -170,6 +171,11 @@ export default function BookingScreen({ navigation }: Props) {
   };
 
   const save = () => {
+    // U5: mutasi booking = gerbang bound terminal (fail-closed).
+    if (!branchId.trim()) {
+      setWarn(t('terminal_unbound_hint'));
+      return;
+    }
     if (!name.trim()) {
       setWarn(t('bok_warn_name'));
       return;
@@ -185,7 +191,7 @@ export default function BookingScreen({ navigation }: Props) {
     const picked = tablesSrc.find((tb) => tb.no === code);
     const paxNum = Number(tamu) || 2;
     if (picked && paxNum > picked.kap) {
-      setWarn(`Tamu (${paxNum}) melebihi kapasitas meja ${code} (${picked.kap} kursi).`);
+      setWarn(t('bok_warn_capacity'));
       return;
     }
     if (editingId) {
@@ -237,13 +243,19 @@ export default function BookingScreen({ navigation }: Props) {
     setName(''); setPhone(''); setPax(''); setTime(''); setNote('');
   };
 
-  const advance = (id: string) =>
+  // U5: mutasi booking = gerbang bound terminal (fail-closed).
+  const advance = (id: string) => {
+    if (!branchId.trim()) {
+      setGateNotice(t('terminal_unbound_hint'));
+      return;
+    }
     persist(
       list.map((r) => {
         const nx = NEXT[r.status];
         return r.id === id && nx ? { ...r, status: nx } : r;
       }),
     );
+  };
 
   /** Muat satu reservasi ke form untuk diedit. */
   const startEdit = (r: Resv) => {
@@ -259,14 +271,42 @@ export default function BookingScreen({ navigation }: Props) {
     setWarn('');
   };
 
-  /** Hapus/batalkan reservasi (tanya dua ketuk: tombol berubah jadi konfirmasi). */
+  /** Hapus/batalkan reservasi (tanya dua ketuk: tombol berubah jadi konfirmasi).
+   * U5: ketuk kedua = gerbang PIN supervisor 'order.cancel' (cermin CancelScreen:
+   * server dulu, fallback eskalasi lokal saat offline/unconfigured; fail-closed). */
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
-  const removeResv = (r: Resv) => {
+  const [delPin, setDelPin] = useState('');
+  const removeResv = async (r: Resv) => {
+    // U5: mutasi booking = gerbang bound terminal (fail-closed).
+    if (!branchId.trim()) {
+      setGateNotice(t('terminal_unbound_hint'));
+      return;
+    }
     if (confirmDel !== r.id) {
       setConfirmDel(r.id);
+      setDelPin('');
+      setGateNotice(t('void_need_pin').replace('{r}', 'order.cancel'));
+      return;
+    }
+    const clean = delPin.replace(/\D/g, '');
+    if (!clean) {
+      setGateNotice(t('void_need_pin').replace('{r}', 'order.cancel'));
+      return;
+    }
+    const server = await authorizeSupervisor(clean);
+    if (!server.ok && (server.code === 'offline' || server.code === 'unconfigured')) {
+      const esc = await verifyLocalEscalation(clean, 'order.cancel');
+      if (!esc.ok) {
+        setGateNotice(esc.message);
+        return;
+      }
+    } else if (!server.ok) {
+      setGateNotice(server.message);
       return;
     }
     setConfirmDel(null);
+    setDelPin('');
+    setGateNotice('');
     if (editingId === r.id) resetForm();
     persist(list.filter((x) => x.id !== r.id));
     try {
@@ -305,10 +345,10 @@ export default function BookingScreen({ navigation }: Props) {
 
   const reservasiList = (
     <>
-      <Text style={[styles.count, isTablet && styles.countBig]}>{shopLabel || t('terminal_unbound_title')} · {shown.length} reservasi aktif</Text>
+      <Text style={[styles.count, isTablet && styles.countBig]}>{shopLabel || t('terminal_unbound_title')}{t('bok_count').replace('{n}', String(shown.length))}</Text>
       {!branchId ? <Text style={styles.warn}>{t('terminal_unbound_hint')}</Text> : null}
       <TouchableOpacity onPress={() => setOnlyToday((v) => !v)} style={styles.todayToggle}>
-        <Text style={styles.todayToggleT}>{onlyToday ? '☑ Hari ini saja' : '☐ Hari ini saja'}</Text>
+        <Text style={styles.todayToggleT}>{onlyToday ? '☑' : '☐'} {t('bok_today_only')}</Text>
       </TouchableOpacity>
 
       <Text style={[styles.sec, isTablet && styles.secBig]}>{t('bok_list')}</Text>
@@ -343,7 +383,7 @@ export default function BookingScreen({ navigation }: Props) {
             <AppButton
               size="sm"
               variant="secondary"
-              title={editingId === r.id ? '● Diedit…' : '✎ Edit'}
+              title={editingId === r.id ? t('bok_edited') : t('bok_edit')}
               onPress={() => startEdit(r)}
               fullWidth={false}
               style={[styles.editBtn, { marginTop: 0, borderColor: colors.navy }]}
@@ -352,13 +392,25 @@ export default function BookingScreen({ navigation }: Props) {
             <AppButton
               size="sm"
               variant="secondary"
-              title={confirmDel === r.id ? 'Yakin? Ketuk lagi' : '🗑 Batal/Hapus'}
-              onPress={() => removeResv(r)}
+              title={confirmDel === r.id ? t('tbl_confirm_again') : t('bok_del')}
+              onPress={() => void removeResv(r)}
               fullWidth={false}
               style={[styles.delBtn, confirmDel === r.id && styles.delBtnConfirm, { marginTop: 0, borderColor: colors.red }]}
               textStyle={[styles.delT, confirmDel === r.id && styles.delTConfirm]}
             />
           </View>
+          {/* U5: kolom PIN supervisor muncul saat konfirmasi hapus dipersenjatai. */}
+          {confirmDel === r.id ? (
+            <AppInput
+              boxStyle={styles.input}
+              style={styles.fieldText}
+              value={delPin}
+              onChangeText={(v) => setDelPin(v.replace(/\D/g, '').slice(0, 6))}
+              placeholder={t('cx_pin')}
+              keyboardType="numeric"
+              secureTextEntry
+            />
+          ) : null}
         </View>
       ))}
 
@@ -376,7 +428,7 @@ export default function BookingScreen({ navigation }: Props) {
 
   const bookingForm = (
     <>
-      <Text style={[styles.sec, isTablet && styles.secBig]}>{editingId ? t('bok_edit') : t('bok_new')}</Text>
+      <Text style={[styles.sec, isTablet && styles.secBig]}>{editingId ? t('bok_edit_title') : t('bok_new')}</Text>
       <Text style={[styles.hint, isTablet && styles.hintBig]}>
         {editingId ? t('bok_edit_hint') : t('bok_form_hint')}
       </Text>

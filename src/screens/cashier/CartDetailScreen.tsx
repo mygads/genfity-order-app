@@ -139,11 +139,11 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         applyVoid(id, wantVoid);
         return;
       }
-      setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+      setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
     } catch {
       // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
       // terapkan void tanpa otorisasi.
-      setVoidAuthMsg('Izin tak dapat diperiksa / Access check failed — void ditolak');
+      setVoidAuthMsg(t('void_check_fail'));
       return;
     }
     setVoidPin('');
@@ -221,7 +221,11 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
-      ongkir: ongkirNet,
+      // Ongkir diteruskan BRUTO + cut terpisah (kontrak PayScreen): Pay
+      // percaya ongkirCut pemanggil; kirim net tanpa cut = cut hilang di
+      // catatan (sebelumnya ongkirNet tanpa ongkirCut di sini).
+      ...(ongkir > 0 ? { ongkir } : {}),
+      ...(ongkirCut > 0 ? { ongkirCut } : {}),
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
@@ -255,7 +259,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         ...(memberId ? { memberId } : {}),
         ...(customer.trim() ? { customer: customer.trim() } : {}),
         ...(sn ? { salesNum: sn } : {}),
-        ongkir: ongkirNet,
+        // Draft menyimpan ongkir BRUTO + cut terpisah agar muat-ulang hitung
+        // ulang kanonis dari dasar yang sama (net di sini = cut susut permanen).
+        ...(ongkir > 0 ? { ongkir } : {}),
+        ...(ongkirCut > 0 ? { ongkirCut } : {}),
         total,
         ts: Date.now(),
       });
@@ -291,7 +298,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       {/* Header navy judul tengah + sub mode/meja */}
       <ScreenHeader
         title={t('orderDetail')}
-        sub={`${modeLabel} · ${itemCount} item`}
+        sub={`${modeLabel} · ${itemCount} ${t('hist_items')}`}
         onBack={() => navigation?.goBack()}
       />
 
@@ -308,7 +315,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             <View style={styles.rowBody}>
               <Text style={[styles.itemName, c.voided && styles.voidName, isTablet && styles.itemNameBig]} numberOfLines={2}>
                 {c.name} x{c.qty}
-                {c.voided ? ' (Void)' : ''}
+                {c.voided ? ` (${t('hist_st_void')})` : ''}
               </Text>
               {/* Harga satuan selalu terlihat (dulu hanya di dalam panel edit) */}
               {!c.voided && <Text style={styles.unit}>@ {rp(c.basePrice)}</Text>}
@@ -320,7 +327,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 </Text>
               ))}
               {c.note ? <Text style={styles.note}>{t('kit_note')}: {c.note}</Text> : null}
-              {c.discount > 0 && <Text style={styles.discount}>- Diskon {rp(c.discount)}</Text>}
+              {c.discount > 0 && <Text style={styles.discount}>- {t('discount')} {rp(c.discount)}</Text>}
               {c.voided ? (
                 <TouchableOpacity onPress={() => unvoidItem(c.id)}>
                   <Text style={styles.restoreT}>{t('cart_restore')}</Text>
@@ -371,7 +378,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                     <AppButton
                       size="sm"
                       variant="secondary"
-                      title="Void"
+                      title={t('hist_st_void')}
                       onPress={() => voidItem(c.id)}
                       fullWidth={false}
                       style={[styles.editorVoid, { marginTop: 0, backgroundColor: 'transparent', borderColor: colors.red }]}
@@ -427,7 +434,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               <View style={styles.promoRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.promoCode}>{voucher.code}</Text>
-                  <Text style={styles.promoDesc}>{useOngkirCut ? `Potongan ongkir ${rp(ongkirCut)}` : `Potongan ${rp(voucherAmt)}`}</Text>
+                  <Text style={styles.promoDesc}>{useOngkirCut ? `${t('discount')} ${t('ongkir')} ${rp(ongkirCut)}` : `${t('discount')} ${rp(voucherAmt)}`}</Text>
                 </View>
                 <TouchableOpacity onPress={() => setVoucher(null)} hitSlop={10}>
                   <Text style={styles.promoRemove}>{t('promo_remove')}</Text>
@@ -528,7 +535,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
-              ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
+              // SplitBill menghitung ulang kanonis dari ongkir BRUTO (cut
+              // dihitung ulang min(cap, bruto)); kirim net = cut tak terhitung.
+              ...(ongkir > 0 ? { ongkir } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
             })}>
@@ -542,7 +551,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
-              ongkir: ongkirNet,
+              // Pratinjau butuh bruto + cut terpisah agar terusannya ke Pay
+              // utuh (BillPreview meneruskan keduanya via orderCtx).
+              ...(ongkir > 0 ? { ongkir } : {}),
+              ...(ongkirCut > 0 ? { ongkirCut } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
               ...(service > 0 ? { service } : {}),
@@ -602,8 +614,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       <Modal visible={voidTarget !== null} transparent animationType="fade" onRequestClose={() => setVoidTarget(null)}>
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
-            <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>Supervisor PIN</Text>
-            <Text style={styles.modalLabel}>Perlu persetujuan supervisor / Supervisor approval required</Text>
+            <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('cx_pin')}</Text>
+            <Text style={styles.modalLabel}>{t('void_dialog_sub')}</Text>
             <AppInput
               boxStyle={styles.modalInput}
               style={styles.fieldText}
@@ -619,7 +631,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               <AppButton
                 size="sm"
                 variant="secondary"
-                title="Batal / Cancel"
+                title={t('c_cancel')}
                 onPress={() => { setVoidTarget(null); setVoidPin(''); setVoidAuthMsg(''); }}
                 disabled={voidConfirming}
                 fullWidth={false}
@@ -628,7 +640,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               />
               <AppButton
                 size="sm"
-                title={voidConfirming ? '...' : 'Setujui / Approve'}
+                title={voidConfirming ? '...' : t('xp_approve')}
                 onPress={confirmVoidPin}
                 disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
                 fullWidth={false}
@@ -690,7 +702,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   ...(voucher ? { voucherCode: voucher.code } : {}),
                   ...(table ? { table } : {}),
                   ...(customer ? { customer } : {}),
-                  ongkir: ongkirNet,
+                  // Pracetak dari cart = pratinjau belum bayar (cermin DineIn).
+                  ...(ongkir > 0 ? { ongkir } : {}),
+                  ...(ongkirCut > 0 ? { ongkirCut } : {}),
+                  unpaid: true,
                   ...(service > 0 ? { service } : {}),
                   ...(taxIncl > 0 ? { tax: taxIncl } : {}),
                   ...(rounding !== 0 ? { rounding } : {}),

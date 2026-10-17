@@ -1,4 +1,5 @@
 import { getJSON, setJSON } from './storage';
+import { getSession } from '../session';
 import { enqueueOutbox, enqueueSync } from './sync';
 
 /**
@@ -52,41 +53,49 @@ export async function getApprovalDetail(id: string): Promise<ApprovalDetail | nu
   }
 }
 
-/** Tandai disetujui: tulis kanonis + outbox, lalu siarkan ke semua layar.
- * approvedBy = userId pemilik PIN eskalasi (verifyLocalEscalation). Bila diisi
- * (jalur ExpenseScreen ber-PIN): rincian audit by+at disimpan + satu item sync
- * 'other' (op expense-approve) diantrekan agar identitas approver ikut
- * terkirim. Tanpa approvedBy = jalur lawas (PettyCashScreen/Detail) yang
- * perilakunya tak berubah. */
-export async function markApproved(id: string, approvedBy?: string): Promise<void> {
+/** Tandai disetujui: tulis kanonis + rincian audit + outbox, lalu siarkan.
+ * R28 (audit 2026-10-17): approvedBy pemanggil DIABAIKAN — approver WAJIB
+ * userId sesi terverifikasi (getSession userId, fallback username). Tanpa
+ * sesi = GAGAL-KERAS (throw) agar tak ada jalur approve boolean-tanpa-
+ * identitas yang lolos diam-diam. Param kedua dipertahankan (opsional) agar
+ * pemanggil lama tetap kompil; nilainya tidak dipakai. Rincian audit by+at
+ * selalu disimpan (kolom boolean kanonis di atas dipertahankan apa adanya
+ * agar baca lawas PettyCash/Expense tetap kompatibel) + satu item sync
+ * 'other' (op expense-approve) agar identitas approver ikut terkirim. */
+export async function markApproved(id: string, _approvedBy?: string): Promise<void> {
+  const cleanId = String(id ?? '').trim();
+  void _approvedBy; // R28: identitas pemanggil tak dipercaya — selalu dari sesi.
+  const sess = getSession();
+  const approver = String(sess?.userId ?? sess?.username ?? '').trim();
+  if (!cleanId || !approver) {
+    throw new Error(
+      '[pettyApproval] markApproved butuh id + sesi login terverifikasi — approve tanpa identitas sesi ditolak.',
+    );
+  }
   const at = new Date().toISOString();
   try {
     const cur = await getJSON<Record<string, boolean>>(APPROVAL_KEY, {});
-    cur[id] = true;
+    cur[cleanId] = true;
     await setJSON(APPROVAL_KEY, cur);
-    if (approvedBy) {
-      try {
-        const det = await getJSON<Record<string, ApprovalDetail>>(DETAIL_KEY, {});
-        det[id] = { by: approvedBy, at };
-        await setJSON(DETAIL_KEY, det);
-      } catch {
-        /* abaikan: flag boolean di atas tetap sah */
-      }
+    try {
+      const det = await getJSON<Record<string, ApprovalDetail>>(DETAIL_KEY, {});
+      det[cleanId] = { by: approver, at };
+      await setJSON(DETAIL_KEY, det);
+    } catch {
+      /* abaikan: flag boolean di atas tetap sah */
     }
-    await enqueueOutbox('tr_branchexpense', id, 'update');
-    if (approvedBy) {
-      try {
-        enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'expense-approve', approvedBy, approvedAt: at });
-      } catch {
-        /* abaikan: outbox fisik di atas tetap jalan */
-      }
+    await enqueueOutbox('tr_branchexpense', cleanId, 'update');
+    try {
+      enqueueSync('other', { table: 'tr_branchexpense', rowId: cleanId, op: 'expense-approve', approvedBy: approver, approvedAt: at });
+    } catch {
+      /* abaikan: outbox fisik di atas tetap jalan */
     }
   } catch {
     /* abaikan: state optimistis pemanggil tetap jalan */
   }
   for (const fn of listeners) {
     try {
-      fn(id);
+      fn(cleanId);
     } catch {
       /* abaikan satu listener rusak */
     }
@@ -98,5 +107,60 @@ export function subscribeApprovals(fn: ApprovalListener): () => void {
   listeners.add(fn);
   return () => {
     listeners.delete(fn);
+  };
+}
+
+type RevokeListener = (id: string) => void;
+const revokeListeners = new Set<RevokeListener>();
+
+/** Cabut persetujuan (revoke/unapprove, R28): hapus flag kanonis + rincian
+ * audit + outbox/sync (op expense-unapprove), lalu siarkan ke listener
+ * revoke. Identitas pencabut dari sesi terverifikasi (fail-closed bila tanpa
+ * sesi). Listener terpisah dari approve agar layar tak salah menandai
+ * disetujui saat revoke disiarkan. */
+export async function unapprove(id: string): Promise<void> {
+  const cleanId = String(id ?? '').trim();
+  const sess = getSession();
+  const revokedBy = String(sess?.userId ?? sess?.username ?? '').trim();
+  if (!cleanId || !revokedBy) {
+    throw new Error(
+      '[pettyApproval] unapprove butuh id + sesi login terverifikasi.',
+    );
+  }
+  const at = new Date().toISOString();
+  try {
+    const cur = await getJSON<Record<string, boolean>>(APPROVAL_KEY, {});
+    delete cur[cleanId];
+    await setJSON(APPROVAL_KEY, cur);
+    try {
+      const det = await getJSON<Record<string, ApprovalDetail>>(DETAIL_KEY, {});
+      delete det[cleanId];
+      await setJSON(DETAIL_KEY, det);
+    } catch {
+      /* abaikan: flag boolean di atas tetap sah */
+    }
+    await enqueueOutbox('tr_branchexpense', cleanId, 'update');
+    try {
+      enqueueSync('other', { table: 'tr_branchexpense', rowId: cleanId, op: 'expense-unapprove', revokedBy, revokedAt: at });
+    } catch {
+      /* abaikan: outbox fisik di atas tetap jalan */
+    }
+  } catch {
+    /* abaikan */
+  }
+  for (const fn of revokeListeners) {
+    try {
+      fn(cleanId);
+    } catch {
+      /* abaikan satu listener rusak */
+    }
+  }
+}
+
+/** Langganan revoke lintas layar - kembalikan fungsi unsubscribe. */
+export function subscribeApprovalRevokes(fn: RevokeListener): () => void {
+  revokeListeners.add(fn);
+  return () => {
+    revokeListeners.delete(fn);
   };
 }

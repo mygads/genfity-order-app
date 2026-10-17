@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { rp as formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { isBackendConfigured, isDisplayLive, publishDisplay, resolveDisplaySseTerminalId, subscribeDisplay, subscribeDisplayLive, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseStatus } from '../../lib/sse';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { rp as formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
@@ -19,40 +19,29 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   const isCustomerView = activeTag === 'view_pelanggan';
   const isQueueBoard = activeTag === 'view_queue';
   const isLockedView = isCustomerView || isQueueBoard;
+  /** D2: pasangan kasir view ini ('' = tak terikat ke kasir mana pun). */
+  const pairedKasirId = (() => {
+    try {
+      return String(getBinding()?.pairedKasirId ?? '').trim();
+    } catch {
+      return '';
+    }
+  })();
+  const isUnpairedView = isCustomerView && !pairedKasirId;
   const shownMode: ViewMode = isCustomerView ? 'order' : isQueueBoard ? 'queue' : mode;
-  /** APP-EVENTS liveness (§11.4 TRANSPORT): SSE primer + WS sekunder via
-   * lib/display (isDisplayLive); poll SQLite fallback WAJIB berpenanda stale;
+  /** APP-EVENTS liveness (§11.4 TRANSPORT): SSE primer per-feed (sseOk) + WS
+   * sekunder; poll SQLite fallback WAJIB berpenanda stale (D3/D4);
    * QR/bayar diblokir offline. */
   const { online } = useConnectivity();
-  const [displayLive, setDisplayLive] = useState<boolean>(() => {
-    try {
-      return isDisplayLive();
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      return subscribeDisplayLive((v) => setDisplayLive(v));
-    } catch {
-      return undefined;
-    }
-  }, []);
-  /** APP-FIXUP (fix-sse2 M5): status agregat SSE langsung (TRANSPORT) —
-   * digabung live bus agar banner stale/offline peka feed primer statis. */
+  /** D16: status feed SSE milik view ini (per-feed, bukan agregat modul) —
+   * langganan dipasang di efek [uiTick] di bawah agar ikut re-bind. */
   const [sseOk, setSseOk] = useState(false);
-  useEffect(() => {
-    try {
-      return subscribeSseStatus((live) => setSseOk(live));
-    } catch {
-      return undefined;
-    }
-  }, []);
-  const sseLive = displayLive || sseOk;
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
+  /** D4: jam poll fallback (tak dipakai label umur — label dari jam live). */
+  const [, setLastPollAt] = useState<number | null>(null);
   /** D3-06: true bila device belum ter-bound — daftar dikosongkan + prompt ikat. */
   const [needBind, setNeedBind] = useState(false);
-  const [, setUiTick] = useState(0);
+  const [uiTick, setUiTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setUiTick((x) => x + 1), 10000);
     const un1 = subscribeSession(() => setUiTick((x) => x + 1));
@@ -63,8 +52,29 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       un2();
     };
   }, []);
+  /** D16: status feed SSE milik view ini saja (bukan agregat modul). */
+  useEffect(() => {
+    try {
+      return subscribeSseFeed(terminalFeedId(resolveDisplaySseTerminalId()), (s) => setSseOk(s === 'online'));
+    } catch {
+      return undefined;
+    }
+  }, [uiTick]);
+  /** D10: transport ulang saat sesi/peran/terminal berubah (idempoten — tanpa
+   * teardown bila feed sama, anti reconnect storm). */
+  useEffect(() => {
+    try {
+      refreshDisplayTransport();
+    } catch {
+      /* abaikan */
+    }
+  }, [uiTick]);
   const staleAgeSec = lastDataAt === null ? null : Math.max(0, Math.round((Date.now() - lastDataAt) / 1000));
   const staleAgeLabel = staleAgeSec === null ? null : staleAgeSec < 120 ? `${staleAgeSec}s` : `${Math.floor(staleAgeSec / 60)}m`;
+  /** D3: banner basi bila feed primer tak live ATAU jam live basi — kaki WS
+   * tak menyembunyikan staleness poll. D4: jam live hanya dari kaki live. */
+  const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);
+  const showStaleBanner = !sseOk || liveAgeMs < 0 || liveAgeMs > DISPLAY_STALE_MS;
   const [ready, setReady] = useState<string[]>(EMPTY_TICKETS);
   const [prep, setPrep] = useState<string[]>(EMPTY_TICKETS);
   const [liveItems, setLiveItems] = useState<LiveItem[]>(EMPTY_ITEMS);
@@ -96,6 +106,14 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   })();
 
   useEffect(() => subscribeDisplay((e) => {
+    // D2: view_pelanggan tanpa pasangan tak terikat ke apa pun — abaikan
+    // event (fail-closed: kosong, tanpa fallback branch-wide).
+    try {
+      const b = getBinding();
+      if (normalizeTag(b?.tag) === 'view_pelanggan' && !String(b?.pairedKasirId ?? '').trim()) return;
+    } catch {
+      return;
+    }
     setLastDataAt(Date.now());
     if (e.type === 'call') {
       setPrep((p) => (p[0] === e.ticket ? p.slice(1) : p.filter((t) => t !== e.ticket)));
@@ -120,6 +138,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   /** APP-EVENTS: sale lokal same-device (kasir→display satu device) —
    * tampil instan tanpa roundtrip server (audit row 12, offline). */
   useEffect(() => subscribeLocalSale((s) => {
+    // D2: gerbang yang sama dengan bus display (lihat di atas).
+    try {
+      const b = getBinding();
+      if (normalizeTag(b?.tag) === 'view_pelanggan' && !String(b?.pairedKasirId ?? '').trim()) return;
+    } catch {
+      return;
+    }
     setLastDataAt(Date.now());
     if (s.salesNum) setOpenTag(s.salesNum);
     if (s.clientId) setLiveClientId(s.clientId);
@@ -136,6 +161,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
    * terkonfigurasi/gagal/offline (TRANSPORT); saat SSE live, feed E26 primer
    * di atas + bus lokal yang memasok layar. Kosong jujur bila tak ada event. */
   useEffect(() => {
+    // D2: tanpa pasangan = tak terikat ke apa pun — tanpa fallback WS branch-wide.
+    try {
+      const b = getBinding();
+      if (normalizeTag(b?.tag) === 'view_pelanggan' && !String(b?.pairedKasirId ?? '').trim()) return undefined;
+    } catch {
+      return undefined;
+    }
     // Fallback hanya bila primer tak live (SATU keputusan TRANSPORT via
     // isBackendConfigured — jangan cek isSseConfigured saja: basis URL-nya
     // beda dan bus bisa fail-closed sementara layar tetap dial).
@@ -145,7 +177,10 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     try { startRealtime(); } catch { /* abaikan */ }
     const off = onWsMessage((msg) => {
       setLastDataAt(Date.now());
-      if (!/display|order|kitchen|ticket|call|ready/i.test(msg.type)) return;
+      // D17: hanya topik display (alternatif kitchen|ticket mati — gerbang
+      // tag realtime juga tak mengantarnya ke view; pratinjau operator
+      // mencerminkan apa yang dilihat pelanggan).
+      if (!/display|order|call|ready/i.test(msg.type)) return;
       const p = (msg.payload ?? {}) as { ticket?: unknown; code?: unknown; no?: unknown; status?: unknown; items?: unknown };
       const ticket = String(p.ticket ?? p.code ?? p.no ?? '').trim();
       if (ticket) {
@@ -169,6 +204,9 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         if (mapped.length > 0) setLiveItems(mapped);
       }
     });
+    // D8: lepas handler milik layar ini; channel WS global milik sesi
+    // (start saat login, stop saat logout) — stopRealtime di sini akan
+    // memutus feed layar lain (dapur/kasir) yang masih mount.
     return off;
   }, [sseOk]);
 
@@ -216,16 +254,31 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         // A WAJIB hanya membaca cart kasir A. Branch-wide di sini bisa
         // menampilkan cart + QR client_id/total milik kasir B (salah bayar).
         // Papan antrean (view_queue/lainnya) tetap branch-wide by design.
+        // D2: tanpa pairedKasirId = tak terikat ke apa pun — berhenti di sini
+        // (daftar kosong + prompt ikat), TANPA query branch-wide.
         let scopeTid = '';
+        let isViewCustomer = false;
         try {
           const b = getBinding();
-          if (normalizeTag(b?.tag) === 'view_pelanggan') scopeTid = String(b?.pairedKasirId ?? '').trim();
-        } catch { /* tanpa scope = fallback branch-wide */ }
+          isViewCustomer = normalizeTag(b?.tag) === 'view_pelanggan';
+          if (isViewCustomer) scopeTid = String(b?.pairedKasirId ?? '').trim();
+        } catch { /* getBinding tak melempar nyata — pola bertahan di bawah */ }
+        if (isViewCustomer && !scopeTid) {
+          if (alive) setNeedBind(true);
+          return;
+        }
+        if (isViewCustomer && scopeTid) {
+          // D1: samakan namespace (kolom = terminalCode, id = id BE) via E09;
+          // gagal = id mentah = kosong jujur (fail-closed).
+          try {
+            scopeTid = await resolvePairedKasirCode(branchId, scopeTid);
+          } catch { /* id mentah di bawah */ }
+        }
         const heads = await query<{ salesNum: string; tableNo: string | null; queueNumber: string | null; status: string | null; client_id: string | null }>(
           'SELECT salesNum, tableNo, queueNumber, status, client_id FROM tr_saleshead WHERE (branchId = ? OR branchId IS NULL OR branchId = ?) AND (? = \'\' OR terminalId = ?) ORDER BY createdAt DESC LIMIT 20',
           [branchId, '', scopeTid, scopeTid],
         );
-        if (alive) setLastDataAt(Date.now());
+        if (alive) setLastPollAt(Date.now());
         if (!alive || heads.length === 0) return;
         const tag = (h: { salesNum: string; tableNo: string | null; queueNumber: string | null }) =>
           h.queueNumber || h.tableNo || h.salesNum;
@@ -275,8 +328,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={styles.offlineBannerText}>{t('disp_offline_banner')}</Text>
         </View>
       ) : null}
-      {!sseLive && staleAgeLabel !== null ? (
-        <Text style={styles.staleText}>{`${t('disp_stale')} · ${staleAgeLabel}`}</Text>
+      {showStaleBanner ? (
+        <Text style={styles.staleText}>{staleAgeLabel ? `${t('disp_stale')} · ${staleAgeLabel}` : t('disp_stale')}</Text>
       ) : null}
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>{isLockedView ? null : (<View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
@@ -336,8 +389,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={styles.orderSub}>{t('disp_running_sub')}</Text>
           <View style={styles.divider} />
           {liveItems.length === 0 && <Text style={styles.empty}>{t('disp_empty')}</Text>}
-          {liveItems.map((it) => (
-            <View key={it.name} style={styles.itemRow}>
+          {liveItems.map((it, i) => (
+            <View key={`${it.name}#${i}`} style={styles.itemRow}>
               <Text style={styles.itemName}>{it.qty}x {it.name}</Text>
               <Text style={styles.itemPrice}>{formatCurrency(it.qty * it.price)}</Text>
             </View>
@@ -349,7 +402,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           </View>
           <View style={styles.qrisBox}>
             <Text style={styles.qrisTitle}>{t('disp_qris_title')}</Text>
-            {online === false ? (
+            {/* D2: QR diblokir saat unpaired (tanpa client kasir = tanpa bayar). */}
+            {online === false || isUnpairedView ? (
               <Text style={styles.qrisSub}>{t('disp_qr_offline')}</Text>
             ) : (
               <Text style={styles.qrPayload} selectable>{qrPayload}</Text>

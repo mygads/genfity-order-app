@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const s = getSession();
+  const { t, lang } = useLang(); const s = getSession();
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [inTime, setInTime] = useState<string | null>(null);
@@ -123,12 +123,12 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
   const clockedIn = inTime !== null && outTime === null;
 
-  const outlet = s?.outlet ?? 'Genfity Cabang Poris'; const who = s?.name ?? s?.username ?? '-'; return (
+  const outlet = s?.outlet ?? t('outlet_fallback'); const who = s?.name ?? s?.username ?? '-'; return (
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
       <Text style={styles.clock}>{fmtClock(now)}</Text>
-      <Text style={styles.date}>{now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+      <Text style={styles.date}>{now.toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
       <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
 
       <View style={styles.card}>

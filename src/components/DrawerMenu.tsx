@@ -7,6 +7,7 @@ import { getBranchId } from '../config/server';
 import { useLang } from '../lib/i18n';
 import { allowedRoutesFor, getDeviceRole, normalizeTag, subscribeDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
+import { logoutRevoke } from '../lib/terminalApi';
 
 interface DrawerItem {
   label: string;
@@ -187,7 +188,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
       <View style={styles.root}>
         <View style={[styles.panel, { width: drawerW }]}>
           <View style={styles.head}>
-            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? 'Genfity Cabang Poris'}</Text>
+            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? t('outlet_fallback')}</Text>
             <View style={styles.shiftRow}>
               <View
                 style={[
@@ -232,6 +233,16 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
             style={[styles.logout, isTablet && styles.logoutTablet]}
             onPress={() => {
               onClose();
+              // S18: revoke server-side best-effort (fire-and-forget; logout
+              // lokal tetap instan, utang revoke ditandai logout() seperti biasa
+              // dan di-flush pushAll berikutnya).
+              try {
+                const s = getSession();
+                const who = (s?.userId || s?.username || '').trim();
+                if (who) void logoutRevoke({ userId: who }).catch(() => {});
+              } catch {
+                /* abaikan — logout lokal tetap jalan */
+              }
               try {
                 // Reset tumpukan ke Login selagi navigator app masih mount,
                 // baru keluar sesi → guest stack mount segar; tombol back

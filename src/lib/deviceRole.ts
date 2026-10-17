@@ -53,9 +53,13 @@ const LEGACY_MAP: Record<string, TerminalTag> = {
   DISPLAY: 'view_pelanggan',
 };
 
-/** Default perangkat tanpa setting/server-tag: akses penuh (perilaku
- * terbuka eksisting; selaras fallback "legacy tanpa tag = full_access"). */
-let role: TerminalTag = 'full_access';
+/** Default pre-hydrate TERKUNCI (B7 fail-closed, audit 2026-10-17):
+ * satu-halaman pelanggan — BUKAN akses penuh. Perangkat tanpa tag
+ * tersimpan/server tetap terkunci sampai bind/sync menetapkan tag eksplisit
+ * (setDeviceRole); restore() di bawah menaikkan ke tag tersimpan dalam
+ * microtask. deviceRoleForTag tak butuh gate tambahan: paramnya bertipe
+ * TerminalTag (nilai-terkunci lolos apa adanya) dan nol pemanggil produksi. */
+let role: TerminalTag = 'view_pelanggan';
 let hydrated = false;
 
 const listeners = new Set<(r: DeviceRole) => void>();
@@ -92,7 +96,8 @@ export function normalizeTag(v: unknown): TerminalTag | null {
   return LEGACY_MAP[s.toUpperCase()] ?? null;
 }
 
-/** Tag perangkat aktif (sinkron, default full_access bila belum diset). */
+/** Tag perangkat aktif (sinkron; TERKUNCI 'view_pelanggan' hingga
+ * restore/bind/sync menetapkan tag — B7 fail-closed). */
 export function getDeviceRole(): DeviceRole {
   hydrate();
   return role;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { setTerminal } from '../../config/server';import { clearBinding, clearGrant, getBinding, logout } from '../../session';import { fetchMyBranches, type BranchItem } from '../../lib/terminalApi';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
+import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';/** Dev fallback berlabel jelas (B2): HANYA tampil bila BE tak terjangkau,
@@ -56,6 +56,12 @@ const DEV_BRANCHES: BranchItem[] = [
   /** Pilih cabang → TerminalPicker (B1); tak ada gate legacy checkBranch. */
   const goSelect = () => {
     if (loading || !branchId) return;
+    // B6 fail-closed: daftar fallback dev + needBe = belum ada data cabang
+    // nyata dari BE — tolak maju.
+    if (needBe && branches.length === 0) {
+      Alert.alert(t('need_be'));
+      return;
+    }
     const picked =
       branches.find((b) => b.id === branchId) ??
       DEV_BRANCHES.find((b) => b.id === branchId);
@@ -74,11 +80,32 @@ const DEV_BRANCHES: BranchItem[] = [
         text: t('exit_branch'),
         style: 'destructive',
         onPress: () => {
-          try { logout(); } catch { /* abaikan */ }
-          try { clearGrant(); } catch { /* abaikan */ }
-          try { clearBinding(); } catch { /* abaikan */ }
-          try { setTerminal({ terminalCode: '', branchId: '', branchName: '' }); } catch { /* abaikan */ }
-          setBoundTick((x) => x + 1);
+          // E04: coba unbind server best-effort (abaikan gagal — local clear
+          // di bawah sudah sah). Tanpa terminalId = tak ada yang di-unbind.
+          const termId = (b?.terminalId ?? '').trim();
+          const devId = (b?.deviceId ?? '').trim();
+          if (termId) {
+            void (async () => {
+              try {
+                await apiFetch(
+                  ApiPath.terminalUnbind.replace('{id}', encodeURIComponent(termId)),
+                  { body: devId ? { deviceId: devId } : {} },
+                );
+              } catch { /* abaikan: local clear sudah sah */ }
+            })();
+          }
+          // Kontrak antar-paket: exitBranchAll = logout + clear SEMUA store
+          // binding (sesi, kontrak, server) + clear grant sekaligus.
+          void (async () => {
+            try {
+              await exitBranchAll();
+            } catch { /* abaikan: lanjut bereskan sisa lokal */ }
+            // B12: peran + station printer milik terminal lama ikut dicabut
+            // (store peran/printer bukan bagian exitBranchAll).
+            try { setDeviceRoleForTag('full_access'); } catch { /* abaikan */ }
+            void removeItem('genfity.printer.stations').catch(() => { /* abaikan */ });
+            setBoundTick((x) => x + 1);
+          })();
         },
       },
     ]);
@@ -170,7 +197,7 @@ const DEV_BRANCHES: BranchItem[] = [
           size="lg"
           title={binding ? t('rebind_button') : t('sel_choose')}
           onPress={goSelect}
-          disabled={loading || !branchId}
+          disabled={loading || !branchId || (needBe && branches.length === 0)}
           style={styles.primary}
         />
       </View>

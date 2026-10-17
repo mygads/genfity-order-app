@@ -133,7 +133,7 @@ function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: React
         activeOpacity={0.85}
         onPress={() => {
           // fallback jujur sampai URL video disediakan BE/produk.
-          Alert.alert(t('g_qrhow_title'), 'Video tutorial ' + t('dash_not_available'));
+          Alert.alert(t('g_qrhow_title'), t('qrhow_video_unavail').replace('{msg}', t('dash_not_available')));
         }}>
         <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
         <View style={styles.playWrap} pointerEvents="none">

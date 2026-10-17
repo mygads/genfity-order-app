@@ -6,7 +6,7 @@
  */
 import { ApiPath, apiGet, getBaseUrl, getBranchId, getServerEnv } from '../config/server';
 import { getApiMode } from './apiSource';
-import { initDb, run } from './db';
+import { initDb, queryFirst, run } from './db';
 import { getWatermark, setWatermark } from './sync';
 
 type Row = Record<string, string | number | null>;
@@ -46,6 +46,8 @@ const DOMAINS: Domain[] = [
     requireFirst: true,
     // Field soldOut kontrak §4 JANGAN dibuang: cerminkan ke flagSoldOut
     // ms_branchmenu. qty tidak disentuh (domain branchmenu yang mengisinya).
+    // L20: hook ikut menyegarkan flagActive (dulu hanya flagSoldOut —
+    // menu yang dinonaktifkan server tetap tampil aktif selamanya).
     after: async (r, now) => {
       const menuId = str(r.menuId) ?? '';
       if (!menuId) return;
@@ -53,7 +55,7 @@ const DOMAINS: Domain[] = [
       await run(
         `INSERT INTO ms_branchmenu (branchId, menuId, qty, flagSoldOut, flagActive, syncDate)
          VALUES (?, ?, 0, ?, ?, ?)
-         ON CONFLICT (branchId, menuId) DO UPDATE SET flagSoldOut = excluded.flagSoldOut`,
+         ON CONFLICT (branchId, menuId) DO UPDATE SET flagSoldOut = excluded.flagSoldOut, flagActive = excluded.flagActive`,
         [getBranchId(), menuId, sold, flag(r.flagActive), now],
       );
     },
@@ -130,6 +132,26 @@ const DOMAINS: Domain[] = [
     table: 'ms_member',
     cols: ['id', 'memberName', 'phone', 'depositBalance'],
     map: (r) => [str(r.memberId) ?? '', str(r.name), str(r.phoneMasked ?? r.phone), num(r.balance ?? r.depositBalance)],
+    // L21: server menang KECUALI dua lindung lokal —
+    // (a) saldo: baris lokal syncDate NULL (topup/burn belum push) MEMPERTAHANKAN
+    //     depositBalance + tetap kotor (syncDate NULL) agar push berikutnya
+    //     mengirimnya; saldo server hanya menang untuk baris bersih;
+    // (b) telepon: nomor masuk yang tampak termask (karakter mask *, x, • —
+    //     format phoneMasked server; dummy "0812-3456-7890" bertanda strip
+    //     TAPI berdigit penuh sehingga lolos sebagai nomor nyata) atau yang
+    //     digitnya LEBIH SEDIKIT dari lokal tak menimpa nomor lokal yang
+    //     lebih lengkap. Nama selalu ikut server.
+    upsert: `ON CONFLICT(id) DO UPDATE SET
+      memberName = excluded.memberName,
+      phone = CASE
+        WHEN excluded.phone LIKE '%*%' OR excluded.phone LIKE '%x%'
+          OR excluded.phone LIKE '%X%' OR excluded.phone LIKE '%•%' THEN ms_member.phone
+        WHEN ms_member.phone IS NOT NULL AND ms_member.phone <> ''
+          AND length(replace(replace(replace(replace(excluded.phone, ' ', ''), '-', ''), '+', ''), '.', ''))
+            < length(replace(replace(replace(replace(ms_member.phone, ' ', ''), '-', ''), '+', ''), '.', '')) THEN ms_member.phone
+        ELSE excluded.phone END,
+      depositBalance = CASE WHEN ms_member.syncDate IS NULL THEN ms_member.depositBalance ELSE excluded.depositBalance END,
+      syncDate = CASE WHEN ms_member.syncDate IS NULL THEN NULL ELSE excluded.syncDate END`,
   },
   {
     key: 'voucher',
@@ -141,6 +163,36 @@ const DOMAINS: Domain[] = [
       str(r.validFrom), str(r.validTo), str(r.status),
     ],
     requireFirst: true,
+    // L10: REPLACE server HANYA bila tak ada burn lokal yang belum push
+    // (syncDate NULL = kuota lokal sudah turun via saveSale/append dan wajib
+    // ikut push dulu). Bila burn lokal menggantung: deskriptif (nama/amount/
+    // jendela) ikut server, TAPI quota + status + syncDate lokal dipertahankan
+    // (tetap kotor) dan konflik dicatat jujur di log — pull berikutnya setelah
+    // push akan menyelaraskan. Tanpa ini pull menimpa kuota yang sudah
+    // terbakar offline sehingga voucher bisa dipakai ulang tanpa batas.
+    upsert: `ON CONFLICT(id) DO UPDATE SET
+      voucherCode = excluded.voucherCode, voucherName = excluded.voucherName,
+      amount = excluded.amount, validFrom = excluded.validFrom, validTo = excluded.validTo,
+      quota = CASE WHEN ms_voucher.syncDate IS NULL THEN ms_voucher.quota ELSE excluded.quota END,
+      status = CASE WHEN ms_voucher.syncDate IS NULL THEN ms_voucher.status ELSE excluded.status END,
+      syncDate = CASE WHEN ms_voucher.syncDate IS NULL THEN NULL ELSE excluded.syncDate END`,
+    // L10 (lanjutan): catat konflik secara jujur — baris yang tetap kotor
+    // setelah upsert = burn lokal belum push yang dipertahankan.
+    after: async (r) => {
+      try {
+        const id = str(r.voucherId) ?? '';
+        if (!id) return;
+        const row = await queryFirst<{ syncDate: string | null }>(
+          'SELECT syncDate FROM ms_voucher WHERE id = ? LIMIT 1',
+          [id],
+        );
+        if (row && row.syncDate === null) {
+          console.warn(`[pull-voucher] burn lokal belum push dipertahankan: ${id}`);
+        }
+      } catch {
+        /* abaikan */
+      }
+    },
   },
   {
     key: 'sales',
@@ -148,7 +200,7 @@ const DOMAINS: Domain[] = [
     cols: ['salesNum', 'client_id', 'branchId', 'terminalId', 'userId', 'salesDate', 'salesMode', 'tableNo',
       'customerName', 'subtotal', 'discount', 'tax', 'serviceCharge', 'voucherAmount', 'voucherCode',
       'platformFee', 'rounding', 'grandTotal', 'paidAmount', 'changeAmount', 'paymentMethod',
-      'ongkir', 'status'],
+      'ongkir', 'status', 'memberId', 'shiftId', 'queueNumber'],
     map: (r) => {
       // client_id kosong dari server (riwayat lama/terminal lain/BE yang belum
       // upsert-by-client) dinormalisasi ke salesNum — cermin backfill lokal di
@@ -163,6 +215,8 @@ const DOMAINS: Domain[] = [
       num(r.voucherAmount), str(r.voucherCode), num(r.platformFee), num(r.rounding),
       num(r.grandTotal), num(r.paidAmount), num(r.changeAmount), str(r.paymentMethod),
       num(r.ongkir), str(r.status) ?? 'paid',
+      // L19: identitas + antrean ikut pull (kolom sudah ada di skema head).
+      str(r.memberId), str(r.shiftId), str(r.queueNumber),
       ];
     },
     requireFirst: true,
@@ -176,6 +230,9 @@ const DOMAINS: Domain[] = [
     after: async (r, now) => {
       const salesNum = str(r.salesNum) ?? '';
       if (!salesNum) return;
+      // L19: anak pull memakai client_id head (normalisasi yang sama dengan
+      // map di atas) agar join server-by-client konsisten.
+      const headCid = str(r.client_id ?? r.clientId) || salesNum;
       const raw = (r as unknown as { items?: unknown }).items;
       if (!Array.isArray(raw)) return;
       let idx = 0;
@@ -188,9 +245,9 @@ const DOMAINS: Domain[] = [
         const disc = num(m.discount);
         await run(
           `INSERT OR IGNORE INTO tr_salesmenu
-           (id, salesNum, menuId, menuName, qty, price, discount, subtotal, note, syncDate)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [`${salesNum}:i${idx}`, salesNum, menuId, str(m.name),
+           (id, salesNum, client_id, menuId, menuName, qty, price, discount, subtotal, note, syncDate)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [`${salesNum}:i${idx}`, salesNum, headCid, menuId, str(m.name),
             qty, price, disc, qty * price - disc, str(m.note), now],
         );
         idx += 1;

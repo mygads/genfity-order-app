@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import {
-  useLang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
+  useLang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
   return colors.orangeDark;}function statusBg(s: TxnStatus) {
@@ -100,12 +100,12 @@ const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund
     try {
       const s = getSession();
       const gate = await requireAccess(s?.userId || s?.username || '', 'order.void');
-      if (!gate.ok) setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+      if (!gate.ok) setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
     } catch { /* abaikan - modal PIN tetap dibuka */ }
     setConfirmVoid(true);
   }; const doVoid = () => { runVoidAuthed(false); };
 
-  const doVoidAndPrint = () => { runVoidAuthed(true); }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } Alert.alert('Akses ditolak / Access denied', `Ubah metode bayar perlu PIN supervisor / Changing payment method needs supervisor PIN (${gate.reason})`); setPayPending(method); setPayPin(''); setPayAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }; const payPinOk = (() => { const d = payPin.replace(/\D/g, ''); return d.length >= 4 && d.length <= 6 && !payConfirming; })(); /** PIN supervisor 4-6 digit wajib sebelum simpan bila gate sale.refund deny (server; offline → PIN lokal + cek hak). */ const confirmPayAuthed = () => { if (!selected || !payPending || !payPinOk) return; const target = selected; const method = payPending; setPayConfirming(true); setPayAuthMsg(''); void authedOrLocal(payPin, 'sale.refund').then((res) => { if (!res.ok) { setPayAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setPayConfirming(false); return; } applyPayChange(target, method); setPayConfirming(false); setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }); }; const sendMail = () => {
+  const doVoidAndPrint = () => { runVoidAuthed(true); }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } Alert.alert(t('hist_deny_title'), t('hist_deny_change_pay').replace('{r}', gate.reason)); setPayPending(method); setPayPin(''); setPayAuthMsg(t('hist_deny_change_pay').replace('{r}', gate.reason)); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }; const payPinOk = (() => { const d = payPin.replace(/\D/g, ''); return d.length >= 4 && d.length <= 6 && !payConfirming; })(); /** PIN supervisor 4-6 digit wajib sebelum simpan bila gate sale.refund deny (server; offline → PIN lokal + cek hak). */ const confirmPayAuthed = () => { if (!selected || !payPending || !payPinOk) return; const target = selected; const method = payPending; setPayConfirming(true); setPayAuthMsg(''); void authedOrLocal(payPin, 'sale.refund').then((res) => { if (!res.ok) { setPayAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setPayConfirming(false); return; } applyPayChange(target, method); setPayConfirming(false); setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
       setMailMsg(t('hist_mail_bad'));
@@ -134,12 +134,26 @@ const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund
     <DetailPanel
       txn={selected}
       payment={payOf(selected, payOver)}
-      statusLabel={STATUS_LABEL[selected.status]} t={t} onPrint={() =>
-        navigation?.navigate('Receipt', {
-          no: selected?.no,
-          total: selected?.total ?? 0,
-          method: selected ? payOf(selected, payOver) : undefined,
-        items: selected?.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: selected?.discount ?? 0, mode: selected?.mode, ...(selected?.table ? { table: selected.table } : {}), })
+      statusLabel={STATUS_LABEL[selected.status]} t={t} onPrint={() => {
+        const sel = selected;
+        if (!sel) return;
+        // R23: clientId untuk QR struk (rantai Q7) + flag void agar Receipt
+        // menampilkan banner VOID / menekan QR (R24). Best-effort — tanpa
+        // clientId pun navigasi tetap jalan (struk tanpa QR).
+        void (async () => {
+          let cid = '';
+          try {
+            cid = (await getSaleClientId(sel.no)) ?? '';
+          } catch {
+            cid = '';
+          }
+          navigation?.navigate('Receipt', {
+            no: sel.no,
+            total: sel.total ?? 0,
+            method: payOf(sel, payOver),
+            items: sel.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: sel.discount ?? 0, mode: sel.mode, ...(sel.table ? { table: sel.table } : {}), ...(cid ? { clientId: cid } : {}), ...(sel.status === 'Void' ? { voided: true } : {}), });
+        })();
+      }
       }
       onChangePay={() => setPayModal(true)}
       onVoid={() => { void guardVoidOpen(); }}
@@ -515,7 +529,7 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
             <Text style={styles.itemName}>{it.name}</Text>
             {it.note ? <Text style={styles.itemNote}>{it.note}</Text> : null}
             {txn.discount > 0 ? (
-              <Text style={styles.itemDisc}>Diskon {rp(txn.discount)}</Text>
+              <Text style={styles.itemDisc}>{t('discount')} {rp(txn.discount)}</Text>
             ) : null}
           </View>
           <Text style={styles.itemPrice}>{rp(it.qty * it.price)}</Text>

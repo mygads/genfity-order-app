@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -7,14 +7,12 @@ import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { useLang, type Lang } from '../../lib/i18n';
 import { getSession, getBinding, logout, subscribeSession } from '../../session';
-import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, setTerminal, type ServerEnv } from '../../config/server';
+import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
-import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';
 import { requireAccess } from '../../lib/access';
 import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
-import { getDeviceRole, setDeviceRole, subscribeDeviceRole, normalizeTag, VIEW_TAGS, type DeviceRole } from '../../lib/deviceRole';
-import { syncTerminalSettings } from '../../lib/terminal';
+import { getDeviceRole, subscribeDeviceRole, normalizeTag, VIEW_TAGS } from '../../lib/deviceRole';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -40,10 +38,11 @@ export default function SettingsScreen({ navigation }: Props) {
   const toggleAutoCut = (v: boolean) => { setAutoCut(v); void setJSON(AUTOCUT_KEY, v); };
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
-  const [terminal, setTerminalState] = useState(() => getTerminal());
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  // F4 readout klaim: dibaca segar tiap render (ditulis HANYA oleh alur bind
+  // terverifikasi PIN via BranchPicker — tanpa input manual di layar ini).
+  const terminal = getTerminal();
   // Kunci peran perangkat: 1 perangkat = 1 peran (Kasir penuh, Dapur, Display).
-  const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => getDeviceRole());
+  const [deviceRole, setDeviceRoleState] = useState(() => getDeviceRole());
   useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);
   // Display-lock SPEC §10: tag view terkunci = switch peran perangkat +
   // klaim terminal disembunyikan TOTAL (tanpa Settings/role-switch di profil
@@ -60,9 +59,6 @@ export default function SettingsScreen({ navigation }: Props) {
   })();
   const activeTag = boundTag ?? normalizeTag(deviceRole) ?? 'full_access';
   const isViewLocked = (VIEW_TAGS as string[]).includes(activeTag);
-  const [draftCode, setDraftCode] = useState('');
-  const [draftBranchId, setDraftBranchId] = useState('');
-  const [draftBranchName, setDraftBranchName] = useState('');
   const [syncBusy, setSyncBusy] = useState<'push' | 'pull' | null>(null);
   const [syncMsg, setSyncMsg] = useState('');
   // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
@@ -127,18 +123,16 @@ export default function SettingsScreen({ navigation }: Props) {
     });
   };
 
-  const pickRole = (r: DeviceRole) => {
-    void guardSettingsEdit().then((ok) => {
-      if (!ok) return;
-      setDeviceRole(r);
-      setDeviceRoleState(r);
-    });
-  };
-
   const saveCustom = () => {
     void guardSettingsEdit().then((ok) => {
       if (!ok) return;
-      setCustomBaseUrl(customUrl);
+      // setCustomBaseUrl melempar untuk URL non-http(s): tampilkan pesannya
+      // (sync_bad_url lokal) agar tak jadi unhandled rejection diam-diam.
+      try {
+        setCustomBaseUrl(customUrl);
+      } catch (e) {
+        setSyncMsg(e instanceof Error ? e.message : String(e));
+      }
     });
   };
 
@@ -174,37 +168,11 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  const openTerminal = () => {
-    setDraftCode(terminal.terminalCode);
-    setDraftBranchId(terminal.branchId);
-    setDraftBranchName(terminal.branchName);
-    setTerminalOpen(true);
-  };
-
-  const saveTerminal = () => {
-    void guardSettingsEdit().then((ok) => {
-      if (!ok) return;
-      // Kanon Q7: normalisasi (UPPER) + REGEX + branch wajib — kode yang
-      // lolos di sini pasti lolos isTerminalBound/saveSale (tanpa ini
-      // tersimpan lalu ditolak sebagai terminal-unbound).
-      const canonCode = normalizeTerminalCode(draftCode);
-      const canonBranch = draftBranchId.trim();
-      if (!TERMINAL_CODE_RE.test(canonCode) || !canonBranch) {
-        Alert.alert(t('inst_claim_invalid'), t('inst_code_format'));
-        return;
-      }
-      const next = { terminalCode: canonCode, branchId: canonBranch, branchName: draftBranchName.trim() };
-      setTerminal(next);
-      setTerminalState(next);
-      setTerminalOpen(false);
-      // Klaim baru = tarik setting per terminal (peran, printer default,
-      // auto-print dapur, footer) agar tak setting manual per tablet.
-      void syncTerminalSettings().then((r) => {
-        setDeviceRoleState(getDeviceRole());
-        setSyncMsg(r.ok ? t('term.settingsOk') : t('term.settingsFail'));
-      });
-    });
-  };
+  /** F12: ganti tulis tag/identitas lokal dengan CTA re-bind — tag adalah hak
+   * server (ditetapkan saat bind terverifikasi PIN di BranchPicker); tulis
+   * lokal akan desync dari binding server, dan adoptTerminalBinding sendiri
+   * melakukan logout + clearGrant sehingga tak pantas dipicu dari sini. */
+  const goReclaim = () => navigation?.navigate('SelectBranch');
 
   const pickLang = (l: Lang) => setLang(l);
 
@@ -228,18 +196,13 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.terminalServer')}</Text>
       {isViewLocked ? null : (
       <>
-      <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={openTerminal} />
+      <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={goReclaim} />
       <View style={styles.panel}>
-        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.deviceRole')}</Text>
-        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('settings.deviceRoleSub')}</Text>
-        <View style={styles.envRow}>
-          {(['KASIR', 'DAPUR', 'DISPLAY'] as DeviceRole[]).map((r) => (
-            <Pressable key={r} onPress={() => pickRole(r)} style={[styles.envBtn, deviceRole === r && styles.envBtnActive]}>
-              <Text style={[styles.envText, deviceRole === r && styles.envTextActive]}>
-                {r === 'KASIR' ? t('role.kasir') : r === 'DAPUR' ? t('role.dapur') : t('role.display')}
-              </Text>
-            </Pressable>
-          ))}
+        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.claimTerminal')}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('settings.claimSub')}</Text>
+        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{activeTag}</Text>
+        <View style={styles.syncRow}>
+          <AppButton size="md" title={t('rebind_button')} onPress={goReclaim} fullWidth={false} style={styles.btnFlexNavy} />
         </View>
       </View>
       </>
@@ -352,21 +315,6 @@ export default function SettingsScreen({ navigation }: Props) {
       />
       <Text style={styles.version}>v1.0.0 - genfity-order</Text>
 
-      <Modal visible={terminalOpen} animationType="fade" transparent>
-        <View style={styles.centerWrap}>
-          <View style={[styles.dialog, styles.dialogNarrow]}>
-            <Text style={styles.dialogTitle}>{t('settings.claimTerminal')}</Text>
-            <Text style={styles.dialogSub}>{t('settings.claimSub')}</Text>
-            <AppInput label={t('settings.terminalCode')} value={draftCode} onChangeText={setDraftCode} placeholder="PORIS01" autoCapitalize="characters" />
-            <AppInput label={t('settings.branchId')} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="B001" />
-            <AppInput label={t('settings.branchName')} value={draftBranchName} onChangeText={setDraftBranchName} placeholder={t('settings.branchNamePh')} />
-            <View style={styles.dialogBtns}>
-              <AppButton size="sm" title={t('common.cancel')} onPress={() => setTerminalOpen(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-              <AppButton size="sm" title={t('common.save')} onPress={saveTerminal} fullWidth={false} style={styles.btnFlexNavy} />
-            </View>
-          </View>
-        </View>
-      </Modal>
       </ScrollView>
     </View>
   );

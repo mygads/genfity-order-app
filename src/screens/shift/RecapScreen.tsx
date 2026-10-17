@@ -382,9 +382,9 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.disc, isTablet && styles.discTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {promo.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada promo dipakai.</Text>}
+          {promo.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_promo')}</Text>}
           <View style={styles.row}>
-            <Text style={[styles.totalL, isTablet && styles.totalLTablet]}>Total promo</Text>
+            <Text style={[styles.totalL, isTablet && styles.totalLTablet]}>{t('rcp_promo_total')}</Text>
             <Text style={[styles.disc, isTablet && styles.discTablet]}>{rp(promoTotal)}</Text>
           </View>
         </View>
@@ -403,18 +403,18 @@ export default function RecapScreen({ navigation }: Props) {
               </View>
             </View>
           ))}
-          {cancelled.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Tidak ada item dibatalkan.</Text>}
+          {cancelled.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_cancel')}</Text>}
         </View>
         </View>
         <View style={isTablet ? styles.pairCol : undefined}>
         <Text style={[styles.sec, isTablet && styles.secTablet]}>{t('rcp_expense')}</Text>
         <View style={styles.card}>
           <View style={styles.row}>
-            <Text style={[styles.item, isTablet && styles.itemTablet]}>Total pengeluaran outlet</Text>
+            <Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rcp_expense_total')}</Text>
             <Text style={[styles.disc, isTablet && styles.discTablet]}>-{rp(expenseTotal)}</Text>
           </View>
           <TouchableOpacity onPress={() => navigation?.navigate('Expense')}>
-            <Text style={styles.link}>Kelola pengeluaran cabang ›</Text>
+            <Text style={styles.link}>{t('rcp_manage_expense')}</Text>
           </TouchableOpacity>
         </View>
         </View>

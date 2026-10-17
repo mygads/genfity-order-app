@@ -4,10 +4,9 @@
  * tipe `Transaction` (src/data/mock.ts) agar layar tidak berubah.
  */
 import { ApiPath } from '../config/server';
-import { apiFetch } from './apiSource';
 import { getSession } from '../session';
-import { initDb, query, queryFirst, run } from './db';
-import { enqueueOutbox, enqueueSync } from './sync';
+import { initDb, markClean, query, queryFirst, run } from './db';
+import { enqueueOutbox, enqueueSync, postImmediate } from './sync';
 import { fmtSalesDate } from './datefmt';
 import { uuidv7 } from './uuidv7';
 import type { Transaction, TxnStatus } from '../data/mock';
@@ -359,20 +358,40 @@ export async function persistVoidDb(salesNum: string, reason: string, approvedBy
   } catch {
     /* DB gagal - antrean di bawah tetap jalan */
   }
+  // S6 immediate-first: coba POST langsung (timeout singkat) dengan client_id
+  // twin; antrean (fisik + ringan, id twin SAMA, tanpa UUID ganda) hanya bila
+  // immediate gagal. Kaki refund deposit di atas tetap diantrekan apa adanya.
+  const twinId = uuidv7();
+  let sent = false;
   try {
-    await enqueueOutbox('tr_saleshead', salesNum, 'update');
+    sent = await postImmediate(ApiPath.pushOrderFinish, {
+      action: 'void', no: salesNum, reason, client_id: twinId,
+      ...(approver ? { approvedBy: approver } : {}),
+    });
   } catch {
-    /* abaikan */
+    sent = false;
   }
-  try {
-    enqueueSync('order', { action: 'void', salesNum, no: salesNum, reason, ...(approver ? { approvedBy: approver } : {}) });
-  } catch {
-    /* abaikan */
-  }
-  try {
-    await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: salesNum, reason, ...(approver ? { approvedBy: approver } : {}) } });
-  } catch {
-    /* offline - terkirim via push berikutnya */
+  if (sent) {
+    // Server sudah punya datanya — head ikut bersih agar badge dirty jujur.
+    try {
+      await markClean('tr_saleshead', salesNum);
+    } catch {
+      /* abaikan */
+    }
+  } else {
+    try {
+      await enqueueOutbox('tr_saleshead', salesNum, 'update');
+    } catch {
+      /* abaikan */
+    }
+    try {
+      enqueueSync('order', {
+        action: 'void', salesNum, no: salesNum, reason, client_id: twinId,
+        ...(approver ? { approvedBy: approver } : {}),
+      }, twinId);
+    } catch {
+      /* abaikan */
+    }
   }
 }
 
@@ -401,14 +420,31 @@ export async function persistPayChangeDb(salesNum: string, method: string): Prom
   } catch {
     /* abaikan */
   }
+  // S6 immediate-first: coba POST langsung (timeout singkat) dengan client_id
+  // twin; twin ringan (id SAMA) hanya bila immediate gagal. Outbox fisik di
+  // atas tetap dicatat (kendaraan retry + penanda kotor).
+  const payTwinId = uuidv7();
+  let paySent = false;
   try {
-    enqueueSync('order', { action: 'change-payment', salesNum, no: salesNum, method });
+    paySent = await postImmediate(ApiPath.pushOrderFinish, {
+      action: 'change-payment', no: salesNum, method, client_id: payTwinId,
+    });
   } catch {
-    /* abaikan */
+    paySent = false;
   }
-  try {
-    await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'change-payment', no: salesNum, method } });
-  } catch {
-    /* offline - terkirim via push berikutnya */
+  if (paySent) {
+    try {
+      await markClean('tr_saleshead', salesNum);
+    } catch {
+      /* abaikan */
+    }
+  } else {
+    try {
+      enqueueSync('order', {
+        action: 'change-payment', salesNum, no: salesNum, method, client_id: payTwinId,
+      }, payTwinId);
+    } catch {
+      /* abaikan */
+    }
   }
 }

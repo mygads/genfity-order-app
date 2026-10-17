@@ -136,9 +136,9 @@ export default function MoveTableScreen({ navigation, route }: Props) {
 
   const move = () => {
     // Validasi meja tujuan ala POSLite: asal harus ada, tujuan wajib diisi + tak boleh sama.
-    if (!src) { setWarn('Pilih meja asal yang terisi dulu.'); return; }
-    if (!destCode) { setWarn('Pilih meja tujuan dulu.'); return; }
-    if (destCode === src.table) { setWarn(`Meja tujuan sama dengan asal (${src.table}) - pilih meja lain.`); return; }
+    if (!src) { setWarn(t('mov_warn_src')); return; }
+    if (!destCode) { setWarn(t('mov_warn_dst')); return; }
+    if (destCode === src.table) { setWarn(t('mov_same_table').replace('{from}', src.table)); return; }
     setWarn('');
     // Catat pindah meja ke antrean sync agar diteruskan ke server (offline-first).
     try {
@@ -198,7 +198,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         {/* Tablet: pemilih Dari dan Ke berdampingan 2 kolom; phone tetap susun vertikal. */}
         <View style={[isTablet && styles.cols]}>
         <View style={[isTablet && styles.col]}>
-        <Text style={[styles.label, isTablet && styles.labelBig]}>Dari meja (terisi)</Text>
+        <Text style={[styles.label, isTablet && styles.labelBig]}>{t('mov_from_label')}</Text>
         <View style={styles.chips}>
           {occupied.map((o) => (
             <TouchableOpacity
@@ -215,17 +215,17 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
             <View style={styles.cardRow}>
-              <Text style={styles.cardLabel}>Item</Text>
-              <Text style={styles.cardVal}>{src.items} item</Text>
+              <Text style={styles.cardLabel}>{t('mov_card_items')}</Text>
+              <Text style={styles.cardVal}>{t('mov_items_unit').replace('{n}', String(src.items))}</Text>
             </View>
             <View style={styles.cardRow}>
-              <Text style={styles.cardLabel}>Total berjalan</Text>
+              <Text style={styles.cardLabel}>{t('mov_total_run')}</Text>
               <Text style={styles.cardVal}>{rp(src.total)}</Text>
             </View>
           </View>
         )}
         <View style={[isTablet && styles.col]}>
-        <Text style={[styles.label, isTablet && styles.labelBig]}>Ke meja (kosong)</Text>
+        <Text style={[styles.label, isTablet && styles.labelBig]}>{t('mov_to_label')}</Text>
         <View style={styles.chips}>
           {emptyList.map((tb) => (
             <TouchableOpacity key={tb} style={[styles.chip, to === tb && styles.chipOn, isTablet && styles.chipBig]} onPress={() => { setTo(tb); setWarn(''); }}>
@@ -241,18 +241,18 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           <View style={styles.card}>
             <Text style={[styles.cardTitle, styles.cardTitleBig]}>{t('c_table')} {src.table}{SECTION_OF[src.table] ? ` · ${SECTION_OF[src.table]}` : ''} · {src.guest}</Text>
             <View style={styles.cardRow}>
-              <Text style={[styles.cardLabel, styles.cardLabelBig]}>Item</Text>
-              <Text style={[styles.cardVal, styles.cardValBig]}>{src.items} item</Text>
+              <Text style={[styles.cardLabel, styles.cardLabelBig]}>{t('mov_card_items')}</Text>
+              <Text style={[styles.cardVal, styles.cardValBig]}>{t('mov_items_unit').replace('{n}', String(src.items))}</Text>
             </View>
             <View style={styles.cardRow}>
-              <Text style={[styles.cardLabel, styles.cardLabelBig]}>Total berjalan</Text>
+              <Text style={[styles.cardLabel, styles.cardLabelBig]}>{t('mov_total_run')}</Text>
               <Text style={[styles.cardVal, styles.cardValBig]}>{rp(src.total)}</Text>
             </View>
           </View>
         )}
 
         {done && src ? (
-          <Text style={[styles.done, isTablet && styles.doneBig]}>Transaksi {src.table} ({rp(src.total)}) dipindahkan ke {to} - item dan catatan ikut.</Text>
+          <Text style={[styles.done, isTablet && styles.doneBig]}>{t('mov_table_done').replace('{table}', src.table).replace('{total}', rp(src.total)).replace('{to}', to)}</Text>
         ) : null}
         {warn ? <Text style={styles.warn}>{warn}</Text> : null}
 
@@ -265,10 +265,10 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         />
         <View style={styles.links}>
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}>
-            <Text style={[styles.link, isTablet && styles.linkBig]}>Lihat Denah Meja ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('mov_view_layout')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation?.navigate('Cashier', { table: destCode })}>
-            <Text style={[styles.link, isTablet && styles.linkBig]}>Buka di Kasir ›</Text>
+            <Text style={[styles.link, isTablet && styles.linkBig]}>{t('mov_open_cashier')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

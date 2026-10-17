@@ -1,4 +1,20 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Tulis void nyata via outbox + antrean sync (lihat persistVoid). *//** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. *//** * Tulis void ke DB lokal dulu (sumber kebenaran offline), lalu outbox/sync/POST:
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong. */
+async function loadHeadAdj(salesNum: string): Promise<{ discount: number; service: number; tax: number }> {
+  try {
+    await initDb();
+    const h = await queryFirst<{ discount: number | null; serviceCharge: number | null; tax: number | null }>(
+      'SELECT discount, serviceCharge, tax FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+      [salesNum],
+    );
+    return {
+      discount: Math.max(0, Math.round(Number(h?.discount) || 0)),
+      service: Math.max(0, Math.round(Number(h?.serviceCharge) || 0)),
+      tax: Math.max(0, Math.round(Number(h?.tax) || 0)),
+    };
+  } catch {
+    return { discount: 0, service: 0, tax: 0 };
+  }
+}/** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. *//** * Tulis void ke DB lokal dulu (sumber kebenaran offline), lalu outbox/sync/POST:
  * - satu baris tr_cancelmenu per item (alasan + user + syncDate NULL = kotor),
  * - qty tr_salesmenu dikurangi sejumlah void (baris habis = qty 0),
  * - tr_saleshead jadi 'void' bila tak ada sisa, 'open' + total dihitung ulang
@@ -294,8 +310,35 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   try {
     await applyVoidLocal(orderId, voidLines, reason, approvedBy);
   } catch {
-    /* tulis lokal gagal - outbox di bawah tetap jalan */
-  } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason, ...(approvedBy ? { approvedBy } : {}) }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason, ...(approvedBy ? { approvedBy } : {}) } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
+    /* tulis lokal gagal - twin di bawah tetap jalan */
+  }
+  // S6 immediate-first: coba POST langsung (timeout singkat) dengan client_id
+  // twin; twin ringan (id SAMA) hanya bila immediate gagal.
+  const twinId = uuidv7();
+  let sent = false;
+  try {
+    sent = await postImmediate(ApiPath.pushOrderFinish, {
+      action: 'void', no: orderId, salesNum: orderId, voidLines, reason,
+      client_id: twinId, ...(approvedBy ? { approvedBy } : {}),
+    });
+  } catch {
+    sent = false;
+  }
+  if (sent) {
+    try {
+      await markClean('tr_saleshead', orderId);
+    } catch {
+      /* abaikan */
+    }
+  } else {
+    try {
+      enqueueSync('order', {
+        action: 'void', salesNum: orderId, no: orderId, voidLines, reason,
+        client_id: twinId, ...(approvedBy ? { approvedBy } : {}),
+      }, twinId);
+    } catch { /* abaikan */ }
+  }
+}export default function CancelScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const orderId = (route?.params?.orderId ?? '').trim();
@@ -303,7 +346,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   const cashier = route?.params?.cashier ?? '';
   /** Total resmi pemanggil; 0 bila tak ada (mock 86400 tak lagi dipakai). */
   const paramTotal = Math.max(0, Math.round(Number(route?.params?.total) || 0));
-  /** Live-only: mulai kosong (tanpa mock); DB kosong = empty-state, bukan fallback mock. */ const [items, setItems] = useState<CancelItem[]>([]); const [voidQty, setVoidQty] = useState<Record<string, number>>({}); const [loaded, setLoaded] = useState(false); /** Muat baris live tr_salesmenu; kosong/tanpa orderId = tetap [] + tandai loaded. */ useEffect(() => { let alive = true; if (!orderId) { setItems([]); setVoidQty({}); setLoaded(true); return () => { alive = false; }; } void loadSaleItems(orderId).then((rows) => { if (!alive) return; setItems(rows); const zero: Record<string, number> = {}; for (const r of rows) zero[r.id] = 0; setVoidQty(zero); setLoaded(true); }); return () => { alive = false; }; }, [orderId]);
+  /** Live-only: mulai kosong (tanpa mock); DB kosong = empty-state, bukan fallback mock. */ const [items, setItems] = useState<CancelItem[]>([]); const [voidQty, setVoidQty] = useState<Record<string, number>>({}); const [loaded, setLoaded] = useState(false); /** Penyesuaian head untuk sisa NET U7. */ const [headAdj, setHeadAdj] = useState({ discount: 0, service: 0, tax: 0 }); /** Muat baris live tr_salesmenu; kosong/tanpa orderId = tetap [] + tandai loaded. */ useEffect(() => { let alive = true; if (!orderId) { setItems([]); setVoidQty({}); setHeadAdj({ discount: 0, service: 0, tax: 0 }); setLoaded(true); return () => { alive = false; }; } void Promise.all([loadSaleItems(orderId), loadHeadAdj(orderId)]).then(([rows, adj]) => { if (!alive) return; setItems(rows); const zero: Record<string, number> = {}; for (const r of rows) zero[r.id] = 0; setVoidQty(zero); setHeadAdj(adj); setLoaded(true); }); return () => { alive = false; }; }, [orderId]);
   const REASONS = [t('cx_reason_1'), t('cx_reason_2'), t('cx_reason_3'), t('cx_reason_4')];
   const [reason, setReason] = useState(REASONS[0]);
   const [note, setNote] = useState('');
@@ -314,7 +357,11 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   /** Total live (jumlah item) bila pemanggil tak mengirim total; tanpa mock. */
   const liveTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
   const orderTotal = paramTotal > 0 ? paramTotal : liveTotal;
-  const remain = orderTotal - voidTotal;
+  // U7: sisa NET proporsional — porsi diskon/service/tax milik baris void =
+  // voidSubtotal/orderSubtotal × (discount+service+tax).
+  const adjTotal = headAdj.discount + headAdj.service + headAdj.tax;
+  const voidShare = liveTotal > 0 && voidTotal > 0 ? (voidTotal / liveTotal) * adjTotal : 0;
+  const remain = orderTotal - voidTotal - voidShare;
   /** DB nol-baris / tanpa orderId = empty-state (bukan ITEMS/SPLITS/TRX-047 mock). */
   const isEmptyOrder = loaded && (items.length === 0 || !orderId);
 
@@ -324,7 +371,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
    if (!canConfirm) return; setConfirming(true); setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.cancel').then((gate) => {
         // Gate RBAC order.cancel: deny = eskalasi ke PIN supervisor di bawah
         // (bukan hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
-        if (!gate.ok) setAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+        if (!gate.ok) setAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
         return authorizeSupervisor(pin); }).then((res) => {
         // Offline-first: server tak terjangkau -> cocokkan PIN lokal milik
         // pemegang hak order.cancel (owner); PIN staf/salah tetap ditolak.
@@ -342,15 +389,15 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   if (!loaded || isEmptyOrder) { return (
     <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={orderId ? `Order ${orderId}` : undefined} onBack={() => navigation?.goBack?.()} /><ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.emptyWrap}>
-        <Text style={styles.empty}>{!loaded ? 'Memuat... / Loading...' : 'Order tidak ditemukan / Order not found'}</Text>
-        {loaded && orderId ? (<Text style={styles.meta}>Order {orderId} tidak ada di database lokal</Text>) : null}
+        <Text style={styles.empty}>{!loaded ? t('cx_loading') : t('cx_not_found')}</Text>
+        {loaded && orderId ? (<Text style={styles.meta}>{t('cx_order_missing').replace('{o}', orderId)}</Text>) : null}
       </View>
     </ScrollView>
   </View> ); }
 
   /** Cetak rincian void ke struk dengan data order asal (id/meja/kasir/total). */ const printVoid = () => { navigation?.navigate('Receipt', { no: orderId, table: tableNo, cashier, total: voidTotal, voidLines: picked.map((i) => ({ name: i.name, qty: voidQty[i.id] ?? 0, price: i.price })), reason, }); }; return (
-    <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={`Order ${orderId} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} /><ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <Text style={styles.meta}>Order {orderId} - {tableNo} - {cashier} - {rp(orderTotal)}</Text>
+    <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={`${t('cx_order_of').replace('{o}', orderId)} - ${tableNo} - ${cashier}`} onBack={() => navigation?.goBack?.()} /><ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+      <Text style={styles.meta}>{t('cx_order_of').replace('{o}', orderId)} - {tableNo} - {cashier} - {rp(orderTotal)}</Text>
       <Text style={styles.sec}>{t('cx_title')}</Text>
       <Text style={styles.hint}>{t('cx_pick_hint')}</Text>
 
@@ -381,7 +428,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         <Text style={styles.sumTitle}>{t('cx_confirm_split')}</Text>
         <Text style={styles.sumLine}>{picked.length} item ({rp(voidTotal)}) {t('cx_to_cancel')}</Text>
         <Text style={styles.sumNote}>{t('cx_stock_back')}</Text>
-        <View style={styles.row}><Text style={styles.item2}>Order {orderId} - {tableNo} - {cashier}</Text></View>
+        <View style={styles.row}><Text style={styles.item2}>{t('cx_order_of').replace('{o}', orderId)} - {tableNo} - {cashier}</Text></View>
         <View style={styles.row}><Text style={styles.item2}>{t('cx_total_before')}</Text><Text style={styles.price}>{rp(orderTotal)}</Text></View>
         <View style={styles.row}><Text style={styles.item2}>{t('cx_voided')}</Text><Text style={styles.disc}>-{rp(voidTotal)}</Text></View>
         <View style={styles.row}><Text style={styles.totalL}>{t('cx_remain')}</Text><Text style={styles.totalV}>{rp(remain)}</Text></View>

@@ -252,7 +252,7 @@ export default function TableTimerScreen({ navigation }: Props) {
             dari default (hardcode ID sementara; kunci i18n: tmr_round_info). */}
         {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
           <Text style={[styles.foot, isTablet && styles.footBig]}>
-            {`Pembulatan: ${rounding.mode !== '' ? rounding.mode : 'default'} · terdekat ${rounding.nearest} · langkah ${rounding.step}`}
+            {t('tmr_round_info').replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
           </Text>
         ) : null}
       </ScrollView>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useEffect, useRef, useState } from 'react';import { Alert, Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); // Tanpa params = nilai kosong yang jujur (bukan TRX/#148/QRIS/Bawa Pulang karangan).
@@ -22,6 +22,12 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const hasItems = !!cartItems && cartItems.length > 0;
   const discount = route?.params?.discount ?? 0;
   const ongkir = route?.params?.ongkir ?? 0;
+  // Potongan ongkir voucher terpisah (bruto + cut): baris Ongkir tampil bruto,
+  // baris Potongan ongkir tampil -cut. Tanpa cut = perilaku lama (net).
+  const ongkirCut = Math.max(0, Math.round(Number(route?.params?.ongkirCut) || 0));
+  // Pratinjau pracetak (BillPreview/CartDetail/DineIn): struk DITANDAI belum
+  // bayar agar tak terbaca lunas (kertas + sharing + thermal).
+  const isUnpaidPreview = route?.params?.unpaid === true;
   // Rincian struk bawaan rantai pay (opsional): tampil bila dikirim pemanggil.
   // Semua baris rincian info-only - total terusan pemanggil adalah kebenaran.
   const service = Math.max(0, Math.round(Number(route?.params?.service) || 0));
@@ -29,16 +35,19 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const rounding = Math.round(Number(route?.params?.rounding) || 0);
   const feeESB = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0));
   const itemsSum = hasItems ? cartItems.reduce((s, it) => s + lineTotal(it), 0) : 0;
-  const total = route?.params?.total ?? (itemsSum - discount + ongkir);
+  const total = route?.params?.total ?? (itemsSum - discount - ongkirCut + ongkir);
   // Mundur tanpa item: kurangi SEMUA komponen info-only agar konsisten
   // (sebelumnya service/rounding/feeESB tak dikurangi → subtotal kebesaran).
-  const subtotal  = hasItems ? itemsSum : Math.max(0, total + discount - ongkir - service - rounding - feeESB);
+  // Ongkir mundur sebagai NET (bruto - cut) agar imbang dengan total.
+  const subtotal  = hasItems ? itemsSum : Math.max(0, total + discount + ongkirCut - ongkir - service - rounding - feeESB);
 
   const cashierLine = [route?.params?.cashier ?? getSession()?.name ?? getSession()?.username ?? '', route?.params?.table ?? route?.params?.customer ?? ''].filter((s) => s && s.trim()).join(' · ');
   // Rincian void dari CancelScreen/History (T8): tampil sebagai seksi struk tersendiri.
   const voidLines = route?.params?.voidLines ?? [];
   const voidReason = route?.params?.reason ?? '';
   const hasVoid = voidLines.length > 0;
+  // R24: sale void penuh — banner + QR ditekan + cetak ditolak di doPrint.
+  const isVoidSale = route?.params?.voided === true;
   const voidTotal = voidLines.reduce((s, l) => s + l.qty * l.price, 0);
   // Kode voucher + footer custom cabang bila dioper via params (jangan hardcode).
   const voucherCode = route?.params?.voucherCode ?? '';
@@ -52,9 +61,14 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const customFooter = route?.params?.footer ?? '';
   // APP-PRINTER-SALES (Q7): QR struk membawa client_id rantai bayar (kunci
   // upsert server). Kosong = struk tanpa QR (arsip lama / tanpa rantai).
-  const receiptQr = (route?.params?.clientId ?? '').trim() && no
+  // R24: sale void penuh tak membawa QR bayar.
+  const receiptQr = !isVoidSale && (route?.params?.clientId ?? '').trim() && no
     ? buildSaleQrPayload((route?.params?.clientId ?? '').trim(), no, Math.round(total))
     : '';
+  // P12: kunjungan split = nominal + metode kunjungan ini (cermin Success —
+  // navigation/types Receipt sudah membawa splitPaid, layar wajib merender).
+  const splitPaidAmt = Math.max(0, Math.round(Number(route?.params?.splitPaid?.amount) || 0));
+  const splitPaidMethod = typeof route?.params?.splitPaid?.method === 'string' ? route.params.splitPaid.method : '';
   const [printing, setPrinting] = useState(false);
   /** Cetak masuk antrean persisten (offline/printer putus): banner pending
    * eksplisit, bukan status tercetak. Kunci i18n yang dipakai sudah ada. */
@@ -63,7 +77,16 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
    * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
    * kas ala POSLite (best-effort). APP-PRINTER-SALES (Q7): QR struk membawa
    * client_id rantai bayar (kunci upsert server), bukan nomor display saja. */
-  const doPrint = async () => { if (printing) return; setPrinting(true); setPrintQueued(false); try { const res = await printForTag({ receipt: { shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${modeLabel}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), ...(receiptQr ? { qr: receiptQr } : {}), } }); if (!res.ok && res.queued) { setPrintQueued(true); } if (res.ok && res.bytes > 0) { try { await initDb(); await run( 'UPDATE tr_saleshead SET printedCount = COALESCE(printedCount, 0) + 1, syncDate = NULL WHERE salesNum = ?', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
+  const doPrint = async () => { if (printing) return; // R24: struk sale void tak dicetak sebagai aktif — kunci
+    // hist_deny_title + rc_void_title yang sudah ada.
+    if (isVoidSale) {
+      Alert.alert(t('hist_deny_title'), t('rc_void_title'));
+      return;
+    }
+    setPrinting(true); setPrintQueued(false); try { const res = await printForTag({ receipt: { shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${modeLabel}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service } : {}), ...(tax > 0 ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(ongkirCut > 0 ? { ongkirCut: Math.round(ongkirCut) } : {}), ...(isUnpaidPreview ? { unpaid: true } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), ...(receiptQr ? { qr: receiptQr } : {}), } }); if (!res.ok && res.queued) { setPrintQueued(true); } if (res.ok && res.bytes > 0) { try { await initDb(); // R26: tandai tercetak hanya pada cetakan pertama (conditional
+        // UPDATE — tak ada kolom lastPrintAt di skema, skema milik lane
+        // lain sehingga tak ditambah di sini).
+        await run( 'UPDATE tr_saleshead SET printedCount = 1, syncDate = NULL WHERE salesNum = ? AND COALESCE(printedCount, 0) = 0', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
   /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
    * lain (pratinjau/arsip/void) tetap manual via tombol. */
   const autoPrinted = useRef(false);
@@ -75,6 +98,8 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const paper = (<View style={[styles.paper, isTablet && styles.paperTablet]}>
+      {isVoidSale ? <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> : null}
+      {isUnpaidPreview ? <Text style={styles.voidTitle}>{t('rc_unpaid')}</Text> : null}
       <Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text>{shopAddr ? <Text style={styles.addr}>{shopAddr}</Text> : null}<Text style={styles.line}>No: {no}    {modeLabel}</Text>
       <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
@@ -85,9 +110,10 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('serviceExcl')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(service)}</Text></View> )}{feeESB > 0 && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('feeESB')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(feeESB)}</Text></View> )}{tax > 0 && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ok_tax')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(tax)}</Text></View> )}{voucherCode ? (
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_voucher')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_approval')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_terminal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{edcLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rounding')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_voucher')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_approval')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_terminal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{edcLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{ongkirCut > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_ongkir_cut')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(ongkirCut)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rounding')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
       <View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(total)}</Text></View>{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_void_total')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(voidTotal)}</Text></View></> )}
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(total)}</Text></View>{splitPaidAmt > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('suc_paid').replace('{m}', splitPaidMethod ? ` (${splitPaidMethod})` : '')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(splitPaidAmt)}</Text></View> )}{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_void_total')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(voidTotal)}</Text></View></> )}
       {isCash && cash > 0 ? (
         <>
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_cashin')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(cash)}</Text></View>
@@ -102,7 +128,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
 
   // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
   const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...(it.modifiers ?? []).map((m) => ` + ${m.name} ${rp(m.price * it.qty)}`), ]) : [];
-  const shareText = [ `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${t('serviceExcl')}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${t('feeESB')}: ${rp(feeESB)}`] : []), ...(tax > 0 ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `${t('c_total').toUpperCase()}: ${rp(total)}`, `${method}: ${rp(total)}`, ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
+  const shareText = [ ...(isUnpaidPreview ? [`** ${t('rc_unpaid')} **`] : []), `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${t('serviceExcl')}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${t('feeESB')}: ${rp(feeESB)}`] : []), ...(tax > 0 ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(ongkirCut > 0 ? [`${t('rc_ongkir_cut')}: -${rp(ongkirCut)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `${t('c_total').toUpperCase()}: ${rp(total)}`, `${method}: ${rp(total)}`, ...(splitPaidAmt > 0 ? [`${t('suc_paid').replace('{m}', splitPaidMethod ? ` (${splitPaidMethod})` : '')}: ${rp(splitPaidAmt)}`] : []), ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
@@ -163,7 +189,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
             <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_no')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{no}</Text></View>
             <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_mode')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{modeLabel}</Text></View>
             <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_method')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text></View>
-            {ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}<View style={styles.div} />
+            {ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{ongkirCut > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_ongkir_cut')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(ongkirCut)}</Text></View> )}<View style={styles.div} />
             <View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>
           </View>
           <View style={styles.actionsColumn}>{actions}</View>

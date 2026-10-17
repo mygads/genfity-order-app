@@ -1,6 +1,8 @@
 import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
-import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];export default function CreatePinScreen({ navigation, route }: Props) {
+import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** B9: PIN lemah — semua berulang atau berurutan umum. */
+const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
+const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default function CreatePinScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const branch = route?.params?.branch ?? 'Genfity Cabang Poris';
@@ -36,7 +38,14 @@ import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { sav
       const next = val + k;
       setVal(next);
       if (next.length === 4 && active === 'confirm') {
-        if (next === pin) void submitPin(next);
+        if (next === pin) {
+          // B9: tolak PIN lemah (berulang/berurutan).
+          if (isWeakPin(next)) {
+            setError(t('pin_weak'));
+            setPin('');
+            setConfirm('');
+          } else void submitPin(next);
+        }
         else {
           setError(t('inst_pin_mismatch'));
           setPin('');

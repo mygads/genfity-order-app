@@ -241,9 +241,35 @@ export async function removePinHash(userId: string): Promise<void> {
 }
 
 export interface AttendanceVerify {
-  /** true = cocok, false = user ada tapi PIN salah, null = tabel kosong/belum siap. */
+  /** true = cocok, false = user ada tapi PIN salah / throttle terkunci, null = tabel kosong/belum siap. */
   ok: boolean | null;
   userId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Attempt-throttle modul (R33, audit 2026-10-17): 5x salah beruntun mengunci
+// 60 detik. Penghitung TERPISAH dari supervisor (PIN_ATTEMPTS_* di bawah,
+// bukan LS_SUP_*). In-memory per proses — guard brute-force lokal, bukan
+// otorisasi; kunci kedaluwarsa memberi jendela baru (decay).
+// ---------------------------------------------------------------------------
+
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MS = 60_000;
+
+let pinAttempts = 0;
+let pinLockedUntil = 0;
+
+/** Sisa detik kunci throttle PIN; 0 bila tidak dikunci. */
+export function pinLockRemainingSec(): number {
+  return Math.max(0, Math.ceil((pinLockedUntil - Date.now()) / 1000));
+}
+
+export function isPinLocked(): boolean {
+  return pinLockRemainingSec() > 0;
+}
+
+export function pinAttemptsLeft(): number {
+  return Math.max(0, PIN_MAX_ATTEMPTS - pinAttempts);
 }
 
 /**
@@ -255,6 +281,13 @@ export interface AttendanceVerify {
 export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify> {
   const clean = pin.replace(/[^0-9]/g, '');
   if (!clean) return { ok: null };
+  // Kunci kedaluwarsa memberi jendela baru (decay); kunci aktif menolak
+  // TANPA verifikasi dan TANPA membakar attempt baru.
+  if (pinLockedUntil !== 0 && !isPinLocked()) {
+    pinAttempts = 0;
+    pinLockedUntil = 0;
+  }
+  if (isPinLocked()) return { ok: false };
   try {
     await initDb();
     const users = await query<{ id: string }>('SELECT id FROM ms_posuser');
@@ -262,11 +295,21 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
     for (const u of users) {
       try {
         const rec = await loadPinRecord(u.id);
-        if (rec && verifyPinHash(clean, rec)) return { ok: true, userId: u.id };
+        if (rec && verifyPinHash(clean, rec)) {
+          pinAttempts = 0;
+          pinLockedUntil = 0;
+          return { ok: true, userId: u.id };
+        }
       } catch {
         /* lanjut kandidat berikut */
       }
     }
+    // R34 DEFERRED (audit 2026-10-17, terverifikasi via grep): cabang
+    // plaintext di bawah DIPERTAHANKAN — kolom pembanding TIDAK selalu NULL
+    // (master.ts:83-85 sengaja melestarikan pinHash/password lokal sebagai
+    // "fallback verifikasi PIN legacy") dan ada pemanggil live yang
+    // membandingkan plaintext (apiSource.ts:540 validateEmployeeLocal).
+    // Penghapusan menunggu migrasi hash penuh + penghapusan fallback ganda.
     const legacy = await queryFirst<{ id: string }>(
       'SELECT id FROM ms_posuser WHERE pinHash = ? OR password = ? LIMIT 1',
       [clean, clean],
@@ -277,10 +320,17 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
       } catch {
         /* upgrade gagal - verifikasi tetap sah */
       }
+      pinAttempts = 0;
+      pinLockedUntil = 0;
       return { ok: true, userId: legacy.id };
     }
+    // PIN salah = tebakan → bakar 1 attempt; capai batas → kunci 60 detik.
+    pinAttempts += 1;
+    if (pinAttempts >= PIN_MAX_ATTEMPTS) pinLockedUntil = Date.now() + PIN_LOCK_MS;
     return { ok: false };
   } catch {
+    // DB belum siap/gagal = BUKAN tebakan → jangan bakar attempt (fail-closed
+    // tetap: null = tolak-lembut, pemanggil wajib menangani sebagai offline).
     return { ok: null };
   }
 }

@@ -70,7 +70,9 @@ export default function EdcScreen({ navigation, route }: Props) {
         if (r.cardNo) setCardNo(r.cardNo.replace(/\D/g, '').slice(-4));
         setPhase('approval');
       }
-    });
+    // P16: rantai bare promise dijaga — APOS tak tersedia = tetap di fase
+    // waiting, kasir input approval manual (fail-soft, tanpa tombol mati).
+    }).catch(() => { /* modul APOS/native absen — abaikan, jalur manual hidup */ });
   }, []);
 
   useEffect(() => {
@@ -115,6 +117,8 @@ export default function EdcScreen({ navigation, route }: Props) {
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
+      } else {
+        Alert.alert(t('pay_issue_fail'));
       }
       return;
     }
@@ -124,13 +128,29 @@ export default function EdcScreen({ navigation, route }: Props) {
     let saleClientId: string;
     try {
       saleClientId = (p.clientId ?? '').trim() || (await getSaleClientId(orderNo)) || uuidv7();
-    } catch {
+    } catch (e) {
       savedRef.current = false;
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+      } else {
+        Alert.alert(t('pay_issue_fail'));
+      }
       return;
     }
-    const fwdSplits = (p.splits ?? [])
-      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
+    // P7/P15: kaki terusan boleh membawa approvalCode/memberId defensif dari
+    // Pay (tipe nav params belum diperluas) — dipertahankan ke visitPay agar
+    // atribusi deposit + kode otorisasi kunjungan lalu tak hilang di EDC.
+    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string };
+    const fwdSplits = ((p.splits ?? []) as FwdLeg[])
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}) }))
       .filter((s) => s.amount > 0);
+    const legMemberId = ((p.splits ?? []) as FwdLeg[])
+      .map((s) => String(s?.memberId ?? '').trim())
+      .find((v) => v !== '') ?? '';
+    const effMemberId = String(p.memberId ?? '').trim() || legMemberId;
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
@@ -149,7 +169,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       const visitPay = [...fwdSplits, { method, amount: total, approvalCode: approval }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(p.memberId ? { memberId: p.memberId } : {}) });
+          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}) });
         } else {
           const gInput: SaleInput = {
             method,
@@ -167,7 +187,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
             approvalCode: approval,
             ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
-            ...(p.memberId ? { memberId: p.memberId } : {}),
+            ...(effMemberId ? { memberId: effMemberId } : {}),
             ...(p.table ? { tableId: p.table } : {}),
             ...(p.mode ? { mode: p.mode } : {}),
             ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -224,7 +244,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
-        ...(p.memberId ? { memberId: p.memberId } : {}),
+        ...(effMemberId ? { memberId: effMemberId } : {}),
         ...(p.mode ? { mode: p.mode } : {}),
         ...(p.table ? { table: p.table } : {}),
         ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -248,7 +268,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
-      ...(p.memberId ? { memberId: p.memberId } : {}),
+      ...(effMemberId ? { memberId: effMemberId } : {}),
       ...(p.table ? { tableId: p.table } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -289,10 +309,11 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
-      ...(p.memberId ? { memberId: p.memberId } : {}),
+      ...(effMemberId ? { memberId: effMemberId } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.table ? { table: p.table } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
+      ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
     });
   };
@@ -393,6 +414,10 @@ export default function EdcScreen({ navigation, route }: Props) {
       <View style={[styles.card, isTablet && styles.approvalTablet]}>
         <Text style={styles.cardTitle}>{t('edc_approval_title')}</Text>
         <Text style={styles.meta}>{t('edc_approval_ex')}</Text>
+        {/* P17: total<=0 = Simpan mati (canSave) + pesan jujur, bukan tombol mati tanpa kabar. */}
+        {total <= 0 && (
+          <Text style={styles.err}>{t('pay_empty_total')} {t('pay_empty_total_sub')}</Text>
+        )}
         <AppInput value={approval} onChangeText={(v) => setApproval(v.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="••••••" keyboardType="numeric" maxLength={6} style={styles.centerField} />
         <AppButton
           title={t('edc_save')}
@@ -405,10 +430,19 @@ export default function EdcScreen({ navigation, route }: Props) {
           // nomor + client_id + kaki split + grup ikut pulang (ganti metode
           // bukan sale baru — rantai Q7 lestari).
           const p = route?.params ?? {};
-          const backSalesNum = (p.salesNum ?? '').trim();
-          const backClientId = (p.clientId ?? '').trim()
-            || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
-            || uuidv7();
+          // P1: blok issuance dijaga (cermin Qris-guard) — getSaleClientId /
+          // uuidv7 gagal = Alert + tetap di EDC, bukan pulang tanpa client_id.
+          let backSalesNum = '';
+          let backClientId = '';
+          try {
+            backSalesNum = (p.salesNum ?? '').trim();
+            backClientId = (p.clientId ?? '').trim()
+              || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
+              || uuidv7();
+          } catch {
+            Alert.alert(t('pay_issue_fail'));
+            return;
+          }
           navigation?.navigate('Pay', {
             total,
             ...(p.items ? { items: p.items } : {}),

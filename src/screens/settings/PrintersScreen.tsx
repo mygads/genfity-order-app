@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -67,22 +67,68 @@ function roleToPrinterType(r: StationRole): string {
  *  kunci printers.detectedHint dari pemanggil agar ikut bahasa aktif). */
 function previewText(s: Station, hint: string | null, L: { test: string; role: string; cols: string; cut: string; total: string }): string {
   const bar = '-'.repeat(s.cpl);
-  return [
+  const head = [
     `${L.test} - ${s.name}`,
     `${L.role} - ${s.conn}${s.address ? ` - ${s.address}` : ''}`,
     `${L.cols} - ${L.cut}`,
     bar,
+  ];
+  // R54: pratinjau mengikuti layout uji per peran (dapur = tiket tanpa
+  // harga; label = slip antrean pendek).
+  if (s.role === 'Dapur' || s.role === 'Checker') {
+    return [...head, '1x Ayam Geprek Pelakor', '2x Es Teh Manis', bar, ...(hint ? [hint] : [])].join('\n');
+  }
+  if (s.role === 'Label') {
+    return [...head, 'ANTREAN', 'A-001', ...(hint ? [hint] : [])].join('\n');
+  }
+  return [...head,
     '1x Ayam Geprek Pelakor',
     '2x Es Teh Manis',
     bar,
     `${L.total} ${rp(64050)}`,
     ...(hint ? [hint] : []),
-  ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. */function stationTarget(s: Station): PrinterTarget { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
+  ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. R57: nullable — alamat tak
+ * bisa kirim (LAN tanpa host, Star tanpa VID/PID, BT/BLE kosong) = null agar
+ * pemanggil menolak eksplisit, bukan mengirim target buta ke native. */function stationTarget(s: Station): PrinterTarget | null { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); const h = (host ?? '').trim(); if (!h) return null; return { transport: 'lan', host: h, port: Number(portRaw ?? 9100) || 9100 };
 }
 
-if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } const addr = s.address.trim(); if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (mac) return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master.
+if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); if (!m) return null; return { transport: 'usb', vendorId: Number(m[1]), productId: Number(m[2]) }; } const addr = s.address.trim(); if (!addr) return null; if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (!mac) return null; return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master.
  * M14: peran dipetakan via roleToPrinterType + UPSERT kolom-terkelola (kolom
- * server lain lestari; binding terminalCode/branchId tetap di cache JSON). */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerPort = excluded.printerPort, connection = excluded.connection, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagAutocut = excluded.flagAutocut, syncDate = NULL`, [s.id, s.name, s.name, s.address, s.conn, roleToPrinterType(s.role), s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
+ * server lain lestari; binding terminalCode/branchId tetap di cache JSON). */async function persistStation(s: Station): Promise<void> {
+  // R53: tanpa branch klaim, tulis DB/outbox ditahan — cache JSON tetap menyimpan.
+  try {
+    if (!String(getBranchId() ?? '').trim()) return;
+  } catch {
+    return;
+  }
+  try { await initDb(); await run( `INSERT INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerPort = excluded.printerPort, connection = excluded.connection, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagAutocut = excluded.flagAutocut, syncDate = NULL`, [s.id, s.name, s.name, s.address, s.conn, roleToPrinterType(s.role), s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}
+
+/**
+ * R55: backup binding terminal (id → terminalCode/branchId) ke ms_setting
+ * (key1='printerBind', key2='bindings') agar tahan reinstall/DB rebuild.
+ * Cache JSON tetap sumber baca pertama; ini lapis kedua. R53: tanpa branch =
+ * tanpa tulis DB. Tak pernah melempar.
+ */
+function backupBindings(ss: Station[]): void {
+  void (async () => {
+    try {
+      if (!String(getBranchId() ?? '').trim()) return;
+      const map: Record<string, { terminalCode?: string; branchId?: string }> = {};
+      for (const x of ss) {
+        if (!x.id || (!x.terminalCode && !x.branchId)) continue;
+        map[x.id] = {
+          ...(x.terminalCode ? { terminalCode: x.terminalCode } : {}),
+          ...(x.branchId ? { branchId: x.branchId } : {}),
+        };
+      }
+      await initDb();
+      await run(
+        "INSERT INTO ms_setting (key1, key2, value1, syncDate) VALUES ('printerBind', 'bindings', ?, NULL) ON CONFLICT (key1, key2) DO UPDATE SET value1 = excluded.value1, syncDate = NULL",
+        [JSON.stringify(map)],
+      );
+    } catch { /* cache JSON tetap menyimpan */ }
+  })();
+}export default function PrintersScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false);
@@ -151,6 +197,24 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
           };
         });
         for (const rest of bindOf.values()) mapped.push(rest);
+        // R55: restore binding dari ms_setting untuk station yang belum
+        // terikat (cache JSON hilang) — tak menimpa binding cache yang ada.
+        try {
+          const brows = await query<{ value1: string | null }>(
+            "SELECT value1 FROM ms_setting WHERE key1 = 'printerBind' AND key2 = 'bindings' LIMIT 1",
+          );
+          const raw = brows.length > 0 ? brows[0]?.value1 : null;
+          if (raw) {
+            const saved = JSON.parse(String(raw)) as Record<string, { terminalCode?: string; branchId?: string }>;
+            for (const m of mapped) {
+              if (m.terminalCode) continue;
+              const b = saved[m.id];
+              if (!b) continue;
+              if (b.terminalCode) m.terminalCode = b.terminalCode;
+              if (b.branchId) m.branchId = b.branchId;
+            }
+          }
+        } catch { /* tanpa backup: lanjut */ }
         if (mapped.length > 0) {
           if (alive) setStations(mapped);
           return;
@@ -159,7 +223,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
       if (alive) setStations(cached);
     })();
     return () => { alive = false; };
-  }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]);
+  }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); backupBindings(stations); }, [stations]);
 
   const patchStation = (id: string, patch: Partial<Station>) =>
     { setStations((ss) => { const next = ss.map((x) => (x.id === id ? { ...x, ...patch } : x));
@@ -172,7 +236,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     const term = String(activeTerm.terminalCode ?? '').trim().toUpperCase();
     const br = String(activeTerm.branchId ?? '').trim();
     if (!term) {
-      setStatusMsg('Terminal belum diklaim - klaim terminal dulu sebelum mengikat printer.');
+      setStatusMsg(t('printers_bind_first'));
       return;
     }
     setStations((ss) => {
@@ -181,7 +245,7 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
       if (changed) void persistStation(changed);
       return next;
     });
-    setStatusMsg(`Printer diikat ke terminal ${term}.`);
+    setStatusMsg(t('printers_bound').replace('{term}', term));
   };
   /** Lepas binding → station kembali jadi address book global (warisan). */
   const unbindStation = (id: string) =>
@@ -194,8 +258,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
       if (ss.length <= 1) return ss;
       const next = ss.filter((x) => x.id !== id);
       // Cerminkan hapus ke ms_station agar daftar live KitchenScreen ikut bersih.
+      // R53: tanpa branch klaim, hapus DB/outbox ditahan (cache JSON tetap).
       void (async () => {
         try {
+          if (!String(getBranchId() ?? '').trim()) return;
           await initDb();
           await run('DELETE FROM ms_station WHERE id = ?', [id]);
           await enqueueOutbox('ms_station', id, 'delete');
@@ -268,8 +334,14 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     }
   };
 
-  /** Pakai perangkat hasil pindai (BLE/USB) ke printer utama. */
+  /** Pakai perangkat hasil pindai (BLE/USB) ke printer utama. R56: tanpa
+   * station, patch ke default diam-diam tak ke mana-mana — tolak eksplisit
+   * (kunci noPrinterSub yang sudah ada). */
   const useOnPrimary = (patch: Partial<Station>, msg: string) => {
+    if (stations.length === 0) {
+      setStatusMsg(t('printers.noPrinterSub'));
+      return;
+    }
     setStations((ss) => {
       const next = ss.map((x) => (x.isDefault ? { ...x, ...patch } : x));
       const d = next.find((x) => x.isDefault);
@@ -299,8 +371,12 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   const useUsbDevice = (v: UsbDeviceInfo) =>
     useOnPrimary({ conn: 'Star', address: `${v.vendorId}/${v.productId}` }, t('printers.usbApplied').replace('{x}', v.name));
 
-  const togglePair = (id: string) =>
+  // R56: flip lokal saja (bukan pairing OS sungguhan) — statusMsg jujur via
+  // btSub yang sudah ada (kirim nyata butuh dev-client), bukan klaim sukses.
+  const togglePair = (id: string) => {
     setBonded((bb) => bb.map((b) => (b.id === id ? { ...b, paired: !b.paired } : b)));
+    setStatusMsg(t('printers.btSub'));
+  };
 
   /** Uji koneksi LAN: kirim ESC @ (init, aman) via TCP port 9100. */
   const testLan = async () => {
@@ -327,7 +403,13 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
 
   /** Buka drawer kas: pulse ESC/POS via printer kasir. */
   const openDrawer = async (s: Station) => {
-    const ok = await openCashDrawer(stationTarget(s));
+    // R57: tanpa target kirim valid, jangan panggil native.
+    const target = stationTarget(s);
+    if (!target) {
+      setStatusMsg(t('printers.noPrinter'));
+      return;
+    }
+    const ok = await openCashDrawer(target);
     setStatusMsg(
       ok
         ? t('printers.drawerOk').replace('{x}', s.name)
@@ -335,24 +417,52 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
     );
   };
 
-  /** Test print per station: pratinjau struk + hex ESC/POS, lalu kirim nyata bila bisa. */
+  /** Test print per station: pratinjau + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
-    const bytes = buildReceiptBytes({
-      cols: s.cpl,
-      shop: 'GENFITY CABANG PORIS',
-      addr: `${t('printers.receiptTest')} - ${s.name}`,
-      trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
-      items: [
-        { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
-        { name: 'Es Teh Manis', qty: 2, price: 8000 },
-      ],
-      subtotal: 61000,
-      service: 3050,
-      total: 64050,
-      method: t('pay_tab_cash'),
-    });
+    // R57: alamat tak bisa kirim = null — tolak eksplisit (kunci noPrinter
+    // yang sudah ada), jangan kirim target buta.
+    const target = stationTarget(s);
+    if (!target) {
+      setPreview(null);
+      setStatusMsg(t('printers.noPrinter'));
+      return;
+    }
+    // R54: layout uji mengikuti peran + cut per station (bukan selalu struk).
+    // Label = slip antrean pendek (cetak label; bukan struk bayar).
+    const shop = String(getTerminal().branchName ?? '').trim() || 'GENFITY';
+    let bytes: Uint8Array;
+    if (s.role === 'Dapur' || s.role === 'Checker') {
+      bytes = buildKitchenTicketBytes({
+        station: s.name,
+        no: `${t('printers.receiptTest')} - ${s.name}`,
+        cols: s.cpl,
+        cut: s.autocut,
+        items: [
+          { name: 'Ayam Geprek Pelakor', qty: 1 },
+          { name: 'Es Teh Manis', qty: 2 },
+        ],
+      });
+    } else if (s.role === 'Label') {
+      bytes = buildQueueSlipBytes({ queueNo: 'A-001', branch: shop, cols: s.cpl, cut: s.autocut });
+    } else {
+      bytes = buildReceiptBytes({
+        cols: s.cpl,
+        cut: s.autocut,
+        shop,
+        addr: `${t('printers.receiptTest')} - ${s.name}`,
+        trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
+        items: [
+          { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
+          { name: 'Es Teh Manis', qty: 2, price: 8000 },
+        ],
+        subtotal: 61000,
+        service: 3050,
+        total: 64050,
+        method: t('pay_tab_cash'),
+      });
+    }
     setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint'), { test: t('printers.receiptTest'), role: roleLabel(s.role), cols: t('printers.receiptCols').replace('{n}', String(s.cpl)), cut: s.autocut ? t('printers.receiptCut') : t('printers.receiptNoCut'), total: t('c_total') }), hex: toHex(bytes).slice(0, 240) + '...' });
-    const res = await printBytes(stationTarget(s), bytes);
+    const res = await printBytes(target, bytes);
     setStatusMsg(
       res.ok
         ? t('printers.testOk').replace('{x}', s.name).replace('{n}', String(res.bytes))
@@ -377,10 +487,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             Printer aktif = station yang terikat terminal di bawah ini. */}
         <View style={styles.stCard}>
           <Text style={styles.stName}>
-            {String(activeTerm.terminalCode ?? '').trim() ? `Terminal: ${String(activeTerm.terminalCode).trim().toUpperCase()}` : 'Terminal: belum diklaim'}
+            {String(activeTerm.terminalCode ?? '').trim() ? `Terminal: ${String(activeTerm.terminalCode).trim().toUpperCase()}` : t('printers_term_unclaimed')}
           </Text>
           <Text style={styles.stMeta}>
-            {String(activeTerm.branchId ?? '').trim() ? `Cabang: ${String(activeTerm.branchId).trim()}` : 'Klaim terminal dulu sebelum mengikat printer'}
+            {String(activeTerm.branchId ?? '').trim() ? `Cabang: ${String(activeTerm.branchId).trim()}` : t('printers_claim_first')}
           </Text>
         </View>
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
@@ -451,9 +561,9 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
           )}
           {/* APP-PRINTER: satu printer aktif per terminal klaim (literal netral, tanpa kunci baru). */}
           {s.terminalCode ? (
-            <AppButton size="md" title="Lepas dari terminal ini" onPress={() => unbindStation(s.id)} variant="secondary" style={styles.blockGap} />
+            <AppButton size="md" title={t('printers_unbind')} onPress={() => unbindStation(s.id)} variant="secondary" style={styles.blockGap} />
           ) : (
-            <AppButton size="md" title="Pakai di terminal ini" onPress={() => bindStation(s.id)} style={styles.greenBlock} />
+            <AppButton size="md" title={t('printers_use_here')} onPress={() => bindStation(s.id)} style={styles.greenBlock} />
           )}
         </View>
       ))}

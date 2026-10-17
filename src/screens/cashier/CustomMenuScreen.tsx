@@ -108,7 +108,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       <View style={[isTablet && styles.col]}>
 
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('itemName')}</Text>
-      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={name} onChangeText={setName} placeholder="cth: Nasi + Ayam" />
+      <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={name} onChangeText={setName} placeholder={t('custom_name_ph')} />
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.label, isTablet && styles.labelBig]}>{t('price')}</Text>

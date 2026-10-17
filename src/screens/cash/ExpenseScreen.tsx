@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { verifyLocalEscalation } from '../../lib/supervisor';
 import { uuidv7 } from '../../lib/uuidv7';
 import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
@@ -9,7 +9,7 @@ import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyA
   jumlah: number;
   disetujui: boolean;
   photo?: string;};type ExpenseRow = { id: string;
-coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Sewa', 'Lainnya'];
+coaName: string | null; amount: number | null; note: string | null; userId: string | null; expenseDate: string | null; photoPath: string | null; createdAt: string | null;};const FALLBACK_COA = [tOf('coa_ops'), tOf('coa_material'), tOf('coa_salary'), tOf('coa_util'), tOf('coa_rent'), tOf('coa_other')];
 
 /** DB kosong = empty-state (tanpa seed). */interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA expense: ms_coa (SQLite seed) DULU, lalu pull, lalu cache, FALLBACK_COA last-resort. */async function loadCoa(): Promise<string[]> { try { await initDb(); const coaRows = await query<{ coaName: string | null }>( "SELECT coaName FROM ms_coa WHERE flagActive = 1 AND (coaType = 'expense' OR coaType IS NULL) ORDER BY rowid", ); const coaNames = coaRows.map((r) => String(r.coaName ?? '').trim()).filter((s) => s.length > 0); if (coaNames.length > 0) return [...new Set(coaNames)]; } catch { /* abaikan: lanjut pull */ } try { await initDb();
   const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { await initDb(); const srow = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (srow?.value1) { try { const parsed = JSON.parse(srow.value1) as unknown; if (Array.isArray(parsed)) { const strs = (parsed as unknown[]).filter((x): x is string => typeof x === 'string').map((s) => s.trim()).filter((s) => s.length > 0); if (strs.length > 0) return [...new Set(strs)]; } } catch { /* JSON rusak: lanjut cache file */ } } } catch { /* abaikan */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}function shortDate(iso: string | null, lang: Lang = 'id'): string { if (!iso) return fmtDate(new Date(), lang); try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return fmtDate(d, lang); } catch { return iso; }}export default function ExpenseScreen({ navigation }: Props) { const { width } = useWindowDimensions(); const isTablet = width >= TABLET_BP; const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [coaList, setCoaList] = useState<string[]>(FALLBACK_COA); const [items, setItems] = useState<Expense[]>([]); const [formOpen, setFormOpen] = useState(false);
@@ -28,7 +28,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
 
   // F7: muat ulang tiap layar jadi fokus agar approve dari daftar lain langsung
   // terlihat (focus-listener; aman: guard addListener + alive).
-  const [saving, setSaving] = useState(false); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY createdAt DESC", [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: biarkan state apa adanya */ } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
+  const [saving, setSaving] = useState(false); const [saveNotice, setSaveNotice] = useState(''); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY createdAt DESC", [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: biarkan state apa adanya */ } }; void load(); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = nama.trim().length >= 3 && jumlahNum > 0 && !saving;
 
@@ -52,6 +52,10 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
 
   /** Simpan expense ke tr_branchexpense + dokumen foto, antrekan outbox. ID UUID-style (Q7): EX- + UUIDv7 agar unik lintas-device; prefix EX- dipertahankan agar filter daftar 'EX-%' tetap cocok. */ const tambah = async () => {
     if (!ready) return;
+    // UNBOUND-GUARD: device belum terikat terminal (branchId kosong) = tulis
+    // lokal DILEWATI + pesan jujur; form tetap terbuka agar input tak hilang.
+    if (!getBranchId().trim()) { setSaveNotice(t('terminal_unbound_hint')); return; }
+    setSaveNotice('');
     setSaving(true); const id = `EX-${uuidv7()}`; const now = new Date().toISOString(); const branchId = getBranchId(); const sess = getSession(); const kasir = sess?.userId || sess?.username || sess?.name || ''; const entry: Expense =
       {
         id,
@@ -75,9 +79,12 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     if (!pendingId) return;
     const esc = await verifyLocalEscalation(pin, 'settings.edit');
     if (!esc.ok) { setPinErr(esc.message); return; }
+    // WIRE-APPROVAL: approver wajib userId nyata — tanpa identitas = tolak.
+    const approver = (esc.userId ?? '').trim();
+    if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
     const id = pendingId;
     setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e)));
-    await markApproved(id, esc.userId ?? '');
+    await markApproved(id, approver);
     setPinVisible(false); setPin(''); setPendingId(null);
   }; return (
     <View style={s.root}>
@@ -149,6 +156,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
               disabled={!ready}
               onPress={() => void tambah()}
             />
+            {saveNotice ? <Text style={s.pinErr}>{saveNotice}</Text> : null}
           </View>
         )}
 
@@ -184,8 +192,8 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
       <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
         <View style={s.modalBg}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
-            <Text style={s.modalTitle}>{lang === 'id' ? 'PIN Persetujuan' : 'Approval PIN'}</Text>
-            <Text style={s.modalHint}>{lang === 'id' ? 'Masukkan PIN owner untuk menyetujui' : 'Enter owner PIN to approve'}</Text>
+            <Text style={s.modalTitle}>{t('petty_approve_title')}</Text>
+            <Text style={s.modalHint}>{t('petty_approve_hint')}</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />

@@ -49,10 +49,10 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Switch value={opts.allowSellEmpty} onValueChange={(v) => setOpt('allowSellEmpty', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         {/* REA-14: tampilkan info pembulatan hanya bila ms_setting menyimpang
-            dari default (hardcode ID sementara; kunci i18n: stock.roundInfo). */}
+            dari default (kunci i18n: stock_round_info, {n} ganda = chained). */}
         {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
           <Text style={styles.cardSub}>
-            {`Pembulatan: ${rounding.mode !== '' ? rounding.mode : 'default'} · terdekat ${rounding.nearest} · langkah ${rounding.step}`}
+            {t('stock_round_info').replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
           </Text>
         ) : null}
       </View>

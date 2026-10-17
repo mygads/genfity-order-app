@@ -158,15 +158,33 @@ interface CallResult<T> {
   data: T | null;
 }
 
-async function postJson<T>(path: string, body: unknown, timeoutMs = 9000): Promise<CallResult<T>> {
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = 9000,
+  opts?: { auth?: boolean },
+): Promise<CallResult<T>> {
   const base = contractBase();
   if (!base) return { ok: false, status: 0, offline: true, data: null };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (opts?.auth) {
+      // StaffPinReset menuntut Authorization (terminal.go:1062-1066);
+      // token sesi server (authToken JWT E01; fallback authKey terminal-login).
+      // Tanpa token, header dihilangkan (server 401 jujur, bukan sukses palsu).
+      try {
+        const s = getSession();
+        const token = String(s?.authToken ?? s?.authKey ?? '').trim();
+        if (token) headers.Authorization = `Bearer ${token}`;
+      } catch {
+        /* sesi tak terbaca — biarkan server yang menolak */
+      }
+    }
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
@@ -226,16 +244,33 @@ function unwrapData<T>(body: unknown): T {
 // lib/apiSource.ts agar dua modul sepakat pada satu identitas.
 // ---------------------------------------------------------------------------
 
-/** Ambil atau buat deviceID 16-hex persisten (CSPRNG, Q7). */
+/** Ambil atau buat deviceID 16-hex persisten (CSPRNG, Q7).
+ * G9 best-effort (audit 2026-10-17): persist dicoba; bila tulis/gagal-baca
+ * storage, fallback ke id ephemeral in-memory yang STABIL selama proses
+ * (bukan acak tiap panggil) + console.warn jujur — tanpa silent loss. */
+let ephemeralDeviceId: string | null = null;
+
 export async function getContractDeviceId(): Promise<string> {
+  if (ephemeralDeviceId) return ephemeralDeviceId;
   try {
     const cur = await getItem(LS_DEVICE);
     if (cur && /^[0-9a-f]{16}$/.test(cur)) return cur;
     const id = randomHexCsprng(16);
-    await setItem(LS_DEVICE, id);
+    try {
+      await setItem(LS_DEVICE, id);
+    } catch {
+      ephemeralDeviceId = id;
+      console.warn(
+        '[terminalContract] getContractDeviceId: persist gagal — fallback ephemeral in-memory (best-effort, stabil selama proses).',
+      );
+    }
     return id;
   } catch {
-    return randomHexCsprng(16);
+    if (!ephemeralDeviceId) ephemeralDeviceId = randomHexCsprng(16);
+    console.warn(
+      '[terminalContract] getContractDeviceId: storage tak terbaca — fallback ephemeral in-memory (best-effort).',
+    );
+    return ephemeralDeviceId;
   }
 }
 
@@ -426,6 +461,9 @@ export async function requestPinReset(input: {
   const r = await postJson<Record<string, unknown>>(
     `/staff/${encodeURIComponent(id)}/pin-reset`,
     body,
+    9000,
+    // Owner-only + UserAuth: kirim token sesi sebagai Authorization.
+    { auth: true },
   );
   return { ok: r.ok, offline: r.offline, status: r.status };
 }
@@ -477,6 +515,9 @@ export async function clearBinding(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Proyeksi baca grant kanonis sesi ke bentuk kontrak (null bila tanpa grant).
+ * F21: terminalCode/tag TAK diproyeksikan dari binding aktif bila grant milik
+ * terminal lain — dipakai terminal milik grant apa adanya; tak cocok →
+ * dikembalikan tanpa tambal, mismatch ditangani gerbang grant (fail-closed).
  * @deprecated Nol pemanggil produksi (audit 2026-10-17) — gate memakai
  * session.ts langsung (getGrant/isGrantValid/describeGrantProblem). Proyeksi
  * '' saat sesi/binding absen by design (fail-closed); jangan andalkan untuk
@@ -493,13 +534,28 @@ export async function readGrant(): Promise<TerminalGrant | null> {
     if (!g) return null;
     const s = getSession();
     const b = getSessionBinding();
+    // F21: cocok = terminalId grant sama dengan binding sesi (fallback warisan:
+    // terminalCode grant bila grant tak membawa terminalId). Selain itu grant
+    // dikembalikan apa adanya — binding aktif tak boleh menambal terminalCode.
+    const gRec = g as unknown as Record<string, unknown>;
+    const grantTerminalId = str(gRec['terminalId']);
+    const grantTerminalCode = str(gRec['terminalCode']);
+    const grantTag = str(gRec['tag']);
+    const bRec = (b ?? null) as unknown as Record<string, unknown> | null;
+    const bindingTerminalId = bRec ? str(bRec['terminalId']) : '';
+    const bindingTerminalCode = bRec ? str(bRec['terminalCode']) : '';
+    const sameTerminal =
+      bRec !== null &&
+      (grantTerminalId !== ''
+        ? bindingTerminalId !== '' && bindingTerminalId === grantTerminalId
+        : grantTerminalCode !== '' && bindingTerminalCode === grantTerminalCode);
     return {
       userId: g.userId,
       username: s?.username ?? '',
-      terminalCode: b?.terminalCode ?? '',
+      terminalCode: sameTerminal ? bindingTerminalCode : grantTerminalCode,
       deviceId: g.deviceId,
       role: s?.role ?? '',
-      tag: b?.tag ?? s?.terminalTag ?? '',
+      tag: sameTerminal ? (b?.tag ?? s?.terminalTag ?? '') : grantTag,
       authKey: s?.authKey ?? '',
       issuedAt: g.grantedAt,
       expiresAt: g.expiresAt,
@@ -580,13 +636,20 @@ export async function grantValidFor(input: {
 /**
  * Geser TTL (sliding) tiap login sukses — didelegasikan ke store sesi
  * kanonis (sebelumnya menggeser store ganda yang tak dibaca gate access.ts).
- * Best-effort: tanpa grant → diam; gate yang memutuskan. Tanda tangan
- * Promise<void> dipertahankan agar pemanggil lama (LoginScreen) tetap kompil.
+ * Best-effort: G7 fail-closed — touchSessionGrant mengembalikan null bila
+ * prasyarat grant gagal (tak ada mint); di sini dicatat warn jujur, bukan
+ * sukses palsu. Tanda tangan Promise<void> dipertahankan agar pemanggil
+ * lama tetap kompil.
  */
 export async function touchGrant(): Promise<void> {
   try {
     await hydrateTerminalState();
-    touchSessionGrant();
+    const g = touchSessionGrant();
+    if (!g) {
+      console.warn(
+        '[terminalContract] touchGrant: prasyarat grant gagal — sliding dilewati (fail-closed, tanpa mint).',
+      );
+    }
   } catch {
     /* abaikan: sliding best-effort, gate yang memutuskan */
   }

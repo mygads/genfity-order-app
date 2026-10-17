@@ -10,6 +10,7 @@
  * fire-and-forget, dan dimuat ulang di background saat pertama dipakai.
  */
 import { getItem, setItem } from '../lib/storage';
+import { tr } from '../lib/i18n';
 
 export type ServerEnv = 'prod' | 'dev' | 'staging' | 'custom';
 
@@ -133,7 +134,7 @@ export const ApiPath = {
   // tabel final; BE Go pemilik kebenaran — sebagian BELUM ADA: klien wajib
   // fallback jujur offline/unconfigured, fail-closed untuk terminal-access,
   // verifikasi PIN, dan login pertama). '{id}'/'{viewId}' diganti caller.
-  staffLogin: 'api/v1/auth/staff-login', // E01 POST login 2-tahap
+  staffLogin: 'api/v1/auth/terminal-login', // E01 POST login 2-tahap {username,password,staffPin?,terminalCode,deviceId} (SPEC §4)
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
   terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding
@@ -255,7 +256,13 @@ export function getCustomBaseUrl(): string {
 }
 
 export function setCustomBaseUrl(url: string): void {
-  customUrl = url.trim();
+  const v = url.trim();
+  // S5: hanya skema http(s)://host yang diterima; kosong = belum dikonfigurasi
+  // (pushAll menolak dengan sync_no_url sebelum drain).
+  if (v && !/^https?:\/\/[^/\s]+/i.test(v)) {
+    throw new Error(tr('sync_bad_url'));
+  }
+  customUrl = v;
   void setItem(LS_CUSTOM, customUrl);
 }
 
@@ -312,6 +319,39 @@ export function getBranchId(): string {
   return b;
 }
 
+/**
+ * GO-POS COMPAT auth (wire-app): path kontrak-Go (`api/...`, mis.
+ * `api/merchant/orders/pos` + `api/v1/...`) dilayani backend Go di belakang
+ * MerchantAuth — tanpa bearer, push 401. Token dibaca MALAS (lazy) dari store
+ * sesi pada tiap panggilan (sesi bisa terhidrasi sesudah modul ini dimuat),
+ * via accessor yang SAMA dengan terminalContract requestPinReset
+ * (`getSession()`, urutan `authToken` JWT E01 dulu, fallback `authKey`
+ * terminal-login). Tanpa token → header dihilangkan (server 401 jujur, bukan
+ * sukses palsu). Path bentuk-ESB (`main/...`, `order/...`, `posv1/...`,
+ * `v1/push/...`, ...) SENGAJA tanpa bearer (jalur dummy/lokal tak pernah
+ * sampai sini — apiFetch short-circuit sebelum dial network).
+ * Lazy-require ala display.ts/sse.ts/realtime.ts agar nol risiko siklus impor
+ * statis. Verifikasi siklus: session.ts statis→ hanya lib/storage,
+ * lib/deviceRole, lib/pin; transitif→ db/dbSchema/uuidv7/secure-store/
+ * AsyncStorage — tak ada yang mengimpor config/server maupun session.
+ */
+function resolveSessionToken(): string {
+  try {
+    const sess = require('../session') as typeof import('../session');
+    const s = sess.getSession();
+    return String(s?.authToken ?? s?.authKey ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** true = path kontrak Go (`api/...`) yang butuh bearer MerchantAuth. */
+function needsSessionBearer(path: string): boolean {
+  return String(path ?? '')
+    .replace(/^\/+/, '')
+    .startsWith('api/');
+}
+
 /** GET dengan query branch + paging inkremental (§0 kontrak).
  *
  * REA-18: header X-Terminal-Code / X-Branch-Id TANPA padanan literal di APK
@@ -321,6 +361,7 @@ export function getBranchId(): string {
 export async function apiGet(
   path: string,
   params?: Record<string, string | number>,
+  opts?: { token?: string; idempotencyKey?: string },
 ): Promise<Response> {
   const t = getTerminal();
   const q = new URLSearchParams({
@@ -330,6 +371,16 @@ export async function apiGet(
   const url = `${apiUrl(path)}?${q.toString()}`;
   const headers: Record<string, string> = {};
   if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  // S17: opsi auth/idempotency ala apiPost (aditif — pemanggil lama tetap jalan).
+  // Bearer: token eksplisit menang; bila absen dan path kontrak-Go, pakai
+  // token sesi (compat push MerchantAuth) — path ESB tetap header-free.
+  if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  const getToken = opts?.token
+    ? opts.token
+    : needsSessionBearer(path)
+      ? resolveSessionToken()
+      : '';
+  if (getToken) headers['Authorization'] = `Bearer ${getToken}`;
   return fetch(url, { headers });
 }
 
@@ -343,10 +394,45 @@ export async function apiPost(
   if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
   if (t.branchId) headers['X-Branch-Id'] = t.branchId;
   if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
-  if (opts?.token) headers['Authorization'] = `Bearer ${opts.token}`;
+  // Bearer: token eksplisit menang; bila absen dan path kontrak-Go, pakai
+  // token sesi (compat push MerchantAuth) — path ESB tetap header-free.
+  const postToken = opts?.token
+    ? opts.token
+    : needsSessionBearer(path)
+      ? resolveSessionToken()
+      : '';
+  if (postToken) headers['Authorization'] = `Bearer ${postToken}`;
   return fetch(apiUrl(path), {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * S15: detak koneksi (pong) + ambang mati 90 dtk. Soket dimiliki realtime.ts
+ * (agen lain) — modul ini hanya menyimpan stempel; pemilik realtime memanggil
+ * notePong() tiap pong dan noteReconnect() tiap sambung-ulang.
+ * pullMaster TIDAK dipicu dari sini: import master.ts akan bersiklus
+ * (server → master → sync → server) — wiring reconnect→pullMaster milik
+ * pemilik realtime (DEFERRED, lihat laporan).
+ */
+let lastPongMs = 0;
+let lastReconnectMs = 0;
+/** S15: ambang mati koneksi 90 detik tanpa pong. */
+export const CONN_DEAD_MS = 90_000;
+export function notePong(): void {
+  lastPongMs = Date.now();
+}
+export function getLastPong(): number {
+  return lastPongMs;
+}
+export function isConnDead(now = Date.now()): boolean {
+  return lastPongMs > 0 && now - lastPongMs > CONN_DEAD_MS;
+}
+export function noteReconnect(): void {
+  lastReconnectMs = Date.now();
+}
+export function getLastReconnect(): number {
+  return lastReconnectMs;
 }

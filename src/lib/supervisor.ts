@@ -15,6 +15,7 @@ import { requireEscalationAccess } from './access';
 import { verifyAttendancePin } from './pin';
 import { tOf } from './i18n';
 import { getItem, setItem } from './storage';
+import { getSession } from '../session';
 
 const MAX_ATTEMPTS = 5;
 const LOCK_MS = 60_000;
@@ -90,6 +91,10 @@ export interface AuthResult {
   ok: boolean;
   message: string;
   code: SupervisorCode;
+  /** R40: identitas approver — diisi jalur lokal dari sesi; jalur server
+   * membiarkan null (pemanggil fallback ke user sesi — JANGAN edit pemanggil). */
+  userId?: string;
+  role?: string;
 }
 
 /** Catat 1 kegagalan; kunci sementara bila batas tercapai. Persisten (CONFIRMED-2). */
@@ -134,21 +139,36 @@ export async function verifyLocalEscalation(
   accessKey: string,
 ): Promise<EscalationResult> {
   await hydrateThrottle();
+  // R36: kunci kedaluwarsa memberi jendela baru (decay, cermin
+  // authorizeSupervisor di bawah — attempts harus meluruh, bukan abadi).
+  if (lockedUntil !== 0 && !isLocked()) {
+    attempts = 0;
+    lockedUntil = 0;
+    persistThrottle();
+  }
   if (isLocked()) return locked();
   const clean = pin.replace(/[^0-9]/g, '');
-  if (!clean) {
-    // M1: PIN kosong ikut dihitung via fail() agar brute-force tak lolos attempt-limit.
+  // R38: panjang PIN 4-6 di jalur lokal juga (full-string, tanpa pemotongan).
+  // M1: PIN kosong/pendek/panjang ikut dihitung via fail() — tebakan
+  // panjang-salah tetap tebakan (it's a guess).
+  if (!clean || clean.length < 4 || clean.length > 6) {
     return fail('invalid', tOf('sup_invalid'));
   }
   let v: { ok: boolean | null; userId?: string };
   try {
     v = await verifyAttendancePin(clean);
   } catch {
-    return fail('offline', tOf('sup_offline'));
+    // R35: error/thrown = offline — kembalikan hasil offline jujur TANPA
+    // membakar attempt (klasifikasi SEBELUM penghitungan).
+    return { ok: false, code: 'offline', message: tOf('sup_offline') };
+  }
+  // R35: null = DB/offline/belum-siap, BUKAN tebakan → early offline jujur,
+  // tanpa fail() (tanpa bakar attempt).
+  if (v.ok === null) {
+    return { ok: false, code: 'offline', message: tOf('sup_offline') };
   }
   if (v.ok !== true || !v.userId) {
-    if (v.ok === false) return fail('invalid', tOf('sup_invalid'));
-    return fail('offline', tOf('sup_offline'));
+    return fail('invalid', tOf('sup_invalid'));
   }
   let gate: { ok: boolean };
   try {
@@ -159,13 +179,29 @@ export async function verifyLocalEscalation(
   if (!gate.ok) {
     return fail('denied', tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1)));
   }
-  return { ok: true, code: 'ok', message: tOf('sup_ok'), userId: v.userId };
+  // R40: userId approver + role dari sesi (jalur server membiarkan keduanya
+  // null — pemanggil fallback ke user sesi).
+  let role: string | undefined;
+  try {
+    role = getSession()?.role?.trim() || undefined;
+  } catch {
+    /* abaikan: role opsional */
+  }
+  return {
+    ok: true,
+    code: 'ok',
+    message: tOf('sup_ok'),
+    userId: v.userId,
+    ...(role ? { role } : {}),
+  };
 }
 
 /** Minta persetujuan supervisor ke server; offline selalu ditolak. */
 export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
   await hydrateThrottle();
-  const clean = pin.replace(/[^0-9]/g, '').slice(0, 6);
+  // R38: TANPA slice(0,6) — cocokkan string PENUH apa adanya (no
+  // slice-prefix acceptance: '1234567' tak boleh lolos sebagai '123456').
+  const clean = pin.replace(/[^0-9]/g, '');
   // Kunci kedaluwarsa memberi jendela baru; kunci aktif menolak tanpa panggil server.
   if (lockedUntil !== 0 && !isLocked()) {
     attempts = 0;
@@ -173,22 +209,20 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     persistThrottle();
   }
   if (isLocked()) return locked();
-  // M1: PIN kosong/pendek ikut dihitung via fail() agar tebakan 4-digit tak
-  // lolos attempt-limit + kunci sementara di Real Mode.
-  if (!clean) {
-    return fail('invalid', tOf('sup_invalid'));
-  }
-  // Mode local = offline-first tanpa server (apiFetch short-circuit tanpa
-  // dial network): kembalikan 'unconfigured' TANPA gerbang panjang-PIN agar
-  // pemanggil shift (buka/tutup) bisa lanjut ke fallback PIN lokal 4-digit
-  // (seed: 1111/2222/1234). Validasi 6 digit hanya berlaku untuk jalur server
-  // di bawah; pemanggil aksi sensitif (void/refund) tetap fail-closed karena
-  // mereka tidak punya fallback lokal.
+  // R39: status 'unconfigured' (mode local / tanpa base URL) kembali AWAL
+  // sebelum fail() — PIN dummy/tak-terkonfigurasi tak membakar attempt.
+  // (Perubahan perilaku vs M1: PIN kosong di mode local kini 'unconfigured'
+  // tanpa burn; di jalur evaluasi nyata, PIN kosong tetap 'invalid' + burn.)
+  // Mode local = offline-first tanpa server: pemanggil shift (buka/tutup)
+  // lanjut ke fallback PIN lokal 4-digit (seed: 1111/2222/1234); pemanggil
+  // aksi sensitif (void/refund) tetap fail-closed karena mereka tidak punya
+  // fallback lokal.
   if (getApiMode() === 'local' || !getBaseUrl()) {
-    return fail('unconfigured', tOf('sup_unconfigured'));
+    return { ok: false, code: 'unconfigured', message: tOf('sup_unconfigured') };
   }
-  if (clean.length !== 6) {
-    // M1: PIN pendek ikut dihitung (attempt-limit + kunci berlaku).
+  // R38: panjang 4-6 di jalur server juga (full-string); M1: tebakan
+  // panjang-salah ikut dihitung (attempt-limit + kunci berlaku).
+  if (!clean || clean.length < 4 || clean.length > 6) {
     return fail('invalid', tOf('sup_invalid'));
   }
   try {
@@ -196,8 +230,9 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     // lokal tanpa PIN keluar perangkat; Real Mode ke server sendiri.
     const r = await apiFetch(ApiPath.supervisorApprove, { body: { pin: clean } });
     if (r.fromDummy && getApiMode() === 'real') {
-      // Jaringan gagal lalu jatuh ke dummy: tetap fail-closed, jangan setujui.
-      return fail('offline', tOf('sup_offline'));
+      // R35: jaringan gagal lalu jatuh ke dummy = offline — fail-closed jujur
+      // TANPA membakar attempt (klasifikasi sebelum penghitungan).
+      return { ok: false, code: 'offline', message: tOf('sup_offline') };
     }
     const { success, data } = unwrap<{ approved?: unknown }>(r.data);
     if (!r.ok || !success || data.approved !== true) {
@@ -207,8 +242,11 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     attempts = 0;
     lockedUntil = 0;
     persistThrottle();
+    // R40: jalur server membiarkan userId/role null — pemanggil fallback ke
+    // user sesi (JANGAN edit pemanggil).
     return { ok: true, code: 'ok', message: tOf('sup_ok') };
   } catch {
-    return fail('offline', tOf('sup_offline'));
+    // R35: network error tak membakar attempt — hasil offline jujur.
+    return { ok: false, code: 'offline', message: tOf('sup_offline') };
   }
 }

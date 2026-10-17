@@ -49,6 +49,31 @@ function withId(path: string, id: string): string {
   return path.replace('{id}', safe).replace('{viewId}', safe).replace('{branchId}', safe);
 }
 
+/**
+ * EventSource/fetch-SSE tak bisa menyetel header Authorization, sedangkan
+ * backend WAJIB auth (TerminalEventsSSE → 401 tanpa konteks user; grup route
+ * menerima bearerFromQueryParam("token") SEBELUM UserAuth — router.go).
+ * Selipkan kredensial sesi (authToken JWT E01 dulu, fallback authKey
+ * terminal-login — selaras server.ts resolveSessionToken +
+ * terminalContract.ts:179) sebagai ?token= pada URL SSE; tanpa
+ * token, URL dibiarkan apa adanya (server 401 jujur → status offline).
+ * Lazy-require agar tak ada siklus impor (session tak mengimpor modul ini).
+ * APP-FIXUP(R-sse-token-order): urutan disamakan authToken-dulu (sebelumnya
+ * authKey-dulu, berlawanan dengan server.ts:342).
+ */
+function withQueryToken(url: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sess = require('../session') as typeof import('../session');
+    const s = sess.getSession?.();
+    const token = String(s?.authToken ?? s?.authKey ?? '').trim();
+    if (!token) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  } catch {
+    return url;
+  }
+}
+
 /** Header SSE: Accept event-stream + konteks terminal (kontrak §2). */
 function sseHeaders(extra?: Record<string, string>): Record<string, string> {
   const t = getTerminal();
@@ -148,6 +173,8 @@ export interface SseClientOpts {
   /** Interval fallback polling (ms) bila streaming tak didukung. */
   pollMs?: number;
   headers?: Record<string, string>;
+  /** D16: id feed (E26 per terminal / E27 per branch) untuk status per-feed. */
+  feedId?: string;
 }
 
 export class SseClient {
@@ -156,6 +183,7 @@ export class SseClient {
   private onStatus: SseStatusHandler | null;
   private pollMs: number;
   private extraHeaders: Record<string, string>;
+  private feedId: string;
   private status: SseStatus = 'offline';
   private running = false;
   private retry = 0;
@@ -170,6 +198,7 @@ export class SseClient {
     this.onStatus = opts?.onStatus ?? null;
     this.pollMs = Math.max(2000, Math.floor(Number(opts?.pollMs) || DEFAULT_POLL_MS));
     this.extraHeaders = { ...(opts?.headers ?? {}) };
+    this.feedId = String(opts?.feedId ?? '');
   }
 
   getStatus(): SseStatus {
@@ -180,6 +209,11 @@ export class SseClient {
     return this.lastEventId;
   }
 
+  /** D16: id feed milik klien ini ('' = tak terdaftar per-feed). */
+  getFeedId(): string {
+    return this.feedId;
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -187,6 +221,7 @@ export class SseClient {
     this.setStatus('connecting');
     sseInstances.add(this);
     emitSseAggregate();
+    recomputeFeed(this.feedId);
     void this.connect();
   }
 
@@ -202,6 +237,7 @@ export class SseClient {
     this.ctrl = null;
     sseInstances.delete(this);
     emitSseAggregate();
+    recomputeFeed(this.feedId);
   }
 
   private setStatus(next: SseStatus): void {
@@ -213,6 +249,7 @@ export class SseClient {
       /* listener tak boleh mematikan klien */
     }
     emitSseAggregate();
+    recomputeFeed(this.feedId);
   }
 
   /** Catat id; false bila duplikat (agar poll ulang tak kirim ganda). */
@@ -269,7 +306,9 @@ export class SseClient {
     try {
       const headers = sseHeaders(this.extraHeaders);
       if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
-      const res = await fetch(this.url, { method: 'GET', headers, signal: ctrl.signal });
+      // Kredensial via ?token= (lihat withQueryToken) — header tak
+      // tersedia untuk EventSource; backend menolak tanpa auth.
+      const res = await fetch(withQueryToken(this.url), { method: 'GET', headers, signal: ctrl.signal });
       if (!res.ok) {
         this.scheduleRetry();
         return;
@@ -347,12 +386,16 @@ export function subscribeTerminalEvents(
     onMessage: cb,
     onStatus: opts?.onStatus,
     pollMs: opts?.pollMs,
+    feedId: terminalFeedId(terminalId),
   });
   client.start();
   return () => client.stop();
 }
 
-/** Langganan feed antrean SSE per branch E27 (queue-update/call/ready). */
+/** Langganan feed antrean SSE per branch E27 (queue-update/call/ready).
+ * URL eksak kontrak IMPLEMENTED: {base}/api/v1/branches/{branchId}/queue-events
+ * + ?token= via withQueryToken (ApiPath.queueEvents memakai {id} yang diganti
+ * withId; id: qb-{branch}-{seq} didedupe di remember; version = sekuens hub). */
 export function subscribeQueueEvents(
   branchId: string,
   cb: SseMessageHandler,
@@ -363,6 +406,7 @@ export function subscribeQueueEvents(
     onMessage: cb,
     onStatus: opts?.onStatus,
     pollMs: opts?.pollMs,
+    feedId: queueFeedId(branchId),
   });
   client.start();
   return () => client.stop();
@@ -411,5 +455,87 @@ export function subscribeSseStatus(cb: (live: boolean) => void): () => void {
   }
   return () => {
     sseLiveListeners.delete(cb);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// D16: status SSE per feed (bus display hanya konsumsi feed-nya sendiri).
+// Agregat modul di atas dipertahankan untuk konsumen lama; feed di sini =
+// terminal E26 / antrean E27 per id. Tak pernah melempar.
+// ---------------------------------------------------------------------------
+
+/** Kunci feed kanonis E26 per terminal. */
+export function terminalFeedId(terminalId: string): string {
+  return `term:${String(terminalId ?? '').trim()}`;
+}
+
+/** Kunci feed kanonis E27 per branch. */
+export function queueFeedId(branchId: string): string {
+  return `queue:${String(branchId ?? '').trim()}`;
+}
+
+const feedStates = new Map<string, SseStatus>();
+const feedListeners = new Map<string, Set<SseStatusHandler>>();
+
+/** Hitung ulang status satu feed dari klien berjalan (online > connecting > offline). */
+function recomputeFeed(feedId: string): void {
+  if (!feedId) return;
+  let next: SseStatus = 'offline';
+  try {
+    for (const c of sseInstances) {
+      if (c.getFeedId() !== feedId) continue;
+      const s = c.getStatus();
+      if (s === 'online') {
+        next = 'online';
+        break;
+      }
+      if (s === 'connecting') next = 'connecting';
+    }
+  } catch {
+    next = 'offline';
+  }
+  const prev = feedStates.get(feedId);
+  feedStates.set(feedId, next);
+  if (prev === next) return;
+  const set = feedListeners.get(feedId);
+  if (!set) return;
+  set.forEach((cb) => {
+    try {
+      cb(next);
+    } catch {
+      /* listener tak boleh mematikan klien */
+    }
+  });
+}
+
+/** Status terakhir feed ini ('offline' bila belum pernah ada klien). */
+export function getSseFeedStatus(feedId: string): SseStatus {
+  return feedStates.get(String(feedId ?? '')) ?? 'offline';
+}
+
+/**
+ * Langganan status SATU feed (dipanggil segera dengan status kini;
+ * kembalikan fungsi unsubscribe). Dipakai bus display + layar view agar
+ * feed antrean tak menutupi feed terminal yang mati (dan sebaliknya).
+ */
+export function subscribeSseFeed(feedId: string, cb: SseStatusHandler): () => void {
+  const key = String(feedId ?? '');
+  let set = feedListeners.get(key);
+  if (!set) {
+    set = new Set();
+    feedListeners.set(key, set);
+  }
+  set.add(cb);
+  try {
+    cb(getSseFeedStatus(key));
+  } catch {
+    /* abaikan */
+  }
+  return () => {
+    try {
+      feedListeners.get(key)?.delete(cb);
+    } catch {
+      /* abaikan */
+    }
   };
 }

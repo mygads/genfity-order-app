@@ -1,18 +1,15 @@
 /**
- * Trim user uji — menegakkan keputusan "2 user saja" (admin + kasir) TANPA
- * menyentuh lib/seed.ts (lane beku/dirty milik worker).
+ * Jaring pengaman user uji — menegakkan keputusan "2 user saja" (admin +
+ * kasir) untuk DB lama yang telanjur berisi u-owner.
  *
- * Latar: seed.ts men-seed 3 user (u-admin, u-owner, u-kasir). Keputusan produk:
- * u-owner/1111 dibuang; baris seed yang mencatat userId 'u-owner' (topup awal
- * member) dialihkan ke 'u-admin'. Modul ini idempoten (aman jalan ulang) dan
- * tak pernah melempar — dipanggil dari LoginScreen.submit setelah
- * ensureSeeded() dan SEBELUM validateEmployee(), sehingga u-owner tak pernah
- * bisa dipakai login.
- *
- * CATATAN UNTUK MASA DEPAN: bila lane seed.ts sudah bebas/merge, lipat logika
- * ini ke hulu (hapus blok testUsers u-owner di seed + ganti literal
- * 'u-owner' -> 'u-admin' di seed member), lalu HAPUS modul ini dan
- * pemanggilannya di LoginScreen.
+ * Latar: seed.ts dulu men-seed 3 user (u-admin, u-owner, u-kasir); kini
+ * u-owner/owner sudah dibuang di hulu (testUsers di lib/seed.ts) dan literal
+ * 'u-owner' pencatat topup awal member dialihkan ke 'u-admin'. Modul ini
+ * dipertahankan sebagai pembersih DB lama: buang u-owner + alihkan jejaknya
+ * ke 'u-admin'. Idempoten (aman jalan ulang) dan tak pernah melempar —
+ * dipanggil dari ensureSeeded() SEBELUM gate flag seed (agar DB lama yang
+ * flag-nya sudah '1' ikut bersih) dan dari LoginScreen.submit sebelum
+ * validateEmployee(), sehingga u-owner tak pernah bisa dipakai login.
  */
 import { run } from './db';
 

@@ -239,7 +239,7 @@ export async function apiFetch<T = unknown>(
     try {
       const res =
         method === 'GET'
-          ? await apiGet(path, opts?.params)
+          ? await apiGet(path, opts?.params, { token: opts?.token, idempotencyKey: opts?.idempotencyKey })
           : await apiPost(path, opts?.body ?? {}, {
               idempotencyKey: opts?.idempotencyKey,
               token: opts?.token,
@@ -387,6 +387,12 @@ export interface VoucherCheck {
   amount: number;
   minSpend: number;
   fromDummy: boolean;
+  /** Kind kanonis: 'Ongkir' untuk potongan ongkir, ''/lain untuk diskon belanja. */
+  kind: string;
+  /** Persen 0-100 bila promo percent (untuk hitung kanonis di Pay). */
+  rate?: number;
+  /** Cap nominal (Rp) promo percent / flat bila ada. */
+  maxAmount?: number;
 }
 
 /**
@@ -425,9 +431,15 @@ async function validateVoucherCodeLocal(
   code: string,
   grandTotal: number,
 ): Promise<VoucherCheck> {
-  const nope: VoucherCheck = { ok: false, amount: 0, minSpend: 0, fromDummy: false };
+  const nope: VoucherCheck = { ok: false, amount: 0, minSpend: 0, fromDummy: false, kind: '' };
   const clean = (code ?? '').trim().toUpperCase();
   if (!clean || !(grandTotal > 0)) return nope;
+  const inferKind = (promoType: string | null, fallbackCode: string): string => {
+    const pt = String(promoType ?? '').toLowerCase();
+    if (pt.includes('ongkir')) return 'Ongkir';
+    if (fallbackCode === 'GRATISONGKIR' || fallbackCode.includes('ONGKIR')) return 'Ongkir';
+    return '';
+  };
   try {
     await initDb();
     const row = await queryFirst<LocalVoucherRow>(
@@ -449,9 +461,28 @@ async function validateVoucherCodeLocal(
       const pType = String(promo.promoType ?? 'nominal').toLowerCase();
       const pValue = Math.max(0, Math.round(Number(promo.value) || 0));
       const pCap = Math.max(0, Math.round(Number(promo.maxAmount ?? pValue) || 0));
-      const pAmt = pType === 'percent' ? pCap : pValue;
-      if (pAmt <= 0) return nope;
-      return { ok: true, amount: pAmt, minSpend: Math.max(0, Math.round(Number(promo.minSpend) || 0)), fromDummy: false };
+      const pMin = Math.max(0, Math.round(Number(promo.minSpend) || 0));
+      // Gate minSpend dulu (gross = grandTotal pemanggil): gagal = tolak.
+      if (pMin > 0 && Math.round(grandTotal) < pMin) {
+        return { ok: false, amount: 0, minSpend: pMin, fromDummy: false, kind: '' };
+      }
+      const kind = inferKind(promo.promoType, clean);
+      if (pType === 'percent') {
+        // Persen kanonis atas grandTotal pemanggil, dibatasi cap (selaras
+        // totals(): round(dasar*pct/100) capped; di sini dasar ≈ grandTotal
+        // karena Pay hanya punya total resmi, bukan gross item).
+        const pct = Math.min(100, Math.max(0, pValue));
+        if (pct <= 0 || pCap <= 0) return nope;
+        const amt = Math.min(Math.round((Math.round(grandTotal) * pct) / 100), pCap);
+        if (amt <= 0) return nope;
+        return { ok: true, amount: amt, minSpend: pMin, fromDummy: false, kind, rate: pct, maxAmount: pCap };
+      }
+      if (pType === 'ongkir') {
+        if (pValue <= 0) return nope;
+        return { ok: true, amount: pValue, minSpend: pMin, fromDummy: false, kind: 'Ongkir', maxAmount: pCap > 0 ? pCap : pValue };
+      }
+      if (pValue <= 0) return nope;
+      return { ok: true, amount: pValue, minSpend: pMin, fromDummy: false, kind, maxAmount: pCap > 0 ? pCap : undefined };
     }
     if ((row.status ?? '').toLowerCase() !== 'available') return nope;
     if (Math.round(Number(row.quota) || 0) <= 0) return nope;
@@ -460,7 +491,7 @@ async function validateVoucherCodeLocal(
     if (row.validTo && row.validTo < now) return nope;
     const amount = Math.round(Number(row.amount) || 0);
     if (amount <= 0) return nope;
-    return { ok: true, amount, minSpend: 0, fromDummy: false };
+    return { ok: true, amount, minSpend: 0, fromDummy: false, kind: inferKind(null, clean) };
   } catch {
     return nope;
   }
@@ -477,14 +508,25 @@ export async function validateVoucherCode(
   // jaringan real-mode yang gagal JANGAN divalidasi pakai voucher dummy).
   if (r.ok && !r.fromDummy) {
     const { data } = unwrap<Record<string, unknown>>(r.data);
-    const d = data as { valid?: unknown; amount?: unknown; minSpend?: unknown };
+    const d = data as { valid?: unknown; amount?: unknown; minSpend?: unknown; kind?: unknown; promoType?: unknown; rate?: unknown; maxAmount?: unknown };
     const amount = Math.round(Number(d.amount ?? 0)) || 0;
     const minSpend = Math.round(Number(d.minSpend ?? 0)) || 0;
+    const rawKind = String((d.kind ?? d.promoType) ?? '').trim();
+    const clean = String(code ?? '').trim().toUpperCase();
+    const kind =
+      rawKind.toLowerCase().includes('ongkir') || clean === 'GRATISONGKIR' || clean.includes('ONGKIR')
+        ? 'Ongkir'
+        : rawKind;
+    const rateRaw = Number(d.rate);
+    const capRaw = Number(d.maxAmount);
     return {
       ok: d.valid === true && amount > 0,
       amount,
       minSpend,
       fromDummy: r.fromDummy,
+      kind,
+      ...(Number.isFinite(rateRaw) && rateRaw > 0 ? { rate: Math.min(100, rateRaw) } : {}),
+      ...(Number.isFinite(capRaw) && capRaw > 0 ? { maxAmount: Math.round(capRaw) } : {}),
     };
   }
   return validateVoucherCodeLocal(code, grandTotal);
@@ -661,6 +703,11 @@ export async function loginByQrCode(p: QrLoginPayload): Promise<EmployeeSession>
   const r = await apiFetch(ApiPath.cashierLogin, {
     body: { username: p.username, pin: p.pin, ...(p.terminalId ? { terminalId: p.terminalId } : {}) },
   });
+  // F5: disiplin fail-closed ala validateEmployee — dummy/offline tak pernah
+  // sukses; tolak SEBELUM unwrap (unwrap(null) lokal / fixture dummy bukan identitas nyata).
+  if (!r.ok || r.fromDummy) {
+    return { ok: false, userId: '', nama: '', authKey: '', role: '', fromDummy: r.fromDummy };
+  }
   const { success, data } = unwrap<Record<string, unknown>>(r.data);
   const d = data as {
     userId?: unknown;

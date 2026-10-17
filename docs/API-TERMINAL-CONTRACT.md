@@ -16,8 +16,7 @@ spesifik terminal di sini.
 > [`AUDIT-TERMINAL-RBAC.md`](AUDIT-TERMINAL-RBAC.md) §7–§12). Bila ada
 > bagian §0–§7 di bawah yang bertentangan dengan SPEC (mis. `deviceRole`
 > 3-nilai vs 5 tag, nav-lock DAPUR/DISPLAY), **SPEC yang menang**; §8–§10
-> dokumen ini merangkum nilai finalnya. Endpoint E01–E28 sebagian besar
-> **belum ada di BE** — klien memakai fixture dummy §10 sampai BE siap.
+> dokumen ini merangkum nilai finalnya. Status 2026-10-17 (terverifikasi grep `src/`): login 2-tahap + takeover-confirm E01b (`tookOver{kickedUserId}`) SUDAH wired app-side (`LoginScreen.tsx:221-246,707-738,1146-1192`; fixture `staff-login.json`, `terminal-bind.json` ada) — yang BE-pending adalah endpoint + fan-out WS/SSE sisi server (rincian per endpoint di §10). Fixture dummy §10 tetap acuan sampai BE siap.
 
 Legenda: **[FAKTA]** = path/event sudah ada di aplikasi. **[KONTRAK]** =
 ditetapkan dokumen ini, implementasikan persis.
@@ -34,23 +33,32 @@ ditetapkan dokumen ini, implementasikan persis.
   per terminal `deviceRole` (§3), dan boleh menolak request yang tak sesuai
   peran (mis. `order/finish` dari `DISPLAY`) dengan `E422`.
 
+> **LEGACY (DG1 — SPEC menang)**: `deviceRole` 3-nilai di §0–§7 adalah model
+> lama — digantikan 5 tag kanonis (`kasir | dapur | view_pelanggan |
+> view_queue | full_access`, SPEC §1; nilai final §8). Bila bertentangan,
+> SPEC menang. Server tetap boleh mengirim `deviceRole` sebagai alias, tetapi
+> bila `terminalTag` ada maka tag yang menang. Jangan membangun fitur baru di
+> atas `deviceRole`.
+
 ---
 
 ## 1. Klaim terminal (sama seperti kontrak utama §3)
 
 | Endpoint | Body | Data |
 |---|---|---|
-| `POST /pos/install` [FAKTA] | `{deviceID}` | `{terminalKey, terminalId, terminalCode, branchId, branchName, claimed}` |
+| `POST /pos/install` PLANNED/UNWIRED (2026-10-17: tanpa pemanggil di `src/`, hanya registrasi dummy) | `{deviceID}` | `{terminalKey, terminalId, terminalCode, branchId, branchName, claimed}` |
 | `POST /main/validate-terminal` [FAKTA] | `{terminalCode, deviceID}` | `{valid, branchId, branchName}` |
-| `POST /main/check-branch-status` [FAKTA] | `{branchId}` | `{status: active\|inactive\|expired}` |
-| `POST /terminal/get-terminal` [FAKTA] | `{terminalCode, branchId}` | `{terminalCode, branchId, branchName, deviceRole?, verified}` |
-| `POST /terminal/update` [FAKTA path] | `{terminalCode, branchId, settings: {key: value}}` [KONTRAK body] | `{ok: true}` |
+| `POST /main/check-branch-status` PLANNED/UNWIRED (2026-10-17: helper `checkBranch` tanpa pemanggil layar) | `{branchId}` | `{status: active\|inactive\|expired}` |
+| `POST /terminal/get-terminal` PLANNED/UNWIRED (2026-10-17: tanpa pemanggil di `src/`, hanya registrasi dummy) | `{terminalCode, branchId}` | `{terminalCode, branchId, branchName, deviceRole?, verified}` |
+| `POST /terminal/update` PLANNED/UNWIRED (2026-10-17: tanpa pemanggil di `src/`, hanya registrasi dummy) | `{terminalCode, branchId, settings: {key: value}}` [KONTRAK body] | `{ok: true}` |
 | `POST /esb_apiv9/terminal/verification-notify` [FAKTA] | `{terminalCode, branchId, deviceID, status}` | `{ok, verifiedAt}` |
 
 Setelah klaim berhasil, aplikasi memanggil `syncTerminalSettings()`
 (`src/lib/terminal.ts`) — yaitu pull §3 — sehingga printer default,
 auto-print dapur, footer struk, dan peran mengikuti server tanpa setting
 manual per tablet.
+
+> Status klaim 2026-10-17 (terverifikasi grep `src/`): WIRED app-side = `validateTerminal` (`apiSource.ts:317`, dipanggil `InstallScreen.tsx:244`), `verification-notify` (`apiSource.ts:807-812`, dipanggil InstallScreen/SyncScreen/SettingsScreen), dan flow bind B1 baru (`fetchBranches`/`fetchTerminals`/`bindTerminal` — InstallScreen + TerminalPinScreen + TerminalPickerScreen). PLANNED/UNWIRED = `pos/install`, `terminal/get-terminal`, `terminal/update` (hanya registrasi dummy `apiSource.ts:111,138-139`, nol pemanggil), helper `checkBranch`/`claimTerminal`/`terminalLogin` (definisi tanpa pemanggil layar). Jangan tambah konsumen baru ke jalur legacy.
 
 ---
 
@@ -80,7 +88,8 @@ Respons `data.items[]`:
 
 | `settingKey` [KONTRAK] | `settingValue` | Efek di aplikasi |
 |---|---|---|
-| `deviceRole` | `KASIR` \| `DAPUR` \| `DISPLAY` | Kunci navigasi/drawer perangkat; rute awal ikut peran (§6) |
+| `deviceRole` | `KASIR` \| `DAPUR` \| `DISPLAY` | LEGACY (alias; §6 digantikan SPEC §10) — kunci navigasi/drawer lama; `terminalTag` menang bila ada |
+| `terminalTag` | `kasir` \| `dapur` \| `view_pelanggan` \| `view_queue` \| `full_access` | **Server-wins** (DG7): menang atas `deviceRole` bila ada; kunci navigasi/drawer ikut SPEC §10 |
 | `autoPrintKitchen` | `1` / `0` | Switch auto-print di Pengaturan; `1` = tiket push langsung dicetak di perangkat DAPUR |
 | `printerDefault` | id station, mis. `ST-KASIR` | Tandai default di daftar station lokal (alamat BT/LAN tetap milik perangkat, tak dikirim server) |
 | `receiptFooter` | teks bebas | Footer struk (`getReceiptFooter()`) |
@@ -96,6 +105,10 @@ Channel: `WS_URL` (device) sesuai kontrak utama §7; heartbeat `PING` 30 dtk
 dengan `terminal` di payload (lihat `src/lib/display.ts`, `src/lib/realtime.ts`).
 Semua event di bawah difan-out **per `branchId`**, hanya ke terminal yang
 membutuhkan (dapur/display), bukan broadcast global.
+
+> **Pemetaan peran→tag (SPEC menang)**: filter `role=DAPUR` di §4.1 dibaca
+> sebagai tag `dapur` + `full_access`; `role=DISPLAY` di §4.2 sebagai
+> `view_pelanggan` + `view_queue` (rinci per event di §8).
 
 > Catatan keamanan (aturan repo): aplikasi hanya dial WS ke server milik
 > sendiri (env Custom). Di env bawaan, push tak mengalir dan perangkat
@@ -168,7 +181,13 @@ oleh aplikasi — BE bebas memakai salah satu.
 
 ---
 
-## 6. Peran perangkat (semantik kunci sisi aplikasi)
+## 6. Peran perangkat (semantik kunci sisi aplikasi) — LEGACY, digantikan SPEC §10
+
+> **LEGACY (DG1 — SPEC §10 menang)**: tabel 3-nilai di bawah digantikan
+> matriks navigasi per tag — `kasir`/`dapur`/`full_access` drawer penuh
+> (nav-lock DAPUR/DISPLAY dicabut); `view_pelanggan` sidebar HANYA
+> CustomerView; `view_queue` sidebar HANYA QueueView. Tabel lama
+> dipertahankan agar diff terbaca — jangan dipakai untuk fitur baru.
 
 | Peran | Rute awal | Rute diizinkan |
 |---|---|---|
@@ -190,15 +209,15 @@ dan didiagnosis; layar transaksi selain di atas dikunci.
 
 ## 7. Checklist implementasi BE (beda repo)
 
-1. [ ] `terminal/get-terminal` kembalikan `deviceRole` + `verified`.
+1. [ ] `terminal/get-terminal` kembalikan `tag` (+ `deviceRole` sebagai alias legacy) + `verified` + pairing.
 2. [ ] `terminal/update` terima `{settings}` (opsional, untuk tulis balik).
-3. [ ] `pull-terminal-settings` layani 4 kunci §3 per `terminalId`.
+3. [ ] `pull-terminal-settings` layani 5 kunci §3 per `terminalId` (`terminalTag` + alias legacy `deviceRole` + 3 operasional).
 4. [ ] Saat `order/finish` (atau new-order kasir): fan-out `KITCHEN_TICKET`
       ke terminal DAPUR + `DISPLAY_ORDER` ke terminal DISPLAY satu `branchId`.
 5. [ ] Saat cart berubah / status order berubah: fan-out `DISPLAY_ORDER`.
 6. [ ] `FORCE_PULL {domains: ["terminalsettings"]}` setelah admin ubah
       setting terminal agar tablet langsung menarik.
-7. [ ] (Opsional) Tolak `order/finish` dari peran `DISPLAY` dengan `E422`.
+7. [ ] (Opsional) Tolak `order/finish` dari tag view (`view_pelanggan`/`view_queue`) dengan `E422`.
 
 Contoh fan-out minimal (pseudo):
 
@@ -226,9 +245,13 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
 | `view_queue` | halaman antrean terkunci (terikat branch, bukan kasir) | `queue-update` / `call` / `ready` (scope branch) | sidebar HANYA QueueView |
 | `full_access` | penuh (semua fitur kecuali halaman view pelanggan) | KEDUANYA (order-online-masuk DAN kitchen-incoming) | drawer penuh |
 
-- Respons login (`staff-login`) dan respons terminal (get-terminal,
+- Respons login (`terminal-login` E01 — body selalu membawa
+  `terminalCode`+`deviceId`) dan respons terminal (get-terminal,
   daftar terminal per branch) **selalu membawa `tag`** + pairing
   (`pairedKasirId` / `pairedViewId`, `myKasir` / `myView`).
+- **Server-wins tag (DG7)**: tag efektif selalu nilai server
+  (`terminalTag` via pull-terminal-settings / E13); nilai lokal hanya
+  fallback tampilan dan wajib ditimpa saat pull berikutnya berhasil.
 - Kunci `pull-terminal-settings` membawa `terminalTag` (server-wins);
   bila ada, ia menang atas `deviceRole` lama.
 - Kompatibilitas: `deviceRole` `KASIR|DAPUR|DISPLAY` di §0–§7 adalah
@@ -241,14 +264,20 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
 
 - **B1 — Bind fresh device (sekali)**: Welcome-Unbound → BranchPicker
   (`E07`) → TerminalPicker (`E09`) → PIN terminal (`E03` atomik
-  verify+bind) → Bound (simpan binding, tampilkan sapaan
+  verify+bind — verifikasi + tulis binding satu transaksi, tanpa
+  tulis-parsial) → Bound (simpan binding, tampilkan sapaan
   "Selamat datang di {merchant} — {terminal}") → L1. Gagal (PIN salah /
   terminal terikat device lain / butuh owner) → error eksplisit,
-  **fail-closed**, tanpa fallback diam-diam.
+  **fail-closed**, tanpa fallback diam-diam. **Dilarang** menulis store
+  binding manual / menyuntik binding dummy — binding hanya lahir dari
+  `E03` sukses.
 - **L1 — Login di device ter-bound (per sesi)**: form
-  username+password → `E01` tahap 1 (`{credentialOk, requiresPin:true}`)
-  → modal PIN staff → `E01` tahap 2 (verify + cek RBAC + cek okupansi)
-  → session. **Login pertama wajib online** (tanpa grant bawaan).
+  username+password → `E01 terminal-login` tahap 1
+  (`{username,password,terminalCode,deviceId}` → `{credentialOk,
+  requiresPin:true}`) → modal PIN staff → `E01` tahap 2
+  (`{username,password,staffPin,terminalCode,deviceId}` — verify + cek
+  RBAC + cek okupansi) → session. **Login pertama wajib online**
+  (tanpa grant bawaan).
   Offline: lewati `E01`, cek grant cache (triple user+terminal+device
   cocok, belum expiry) + cocokkan PIN staff ke hash → session lokal
   `offline:true`. PIN terminal **tidak** dipakai saat login.
@@ -258,14 +287,20 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
   terminal cukup; binding lama otomatis dicabut + notifikasi ke device
   lama bila reachable). Efek: binding lama dicabut (`E04`), grant cache
   lama dihapus, session aktif di-logout-dulu, lanjut picker B1 (branch
-  boleh beda).
+  boleh beda). Unbind+bind lewat endpoint (atomik per langkah);
+  **dilarang** mengedit store binding manual.
 - **K1 — Kick (baru menang)**: login sukses di terminal terisi →
   server revoke sesi lama (`reason:takeover`) + audit log + push
   `SESSION_KICKED` ke device lama (bila offline → antre, disampaikan
   saat reconnect; device offline belajar saat reconnect → paksa logout
   + pesan, bukan form login polos). App tampilkan notifikasi takeover
   ke **user baru**. Konflik sesi offline diselesaikan server saat
-  reconnect (baru menang).
+  reconnect (baru menang). Status app-side 2026-10-17: notifikasi user
+  BARU wired (modal takeover confirm-before-session,
+  `LoginScreen.tsx:727-734,1146-1192`); listener device LAMA
+  wiring-in-progress (`revokeKickedSession` di `session.ts:805` tanpa
+  pemanggil, belum ada handler `SESSION_KICKED` di `onWsMessage`) —
+  hingga wiring mendarat, perangkat lama hanya belajar saat login berikut.
 - **O1 — Logout**: `E06` revoke server-side (anti zombie-sync); gagal
   jaringan → tandai `pendingRevoke`, coba lagi saat online. Binding +
   grant cache tetap (grant sampai expiry alami agar login ulang offline
@@ -285,24 +320,55 @@ display se-branch tidak divergen.
 Tabel final E01–E28 ada di **SPEC §11** (satu-satunya acuan; tidak
 didobel di sini agar tidak divergen). Ringkas status + bentuk:
 
-- **E01** `POST /api/v1/auth/staff-login` `{username, password,
-  staffPin?}` — 2 tahap UI, 1 endpoint (tahap 1 tanpa pin →
+- **E01** `POST /api/v1/auth/terminal-login` `{username, password,
+  staffPin?, terminalCode, deviceId}` — **`terminalCode`+`deviceId` wajib
+  di tahap 1 maupun tahap 2**; 2 tahap UI, 1 endpoint (tahap 1 tanpa pin →
   `{credentialOk, requiresPin:true}`; tahap 2 dengan pin → `{session,
   branches[], terminal{tag, pairing}, terminalAccess, grant, policy,
-  tookOver}`). Fail-closed (RBAC terminal-access, PIN verify, login
-  pertama).
-- **E02–E06**: validate-pin (UX, tanpa efek) → bind atomik
-  `{pin,deviceId}` → unbind owner → occupant → logout revoke.
+  tookOver}`). Bentuk lama `staff-login` tanpa identitas terminal
+  **DINYATAKAN DIGANTI** (bukan alternatif). Fail-closed (RBAC
+  terminal-access, PIN verify, login pertama). Status: kontrak dikunci ke
+  `terminal-login`; penyelarasan pemanggil + fixture dikerjakan paket F
+  (acuan: SPEC §11 E01); isi respons penuh BE-pending.
+- **E02–E06**: validate-pin (helper `validateTerminalPin` ganda
+  `terminalContract.ts:367`/`terminalApi.ts:206`, nol pemanggil layar → PLANNED/UNWIRED) → bind atomik
+  `{pin,deviceId}` (WIRED via `bindTerminal`, dipanggil
+  `InstallScreen.tsx:156` + `TerminalPinScreen.tsx:76`; kick-notice
+  device baru `InstallScreen.tsx:204`; fixture `terminal-bind.json`
+  bawa `kickedUserId`) → unbind owner E04 (WIRED app-side —
+  inline `terminalUnbind` via `apiFetch` di `SelectBranchScreen.tsx:90-93`
+  dalam `exitBranch`, best-effort sebelum local clear) → occupant E05
+  (PLANNED/UNWIRED — `fetchOccupant` di `terminalApi.ts:290` tanpa
+  pemanggil) → logout revoke E06 (WIRED app-side — `logoutRevoke`
+  fire-and-forget di `DrawerMenu.tsx:242` + `flushPendingRevokes`
+  via E06 di `sync.ts:1088`, dipanggil akhir `pushAll` sukses
+  (`sync.ts:832`) + login sukses (`LoginScreen.tsx:607`) +
+  boot (`App.tsx:402`); store `pendingRevoke` wired
+  di `session.ts`/`sync.ts`/`SyncScreen.tsx:63`).
 - **E07–E22**: branches / terminals CRUD + `tag` + `set-pin` +
   pair/unpair view→kasir (BE tolak view ke-2 dengan E422) + staff CRUD
-  + pemetaan staff↔branch.
+  + pemetaan staff↔branch. Status: WIRED app-side = E07
+  `fetchBranches` (dipanggil `InstallScreen.tsx:116`) + E09
+  `fetchTerminals`/`fetchBranchTerminals` (dipanggil
+  `InstallScreen.tsx:132` + `TerminalPickerScreen.tsx:11`; fixture
+  `branch-terminals.json`). PLANNED/UNWIRED = E08, E10–E14, E15/E16
+  pair-unpair, E17–E22 staff-CRUD (hanya konstanta path di
+  `server.ts`, nol pemanggil).
 - **E23–E25**: approvals `{action:void|cancel|compliment, ownerPin,
   refId}` → audit owner-actions → login-qr (TBD, Q2).
+  (PLANNED/UNWIRED — hanya konstanta path di `server.ts:158-160`,
+  nol pemanggil; pengecualian: `pin-reset` di luar tabel dipakai
+  `ForgotPinScreen.tsx:84` via `terminalContract.ts:433`.)
 - **E26–E27**: SSE per terminal (`cart-view`/`payment-qr` scope kasir
   pasangan) + SSE antrean per branch (`queue-update`/`call`/`ready`,
-  berversi).
+  berversi). (Subscriber WIRED app-side: `subscribeTerminalEvents`
+  dipanggil `display.ts:443`, `subscribeQueueEvents` dipanggil
+  `QueueViewScreen.tsx:129`, fixture `queue-events.json`; transport
+  live + auth BE-pending.)
 - **E28**: policy `max_offline_grant_days` via terminal-settings
-  (server-wins).
+  (server-wins). (Reader WIRED app-side: `offlineGrantPolicyKey` di
+  `server.ts:168`, dibaca `session.ts:426` + `LoginScreen.tsx:347`;
+  fixture `pull-terminal-settings-v2.json`; nilai server-pending.)
 
 **Q7 — identitas sale (CLOSED, nilai final, SPEC §12)**: PK =
 `client_id` **UUIDv7** device-generated (merge/upsert/retry/outbox/
@@ -319,8 +385,11 @@ SQLite, init dari `MAX(suffix)` lokal; device belum ter-bound
 tidak ditulis ulang; BE terima dua format selama transisi).
 
 **Q6 — grant offline (CLOSED, nilai final, SPEC §12.2)**: TTL **7 hari
-sliding** sejak otorisasi BE terakhir (auth online sukses
-memperpanjang); grant terikat `(user, terminal, device)`; PIN staff
+sliding** sejak otorisasi BE terakhir — sliding **hanya** diperpanjang
+saat otorisasi online (login online sukses / `E01` tahap-2 sukses
+memperpanjang `expiresAt`); login offline (cek grant cache) **tidak**
+memperpanjang, sehingga grant yang tak pernah online lagi kedaluwarsa
+alami. Grant terikat `(user, terminal, device)`; PIN staff
 tetap wajib tiap login offline (vs hash cache); revoke/unbind/
 ganti-role ditegakkan saat online pertama. Policy key
 **`max_offline_grant_days`** (default 7) via `pull-terminal-settings`
@@ -328,12 +397,11 @@ ganti-role ditegakkan saat online pertama. Policy key
 update APK. Trade-off diterima: ganti PIN owner/staff maks 7 hari masih
 bisa dipakai di device offline.
 
-**Fixture dummy acuan (envelope Yii2 §2)** — selama E01–E28 belum ada
-di BE:
+**Status wiring app-side vs BE-pending (2026-10-17, terverifikasi grep `src/`)** — baris E01–E28 di bawah tetap acuan implementasi sisi BE; yang dicatat di sini status sisi APLIKASI. Fixture dummy acuan (envelope Yii2 §2):
 
 | Endpoint | Fixture |
 |---|---|
-| E01 staff-login (user+branches+tag+pairing+grant+policy) | `src/data/dummy/install/staff-login.json` (sukses tahap-2; varian tahap-1 `{credentialOk, requiresPin:true}` + `{tookOver:{kickedUserId}}` menyusul saat klien Fase 1) |
+| E01 terminal-login (user+branches+tag+pairing+grant+policy) | `src/data/dummy/install/staff-login.json` (acuan bentuk sukses tahap-2 + varian tahap-1 `{credentialOk, requiresPin:true}` + `{tookOver:{kickedUserId}}`; rename fixture menyusul paket F) |
 | E03 bind atomik (binding+tag+pairing) | `src/data/dummy/install/terminal-bind.json` (`kickedUserId:null`; varian takeover menyusul) |
 | E09 daftar terminal branch (5 tag + `pairedKasirId`) | `src/data/dummy/pull/branch-terminals.json` |
 | E27 feed antrean branch (versi per event) | `src/data/dummy/pull/queue-events.json` (sampel `queue-update`/`call`/`ready`; transport SSE live menyusul Fase 4) |
@@ -345,3 +413,10 @@ Fixture legacy (`terminal-get-terminal.json`, `terminal-update.json`,
 `esb-employee-validate.json`, `auth-cashier-login.json`) tetap dipakai
 jalur lama sampai klien Fase 1–2 bermigrasi; jangan tambah konsumen
 baru ke bentuk legacy.
+
+**Gate dummy-vs-real (DG6, fail-closed)**: fixture di atas **hanya** untuk
+daftar/picker (E07 branches, E09 daftar terminal) agar UI bisa
+dikembangkan sebelum BE siap. **PIN terminal, bind/unbind (E03/E04), dan
+login (E01) wajib jalur real** — tidak ada PIN/bind/login dummy;
+kredensial salah / terminal tak dikenal / device tak terikat = error
+eksplisit tanpa fallback diam-diam.

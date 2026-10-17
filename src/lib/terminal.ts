@@ -12,6 +12,7 @@ import { initDb, query } from './db';
 import { getItem, getJSON, setItem, setJSON } from './storage';
 import { pullMaster } from './master';
 import { parseDeviceRole, setDeviceRole } from './deviceRole';
+import { setMaxOfflineGrantDays } from '../session';
 
 const LS_STATIONS = 'genfity.printer.stations';
 const LS_RECEIPT_FOOTER = 'genfity.terminal.receiptFooter';
@@ -23,8 +24,9 @@ interface StationLite {
 
 /** Kunci setting yang dikenal aplikasi (selainnya diabaikan, tetap tersimpan di SQLite).
  * tag/terminalTag = tag kanonis model-5 (SPEC §1); pairedKasirId/pairedViewId =
- * pairing 1:1 view→kasir (E09/E15); pinSet = owner sudah set PIN terminal (E09/E14). */
-export const KNOWN_TERMINAL_KEYS = ['deviceRole', 'tag', 'terminalTag', 'pairedKasirId', 'pairedViewId', 'pinSet', 'autoPrintKitchen', 'printerDefault', 'receiptFooter'] as const;
+ * pairing 1:1 view→kasir (E09/E15); pinSet = owner sudah set PIN terminal (E09/E14);
+ * max_offline_grant_days = policy TTL grant offline server-wins (Q6, E28). */
+export const KNOWN_TERMINAL_KEYS = ['deviceRole', 'tag', 'terminalTag', 'pairedKasirId', 'pairedViewId', 'pinSet', 'autoPrintKitchen', 'printerDefault', 'receiptFooter', 'max_offline_grant_days'] as const;
 
 export interface TerminalSyncResult {
   ok: boolean;
@@ -106,6 +108,19 @@ export async function syncTerminalSettings(): Promise<TerminalSyncResult> {
       } else if (key === 'receiptFooter') {
         await setItem(LS_RECEIPT_FOOTER, val);
         applied.push(key);
+      } else if (key === 'max_offline_grant_days') {
+        // G2 (audit 2026-10-17): policy TTL grant offline server-wins (E28).
+        // Clamp 0-365 milik setMaxOfflineGrantDays (cermin session.ts);
+        // nilai non-numerik diabaikan (fail-closed: policy lama bertahan).
+        const n = Math.floor(Number(val));
+        if (Number.isFinite(n)) {
+          try {
+            setMaxOfflineGrantDays(n);
+          } catch {
+            /* abaikan */
+          }
+          applied.push(key);
+        }
       }
     }
     // Terapkan tag: kanonis menang atas legacy; strict-parse (unknown →

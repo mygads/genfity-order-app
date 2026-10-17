@@ -29,10 +29,13 @@ type Nav = {
   goBack: () => void;
 };
 
-type VoucherIn = string | { code?: unknown; amount?: unknown; kind?: unknown } | number;
+type VoucherIn =
+  | string
+  | { code?: unknown; amount?: unknown; kind?: unknown; rate?: unknown; maxAmount?: unknown; minSpend?: unknown }
+  | number;
 
 /** Voucher bawaan order yang nominalnya sudah dihitung pemanggil ke dalam total. */
-type OrderVoucher = { code: string; amount: number; kind: string };
+type OrderVoucher = { code: string; amount: number; kind: string; rate?: number; maxAmount?: number; minSpend?: number };
 
 /**
  * Klasifikasi ragam voucher selaras src/lib/totals.ts: hanya kind 'Ongkir'
@@ -58,6 +61,9 @@ const normalizeOrderVoucher = (
   let code = (voucherCode ?? '').trim().toUpperCase();
   let amount = Math.max(0, Math.round(Number(discount) || 0));
   let kind = '';
+  let rate: number | undefined;
+  let maxAmount: number | undefined;
+  let minSpend: number | undefined;
   if (typeof raw === 'string') {
     if (!code) code = raw.trim().toUpperCase();
   } else if (typeof raw === 'number') {
@@ -66,9 +72,22 @@ const normalizeOrderVoucher = (
     if (!code && typeof raw.code === 'string') code = raw.code.trim().toUpperCase();
     if (amount <= 0) amount = Math.max(0, Math.round(Number(raw.amount) || 0));
     if (typeof raw.kind === 'string') kind = raw.kind.trim();
+    const r = Number((raw as { rate?: unknown }).rate);
+    if (Number.isFinite(r) && r > 0) rate = Math.min(100, r);
+    const c = Math.round(Number((raw as { maxAmount?: unknown }).maxAmount) || 0);
+    if (c > 0) maxAmount = c;
+    const m = Math.round(Number((raw as { minSpend?: unknown }).minSpend) || 0);
+    if (m > 0) minSpend = m;
   }
   if (!code && amount <= 0) return null;
-  return { code, amount, kind };
+  return {
+    code,
+    amount,
+    kind,
+    ...(rate != null ? { rate } : {}),
+    ...(maxAmount != null ? { maxAmount } : {}),
+    ...(minSpend != null ? { minSpend } : {}),
+  };
 };
 
 type Props = {
@@ -90,6 +109,8 @@ type Props = {
       voucherCode?: string;
       /** Diskon/voucher bawaan order (dari BillPreview/SplitBill) agar tidak hilang di rantai. */
       discount?: number;
+      /** Potongan ongkir bawaan yang sudah dihitung pemanggil (gross-ongkir - net). */
+      ongkirCut?: number;
       /** Rincian struk untuk diteruskan (opsional, bila pemanggil memilikinya). */
       service?: number;
       tax?: number;
@@ -145,17 +166,14 @@ let splitSeq = 0;
 
 const SIDEBAR_IDS: Tab[] = ['tunai', 'nontunai', 'online', 'member', 'lainnya'];
 
-const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-
 /** Baris member live (ms_member hasil seed/pull); saldo dari depositBalance. */
 type LiveMember = { id: string; nama: string; saldo: number };
 type MemberRow = { id: string; memberName: string | null; depositBalance: number | null };
 
 export default function PayScreen({ navigation, route }: Props) {
-  /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya tampil
-   * sebagai peringatan di atas metode bayar - semua jalur (tunai/nontunai/
-   * online/member/lainnya + ExtraPay + Qris/Edc) tetap bisa dipakai. */
+  /** G5: sinyal E00044 (kontrak §2/§10.4) >7 hari tanpa sync = BLOKIR bayar:
+   * semua CTA pelunasan mati + banner blokir beraksi Sync; bangun split lokal
+   * (Tambah) tetap boleh. Qris/Edc tak terjangkau karena hanya via Pay. */
   const syncBlocked = syncWarnLevel() === 'block7';
   // Nominal wajib dari kasir (route.params.total) — tanpa params tampilkan
   // empty-state jujur (pay_empty_total), bukan Rp266rb fiktif.
@@ -177,7 +195,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0));
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan
   // & WS up, amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui
@@ -186,8 +204,8 @@ export default function PayScreen({ navigation, route }: Props) {
   const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
   const todayStr = useMemo(() => {
     const d = new Date();
-    return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-  }, []);
+    return d.toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  }, [lang]);
   // Tab awal mengikuti metode usulan pemanggil (mis. SplitBill kirim Tunai/QRIS/EDC).
   const methodParam = (route?.params?.method ?? '').trim().toLowerCase();
   const [tab, setTab] = useState<Tab>(() => {
@@ -207,29 +225,42 @@ export default function PayScreen({ navigation, route }: Props) {
     route?.params?.voucherCode,
     route?.params?.discount,
   );
+  const isSplitGroup = route?.params?.splitGroup === true;
   const orderIsOngkir = orderVoucher
     ? isOngkirVoucher(orderVoucher.code, orderVoucher.kind)
     : false;
-  // Potongan ongkir bawaan untuk tampil (selaras totals.ts: min(amount, ongkir)).
-  const orderOngkirCut =
-    orderVoucher && orderIsOngkir && ongkir > 0
-      ? Math.min(orderVoucher.amount, ongkir)
-      : 0;
+  // Diskon belanja bawaan = angka discount pemanggil apa adanya (sudah neto:
+  // discountTotal + voucherAmt belanja; untuk voucher ongkir = discountTotal
+  // saja karena voucherAmt=0). Jangan di-nol-kan untuk kind Ongkir — itu
+  // menghilangkan diskon order saat voucher ongkir dipakai.
+  const discountParam = Math.max(0, Math.round(Number(route?.params?.discount) || 0));
+  const orderDiscount = orderVoucher ? discountParam : 0;
+  // Potongan ongkir bawaan: PERCAYA angka pemanggil (ongkirCut) apa adanya.
+  // Tebak-ulang min(nominal, ongkir) salah kaprah karena ongkir hilir sudah
+  // NET (min(nominal, net) ≠ cut aktual) dan discountParam sudah neto.
+  // Tanpa params (pemanggil lama) = 0 yang jujur, bukan tebakan.
+  const orderCutParam = Math.max(0, Math.round(Number(route?.params?.ongkirCut) || 0));
+  const orderOngkirCut = orderVoucher && orderIsOngkir ? orderCutParam : 0;
   // Nilai yang dicatat ke DB/payload: hanya jalur langsung (ongkir = bruto).
   // Jalur splitGroup memakai ongkir residual per kunjungan sehingga potongan
   // vs-net tak bermakna - catat 0 yang jujur (kode voucher tetap terbakar).
-  const cutToRecord = route?.params?.splitGroup === true ? 0 : orderOngkirCut;
-  // Diskon belanja bawaan untuk dicatat (voucher ongkir tidak memotong belanja).
-  const orderDiscount = orderVoucher && !orderIsOngkir ? orderVoucher.amount : 0;
+  const cutToRecord = isSplitGroup ? 0 : orderOngkirCut;
   // Voucher yang dipasang di layar ini via kotak validasi server. Ini satu-satunya
-  // pengurang payable, karena total pemanggil sudah final.
+  // pengurang payable, karena total pemanggil sudah final. Split grup DILARANG
+  // pasang box: voucher grup sudah diaporsi SplitBill; box menambah diskon di
+  // luar head grup (ghost remainder: head grand penuh vs visit pay lebih kecil).
   const [boxCode, setBoxCode] = useState('');
-  const [boxVoucher, setBoxVoucher] = useState<{ code: string; amount: number } | null>(null);
+  const [boxVoucher, setBoxVoucher] = useState<{ code: string; amount: number; kind: string; rate?: number; maxAmount?: number } | null>(null);
   const [voucherBusy, setVoucherBusy] = useState(false);
   const [voucherMsg, setVoucherMsg] = useState('');
+  const boxIsOngkir = boxVoucher ? isOngkirVoucher(boxVoucher.code, boxVoucher.kind) : false;
+  const boxBelanjaAmt = boxVoucher && !boxIsOngkir ? boxVoucher.amount : 0;
+  const boxOngkirCut = boxVoucher && boxIsOngkir ? boxVoucher.amount : 0;
   // Kode voucher efektif (kotak didahulukan) + diskon efektif untuk dicatat.
+  // Diskon belanja TAK mencakup box ongkir (itu ongkirCut, bukan discountTotal).
   const effVoucherCode = boxVoucher?.code ?? orderVoucher?.code ?? '';
-  const effDiscount = orderDiscount + (boxVoucher?.amount ?? 0);
+  const effDiscount = orderDiscount + boxBelanjaAmt;
+  const totalOngkirCut = cutToRecord + (isSplitGroup ? 0 : boxOngkirCut);
   // Teks banner voucher bawaan (info saja, tanpa tombol lepas karena sudah di total).
   const orderBannerText = !orderVoucher
     ? ''
@@ -315,8 +346,9 @@ export default function PayScreen({ navigation, route }: Props) {
   // Total pemanggil adalah angka resmi (selaras kontrak SplitBill/CartDetail/DineIn:
   // sudah mencakup service + ongkirNet + voucher + rounding). Params ongkir/
   // voucher/diskon hanya diteruskan untuk dicatat, bukan dihitung ulang di sini.
-  // Satu-satunya pengurang adalah voucher yang dipasang di layar ini.
-  const payable = Math.max(0, total - (boxVoucher?.amount ?? 0));
+  // Satu-satunya pengurang adalah voucher yang dipasang di layar ini: belanja
+  // (boxBelanjaAmt) dan — bila kind Ongkir — sisa ongkir (boxOngkirCut).
+  const payable = Math.max(0, total - boxBelanjaAmt - boxOngkirCut);
   const paid = useMemo(() => splits.reduce((s, x) => s + x.amount, 0), [splits]);
   const remaining = Math.max(0, payable - paid);
 
@@ -329,7 +361,7 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   const nominals = useMemo(() => {
-    const base = remaining > 0 ? remaining : payable;
+    const base = remaining;
     const r10 = Math.ceil(base / 10000) * 10000;
     const r1 = r10 === base ? base + 10000 : r10;
     const r2 = r1 + 10000;
@@ -345,10 +377,19 @@ export default function PayScreen({ navigation, route }: Props) {
   /**
    * Pasang voucher di layar ini: validasi ke server dulu (PAY-09). Nominal ikut
    * server (bukan konstanta), minSpend ditegakkan atas total resmi pemanggil.
+   * Kind-aware (selaras totals.ts): kind Ongkir memotong SISA ongkir
+   * (min(nominal, ongkir - cut bawaan), tolak bila ongkir habis) dan dicatat
+   * sebagai ongkirCut — bukan diskon belanja. Split grup DILARANG: voucher
+   * grup sudah diaporsi SplitBill; box menambah diskon di luar head grup
+   * (ghost remainder: head grand penuh vs visit pay lebih kecil).
    */
   const applyVoucher = async () => {
     const code = boxCode.trim().toUpperCase();
     if (code.length < 3 || voucherBusy) return;
+    if (isSplitGroup) {
+      setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
+      return;
+    }
     setVoucherBusy(true);
     setVoucherMsg(t('pay_voucher_checking'));
     try {
@@ -357,12 +398,36 @@ export default function PayScreen({ navigation, route }: Props) {
         setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));
         return;
       }
-      setBoxVoucher({ code, amount: Math.min(v.amount, total) });
+      if (isOngkirVoucher(code, v.kind || '')) {
+        const remainingOngkir = Math.max(0, Math.round(Number(ongkir) || 0) - orderOngkirCut);
+        if (remainingOngkir <= 0) {
+          setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));
+          return;
+        }
+        const cut = Math.min(v.amount, remainingOngkir);
+        if (cut <= 0) {
+          setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));
+          return;
+        }
+        setBoxVoucher({ code, amount: cut, kind: 'Ongkir', ...(v.maxAmount != null ? { maxAmount: v.maxAmount } : {}) });
+        setBoxCode(code);
+        setVoucherMsg('');
+        setVoucherOpen(false);
+        // Payable turun -> split lama dijepit agar tak over-collect.
+        clampSplits(Math.max(0, total - cut));
+        return;
+      }
+      const amt = Math.min(v.amount, total);
+      if (amt <= 0) {
+        setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));
+        return;
+      }
+      setBoxVoucher({ code, amount: amt, kind: v.kind || '', ...(v.rate != null ? { rate: v.rate } : {}), ...(v.maxAmount != null ? { maxAmount: v.maxAmount } : {}) });
       setBoxCode(code);
       setVoucherMsg('');
       setVoucherOpen(false);
       // Payable turun -> split lama dijepit agar tak over-collect.
-      clampSplits(Math.max(0, total - Math.min(v.amount, total)));
+      clampSplits(Math.max(0, total - amt));
     } catch {
       setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
     } finally {
@@ -454,7 +519,7 @@ export default function PayScreen({ navigation, route }: Props) {
     const orderTotalFull = Math.max(0, Math.round(Number(route?.params?.orderTotal) || 0));
     if (splitGroup && paramSalesNum && orderTotalFull > 0) {
       const visitPay = [
-        ...splits.map((s) => ({ method: s.method, amount: s.amount })),
+        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })),
         { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
       ];
       try {
@@ -481,11 +546,12 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(tableNo ? { tableId: tableNo } : {}),
             ...(orderMode ? { mode: orderMode } : {}),
             ...(ongkir > 0 ? { ongkir } : {}),
-            ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
+            ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
             ...(customerName ? { customer: customerName } : {}),
           };
-          recordSale(gInput);
+          // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
           await saveSale(gInput);
+          recordSale(gInput);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -499,7 +565,9 @@ export default function PayScreen({ navigation, route }: Props) {
           ]);
           return;
         }
-        /* DB gagal - kasir tetap jalan, push via antrean */
+        // L1 fail-closed: tulis DB gagal = JANGAN Success (bukan kasir-jalan).
+        Alert.alert(t('pay_issue_fail'));
+        return;
       }
       // APP-PRINTER-SALES: kunjungan grup ikut menyiarkan display (jalur
       // appendGroupPayment tak lewat saveSale sehingga tak auto-publish).
@@ -549,7 +617,7 @@ export default function PayScreen({ navigation, route }: Props) {
       change,
       items: route?.params?.items,
       payments: [
-        ...splits.map((s) => ({ method: s.method, amount: s.amount })),
+        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })),
         { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
       ],
       ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
@@ -559,10 +627,9 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(tableNo ? { tableId: tableNo } : {}),
       ...(orderMode ? { mode: orderMode } : {}),
       ...(ongkir > 0 ? { ongkir } : {}),
-      ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
+      ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
       ...(customerName ? { customer: customerName } : {}),
     };
-    recordSale(input);
     try {
       await saveSale(input);
     } catch (e) {
@@ -575,8 +642,12 @@ export default function PayScreen({ navigation, route }: Props) {
         ]);
         return;
       }
-      /* DB gagal - kasir tetap jalan, push via antrean */
+      // L1 fail-closed: tulis DB gagal = JANGAN Success (bukan kasir-jalan).
+      Alert.alert(t('pay_issue_fail'));
+      return;
     }
+    // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
+    recordSale(input);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
@@ -602,7 +673,7 @@ export default function PayScreen({ navigation, route }: Props) {
   // ---- Tunai actions ----
   const onCashTambah = () => {
     if (tendered <= 0) return;
-    addSplit('Tunai', Math.min(tendered, remaining), 'cash');
+    addSplit(t('suc_m_cash'), Math.min(tendered, remaining), 'cash');
     setCashSel(null);
     setCustomMode(false);
     setCustomAmt('');
@@ -617,7 +688,7 @@ export default function PayScreen({ navigation, route }: Props) {
   // ---- Non-tunai actions ----
   const onCardLanjut = () => {
     if (edcCode.length !== 6 || payable <= 0) return;
-    const amt = remaining > 0 ? remaining : payable;
+    const amt = remaining;
     const grand = paid + amt;
     if (grand >= payable) {
       void goSuccess(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
@@ -638,7 +709,7 @@ export default function PayScreen({ navigation, route }: Props) {
         try {
         const chainClientId = await resolveChainClientId();
         navigation?.navigate('Qris', {
-        total: remaining > 0 ? remaining : payable,
+        total: remaining,
         items: route?.params?.items,
         discount: effDiscount,
         ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
@@ -649,7 +720,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
         ...(ongkir > 0 ? { ongkir } : {}),
-        ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
+        ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
         ...(customerName ? { customer: customerName } : {}),
         ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -660,7 +731,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
         // Kaki split yang sudah dibayar diteruskan agar QRIS/EDC mencatat
         // SATU bill utuh (bukan hanya sisa): nomor + kaki lama dipakai ulang.
-        ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
+        ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })) } : {}),
         });
         } catch {
           // resolveChainClientId melempar hanya bila CSPRNG absen (uuidv7
@@ -670,7 +741,7 @@ export default function PayScreen({ navigation, route }: Props) {
       })();
       return;
     }
-    const grand = paid + (remaining > 0 ? remaining : payable);
+    const grand = paid + (remaining);
     void goSuccess(wallet, grand, 0);
   };
 
@@ -685,7 +756,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const memberPicked = memberSource.find((m) => m.id === memberSel) ?? null;
   const onDepositLanjut = () => {
     if (!memberPicked || memberPicked.saldo <= 0 || payable <= 0) return;
-    const pakai = Math.min(memberPicked.saldo, remaining > 0 ? remaining : payable);
+    const pakai = Math.min(memberPicked.saldo, remaining);
     const grand = paid + pakai;
     if (grand >= payable) {
       void goSuccess('deposit', grand, 0, { memberId: memberPicked.id });
@@ -742,7 +813,7 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   const cashTambahReady = tendered > 0;
-  const cashLanjutReady = payable > 0 && paid + tendered >= payable && (paid > 0 || tendered > 0);
+  const cashLanjutReady = payable > 0 && !syncBlocked && paid + tendered >= payable && (paid > 0 || tendered > 0);
   const cashChange = Math.max(0, paid + tendered - payable);
   const cashPayLabel =
     tendered > 0 && cashLanjutReady
@@ -777,12 +848,13 @@ export default function PayScreen({ navigation, route }: Props) {
 
   /**
    * Rincian tagihan terlihat: Total order (neto, sudah termasuk orderVoucher +
-   * orderDiscount), potongan voucher Pay yang dipasang di layar ini, dan
-   * Harus dibayar (= Sisa saat belum ada split). Sebelumnya voucher box tak
-   * muncul di penjumlahan mana pun sehingga terasa "tidak masuk hitungan".
+   * orderDiscount), potongan voucher Pay yang dipasang di layar ini (belanja
+   * dan potongan ongkir dipisah — ongkirCut bukan diskon), dan Harus dibayar
+   * (= Sisa saat belum ada split). Sebelumnya voucher box tak muncul di
+   * penjumlahan mana pun sehingga terasa "tidak masuk hitungan".
    */
   const renderSummary = () => {
-    if (orderDiscount <= 0 && !boxVoucher) return null;
+    if (orderDiscount <= 0 && !boxVoucher && totalOngkirCut <= 0) return null;
     return (
       <View style={styles.sumBox}>
         <View style={styles.sumRow}>
@@ -795,10 +867,16 @@ export default function PayScreen({ navigation, route }: Props) {
             <Text style={styles.sumValue}>−{rp(orderDiscount)}</Text>
           </View>
         )}
-        {boxVoucher && (
+        {boxBelanjaAmt > 0 && (
           <View style={styles.sumRow}>
-            <Text style={styles.sumLabel}>{`${t('ok_voucher')} ${boxVoucher.code}`}</Text>
-            <Text style={[styles.sumValue, styles.sumCut]}>−{rp(boxVoucher.amount)}</Text>
+            <Text style={styles.sumLabel}>{`${t('ok_voucher')} ${boxVoucher?.code ?? ''}`}</Text>
+            <Text style={[styles.sumValue, styles.sumCut]}>−{rp(boxBelanjaAmt)}</Text>
+          </View>
+        )}
+        {totalOngkirCut > 0 && (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>{`${t('rc_ongkir_cut')}${boxOngkirCut > 0 && boxVoucher ? ` (${boxVoucher.code})` : ''}`}</Text>
+            <Text style={[styles.sumValue, styles.sumCut]}>−{rp(totalOngkirCut)}</Text>
           </View>
         )}
         <View style={[styles.sumRow, styles.sumDueRow]}>
@@ -824,13 +902,13 @@ export default function PayScreen({ navigation, route }: Props) {
           <View style={styles.voucherBarTablet}>
             <Text style={styles.voucherBarTabletText}>{`◈  ${orderBannerText}`}</Text>
           </View>
-        ) : (
+        ) : !isSplitGroup ? (
           <TouchableOpacity
             style={styles.voucherBarTablet}
             onPress={() => setVoucherOpen((v) => !v)}>
             <Text style={styles.voucherBarTabletText}>{`◈  ${t('pay_voucher_add')}`}</Text>
           </TouchableOpacity>
-        )
+        ) : null
       )}
       <View style={isTablet ? styles.bannerTablet : styles.banner}>
         <View style={styles.bannerCol}>
@@ -865,16 +943,16 @@ export default function PayScreen({ navigation, route }: Props) {
           <View style={styles.voucherBar}>
             <Text style={styles.voucherBarText}>{`◈  ${orderBannerText}`}</Text>
           </View>
-        ) : (
+        ) : !isSplitGroup ? (
           <TouchableOpacity
             style={styles.voucherBar}
             onPress={() => setVoucherOpen((v) => !v)}>
             <Text style={styles.voucherBarText}>{`◈  ${t('pay_voucher_add')}`}</Text>
           </TouchableOpacity>
-        )
+        ) : null
       )}
       {renderSummary()}
-      {voucherOpen && !boxVoucher && !orderVoucher && (
+      {voucherOpen && !boxVoucher && !orderVoucher && !isSplitGroup && (
         <View style={styles.voucherRow}>
           <View style={styles.voucherField}>
             <AppInput
@@ -1082,7 +1160,7 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
 
       <View style={styles.footer}>
-        <AppButton title={`${t('pay_cash_pay').replace('{t}', rp(remaining))} ›`} disabled={edcCode.length !== 6} onPress={onCardLanjut} fullWidth={false} size="md" style={styles.footerBtn} />
+        <AppButton title={`${t('pay_cash_pay').replace('{t}', rp(remaining))} ›`} disabled={edcCode.length !== 6 || syncBlocked} onPress={onCardLanjut} fullWidth={false} size="md" style={styles.footerBtn} />
       </View>
       {edcCode.length !== 6 && (
         <Text style={styles.ctaHint}>{t('pay_need_approval')}</Text>
@@ -1090,11 +1168,16 @@ export default function PayScreen({ navigation, route }: Props) {
       <TouchableOpacity
         style={styles.edcLink}
         onPress={() => void (async () => {
+          // G5: block7 = jalur EDC dikunci (Alert + tetap di Pay, bukan tautan mati).
+          if (syncBlocked) {
+            Alert.alert(t('sync.blocked'), t('sync.blockedMsg'));
+            return;
+          }
           try {
           // client_id rantai SELALU dibawa ke EDC (tak diterbitkan di daun).
           const chainClientId = await resolveChainClientId();
           navigation?.navigate('Edc', {
-          total: remaining > 0 ? remaining : payable,
+          total: remaining,
           items: route?.params?.items,
           discount: effDiscount,
           ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
@@ -1105,7 +1188,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(orderMode ? { mode: orderMode } : {}),
           ...(tableNo ? { table: tableNo } : {}),
           ...(ongkir > 0 ? { ongkir } : {}),
-          ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
+          ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
           ...(customerName ? { customer: customerName } : {}),
           ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -1116,7 +1199,7 @@ export default function PayScreen({ navigation, route }: Props) {
           // head lalu gagal diam-diam (Success palsu, setoran tak tercatat).
           ...(route?.params?.splitGroup === true ? { splitGroup: true } : {}),
           ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
-          ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
+          ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })) } : {}),
           });
           } catch {
             Alert.alert(t('pay_issue_fail'));
@@ -1173,7 +1256,7 @@ export default function PayScreen({ navigation, route }: Props) {
       <View style={styles.footerSingle}>
         <AppButton
           title={wallet ? `${t('pay_via').replace('{t}', rp(remaining)).replace('{w}', WALLET_LABEL[wallet] ?? wallet)} ›` : t('pay_pick_method').replace('{t}', rp(remaining))}
-          disabled={!wallet || !ovoPhoneOk}
+          disabled={!wallet || !ovoPhoneOk || syncBlocked}
           onPress={onOnlineLanjut}
           size="md"
         />
@@ -1238,7 +1321,7 @@ export default function PayScreen({ navigation, route }: Props) {
           title={memberPicked
             ? `${t('pay_dep_use').replace('{t}', rp(Math.min(memberPicked.saldo, remaining))).replace('{n}', memberPicked.nama)} ›`
             : t('pay_dep_pick').replace('{t}', rp(remaining))}
-          disabled={!memberPicked || memberPicked.saldo <= 0}
+          disabled={!memberPicked || memberPicked.saldo <= 0 || syncBlocked}
           onPress={onDepositLanjut}
           size="md"
         />
@@ -1258,7 +1341,7 @@ export default function PayScreen({ navigation, route }: Props) {
             key={k}
             style={[styles.pill, tenderKind === k && styles.pillActive]}
             onPress={() => setTenderKind(k)}>
-            <Text style={[styles.pillText, tenderKind === k && styles.pillTextActive]}>{k}</Text>
+            <Text style={[styles.pillText, tenderKind === k && styles.pillTextActive]}>{k === 'Lainnya' ? t('suc_m_lainnya') : k}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -1279,8 +1362,8 @@ export default function PayScreen({ navigation, route }: Props) {
       {renderSplits()}
       {tenderMsg ? <Text style={styles.ctaHint}>{tenderMsg}</Text> : null}
       <View style={styles.footer}>
-        <AppButton title={tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`} disabled={!tenderReady} onPress={() => void onTenderLunas()} fullWidth={false} size="md" style={styles.footerBtn} />
-        <AppButton title={t('pay_add')} variant="secondary" disabled={!tenderReady} onPress={() => void onTenderTambah()} fullWidth={false} size="md" style={styles.footerBtn} />
+        <AppButton title={tenderBusy ? t('pay_tender_checking') : `${t('pay_cash_pay').replace('{t}', rp(Math.min(tenderNum, remaining)))} ›`} disabled={!tenderReady || syncBlocked} onPress={() => void onTenderLunas()} fullWidth={false} size="md" style={styles.footerBtn} />
+        <AppButton title={t('pay_add')} variant="secondary" disabled={!tenderReady || syncBlocked} onPress={() => void onTenderTambah()} fullWidth={false} size="md" style={styles.footerBtn} />
       </View>
       <Text style={styles.ctaHint}>{t('pay_tender_burn')}</Text>
       {tenderNum > remaining && remaining > 0 && (
@@ -1346,6 +1429,8 @@ export default function PayScreen({ navigation, route }: Props) {
           </View>
         )}
         {renderBody()}
+        {/* G5: block7 = ExtraPay disembunyikan; banner blokir di atas memberi jalan Sync. */}
+        {syncBlocked ? null : (
         <ExtraPaySection onDone={(label, ref, approver) => {
           const method = extraLabelToMethod(label);
           if (method === 'deposit') {
@@ -1364,7 +1449,7 @@ export default function PayScreen({ navigation, route }: Props) {
           if (ref) detail.approvalCode = ref;
           if (approver) detail.approvedBy = approver;
           void goSuccess(method, payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
-        }} />
+        }} />)}
       </ScrollView>
       ) : (
       <View style={styles.emptyWrap}>
@@ -1397,7 +1482,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, textAlign: 'center' },
   emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8 },
   emptyBtn: { marginTop: 16 },
-  /** Kartu peringatan sync >7 hari - info saja, pembayaran tetap jalan. */
+  /** Kartu blokir sync >7 hari (G5): pembayaran dikunci sampai sync. */
   syncWarn: { backgroundColor: colors.paleAmber, borderRadius: 10, padding: 12, marginTop: 10 },
   syncWarnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.amberDark },
   syncWarnSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.amberDark, marginTop: 4 },

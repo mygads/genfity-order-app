@@ -16,8 +16,10 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query, queryFirst, run } from '../../lib/db';
-import { useLang } from '../../lib/i18n';
+import { tOf, useLang } from '../../lib/i18n';
 import type { Lang } from '../../lib/i18n';
+import { verifyLocalEscalation } from '../../lib/supervisor';
+import { uuidv7 } from '../../lib/uuidv7';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -32,6 +34,10 @@ type Voucher = {
   jenis: string;
   nilai: number;
   minBelanja: number;
+  /** U1: cermin TotalsVoucher — diteruskan ke kasir agar totals.ts
+   * (satu-satunya pemilik rumus) bisa pakai. */
+  rate?: number;
+  maxAmount?: number;
   berlakuHingga: string;
   status: VoucherStatus;
 };
@@ -90,7 +96,7 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
       id: String(r.id ?? `V${idx + 1}`),
       kode,
       nama: (r.voucherName ?? '').trim() || kode,
-      jenis: 'Diskon (Rp)',
+      jenis: tOf('vou_type_disc_idr', lang),
       nilai,
       minBelanja: 0,
       berlakuHingga: hingga,
@@ -103,7 +109,9 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
 /**
  * Operasi voucher ke server ikut kontrak docs/API-CONTRACT.md §5.3:
  * validate {code, grandTotal}, lock/unlock/burn {code, salesNum}.
- * Selalu catat ke outbox + antrean sync agar aman saat offline.
+ * S6 (immediate-first): coba ke server dulu dengan timeout singkat; hanya
+ * bila gagal/timeout, antrekan kembar (outbox + sync) dengan client_id
+ * bersama agar push berikutnya idempoten dan tak ganda catat.
  */
 async function persistVoucherOp(
   op: 'lock' | 'unlock' | 'validate' | 'burn',
@@ -118,24 +126,30 @@ async function persistVoucherOp(
         : op === 'burn'
           ? ApiPath.voucherBurn
           : ApiPath.voucherValidate;
+  // FetchOpts tak punya timeout — batas 8 dtk via Promise.race.
+  const clientId = uuidv7();
+  const body =
+    op === 'validate'
+      ? { code: v.kode, grandTotal: opts?.grandTotal ?? 0, client_id: clientId }
+      : { code: v.kode, salesNum: opts?.salesNum ?? '', client_id: clientId };
+  try {
+    const res = await Promise.race([
+      apiFetch(path, { body, idempotencyKey: clientId }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]);
+    if (res && res.ok) return;
+  } catch {
+    /* jatuh ke antrean kembar di bawah */
+  }
   try {
     await enqueueOutbox('ms_voucher', v.id, 'update');
   } catch {
     /* abaikan */
   }
   try {
-    enqueueSync('other', { kind: `voucher-${op}`, id: v.id, kode: v.kode });
+    enqueueSync('other', { kind: `voucher-${op}`, id: v.id, kode: v.kode, client_id: clientId, clientId });
   } catch {
     /* abaikan */
-  }
-  try {
-    const body =
-      op === 'validate'
-        ? { code: v.kode, grandTotal: opts?.grandTotal ?? 0 }
-        : { code: v.kode, salesNum: opts?.salesNum ?? '' };
-    await apiFetch(path, { body });
-  } catch {
-    /* offline - terkirim via push berikutnya */
   }
 }
 
@@ -151,6 +165,12 @@ export default function VoucherScreen({ navigation }: Props) {
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // U10: bakar voucher = gerbang PIN eskalasi (fail-closed). Kunci (lock)
+  // tetap ungated — deliberate.
+  const [burnPinVisible, setBurnPinVisible] = useState(false);
+  const [burnPin, setBurnPin] = useState('');
+  const [burnPinErr, setBurnPinErr] = useState('');
+  const [pendingBurn, setPendingBurn] = useState<Voucher | null>(null);
   // Unified lookup: satu state kode (kodeManual) + satu msg + satu result.
   // lookup() mencoba: match lokal SQLite → validateVoucherCode → validateOnlineVoucher → external validate.
   type LookupSource = 'local' | 'online' | 'external';
@@ -350,14 +370,26 @@ export default function VoucherScreen({ navigation }: Props) {
     }
   };
 
-  const attachClaimedToCashier = async (kode: string, amount: number): Promise<void> => {
+  const attachClaimedToCashier = async (
+    kode: string,
+    amount: number,
+    opts?: { minSpend?: number; rate?: number; maxAmount?: number },
+  ): Promise<void> => {
     const ok = await persistSingleUseVoucher(kode, amount);
     if (!ok) {
       setMsg(t('vou_local_exists'));
       return;
     }
     navigation?.navigate('Cashier', {
-      voucher: { code: kode, amount: Math.max(0, Math.round(amount)), kind: 'Diskon (Rp)' },
+      // U1: teruskan minSpend/rate/maxAmount agar totals.ts bisa pakai.
+      voucher: {
+        code: kode,
+        amount: Math.max(0, Math.round(amount)),
+        kind: 'Diskon (Rp)',
+        ...(opts?.minSpend ? { minSpend: opts.minSpend } : {}),
+        ...(opts?.rate != null ? { rate: opts.rate } : {}),
+        ...(opts?.maxAmount != null ? { maxAmount: opts.maxAmount } : {}),
+      },
     });
   };
 
@@ -379,7 +411,7 @@ export default function VoucherScreen({ navigation }: Props) {
           return;
         }
         setMsg(t('vou_online_claim_ok'));
-        await attachClaimedToCashier(kode, result.amount);
+        await attachClaimedToCashier(kode, result.amount, { minSpend: result.minSpend });
       } else {
         const r = await externalVoucher('burn', kode);
         if (!r.ok) {
@@ -387,7 +419,7 @@ export default function VoucherScreen({ navigation }: Props) {
           return;
         }
         setMsg(t('vou_ext_burn_ok'));
-        await attachClaimedToCashier(kode, result.amount);
+        await attachClaimedToCashier(kode, result.amount, { minSpend: result.minSpend });
       }
     } catch {
       setMsg(t('vou_unknown').replace('{k}', kode));
@@ -440,9 +472,28 @@ export default function VoucherScreen({ navigation }: Props) {
     });
   };
 
-  /** Terapkan = bakar voucher; banner applied tetap tampil, tidak langsung goBack. */
+  /** Terapkan = bakar voucher; banner applied tetap tampil, tidak langsung goBack.
+   * U10: bakar = aksi uang → wajib lolos eskalasi supervisor 'sale.refund'
+   * (PIN salah/tanpa hak = ditolak, fail-closed). */
   const burn = (v: Voucher) => {
     if (v.status !== 'terkunci' || busy) return;
+    setPendingBurn(v);
+    setBurnPin('');
+    setBurnPinErr('');
+    setBurnPinVisible(true);
+  };
+  const confirmBurn = async () => {
+    if (!pendingBurn || busy) return;
+    const v = pendingBurn;
+    const esc = await verifyLocalEscalation(burnPin, 'sale.refund');
+    if (!esc.ok) {
+      setBurnPinErr(esc.message);
+      return;
+    }
+    setBurnPinVisible(false);
+    setBurnPin('');
+    setBurnPinErr('');
+    setPendingBurn(null);
     setBusy(v.id);
     void persistVoucherOp('burn', v).finally(() => {
       setStatus(v.id, 'terpakai');
@@ -485,7 +536,15 @@ export default function VoucherScreen({ navigation }: Props) {
       return;
     }
     navigation?.navigate('Cashier', {
-      voucher: { code: applied.kode, amount: applied.nilai, kind: applied.jenis },
+      voucher: {
+        code: applied.kode,
+        amount: applied.nilai,
+        kind: applied.jenis,
+        // U1: teruskan extras agar totals.ts (satu-satunya pemilik rumus) bisa pakai.
+        ...(applied.minBelanja > 0 ? { minSpend: applied.minBelanja } : {}),
+        ...(applied.rate != null ? { rate: applied.rate } : {}),
+        ...(applied.maxAmount != null ? { maxAmount: applied.maxAmount } : {}),
+      },
     });
   };
 
@@ -672,6 +731,48 @@ export default function VoucherScreen({ navigation }: Props) {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* U10: modal PIN eskalasi bakar voucher (fail-closed). */}
+      <Modal visible={burnPinVisible} transparent animationType="slide" onRequestClose={() => setBurnPinVisible(false)}>
+        <View style={s.modalBg}>
+          <View style={[s.dialog, isTablet && s.dialogTablet]}>
+            <Text style={s.modalTitle}>{t('cx_pin')}</Text>
+            <Text style={s.modalHint}>
+              {pendingBurn ? `${pendingBurn.kode} - ${pendingBurn.nama}` : ''}
+            </Text>
+            <View style={s.pinDots}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <View key={i} style={[s.dot, i < burnPin.length && s.dotFill]} />
+              ))}
+            </View>
+            {burnPinErr ? <Text style={s.pinErr}>{burnPinErr}</Text> : null}
+            <View style={s.pinPad}>
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'].map((k) => (
+                <TouchableOpacity
+                  key={k}
+                  style={s.pinKey}
+                  onPress={() => {
+                    if (k === 'C') setBurnPin(burnPin.slice(0, -1));
+                    else if (k === 'OK') void confirmBurn();
+                    else if (burnPin.length < 6) setBurnPin(burnPin + k);
+                  }}>
+                  <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={s.cancelBtn}
+              onPress={() => {
+                setBurnPinVisible(false);
+                setBurnPin('');
+                setBurnPinErr('');
+                setPendingBurn(null);
+              }}>
+              <Text style={s.cancelTxt}>{t('c_cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={cancelVisible} transparent animationType="fade">
         <View style={s.modalBg}>
@@ -880,4 +981,44 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
   dialogRow: { flexDirection: 'row', marginTop: 18 },
+  /** U10: PIN pad bakar voucher (cermin pola ExpenseScreen). */
+  pinDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  dot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.faint,
+    marginHorizontal: 5,
+  },
+  dotFill: { backgroundColor: colors.navy, borderColor: colors.navy },
+  pinErr: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    color: colors.red,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  pinPad: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  pinKey: {
+    width: '30%',
+    aspectRatio: 1.6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bg,
+    borderRadius: 10,
+    margin: 4,
+  },
+  pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.text },
+  cancelBtn: { alignItems: 'center', marginTop: 12, paddingVertical: 8 },
+  cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.muted },
 });

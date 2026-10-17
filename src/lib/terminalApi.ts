@@ -14,6 +14,8 @@
  */
 import { ApiPath } from '../config/server';
 import { apiFetch, getApiMode, unwrap } from './apiSource';
+// F10: validasi tag BE via parseDeviceRole (standalone, tanpa siklus impor).
+import { parseDeviceRole } from './deviceRole';
 
 /** Alasan gagal jujur: BE belum dikonfigurasi vs jaringan putus. */
 export type TerminalApiReason = 'need_be' | 'offline';
@@ -84,11 +86,13 @@ function asBranch(b: Record<string, unknown>): BranchItem {
 }
 
 function asTerminal(t: Record<string, unknown>): TerminalItem {
+  // F10: tag asing → '' (fail-closed; penolakan di layar PIN/F11) — jangan lolos mentah.
+  const rawTag = str(t.tag).trim().toLowerCase();
   return {
     terminalId: str(t.terminalId ?? t.id),
     terminalCode: str(t.terminalCode ?? t.code),
     name: str(t.name),
-    tag: str(t.tag).trim().toLowerCase(),
+    tag: parseDeviceRole(rawTag) ?? '',
     pinSet: t.pinSet === true,
     ...(str(t.pairedKasirId ?? t.pairedKasir) ? { pairedKasirId: str(t.pairedKasirId ?? t.pairedKasir) } : {}),
     ...(str(t.pairedViewId ?? t.pairedView) ? { pairedViewId: str(t.pairedViewId ?? t.pairedView) } : {}),
@@ -239,12 +243,14 @@ export async function bindTerminal(
     return fail<BindData>(r.status, r.fromDummy);
   }
   const { data } = unwrap<Record<string, unknown>>(r.data);
+  // Tag asing dari BE → '' (disiplin F10 yang sama: jangan lolos mentah).
+  const bindTag = str(data.tag).trim().toLowerCase();
   return {
     ok: true,
     data: {
       bound: data.bound !== false,
       kickedUserId: str(data.kickedUserId),
-      tag: str(data.tag).trim().toLowerCase(),
+      tag: parseDeviceRole(bindTag) ?? '',
       pairedKasirId: str(data.pairedKasirId),
       pairedViewId: str(data.pairedViewId),
     },
@@ -253,14 +259,18 @@ export async function bindTerminal(
 }
 
 /**
- * E01: staff-login 2-tahap {username,password,staffPin?} (L1, SPEC §4).
- * Stub pemakaian layar Login (task lain): fail-closed — dummy/offline
+ * E01: staff-login 2-tahap (SPEC §4, POST /api/v1/auth/terminal-login —
+ * body SELALU {username,password,staffPin?,terminalCode,deviceId}).
+ * Helper ber-signature kontrak penuh (nol pemanggil produksi saat ini;
+ * LoginScreen memakai callStaffLogin sendiri): fail-closed — dummy/offline
  * selalu {ok:false} (login pertama wajib online, tanpa grant bawaan).
  */
 export async function staffLogin(input: {
   username: string;
   password: string;
   staffPin?: string;
+  terminalCode?: string;
+  deviceId?: string;
 }): Promise<TerminalApiResult<Record<string, unknown>>> {
   const r = await apiFetch(ApiPath.staffLogin, { body: input });
   if (!r.ok || r.fromDummy) {

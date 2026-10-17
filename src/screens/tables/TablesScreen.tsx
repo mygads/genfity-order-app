@@ -258,7 +258,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
           [no],
         );
         if ((open[0]?.c ?? 0) > 0) {
-          setCancelWarn(`Meja ${no} masih punya bill terbuka - lunasi atau void dulu sebelum dikosongkan.`);
+          setCancelWarn(t('tbl_warn_open_bill').replace('{no}', no));
           setConfirmCancel(false);
           return;
         }
@@ -308,7 +308,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   );
 
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
-    if (!namaBooking.trim()) { setBookingWarn('Isi nama pelanggan dulu.'); return; } if (!jamBooking.trim()) { setBookingWarn('Isi jam reservasi dulu.'); return; } setBookingWarn(''); const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
+    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
     // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
     void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); }
   setBookingVisible(false);
@@ -323,15 +323,15 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     const no = normNo(newNo);
     const kap = Math.max(0, Math.round(Number(newKap) || 0));
     if (!no) {
-      setManageWarn('Isi nomor meja dulu.');
+      setManageWarn(t('tbl_warn_no'));
       return;
     }
     if (kap <= 0) {
-      setManageWarn('Isi kapasitas kursi dulu (angka > 0).');
+      setManageWarn(t('tbl_warn_cap'));
       return;
     }
     if (tables.some((tb) => normNo(tb.no) === no)) {
-      setManageWarn(`Meja ${no} sudah ada.`);
+      setManageWarn(t('tbl_warn_exists').replace('{no}', no));
       return;
     }
     const section = newSection.trim() || 'Dalam';
@@ -372,7 +372,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     }
     setConfirmDelTable(null);
     if (tb.status !== 'kosong') {
-      setManageWarn(`Meja ${tb.no} sedang ${tb.status} - kosongkan dulu sebelum dihapus.`);
+      setManageWarn(t('tbl_warn_not_empty').replace('{no}', tb.no).replace('{st}', tb.status));
       return;
     }
     void (async () => {
@@ -383,7 +383,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
           [tb.no],
         );
         if ((open[0]?.c ?? 0) > 0) {
-          setManageWarn(`Meja ${tb.no} masih punya bill terbuka - lunasi atau void dulu sebelum dihapus.`);
+          setManageWarn(t('tbl_warn_open_bill_del').replace('{no}', tb.no));
           return;
         }
         await run('DELETE FROM ms_table WHERE id = ?', [tb.id]);
@@ -396,7 +396,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         setTables((list) => list.filter((x) => x.id !== tb.id));
         void writeTimerStore(tb.no, 0);
       } catch {
-        setManageWarn('Gagal menghapus meja - coba lagi.');
+        setManageWarn(t('tbl_del_fail'));
       }
     })();
   };
@@ -424,10 +424,10 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         <View style={s.legendRight}>
         {qsCount > 0 && <Text style={s.qsNote}>{t('tbl.qsNote').replace('{n}', String(qsCount))}</Text>}
         <TouchableOpacity onPress={() => { setManageOpen(true); setManageWarn(''); setConfirmDelTable(null); }} style={s.qsBtn}>
-          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>Kelola</Text>
+          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>{t('tbl_manage')}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>
-          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>+ QS</Text>
+          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>{t('tbl_quick')}</Text>
         </TouchableOpacity>
         </View>
       </View>
@@ -468,7 +468,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       <ScrollView contentContainerStyle={[s.grid, isTablet && wideCenterLg]}>
         {shown.length === 0 && (
           <View style={s.emptyWrap}>
-            <Text style={[s.emptyTxt, isTablet && s.emptyTxtBig]}>{lang === 'id' ? 'Belum ada meja.' : 'No tables yet.'}</Text>
+            <Text style={[s.emptyTxt, isTablet && s.emptyTxtBig]}>{t('tbl_empty')}</Text>
           </View>
         )}
         {shown.map((tb) => {
@@ -481,14 +481,14 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               onPress={() => openDetail(tb)}>
               <Text style={[s.tableNo, isTablet && s.tableNoBig]}>{tb.no}</Text>
               <Text style={[s.tableStatus, { color: meta.fg }, isTablet && s.tableStatusBig]}>{t(STATUS_LABEL_KEY[tb.status])}</Text>
-              <Text style={[s.tableCap, isTablet && s.tableCapBig]}>{tb.kapasitas} tamu</Text>
+              <Text style={[s.tableCap, isTablet && s.tableCapBig]}>{t('tbl_cap_pax').replace('{n}', String(tb.kapasitas))}</Text>
               {tb.total ? (
                 <Text style={[s.tableTotal, isTablet && s.tableTotalBig]}>{rp(tb.total)}</Text>
               ) : null}
               {tb.seatedMin !== undefined && (tb.status === 'terisi' || tb.status === 'gabung') ? (
-                <Text style={[s.tableDur, isTablet && s.tableDurBig]}>Timer {fmtDurasi(tb.seatedMin, t('tbl.min'), t('tbl.hour'))}</Text>
+                <Text style={[s.tableDur, isTablet && s.tableDurBig]}>{t('tbl_timer').replace('{d}', fmtDurasi(tb.seatedMin, t('tbl.min'), t('tbl.hour')))}</Text>
               ) : null}
-              {isHeld ? <Text style={s.holdBadge}>Hold</Text> : null}
+              {isHeld ? <Text style={s.holdBadge}>{t('tbl_hold')}</Text> : null}
               {tb.namaTamu ? (
                 <Text style={[s.tableGuest, isTablet && s.tableGuestBig]} numberOfLines={1}>
                   {tb.namaTamu}
@@ -508,43 +508,43 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               moveMode ? (
                 <>
                   <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
-                    {moveMode === 'pindah' ? `Pindah dari Meja ${selected.no}` : `Gabung Meja ${selected.no}`}
+                    {moveMode === 'pindah' ? t('tbl_move_from').replace('{no}', selected.no) : t('tbl_merge_with').replace('{no}', selected.no)}
                   </Text>
                   <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
                     {moveMode === 'pindah'
-                      ? 'Pilih meja kosong tujuan - tamu dan total ikut pindah.'
-                      : 'Pilih meja terisi tujuan - total digabungkan.'}
+                      ? t('tbl_move_hint_empty')
+                      : t('tbl_move_hint_filled')}
                   </Text>
                   {moveTargets.length === 0 && (
                     <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
-                      {moveMode === 'pindah' ? 'Tidak ada meja kosong.' : 'Tidak ada meja terisi lain.'}
+                      {moveMode === 'pindah' ? t('tbl_no_empty') : t('tbl_no_filled')}
                     </Text>
                   )}
                   {moveTargets.map((tb) => (
                     <TouchableOpacity key={tb.id} style={s.targetRow} onPress={() => applyMove(tb)}>
-                      <Text style={[s.targetNo, isTablet && s.targetNoBig]}>Meja {tb.no}</Text>
+                      <Text style={[s.targetNo, isTablet && s.targetNoBig]}>{t('tbl_table_no').replace('{no}', tb.no)}</Text>
                       <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
-                        {t(STATUS_LABEL_KEY[tb.status])} • {tb.kapasitas} pax
+                        {t(STATUS_LABEL_KEY[tb.status])} • {t('tbl_cap_pax').replace('{n}', String(tb.kapasitas))}
                         {tb.total ? ` • ${rp(tb.total)}` : ''}
                       </Text>
                     </TouchableOpacity>
                   ))}
                   <TouchableOpacity style={s.cancelBtn} onPress={() => setMoveMode(null)}>
-                    <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>Kembali</Text>
+                    <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('c_back')}</Text>
                   </TouchableOpacity>
                 </>
               ) : (
               <>
-                <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>Meja {selected.no}</Text>
+                <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('tbl_table_no').replace('{no}', selected.no)}</Text>
                 <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
-                  {t(STATUS_LABEL_KEY[selected.status])} • {selected.section} • {selected.kapasitas} pax
+                  {t(STATUS_LABEL_KEY[selected.status])} • {selected.section} • {t('tbl_cap_pax').replace('{n}', String(selected.kapasitas))}
                   {selected.namaTamu ? ` • ${selected.namaTamu}` : ''}
                   {selected.total ? ` • ${rp(selected.total)}` : ''}
                   {selected.seatedMin !== undefined ? ` • ${fmtDurasi(selected.seatedMin, t('tbl.min'), t('tbl.hour'))}` : ''}
-                  {held[selected.id] ? ' • Hold' : ''}
+                  {held[selected.id] ? ` • ${t('tbl_hold')}` : ''}
                 </Text>
                 <AppButton
-                  title={selected.status === 'kosong' ? 'Buat Pesanan' : 'Buka Pesanan'}
+                  title={selected.status === 'kosong' ? t('tbl_create_order') : t('tbl_open_order')}
                   onPress={() => {
                     const tb = selected;
                     closeModal();
@@ -554,7 +554,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                 <View style={s.actionRow}>
                   <AppButton title={t('tbl_book')} variant="secondary" onPress={() => setBookingVisible(true)} fullWidth={false} style={s.actionBtn} />
                   {selected.status !== 'kosong' && (
-                    <AppButton title={held[selected.id] ? 'Lanjut Order' : 'Hold Order'} variant="secondary" onPress={toggleHold} fullWidth={false} style={s.actionBtn} />
+                    <AppButton title={held[selected.id] ? t('tbl_resume_order') : t('tbl_hold_order')} variant="secondary" onPress={toggleHold} fullWidth={false} style={s.actionBtn} />
                   )}
                 </View>
                 <View style={s.actionRow}>
@@ -587,7 +587,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                       style={s.actionBtn}
                     />
                     <AppButton
-                      title={confirmCancel ? 'Yakin? Ketuk lagi' : t('tbl_cancel_table')}
+                      title={confirmCancel ? t('tbl_confirm_again') : t('tbl_cancel_table')}
                       variant="danger"
                       onPress={cancelTable}
                       fullWidth={false}
@@ -615,23 +615,23 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
               {t('tbl_book')}{selected ? ` ${selected.no}` : ''}
             </Text>
-            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Sudah memesan meja? Catat reservasi</Text>
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>{t('tbl_book_hint')}</Text>
             <AppInput
-              placeholder="Nama pelanggan"
+              placeholder={t('tbl_bk_name_ph')}
               value={namaBooking}
               onChangeText={setNamaBooking}
             />
             <View style={s.inputRow}>
               <View style={[s.inputHalf, s.inputHalfWrap]}>
                 <AppInput
-                  placeholder="Jam (19:00)"
+                  placeholder={t('tbl_bk_time_ph')}
                   value={jamBooking}
                   onChangeText={setJamBooking}
                 />
               </View>
               <View style={[s.inputHalf, s.inputHalfWrap]}>
                 <AppInput
-                  placeholder="Pax"
+                  placeholder={t('tbl_bk_pax_ph')}
                   keyboardType="number-pad"
                   value={pax}
                   onChangeText={setPax}
@@ -652,20 +652,20 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         <Pressable style={s.modalBg} onPress={() => setManageOpen(false)}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]} onStartShouldSetResponder={() => true}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
-              Kelola Meja
+              {t('tbl_manage_title')}
             </Text>
-            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Tambah meja baru ke denah.</Text>
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>{t('tbl_manage_hint')}</Text>
             <View style={s.inputRow}>
               <View style={[s.inputHalf, s.inputHalfWrap]}>
                 <AppInput
-                  placeholder="Nomor (A5)"
+                  placeholder={t('tbl_new_no_ph')}
                   value={newNo}
                   onChangeText={setNewNo}
                 />
               </View>
               <View style={[s.inputHalf, s.inputHalfWrap]}>
                 <AppInput
-                  placeholder="Kursi"
+                  placeholder={t('tbl_new_cap_ph')}
                   keyboardType="number-pad"
                   value={newKap}
                   onChangeText={(v) => setNewKap(v.replace(/[^0-9]/g, ''))}
@@ -673,24 +673,24 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               </View>
             </View>
             <AppInput
-              placeholder="Seksi (Dalam/Teras/VIP)"
+              placeholder={t('tbl_new_sec_ph')}
               value={newSection}
               onChangeText={setNewSection}
             />
             {manageWarn ? <Text style={s.warn}>{manageWarn}</Text> : null}
-            <AppButton title="＋ Tambah Meja" onPress={addTable} />
-            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Ketuk Hapus dua kali untuk menghapus meja kosong.</Text>
+            <AppButton title={t('tbl_add_table')} onPress={addTable} />
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>{t('tbl_del_hint')}</Text>
             {tables.map((tb) => (
               <View key={tb.id} style={s.targetRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[s.targetNo, isTablet && s.targetNoBig]}>Meja {tb.no}</Text>
+                  <Text style={[s.targetNo, isTablet && s.targetNoBig]}>{t('tbl_table_no').replace('{no}', tb.no)}</Text>
                   <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
-                    {t(STATUS_LABEL_KEY[tb.status])} • {tb.section} • {tb.kapasitas} pax
+                    {t(STATUS_LABEL_KEY[tb.status])} • {tb.section} • {t('tbl_cap_pax').replace('{n}', String(tb.kapasitas))}
                   </Text>
                 </View>
                 <TouchableOpacity onPress={() => delTable(tb)} hitSlop={10}>
                   <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig, { color: colors.red }]}>
-                    {confirmDelTable === tb.id ? 'Yakin?' : 'Hapus'}
+                    {confirmDelTable === tb.id ? t('tbl_del_confirm') : t('delete')}
                   </Text>
                 </TouchableOpacity>
               </View>

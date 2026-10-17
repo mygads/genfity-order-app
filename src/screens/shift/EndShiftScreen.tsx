@@ -31,7 +31,7 @@ import React, { useEffect, useState } from 'react';import {
 
   const askClose = () => {
     if (!touched) {
-      setError(lang === 'id' ? 'Masukkan kas fisik (hasil hitung laci) terlebih dahulu' : 'Enter the physical cash (drawer count) first');
+      setError(t('endshift_cash_first'));
       return;
     }
     setError('');
@@ -59,19 +59,38 @@ import React, { useEffect, useState } from 'react';import {
     if (!auth.ok) {
       const v = await verifyAttendancePin(pin);
       if (v.ok !== true || !v.userId) {
-        setError(lang === 'id' ? (v.ok === false ? 'PIN salah' : 'PIN tak dikenal (offline)') : (v.ok === false ? 'Wrong PIN' : 'Unknown PIN (offline)'));
+        setError(v.ok === false ? t('shf_pin_wrong') : t('endshift_pin_unknown'));
         return;
       }
       closedBy = v.userId;
     } else {
       try { closedBy = getSession()?.userId || getSession()?.username || null; } catch { /* abaikan */ }
     }
+    // U6: penutup wajib punya baris absensi (status 'absen') — tanpa itu tutup
+    // ditolak (fail-closed). Kunci userId ATAU cashierName, cermin AttendanceScreen.
+    try {
+      const who = (closedBy ?? '').trim();
+      const att = who
+        ? await queryFirst<{ clockIn: string | null }>(
+            `SELECT clockIn FROM tr_shiftlog WHERE status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`,
+            [who, who],
+          )
+        : null;
+      if (!att) {
+        // U6: kunci endshift_no_attendance terverifikasi di kamus.
+        setError(t('endshift_no_attendance'));
+        return;
+      }
+    } catch {
+      setError(t('endshift_no_attendance'));
+      return;
+    }
     // Tutup shift di SQLite + rincian per metode (tr_shiftlogdetail) + selisih,
 // lalu antre sync dan kembali ke layar Shift.
     const nowIso = new Date().toISOString(); const branchId = getTerminal().branchId || null; let shiftId: string | null = summary.openId;
     // Tolak tutup tanpa shift terbuka: jangan karang baris shift 'closed' yatim
     // (dulu else-branch INSERT shift palsu dari tengah malam).
-    if (!shiftId) { setError(lang === 'id' ? 'Tidak ada shift terbuka - buka shift dulu sebelum menutup.' : 'No open shift - open a shift before closing.'); return; }
+    if (!shiftId) { setError(t('endshift_no_open')); return; }
     try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); }
     // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16), dibatasi cabang aktif.
     const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);

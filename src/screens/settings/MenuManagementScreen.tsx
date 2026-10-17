@@ -299,10 +299,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
   /** Hapus menu: konfirmasi dulu, lalu flag nonaktif + outbox agar ikut sync. */
   const confirmDelete = (m: MenuEntry) => {
     Alert.alert(
-      lang === 'en' ? `Delete "${m.name}"?` : `Hapus "${m.name}"?`,
-      lang === 'en'
-        ? 'The menu will be removed from this branch and queued for sync.'
-        : 'Menu akan dihapus dari cabang ini dan ikut sync.',
+      t('menu_del_title').replace('{name}', m.name),
+      t('menu_del_body'),
       [
         { text: t('common.cancel'), style: 'cancel' },
         {

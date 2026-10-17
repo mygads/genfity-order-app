@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
+import { DISPLAY_STALE_MS, refreshDisplayTransport } from '../../lib/display';
 import { useLang, type Lang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import { initDb, query } from '../../lib/db';
@@ -32,15 +33,24 @@ export const QUEUE_VIEW_ROUTE = 'QueueView';
 
 type QueueTicket = { ticket: string; done: boolean };
 
-/** Bentuk event SSE E27 yang defensif (kontrak final mendarat di Fase 4). */
+/** Bentuk event SSE E27 — KONTRAK IMPLEMENTED
+ * (backend `terminal_branch_queue_events.go`, GET
+ * `/api/v1/branches/{branchId}/queue-events?token=`):
+ * - Snapshot (event `queue-update`, tanpa ticket):
+ *   `{branchId, preparing: string[], ready: string[], version, at}`.
+ * - Tunggal (event `queue-update` | `ready`):
+ *   `{ticket, orderId, status: preparing|ready|done, branchId, version, at}`.
+ * - `call` reserved (tak pernah di-emit) tapi diperlakukan done.
+ * - `version` = sekuens hub (BUKAN revisi DB); `id: qb-{branch}-{seq}`
+ *   didedupe di SseClient. Tak ada kunci ticketNo/tickets/code/no. */
 type QueueEvent = {
   ticket?: unknown;
-  code?: unknown;
-  no?: unknown;
   status?: unknown;
   preparing?: unknown;
   ready?: unknown;
-  tickets?: unknown;
+  version?: unknown;
+  branchId?: unknown;
+  orderId?: unknown;
 };
 
 function str(v: unknown): string {
@@ -80,25 +90,47 @@ export default function QueueViewScreen() {
   // SSE E27 primer bila kontrak tersedia; fallback poll berpenanda (§11.4).
   const [sseLive, setSseLive] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
+  /** D4: jam poll fallback (tak dipakai label umur — label dari jam live). */
+  const [, setLastPollAt] = useState<number | null>(null);
   const [branchName, setBranchName] = useState(() => currentBranch().name);
-  const [, setUiTick] = useState(0);
+  const [uiTick, setUiTick] = useState(0);
 
   useEffect(() => subscribeSession(() => setUiTick((x) => x + 1)), []);
+  /** D10: transport display di-refresh saat sesi berubah (no-op bila bus tak
+   * aktif di layar ini — refreshDisplayTransport idempoten). */
+  useEffect(() => {
+    try {
+      refreshDisplayTransport();
+    } catch {
+      /* abaikan */
+    }
+  }, [uiTick]);
   useEffect(() => {
     const id = setInterval(() => setUiTick((x) => x + 1), 10000);
     return () => clearInterval(id);
   }, []);
 
+  /** Progres sekuens hub terakhir (max saja — seq reset saat BE restart,
+   * jadi tak dipakai untuk drop; dedupe id: milik SseClient). */
+  const lastVersion = useRef(-1);
+
   const applyEvent = (e: QueueEvent) => {
-    const ticket = str(e.ticket ?? e.code ?? e.no);
-    const listOf = (v: unknown): string[] =>
-      Array.isArray(v) ? v.map(str).filter((s) => s !== '') : [];
-    const prepList = listOf(e.preparing ?? e.tickets);
-    const readyList = listOf(e.ready);
-    if (prepList.length > 0) setPrep(prepList.slice(0, 12));
-    if (readyList.length > 0) setReady(readyList.slice(0, 12));
+    // version = sekuens hub: catat progres, bukan revisi tiket.
+    const v = Number(e.version);
+    if (Number.isFinite(v)) lastVersion.current = Math.max(lastVersion.current, v);
+    const listOf = (val: unknown): string[] =>
+      Array.isArray(val) ? val.map(str).filter((s) => s !== '') : [];
+    // Snapshot queue-update membawa kunci preparing/ready (bisa kosong):
+    // GANTI kolom (daftar kosong = kosong jujur, bukan stale).
+    const hasPrep = Array.isArray(e.preparing);
+    const hasReady = Array.isArray(e.ready);
+    if (hasPrep) setPrep(listOf(e.preparing).slice(0, 12));
+    if (hasReady) setReady(listOf(e.ready).slice(0, 12));
+    // Frame tunggal membawa data.ticket + status preparing|ready|done
+    // (status absen = fallback nama event SSE, diteruskan pemanggil).
+    const ticket = str(e.ticket);
     if (ticket) {
-      const done = /ready|call|done|selesai|paid/i.test(str(e.status));
+      const done = /^(ready|done|call)$/i.test(str(e.status));
       if (done) {
         setPrep((p) => p.filter((x) => x !== ticket));
         setReady((r) => (r.includes(ticket) ? r : [ticket, ...r].slice(0, 12)));
@@ -173,7 +205,7 @@ export default function QueueViewScreen() {
           h.queueNumber || h.tableNo || h.salesNum;
         setPrep(heads.filter((h) => (h.status ?? 'open') !== 'paid').map(tag).filter((s) => s).slice(0, 12));
         setReady(heads.filter((h) => (h.status ?? '') === 'paid').map(tag).filter((s) => s).slice(0, 12));
-        setLastDataAt(Date.now());
+        setLastPollAt(Date.now());
       } catch {
         /* DB belum siap — biarkan kosong jujur */
       }
@@ -186,8 +218,11 @@ export default function QueueViewScreen() {
       alive = false;
       clearInterval(timer);
     };
+    // D15: sseConfigured + branchId eksplisit di deps. branchName SENGAJA
+    // dikecualikan (tulis-terjaga di dalam efek; memasukkannya memicu poll
+    // ulang tiap render nama) — eslint-disable dipertahankan (DECISION).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sseLive]);
+  }, [sseLive, sseConfigured, branchId]);
 
   const staleAgeSec =
     lastDataAt === null ? null : Math.max(0, Math.round((Date.now() - lastDataAt) / 1000));
@@ -197,6 +232,10 @@ export default function QueueViewScreen() {
       : staleAgeSec < 120
         ? `${staleAgeSec}s`
         : `${Math.floor(staleAgeSec / 60)}m`;
+  /** D3: basi bila feed primer tak live ATAU jam live basi. D4: jam live
+   * hanya dari kaki live (poll menulis lastPollAt, bukan lastDataAt). */
+  const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);
+  const showStaleBanner = !sseLive || liveAgeMs < 0 || liveAgeMs > DISPLAY_STALE_MS;
   const isEmpty = prep.length === 0 && ready.length === 0;
   const rows: QueueTicket[] = [
     ...ready.map((ticket) => ({ ticket, done: true })),
@@ -226,8 +265,8 @@ export default function QueueViewScreen() {
           <Text style={styles.offlineBannerText}>{t('disp_offline_banner')}</Text>
         </View>
       ) : null}
-      {!sseLive && staleAgeLabel !== null ? (
-        <Text style={styles.staleText}>{`${t('disp_stale')} · ${staleAgeLabel}`}</Text>
+      {showStaleBanner ? (
+        <Text style={styles.staleText}>{staleAgeLabel ? `${t('disp_stale')} · ${staleAgeLabel}` : t('disp_stale')}</Text>
       ) : null}
       {isEmpty ? (
         <View style={styles.emptyCard}>
@@ -240,7 +279,7 @@ export default function QueueViewScreen() {
             {rows
               .filter((r) => !r.done)
               .map((r) => (
-                <View key={r.ticket} style={styles.ticketPrep}>
+                <View key={`prep:${r.ticket}`} style={styles.ticketPrep}>
                   <Text style={[styles.ticketNo, isTablet && styles.ticketNoBig]}>{r.ticket}</Text>
                 </View>
               ))}
@@ -250,7 +289,7 @@ export default function QueueViewScreen() {
             {rows
               .filter((r) => r.done)
               .map((r, i) => (
-                <View key={r.ticket} style={[styles.ticketReady, i === 0 && styles.ticketFirst]}>
+                <View key={`ready:${r.ticket}`} style={[styles.ticketReady, i === 0 && styles.ticketFirst]}>
                   <Text style={[styles.ticketNo, styles.ticketNoReady, isTablet && styles.ticketNoBig]}>
                     {r.ticket}
                   </Text>

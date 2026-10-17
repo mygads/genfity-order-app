@@ -139,7 +139,10 @@ export default function DineInScreen({ navigation, route }: Props) {
           mode,
           table,
           items: active,
-          ongkir: ongkirNet,
+          // Draft simpan bruto + cut (cermin CartDetail) agar muat-ulang
+          // hitung ulang kanonis dari dasar yang sama.
+          ...(ongkir > 0 ? { ongkir } : {}),
+          ...(ongkirCut > 0 ? { ongkirCut } : {}),
           ...(num ? { salesNum: num } : {}),
           ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
           ...(memberId ? { memberId } : {}),
@@ -165,8 +168,11 @@ export default function DineInScreen({ navigation, route }: Props) {
         ...(mode ? { mode } : {}),
         ...(table ? { table } : {}),
         ...(guest.trim() ? { customer: guest.trim() } : {}),
-        ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
-        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+        // SplitBill menghitung ulang kanonis dari ongkir BRUTO; kirim net =
+        // cut tak terhitung. Extras rate/cap/minSpend wajib agar persen
+        // tak jadi flat / minSpend tak hilang di split.
+        ...(ongkir > 0 ? { ongkir } : {}),
+        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
         discount: discountTotal + voucherAmt,
       });
@@ -180,7 +186,12 @@ export default function DineInScreen({ navigation, route }: Props) {
       items: active,
       discount: discountForChain,
       ...(voucher ? { voucherCode: voucher.code } : {}),
-      ongkir: ongkirNet,
+      // Struk pracetak = pratinjau belum bayar: bruto + cut + tanda unpaid
+      // agar kertas/sharing/thermal jujur (tanpa ini ongkir tampil net dan
+      // struk terbaca lunas).
+      ...(ongkir > 0 ? { ongkir } : {}),
+      ...(ongkirCut > 0 ? { ongkirCut } : {}),
+      unpaid: true,
       // Rincian info-only agar baris struk pas dengan total (service/pajak/fee/pembulatan).
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
@@ -199,8 +210,10 @@ export default function DineInScreen({ navigation, route }: Props) {
       mode,
       table,
       discount: discountForChain,
-      ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
-      ongkir: ongkirNet,
+      ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
+      // Ongkir BRUTO + cut terpisah (kontrak PayScreen).
+      ...(ongkir > 0 ? { ongkir } : {}),
+      ...(ongkirCut > 0 ? { ongkirCut } : {}),
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -16,11 +16,15 @@ import AppButton from '../../components/AppButton';
 import { fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
-import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
-import { initDb, query, run } from '../../lib/db';
+import { ApiPath, getBranchId, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
+import { initDb, query, queryFirst, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
-import { enqueueOutbox, enqueueSync } from '../../lib/sync';
-import { useLang } from '../../lib/i18n';
+import { newDepositKey, postDepositOnce } from '../../lib/deposit';
+import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
+import { tOf, useLang } from '../../lib/i18n';
+import type { Lang } from '../../lib/i18n';
+import { getSession } from '../../session';
+import { hasOpenShift } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -33,6 +37,8 @@ type OrderCtx = {
   mode?: string;
   table?: string;
   ongkir?: number;
+  // Potongan ongkir voucher terpisah (bruto + cut): teruskan apa adanya.
+  ongkirCut?: number;
   customer?: string;
   voucher?: string | { code: string; amount: number; kind?: string } | number;
   voucherCode?: string;
@@ -44,7 +50,7 @@ type OrderCtx = {
 };
 type Props = {
   navigation?: Nav;
-  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number; from?: string; returnTo?: string } & Partial<OrderCtx> };
+  route?: { params?: { memberId?: string; saldoBaru?: number; topupNominal?: number; from?: string; returnTo?: string; ongkirCut?: number } & Partial<OrderCtx> };
 };
 
 type Member = {
@@ -118,7 +124,7 @@ async function loadMembersFromSqlite(): Promise<Member[]> {
 /** Riwayat nyata per member dari SQLite: deposit/withdraw
  * (tr_memberdeposit + tr_membertransactionlog) + penjualan yang menyebut
  * memberId ini (tr_saleshead). Kosong = belum ada transaksi. */
-async function loadMemberHistoryFromSqlite(memberId: string): Promise<Riwayat[]> {
+async function loadMemberHistoryFromSqlite(memberId: string, lang: Lang): Promise<Riwayat[]> {
   await initDb();
   const out: Riwayat[] = [];
   try {
@@ -137,8 +143,8 @@ async function loadMemberHistoryFromSqlite(memberId: string): Promise<Riwayat[]>
         id: String(d.id ?? `dep-${out.length}`),
         tanggal: String(d.trxDate ?? '').slice(0, 10),
         keterangan: tipe.includes('withdraw') || amt < 0
-          ? 'Bayar (Deposit)'
-          : 'Top up deposit',
+          ? tOf('mem_pay_deposit', lang)
+          : tOf('mem_topup_deposit', lang),
         nominal: amt,
       });
     }
@@ -159,7 +165,7 @@ async function loadMemberHistoryFromSqlite(memberId: string): Promise<Riwayat[]>
       out.push({
         id: String(l.id ?? `log-${out.length}`),
         tanggal: String(l.trxDate ?? '').slice(0, 10),
-        keterangan: String(l.trxType ?? 'Transaksi member'),
+        keterangan: String(l.trxType ?? tOf('mem_txn_fallback', lang)),
         nominal: amt,
       });
     }
@@ -180,7 +186,7 @@ async function loadMemberHistoryFromSqlite(memberId: string): Promise<Riwayat[]>
       out.push({
         id: String(sh.salesNum ?? `sale-${out.length}`),
         tanggal: String(sh.salesDate ?? '').slice(0, 10),
-        keterangan: `Bayar ${String(sh.salesNum ?? '')} (${String(sh.paymentMethod ?? '')})`,
+        keterangan: tOf('mem_pay_line', lang).replace('{n}', String(sh.salesNum ?? '')).replace('{m}', String(sh.paymentMethod ?? '')),
         nominal: -total,
       });
     }
@@ -224,26 +230,72 @@ async function persistMember(id: string, nama: string, noHp: string): Promise<vo
 /**
  * Deposit member ikut kontrak §5.2 seperti TopupDepositScreen: POST
  * member-deposit-withdrawal/topup {memberId, amount, paymentMethod, note}.
- * inquiry-deposit hanya untuk cek saldo, bukan top up. Selalu catat ke
- * outbox + antrean sync agar aman offline.
+ * inquiry-deposit hanya untuk cek saldo, bukan top up.
+ *
+ * SINGLE-POST (satu-satunya jalur tulis deposit layar ini): satu tap = SATU
+ * kunci `dep-…` bersama untuk ledger + fisik + light + direct
+ * (direct-or-one-light). Light 'member-deposit' terpisah DIHAPUS — yang hidup
+ * hanya light kind 'deposit-topup' (routing pathFor tak diubah agar antrean
+ * warisan tetap terkuras). Selalu catat lokal dulu agar aman offline.
  */
 async function persistDeposit(memberId: string, amount: number, via: string): Promise<void> {
+  // 'cepat' adalah label UI deposit cepat - kirim metode bayar yang dikenal server.
+  const paymentMethod = via === 'cepat' ? 'Tunai' : via;
+  // SATU kunci idempotensi untuk semua kanal tap ini.
+  const key = newDepositKey();
+  // Lokal dulu: bump saldo + ledger (id = kunci bersama) + fisik SAJA.
+  try {
+    await initDb();
+    await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [amount, memberId]);
+    let after: number | null = null;
+    try {
+      const cur = await queryFirst<{ depositBalance: number | null }>(
+        'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+        [memberId],
+      );
+      after = Math.max(0, Math.round(Number(cur?.depositBalance) || 0));
+    } catch {
+      /* balanceAfter boleh null — saldo ms_member tetap naik */
+    }
+    const nowIso = new Date().toISOString();
+    // WIRE-APPROVAL: baris ledger wajib membawa branchId sesi/binding
+    // (paritas TopupDepositScreen/sales.ts) agar push + rekap per cabang benar.
+    // Ledger juga mencatat id kasir (kolom userId sudah ada di skema).
+    const depUser = getSession()?.userId || getSession()?.username || null;
+    await run(
+      'INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)',
+      [key, memberId, getTerminal().branchId || null, 'topup', amount, after, depUser, nowIso],
+    );
+  } catch {
+    /* abaikan - outbox + direct di bawah tetap jalan */
+  }
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
   } catch {
     /* abaikan */
   }
   try {
-    enqueueSync('other', { kind: 'member-deposit', memberId, amount, via });
+    // Fisik SAJA (tanpa light generik kembar {table,rowId,op}).
+    await enqueueOutboxPhysical('tr_memberdeposit', key, 'insert');
   } catch {
     /* abaikan */
   }
+  // Direct-or-one-light dengan kunci yang sama; light twin HANYA bila direct
+  // tak posted (offline/gagal/timeout).
+  let posted = false;
   try {
-    // 'cepat' adalah label UI deposit cepat - kirim metode bayar yang dikenal server.
-    const paymentMethod = via === 'cepat' ? 'Tunai' : via;
-    await apiFetch(ApiPath.depositTopup, { body: { memberId, amount, paymentMethod, note: 'Deposit cepat Member' } });
+    posted = (await postDepositOnce({ key, memberId, amount, method: paymentMethod, note: 'Deposit cepat Member' })).posted;
   } catch {
-    /* offline - terkirim via push berikutnya */
+    posted = false;
+  }
+  if (!posted) {
+    try {
+      // Alias kanonis kontrak §5.2 (amount/paymentMethod) di samping kunci
+      // ringan lama (nominal/method) agar server ketat tetap memproses retry.
+      enqueueSync('other', { kind: 'deposit-topup', memberId, nominal: amount, method: paymentMethod, amount, paymentMethod, clientId: key }, key);
+    } catch {
+      /* abaikan */
+    }
   }
 }
 
@@ -269,6 +321,12 @@ export default function MemberScreen({ navigation, route }: Props) {
   const [depositVisible, setDepositVisible] = useState(false);
   const [depositNominal, setDepositNominal] = useState('');
   const [depositErr, setDepositErr] = useState('');
+  // Guard ketuk-ganda deposit cepat: ref sinkron (anti-interleave antar-tap)
+  // + state untuk menonaktifkan tombol modal selama menyimpan.
+  const depositBusy = useRef(false);
+  const [depositSaving, setDepositSaving] = useState(false);
+  // U4: error gerbang identitas tambah-member (tampil di modal tambah).
+  const [addErr, setAddErr] = useState('');
   // Saldo inquiry server untuk member terpilih (null = belum ada / hanya dummy).
   const [inquiry, setInquiry] = useState<{ saldo: number; poin: number } | null>(null);
   // WIRE REA-3: saldo via erp/member balance-deposit di samping inquiry-deposit
@@ -446,7 +504,7 @@ export default function MemberScreen({ navigation, route }: Props) {
     const nama = selected.nama;
     (async () => {
       try {
-        const local = await loadMemberHistoryFromSqlite(mid);
+        const local = await loadMemberHistoryFromSqlite(mid, lang);
         if (live) {
           setRiwayat((rw) => ({ ...rw, [mid]: local }));
         }
@@ -471,7 +529,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           rows.push({
             id: String(it.salesNum ?? `srv-${rows.length}`),
             tanggal: String(it.salesDate ?? '').slice(0, 10),
-            keterangan: `Bayar ${String(it.salesNum ?? '')} (${String(it.paymentMethod ?? '')})`,
+            keterangan: t('mem_pay_line').replace('{n}', String(it.salesNum ?? '')).replace('{m}', String(it.paymentMethod ?? '')),
             nominal: -total,
           });
         }
@@ -502,7 +560,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...rw,
       [mid]: [
         // Riwayat mencatat nominal top up-nya, bukan saldo akhir.
-        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: 'Top up deposit (Top Up)', nominal: typeof topup === 'number' ? topup : baru },
+        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: t('mem_topup_full'), nominal: typeof topup === 'number' ? topup : baru },
         ...(rw[mid] ?? []),
       ],
     }));
@@ -524,7 +582,17 @@ export default function MemberScreen({ navigation, route }: Props) {
             m.id.toLowerCase().includes(q.toLowerCase()),
         );
 
-  const saveMember = () => {
+  const saveMember = async () => {
+    // U4: member-create = gerbang identitas (bound terminal + shift buka, fail-closed).
+    if (!getBranchId().trim()) {
+      setAddErr(t('terminal_unbound_hint'));
+      return;
+    }
+    if (!(await hasOpenShift())) {
+      setAddErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+      return;
+    }
+    setAddErr('');
     if (nama.trim() && noHp.trim()) {
       const id = `M${String(Date.now()).slice(-6)}`;
       const nm = nama.trim();
@@ -551,76 +619,66 @@ export default function MemberScreen({ navigation, route }: Props) {
     setTglLahir('');
   };
 
-  const saveDeposit = () => {
-    const n = Number(depositNominal) || 0;
-    if (!selected) {
+  const saveDeposit = async () => {
+    // Guard ketuk-ganda: set SEBELUM await pertama agar tap kedua yang datang
+    // saat gerbang identitas/persist menunggu langsung ditolak.
+    if (depositBusy.current || depositSaving) return;
+    depositBusy.current = true;
+    setDepositSaving(true);
+    try {
+      const n = Number(depositNominal) || 0;
+      if (!selected) {
+        setDepositVisible(false);
+        setDepositNominal('');
+        setDepositErr('');
+        return;
+      }
+      // U3: deposit-save = gerbang bound terminal + shift buka (fail-closed).
+      if (!getBranchId().trim()) {
+        setDepositErr(t('terminal_unbound_hint'));
+        return;
+      }
+      if (!(await hasOpenShift())) {
+        setDepositErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+        return;
+      }
+      // Deposit cepat menolak nominal di bawah MIN_TOPUP dengan pesan.
+      if (n < MIN_TOPUP) {
+        setDepositErr(t('top_hint'));
+        return;
+      }
+      setDepositErr('');
+      const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
+      const mid = selected.id;
+      // SATU jalur tulis (persistDeposit): lokal + fisik + direct-or-one-light
+      // dengan satu kunci bersama. Blok ledger inline ganda DIHAPUS.
+      await persistDeposit(mid, n, 'cepat');
+      // Poin bertahan di perangkat via overlay (dulu memori saja, hilang saat muat ulang).
+      void addPoints(mid, poin).then((total) => {
+        setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
+        setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
+      });
+      setMembers((ms) =>
+        ms.map((m) =>
+          m.id === mid ? { ...m, saldo: m.saldo + n } : m,
+        ),
+      );
+      setSelected((sb) =>
+        sb ? { ...sb, saldo: sb.saldo + n } : sb,
+      );
+      setRiwayat((rw) => ({
+        ...rw,
+        [mid]: [
+          { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: t('mem_topup_quick'), nominal: n },
+          ...(rw[mid] ?? []),
+        ],
+      }));
       setDepositVisible(false);
       setDepositNominal('');
-      setDepositErr('');
-      return;
+    } finally {
+      depositBusy.current = false;
+      setDepositSaving(false);
     }
-    // Deposit cepat menolak nominal di bawah MIN_TOPUP dengan pesan.
-    if (n < MIN_TOPUP) {
-      setDepositErr(t('top_hint'));
-      return;
-    }
-    setDepositErr('');
-    const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
-    void persistDeposit(selected.id, n, 'cepat');
-    const mid = selected.id;
-    // Catat transaksi nyata ke SQLite: saldo member + log deposit + outbox/sync
-    // (paritas TopupDepositScreen agar topup cepat ikut ter-push server).
-    void (async () => {
-      try {
-        await initDb();
-        const nowIso = new Date().toISOString();
-        const depId = `dep-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-        await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [n, mid]);
-        await run(
-          'INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, trxType, amount, balanceAfter, trxDate, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL)',
-          [depId, mid, 'topup', n, selected.saldo + n, nowIso],
-        );
-        try {
-          await enqueueOutbox('ms_member', mid, 'update');
-        } catch {
-          /* abaikan */
-        }
-        try {
-          await enqueueOutbox('tr_memberdeposit', depId, 'insert');
-        } catch {
-          /* abaikan */
-        }
-        try {
-          enqueueSync('other', { kind: 'deposit-topup', memberId: mid, nominal: n, method: 'cepat' });
-        } catch {
-          /* abaikan */
-        }
-      } catch {
-        /* abaikan - state memori tetap jalan */
-      }
-    })();
-    // Poin bertahan di perangkat via overlay (dulu memori saja, hilang saat muat ulang).
-    void addPoints(mid, poin).then((total) => {
-      setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
-      setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
-    });
-    setMembers((ms) =>
-      ms.map((m) =>
-        m.id === selected.id ? { ...m, saldo: m.saldo + n } : m,
-      ),
-    );
-    setSelected((sb) =>
-      sb ? { ...sb, saldo: sb.saldo + n } : sb,
-    );
-    setRiwayat((rw) => ({
-      ...rw,
-      [selected.id]: [
-        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: 'Top up deposit (Cepat)', nominal: n },
-        ...(rw[selected.id] ?? []),
-      ],
-    }));
-    setDepositVisible(false);
-    setDepositNominal('');
   };
 
   const goTopup = () => {
@@ -652,6 +710,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...(p?.mode ? { mode: p.mode } : {}),
       ...(p?.table ? { table: p.table } : {}),
       ...(p?.ongkir != null ? { ongkir: p.ongkir } : {}),
+      ...(p?.ongkirCut != null ? { ongkirCut: p.ongkirCut } : {}),
       ...(p?.customer ? { customer: p.customer } : {}),
       ...(p?.voucher != null ? { voucher: p.voucher } : {}),
       ...(p?.voucherCode ? { voucherCode: p.voucherCode } : {}),
@@ -679,7 +738,7 @@ export default function MemberScreen({ navigation, route }: Props) {
   const list = (
     <ScrollView contentContainerStyle={s.body}>
       <Text style={s.count}>
-        {hasil.length} {t('mem_registered')}{q.trim() ? ` - hasil "${q.trim()}"` : ''}
+        {hasil.length} {t('mem_registered')}{q.trim() ? t('mem_search_suffix').replace('{q}', q.trim()) : ''}
       </Text>
       {hasil.length === 0 ? (
         <View style={s.empty}>
@@ -759,7 +818,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           ) : null}
           <Text style={s.riwayatTitle}>{t('mem_history')}</Text>
           {!online && (
-            <Text style={s.offlineNote}>Offline - riwayat dari cache lokal, disinkron saat online.</Text>
+            <Text style={s.offlineNote}>{t('mem_offline_note')}</Text>
           )}
           {historyList.map((r) => (
             <View key={r.id} style={s.riwayatRow}>
@@ -912,10 +971,11 @@ export default function MemberScreen({ navigation, route }: Props) {
               value={tglLahir}
               onChangeText={setTglLahir}
             />
-            <AppButton size="sm" title={t('mem_save')} onPress={saveMember} />
+            <AppButton size="sm" title={t('mem_save')} onPress={() => void saveMember()} />
+            {addErr ? <Text style={s.minErr}>{addErr}</Text> : null}
             <TouchableOpacity
               style={s.cancelBtn}
-              onPress={() => setAddVisible(false)}>
+              onPress={() => { setAddVisible(false); setAddErr(''); }}>
               <Text style={s.cancelTxt}>{t('mem_cancel_add')}</Text>
             </TouchableOpacity>
           </View>
@@ -960,7 +1020,7 @@ export default function MemberScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               ))}
             </View>
-            <AppButton size="sm" title={t('mem_quick_btn')} onPress={saveDeposit} />
+            <AppButton size="sm" title={t('mem_quick_btn')} disabled={depositSaving} onPress={() => void saveDeposit()} />
             <AppButton size="sm" title={`${t('mem_full_form')} ›`} variant="secondary" onPress={goTopup} />
             <TouchableOpacity
               style={s.cancelBtn}

@@ -200,9 +200,12 @@ export async function pendingPrintCount(): Promise<number> {
 /**
  * Kuras antrean FIFO (`createdAt ASC`, maks 50 baris per drain — meniru batas
  * 200 baris `sync.ts` dengan nilai lebih kecil karena byte cetak berat).
- * Dipanggil: (1) piggyback tiap cetak sukses (`lib/print.ts`), (2) sukses
- * test-print `PrintersScreen` (wiring milik lane UI, bukan file ini),
- * (3) worker reconnect (milik lane realtime). Baris gagal ditandai
+ * Wiring saat ini (terverifikasi grep): HANYA piggyback tiap cetak sukses
+ * (`lib/print.ts`:331,:380,:425). Belum ada wiring drain saat sukses
+ * test-print `PrintersScreen.testPrintStation` (langsung `printBytes`,
+ * tanpa drain) dan belum ada drain saat worker reconnect (milik lane
+ * realtime). `pendingPrintCount` sudah diekspor dan DITAMPILKAN di
+ * `SyncScreen` (baris `tr_printqueue`) — backlog cetak terlihat. Baris gagal ditandai
  * 'gagal' + retry count naik, drain lanjut (tidak berhenti). Tak melempar.
  */
 export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {

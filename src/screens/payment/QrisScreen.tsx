@@ -30,13 +30,23 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   // riwayat; baru diterbitkan bila belum ada). Diselesaikan sekali agar QR yang
   // tampil = kunci yang dipakai settlePaid (QR tak basi).
   const [qrChainId, setQrChainId] = useState((route?.params?.clientId ?? '').trim());
+  // P2: resolusi rantai client_id dijaga — gagal = status error + Alert,
+  // QR tidak dirender (P9) agar tak ada QR basi/acak.
+  const [chainErr, setChainErr] = useState(false);
   useEffect(() => {
     if (qrChainId) return;
     let on = true;
     void (async () => {
-      const sn = (route?.params?.salesNum ?? '').trim();
-      const head = sn ? await getSaleClientId(sn) : null;
-      if (on) setQrChainId(head ?? uuidv7());
+      try {
+        const sn = (route?.params?.salesNum ?? '').trim();
+        const head = sn ? await getSaleClientId(sn) : null;
+        if (on) setQrChainId(head ?? uuidv7());
+      } catch {
+        if (on) {
+          setChainErr(true);
+          Alert.alert(t('pay_issue_fail'));
+        }
+      }
     })();
     return () => { on = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,6 +112,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
+      } else {
+        Alert.alert(t('pay_issue_fail'));
       }
       return;
     }
@@ -111,13 +123,29 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     let saleClientId: string;
     try {
       saleClientId = (p.clientId ?? '').trim() || qrChainId || (await getSaleClientId(orderNo)) || uuidv7();
-    } catch {
+    } catch (e) {
       settledRef.current = false;
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+      } else {
+        Alert.alert(t('pay_issue_fail'));
+      }
       return;
     }
-    const fwdSplits = (p.splits ?? [])
-      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
+    // P7/P15: kaki terusan boleh membawa approvalCode/memberId defensif dari
+    // Pay (tipe nav params belum diperluas) — dipertahankan ke visitPay agar
+    // atribusi deposit + kode otorisasi EDC tak hilang di kunjungan QRIS.
+    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string };
+    const fwdSplits = ((p.splits ?? []) as FwdLeg[])
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}) }))
       .filter((s) => s.amount > 0);
+    const legMemberId = ((p.splits ?? []) as FwdLeg[])
+      .map((s) => String(s?.memberId ?? '').trim())
+      .find((v) => v !== '') ?? '';
+    const effMemberId = (memberId ?? '').trim() || legMemberId;
     const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
     const fullTotal = paidBefore + total;
     // Split grup (SplitBill via Pay): kunjungan QRIS ikut SATU salesNum.
@@ -131,9 +159,9 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       const visitPay = [...fwdSplits, { method: 'qris', amount: total }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0, clientId: saleClientId, ...(memberId ? { memberId } : {}) });
+          await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}) });
         } else {
-          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, clientId: saleClientId, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
+          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, clientId: saleClientId, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
           recordSale(gInput);
           try { await saveSale(gInput); } catch (e) {
             // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
@@ -175,10 +203,10 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           orderTotalFull,
         );
       } catch { /* abaikan */ }
-      navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, clientId: saleClientId, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
+      navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, clientId: saleClientId, approvalCode: refCode, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
       return;
     }
-    const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch (e) {
+    const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch (e) {
       // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
         Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
@@ -190,7 +218,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
         return;
       }
       /* DB gagal - kasir tetap jalan */
-    } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+    } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
@@ -270,11 +298,19 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
               {/* APP-R3: FauxQr di atas pola dekoratif saja (bukan QRIS asli) —
                   payload scannable yang jujur = teks qrPayload di bawah ini
                   sampai dep renderer QR tersedia. */}
-              <FauxQr seed={total} />
-              {/* M15: payload QR nyata (client_id rantai + salesNum + total) —
-                  bukan nominal-dekoratif; teks sampai renderer QR tersedia. */}
-              <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
-              <Text style={styles.qrSub}>{t('qris_scan')}</Text>
+              {/* P9: QR tidak dirender sebelum client_id rantai siap (tanpa QR
+                  basi); fallback loading jujur selagi resolusi berjalan. */}
+              {!qrChainId.trim() ? (
+                <Text style={styles.qrSub}>{t('qris_checking')}</Text>
+              ) : (
+                <>
+                  <FauxQr seed={total} />
+                  {/* M15: payload QR nyata (client_id rantai + salesNum + total) —
+                      bukan nominal-dekoratif; teks sampai renderer QR tersedia. */}
+                  <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
+                  <Text style={styles.qrSub}>{t('qris_scan')}</Text>
+                </>
+              )}
             </View>
           </View>
 

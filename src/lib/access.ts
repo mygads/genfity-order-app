@@ -123,10 +123,18 @@ export function listAccessKeys(): string[] {
 async function checkTerminalGrant(userId: string): Promise<
   | { state: 'absent' }
   | { state: 'ok' }
-  | { state: 'denied'; reason: 'grant-expired' | 'grant-mismatch' }
+  | { state: 'denied'; reason: 'grant-expired' | 'grant-mismatch' | 'no-grant' }
 > {
   await hydrateTerminalState();
-  if (!getGrant()) return { state: 'absent' };
+  if (!getGrant()) {
+    // Fail-closed untuk grant HILANG bila device sudah ter-bound (grant
+    // SEHARUSNYA ada: login pertama wajib online menerbitkannya, Q6).
+    // Legacy fail-open lestari HANYA pra-bind (binding tanpa terminalId —
+    // grant belum BISA ada) + warn-once, kompatibilitas kasir offline.
+    const terminalId = (getBinding()?.terminalId ?? '').trim();
+    if (!terminalId) return { state: 'absent' };
+    return { state: 'denied', reason: 'no-grant' };
+  }
   const terminalId = (getBinding()?.terminalId ?? '').trim();
   if (!terminalId) {
     // Grant ada tapi device belum terikat terminal yang dikenal => tolak.
@@ -202,7 +210,11 @@ async function decideHierarchy(userId: string, accessKey: string): Promise<Acces
     }
   }
 
-  // 4. Fail-open: tanpa baris = allow (kompatibilitas kasir offline).
+  // 4. Fail-open TERBATAS: tanpa baris = allow HANYA karena (a) pra-bind
+  // (grant belum BISA ada — lihat checkTerminalGrant) atau (b) grant valid
+  // tapi peran/user tanpa baris (kompatibilitas RBAC lama; grant sudah
+  // memverifikasi ikatan). Bound + grant HILANG tak pernah sampai sini
+  // (ditolak 'no-grant' di gerbang 0 di atas).
   warnFailOpenOnce('default-allow', userId, accessKey);
   return { ok: true, reason: 'default-allow' };
 }

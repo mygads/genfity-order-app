@@ -22,6 +22,10 @@ type SplitParams = {
   customer?: string;
   memberId?: string;
   ongkir?: number;
+  /** Porsi voucher atas ongkir (diteruskan ke Pay → saveSale info audit). */
+  ongkirCut?: number;
+  /** Id penyetuju eskalasi (diteruskan ke Pay → saveSale info audit). */
+  approvedBy?: string;
   voucher?: VoucherParam;
   discount?: number;
   service?: number;
@@ -179,6 +183,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const voucherCap = (() => { const n = Math.round(Number(voucherObj?.maxAmount) || 0); return n > 0 ? n : undefined; })();
   const voucherMin = (() => { const n = Math.round(Number(voucherObj?.minSpend) || 0); return n > 0 ? n : undefined; })();
   const ongkirParam = asAmount(params.ongkir);
+  // L11: teruskan konteks audit ke Pay → saveSale (konsumsi di PayScreen
+  // adalah wewenang pemiliknya; kontrak sisi SplitBill = meneruskan).
+  const ongkirCutParam = asAmount(params.ongkirCut);
+  const approvedBy = asText(params.approvedBy);
 
   const itemSplits = useMemo(() => {
     const arr = Array(splits).fill(0) as number[];
@@ -206,6 +214,11 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     esbOrder: isMarketplaceMode(mode),
     taxRate,
   });
+  // L8: representasi voucher — `discount` INCLUDES voucher, `voucher.amount`
+  // adalah SUBSET porsi voucher untuk pelaporan; pembaca (Pay/saveSale)
+  // JANGAN menjumlahkan keduanya. L7: kirim TERPISAH — voucher {code,
+  // amount: voucherEff} + discount: discountEff (tanpa mencampur voucherEff
+  // ke discount).
   const discountEff = Math.min(asAmount(params.discount), Math.max(0, itemSum - canon.voucherAmt));
   const serviceEff = params.service !== undefined ? asAmount(params.service) : canon.service;
   const feeEff = canon.feeESB;
@@ -217,6 +230,12 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const residual = orderTotal - (itemSum - canon.voucherAmt - discountEff + serviceEff + canon.ongkirNet + feeEff);
   const ongkirEff = Math.max(0, canon.ongkirNet + residual);
   const voucherEff = canon.voucherAmt + Math.max(0, -(canon.ongkirNet + residual));
+  // L24 (display saja; matematika charge di atas tak berubah): residual
+  // (selisih total pemanggil vs kanonik, termasuk pembulatan pemanggil)
+  // DITAMPILKAN di baris rounding, BUKAN dilipat ke baris ongkir — baris
+  // ongkir selalu ongkirNet kanonis. Kasus normal residual = 0 sehingga
+  // tampilan identik dengan sebelumnya.
+  const roundingShown = canon.rounding + residual;
 
   // Reaporsi tiap komponen: perItem proporsional itemSplit; rata/nominal bobot
   // sama agar share ongkir/voucher/diskon/fee/pajak tetap diteruskan ke Pay.
@@ -297,8 +316,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
       ...(ongkirEff > 0 ? { ongkir: ongkirEff } : {}),
+      ...(ongkirCutParam > 0 ? { ongkirCut: ongkirCutParam } : {}),
+      ...(approvedBy ? { approvedBy } : {}),
       ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherEff, ...(voucherKind ? { kind: voucherKind } : {}), ...voucherExtras({ rate: voucherRate, maxAmount: voucherCap, minSpend: voucherMin }) } } : {}),
-      ...(discountEff + voucherEff > 0 ? { discount: discountEff + voucherEff } : {}),
+      ...(discountEff > 0 ? { discount: discountEff } : {}),
       ...(serviceEff > 0 ? { service: serviceEff } : {}),
       ...(feeEff > 0 ? { feeESB: feeEff } : {}),
       ...(canon.taxIncl > 0 ? { tax: canon.taxIncl } : {}),
@@ -411,7 +432,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           {ongkirEff > 0 && (
             <View style={styles.metaRow}>
               <Text style={styles.metaL}>{t('deliveryFee')}</Text>
-              <Text style={styles.metaV}>+{rp(ongkirEff)}</Text>
+              <Text style={styles.metaV}>+{rp(canon.ongkirNet)}</Text>
             </View>
           )}
           <View style={styles.metaRow}>
@@ -426,7 +447,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           )}
           <View style={styles.metaRow}>
             <Text style={styles.metaL}>{t('rounding')}</Text>
-            <Text style={styles.metaV}>{canon.rounding >= 0 ? `+${rp(canon.rounding)}` : `-${rp(-canon.rounding)}`}</Text>
+            <Text style={styles.metaV}>{roundingShown >= 0 ? `+${rp(roundingShown)}` : `-${rp(-roundingShown)}`}</Text>
           </View>
           <View style={styles.metaRow}>
             <Text style={styles.metaL}>{t('total')}</Text>
@@ -434,7 +455,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           </View>
           {groupPaid.payCount > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>Terbayar {groupPaid.payCount} kaki</Text>
+              {/* U25: sp_paid_legs ({n} = kaki lunas) + nominal di kolom kanan. */}
+              <Text style={styles.metaL}>{t('sp_paid_legs').replace('{n}', String(groupPaid.payCount))}</Text>
               <Text style={styles.metaV}>{rp(groupPaid.paidTotal)} / {rp(groupPaid.grandTotal > 0 ? groupPaid.grandTotal : orderTotal)}</Text>
             </View>
           )}
@@ -468,6 +490,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         )}
 
         <Text style={styles.sec}>{t('sp_perbill')}</Text>
+        {/* L23: tanpa nomor grup = kunjungan tak bisa dicatat — kunci tombol
+          Bayar + pesan (sp_group_wait terverifikasi). */}
+        {!groupNum && <Text style={styles.gateMsg}>{t('sp_group_wait')}</Text>}
         {/* Grid 2 kolom di tablet agar kartu tiap bill berdampingan. */}
         <View style={[isTablet && styles.billGrid]}>
         {splitMode === 'nominal' && (
@@ -568,9 +593,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                     size="sm"
                     title={`${t('sp_pay').replace('{m}', methods[i] as string)} ›`}
                     onPress={() => payBill(i)}
-                    disabled={val <= 0 || nominalBlocked}
+                    disabled={val <= 0 || nominalBlocked || !groupNum}
                     fullWidth={false}
-                    style={[styles.payBtn, (val <= 0 || nominalBlocked) && styles.payOff, { marginTop: 0 }, isTablet && styles.payBtnBig]}
+                    style={[styles.payBtn, (val <= 0 || nominalBlocked || !groupNum) && styles.payOff, { marginTop: 0 }, isTablet && styles.payBtnBig]}
                     textStyle={[styles.payT, isTablet && styles.payTBig]}
                   />
                 )}

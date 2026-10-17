@@ -1,21 +1,22 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
   id: string;
   group: string;
   items: number;
   station: StationId;
   printLabel: boolean;}interface PrintOpts { topMargin: string; showPaymentInfo: boolean;
-showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OPTS = 'genfity.menuPrint.opts';const STATIONS: { id: StationId; label: string }[] = [
-  { id: 'kasir', label: 'Kasir' },
-  { id: 'dapur', label: 'Dapur' },
-  { id: 'checker', label: 'Checker' },
-  { id: 'label', label: 'Label' },
-  { id: 'none', label: 'Jangan Cetak' },];const DEFAULT_ROUTES: MenuRoute[] = [
+showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OPTS = 'genfity.menuPrint.opts';const STATIONS: { id: StationId }[] = [
+  { id: 'kasir' },
+  { id: 'dapur' },
+  { id: 'checker' },
+  { id: 'label' },
+  { id: 'none' },];const DEFAULT_ROUTES: MenuRoute[] = [
   { id: 'r1', group: 'Makanan Utama', items: 24, station: 'dapur', printLabel: false },
   { id: 'r2', group: 'Makanan Ringan', items: 12, station: 'dapur', printLabel: false },
   { id: 'r3', group: 'Minuman', items: 18, station: 'checker', printLabel: false },
   { id: 'r4', group: 'Dessert', items: 8, station: 'checker', printLabel: false },
-  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** M9: cabang routing = id cabang aktif; '' = unbound (tanpa fallback B001 —
- * tulis per-cabang dilewati + banner unbound, tulis global tetap jalan). */
+  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** M9/R53: cabang routing = id cabang aktif; '' = unbound — persistRoutes
+ * MENOLAK seluruh tulis DB (bukan hanya per-cabang) + banner unbound;
+ * cache JSON pemanggil tetap menyimpan. */
 
 /** APP-PRINTER (audit row 7/11, tag-consistent): routing MENU→STATION di sini
  * adalah peta fisik (menu grup → printer kasir/dapur/checker/label), BUKAN
@@ -40,10 +41,11 @@ const STATION_ID_OF: Record<StationId, string | null> = {
  * persisten dan ikut sync master. */
 async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void> {
   try {
-    await initDb();
-    // M9: '' = unbound — tulis per-cabang (ms_branchmenu) dilewati agar tak
-    // tercatat di bawah cabang fiktif; tulis global (ms_menu/ms_setting) jalan.
+    // R53: unbound = tolak tulis DB seluruhnya — tanpa branch, stationId grup
+    // bisa menimpa menu cabang lain; cache JSON pemanggil tetap menyimpan.
     const branchId = (getBranchId() || '').trim();
+    if (!branchId) return;
+    await initDb();
     // 1. Pastikan definisi station kanonis ada; baris pull master menang bila
     // sudah ada (DO NOTHING) agar alamat printer dari server tidak tertimpa.
     const defs = [
@@ -59,16 +61,26 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
       );
     }
     // 2. Routing per grup: tulis stationId ke tiap menu dalam grup tersebut.
-    // Grup dicocokkan ke ms_menu.categoryId (menu lokal menyimpan nama grup di
-    // kolom itu; dummy pull memakai C01.. sehingga tak cocok - peta grup tetap
-    // tersimpan di ms_setting di bawah + TODO chip dinamis dari ms_category).
+    // R52: grup UI = nama tampil — selesaikan ke CODE kategori via
+    // ms_category (categoryId menyimpan id, bukan nama); fallback cocokkan
+    // mentah untuk data lama yang menyimpan nama di categoryId.
     for (const r of routes) {
       const sid = STATION_ID_OF[r.station];
-      const menus = await query<{ id: string }>(
-        'SELECT id FROM ms_menu WHERE categoryId = ?',
-        [r.group],
-      );
-      for (const m of menus) {
+      let codes: string[] = [];
+      try {
+        const cats = await query<{ id: string }>(
+          'SELECT id FROM ms_category WHERE categoryName = ? LIMIT 5',
+          [r.group],
+        );
+        codes = cats.map((c) => String(c.id ?? '').trim()).filter(Boolean);
+      } catch { /* fallback di bawah */ }
+      if (codes.length === 0) codes = [r.group];
+      for (const code of codes) {
+        const menus = await query<{ id: string }>(
+          'SELECT id FROM ms_menu WHERE categoryId = ?',
+          [code],
+        );
+        for (const m of menus) {
         if (sid) {
           await run('UPDATE ms_menu SET stationId = ?, syncDate = NULL WHERE id = ?', [sid, m.id]);
           if (branchId) {
@@ -87,8 +99,9 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
           }
         }
         await enqueueOutbox('ms_menu', m.id, 'update');
-        // M9: outbox cabang hanya bila ter-bound.
+        // R53: di sini branchId selalu terisi (return awal bila unbound).
         if (branchId) await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'update');
+        }
       }
     }
     // 3. Peta routing grup + opsi tiket agar persisten dan ikut sync master.
@@ -108,7 +121,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
   const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS);
-  // M9: '' = unbound — banner jujur (tulis per-cabang dilewati persistRoutes).
+  // M9/R53: '' = unbound — banner jujur (tulis DB ditolak persistRoutes).
   const unboundBranch = (() => {
     try {
       return !getBranchId();
@@ -119,8 +132,21 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const [cachedRoutes, cachedOpts] = await Promise.all([ getJSON<MenuRoute[]>(LS_ROUTES, DEFAULT_ROUTES), getJSON<PrintOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; const base = cachedRoutes.length > 0 ? cachedRoutes : DEFAULT_ROUTES; if (cachedRoutes.length > 0) setRoutes(cachedRoutes); setOpts({ ...DEFAULT_OPTS, ...cachedOpts });
       // Hitungan item jujur dari ms_menu live per grup (bukan angka contoh
       // 24/12/18/8/6); grup merchant sendiri tetap dipertahankan.
+      // R52: categoryId menyimpan CODE — petakan ke nama tampil via
+      // ms_category (fallback kode mentah untuk baris legacy tanpa kategori).
       try {
         await initDb();
+        let codeName: Record<string, string> = {};
+        try {
+          const cats = await query<{ id: string; categoryName: string | null }>(
+            'SELECT id, categoryName FROM ms_category LIMIT 200',
+          );
+          for (const c of cats) {
+            const code = String(c.id ?? '').trim();
+            const nm = String(c.categoryName ?? '').trim();
+            if (code && nm) codeName[code.toLowerCase()] = nm;
+          }
+        } catch { /* tanpa peta: cocokkan mentah */ }
         const counts = await query<{ g: string | null; n: number }>(
           'SELECT categoryId AS g, COUNT(*) AS n FROM ms_menu GROUP BY categoryId',
         );
@@ -128,7 +154,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
           const byGroup: Record<string, number> = {};
           for (const c of counts) {
             const g = (c.g ?? '').trim();
-            if (g) byGroup[g] = Number(c.n) || 0;
+            if (g) byGroup[codeName[g.toLowerCase()] ?? g] = Number(c.n) || 0;
           }
           if (Object.keys(byGroup).length > 0) {
             setRoutes((prev) => {
@@ -151,7 +177,10 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const patch = (id: string, p: Partial<MenuRoute>) =>
     { setRoutes((rs) => { const next = rs.map((r) => (r.id === id ? { ...r, ...p } : r)); void setJSON(LS_ROUTES, next); void persistRoutes(next, opts); return next; }); };
 
-  const setOpt = <K extends keyof PrintOpts>(k: K, v: PrintOpts[K]) => setOpts((o) => ({ ...o, [k]: v })); const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');
+  // R53: UI mati yang dihapus — switch printLabel per rute + kartu opsi dapur
+  // (topMargin/showPay/showTime). Model data (printLabel, PrintOpts) tetap
+  // dipertahankan + ikut tersimpan (persistRoutes/ms_setting) tanpa UI.
+  const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');
 
   const go = (route: string) => navigation?.navigate(route); return (
     <View style={styles.root}>
@@ -182,31 +211,8 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
               </Pressable>
             ))}
           </View>
-          <View style={styles.rowBetween}>
-            <Text style={styles.rowLabel}>{t('mprint.sticker')}</Text>
-            <Switch value={r.printLabel} onValueChange={(v) => patch(r.id, { printLabel: v })} trackColor={{ true: colors.green, false: colors.stroke }} />
-          </View>
         </View>
       ))}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.groupName}>{t('mprint.kitchenOpts')}</Text>
-        <Text style={styles.groupMeta}>{t('mprint.kitchenSub')}</Text>
-        <AppInput
-          label={t('mprint.topMargin')}
-          value={opts.topMargin} onChangeText={(v) => setOpt('topMargin', v.replace(/\D/g, '').slice(0, 2))}
-          keyboardType="numeric"
-          placeholder="2"
-        />
-        <View style={styles.rowBetween}>
-          <Text style={styles.rowLabel}>{t('mprint.showPay')}</Text>
-          <Switch value={opts.showPaymentInfo} onValueChange={(v) => setOpt('showPaymentInfo', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
-        </View>
-        <View style={styles.rowBetween}>
-          <Text style={styles.rowLabel}>{t('mprint.showTime')}</Text>
-          <Switch value={opts.showSalesTime} onValueChange={(v) => setOpt('showSalesTime', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
-        </View>
       </View>
       {unboundBranch ? <Text style={[styles.foot, { color: colors.red }]}>{t('terminal_unbound_hint')}</Text> : null}
       <Text style={styles.foot}>{t('mprint.saved')}</Text>

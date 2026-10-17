@@ -37,7 +37,7 @@ const MAX_KAS_AWAL = 10000000;
 
   const openPin = () => {
     if (kasAwalNum <= 0) {
-      setError('Masukkan Kas Awal terlebih dahulu');
+      setError(t('shf_err_cash'));
       return;
     }
     setError('');
@@ -51,7 +51,7 @@ const MAX_KAS_AWAL = 10000000;
     // 4 digit (1111/2222/1234) harus lolos ke authorizeSupervisor +
     // verifyAttendancePin; hanya PIN kosong yang ditolak di sini.
     if (!pin.replace(/\D/g, '')) {
-      setError('Masukkan PIN terlebih dahulu');
+      setError(t('shf_err_pin'));
       return;
     }
     openingRef.current = true;
@@ -118,10 +118,12 @@ const MAX_KAS_AWAL = 10000000;
         // sumber akhir lewat antrean sync di bawah.
       }
       // Offline jujur: op shift-open selalu diantrekan agar terkirim saat online
-      // kembali; kasir dibuka lokal tanpa menunggu server.
+      // kembali; kasir dibuka lokal tanpa menunggu server. openedBy mengikat
+      // payload ke userId pembuka (paritas closedBy di EndShiftScreen).
       enqueueSync('other', {
         op: 'shift-open',
         shiftId,
+        openedBy: shiftUserId || null,
         cashInDrawer: kasAwalNum,
         note: catatan.trim() || null,
         at: nowIso,
@@ -183,8 +185,8 @@ const MAX_KAS_AWAL = 10000000;
             boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange, marginTop: 8 }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
           />
-          <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : 'Nol rupiah - masukkan nominal kas awal'}</Text>
-          <Text style={s.chipHint}>Ketuk nominal untuk menambah ke Kas Awal · maks. {rp(MAX_KAS_AWAL)}</Text>
+          <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : t('shf_zero_hint')}</Text>
+          <Text style={s.chipHint}>{t('shf_chip_hint').replace('{m}', rp(MAX_KAS_AWAL))}</Text>
           <View style={s.chips}>
             {QUICK_NOMINAL.map((n) => (
               <TouchableOpacity

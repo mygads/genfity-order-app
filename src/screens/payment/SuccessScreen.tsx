@@ -24,7 +24,7 @@ type Props = {
       total?: number; method?: string; cash?: number; change?: number; orderNo?: string;
       /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): diteruskan ke Receipt untuk QR. */
       clientId?: string;
-      items?: SaleItemIn[]; discount?: number; ongkir?: number;
+      items?: SaleItemIn[]; discount?: number; ongkir?: number; ongkirCut?: number;
       mode?: string; table?: string; customer?: string;
       voucher?: string | { code: string; amount?: number; kind?: string };
       voucherCode?: string; approvalCode?: string; cardLast4?: string;
@@ -37,36 +37,62 @@ type Props = {
   };
 };
 
-const METHOD_LABEL: Record<string, string> = {
-  cash: 'Tunai',
-  debit: 'Kartu Debit',
-  kredit: 'Kartu Kredit',
-  'debit-bca': 'Debit BCA',
-  'kredit-bca': 'Kredit BCA',
-  'debit-ocbc': 'Debit OCBC',
-  'EDC BCA': 'EDC BCA',
-  transfer: 'Transfer Bank',
-  'Transfer Bank': 'Transfer Bank',
-  qris: 'QRIS',
-  gopay: 'GoPay',
-  ovo: 'OVO',
-  dana: 'DANA',
-  shopeepay: 'ShopeePay',
-  deposit: 'Deposit Member',
-  pluxee: 'Pluxee',
-  ultra: 'Ultra Voucher',
-  lainnya: 'Lainnya',
-  compliment: 'Kompliment',
-  compliment_label: 'Kompliment',
-  Kompliment: 'Kompliment',
-  'Non-Penjualan': 'Non-Penjualan',
-  nonsales: 'Non-Penjualan',
-};
-
 export default function SuccessScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
+  const { lang, t } = useLang();
+  // I18N: label metode via suc_m_*; brand bank/EDC = literal apa adanya
+  // (nama produk bank, bukan teks terjemahan).
+  const methodLabel = (m: string): string => {
+    const raw = String(m ?? '');
+    if (/^EDC\s/i.test(raw)) return raw;
+    if (/^debit[\s-]*bca$/i.test(raw)) return 'Debit BCA';
+    if (/^kredit[\s-]*bca$/i.test(raw)) return 'Kredit BCA';
+    if (/^debit[\s-]*ocbc$/i.test(raw)) return 'Debit OCBC';
+    switch (raw.trim().toLowerCase().replace(/[^a-z]/g, '')) {
+      case 'cash':
+      case 'tunai':
+        return t('suc_m_cash');
+      case 'debit':
+      case 'kartudebit':
+        return t('suc_m_debit');
+      case 'kredit':
+      case 'kartukredit':
+        return t('suc_m_kredit');
+      case 'transfer':
+      case 'transferbank':
+        return t('suc_m_transfer');
+      case 'qris':
+        return t('suc_m_qris');
+      case 'gopay':
+        return t('suc_m_gopay');
+      case 'ovo':
+        return t('suc_m_ovo');
+      case 'dana':
+        return t('suc_m_dana');
+      case 'shopeepay':
+        return t('suc_m_shopeepay');
+      case 'deposit':
+      case 'depositmember':
+        return t('suc_m_deposit');
+      case 'pluxee':
+        return t('suc_m_pluxee');
+      case 'ultra':
+      case 'ultravoucher':
+        return t('suc_m_ultra');
+      case 'lainnya':
+        return t('suc_m_lainnya');
+      case 'compliment':
+      case 'kompliment':
+      case 'complimentlabel':
+        return t('suc_m_compliment');
+      case 'nonpenjualan':
+      case 'nonsales':
+        return t('suc_m_nonsales');
+      default:
+        return raw;
+    }
+  };
   // Tanpa params (dibuka di luar alur bayar) = nilai kosong yang jujur:
   // total 0, metode apa adanya, nomor order kosong.
   const total = Math.max(0, Math.round(Number(route?.params?.total) || 0));
@@ -77,6 +103,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
   // Qris kirim refCode-nya); kosong bila tak dioper (bukan nomor karangan).
   const orderNo = route?.params?.orderNo ?? '';
   const ongkir = route?.params?.ongkir ?? 0;
+  // Potongan ongkir voucher terpisah (bruto + cut, kontrak PayScreen):
+  // tampil sebagai baris cut; tanpa ini ongkir bruto terbaca tanpa potongan.
+  const ongkirCut = Math.max(0, Math.round(Number(route?.params?.ongkirCut) || 0));
   const orderMode = route?.params?.mode;
   const discount = route?.params?.discount ?? 0;
   const voucherParam = route?.params?.voucher;
@@ -151,7 +180,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
             const g = await getGroupPaid(no);
             if (g.grandTotal > 0 && !g.fullyPaid) return;
           } catch {
-            /* tak tahu = bebaskan seperti biasa */
+            // P13: status grup TAK diketahui = JANGAN bebaskan meja (tetap
+            // terisi untuk ditinjau di Riwayat), bukan bebas-buta.
+            return;
           }
         }
         await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['kosong', tb]);
@@ -178,7 +209,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
     navigation?.navigate('Receipt', { ...receiptParams, autoPrint: true });
   };
   const receiptParams = {
-    total, method: METHOD_LABEL[method] ?? method, cash, change,
+    total, method: methodLabel(method), cash, change,
     no: orderNo, items: route?.params?.items, discount,
     ...(service > 0 ? { service } : {}),
     ...(tax > 0 ? { tax } : {}),
@@ -191,17 +222,21 @@ export default function SuccessScreen({ navigation, route }: Props) {
     ...(terminal ? { terminal } : {}),
     ...(route?.params?.memberId ? { memberId: route.params.memberId } : {}),
     ...(ongkir > 0 ? { ongkir } : {}),
+    ...(ongkirCut > 0 ? { ongkirCut } : {}),
     ...(orderMode ? { mode: orderMode } : {}),
     ...(route?.params?.table ? { table: route.params.table } : {}),
     ...(route?.params?.customer ? { customer: route.params.customer } : {}),
     // APP-PRINTER-SALES (Q7): client_id ikut ke Receipt agar QR struk membawa kunci upsert.
     ...(route?.params?.clientId ? { clientId: route.params.clientId } : {}),
+    // P12: kunjungan split = nominal + metode kunjungan ini ikut ke Receipt.
+    ...(splitPaidAmt > 0 || splitPaidMethod
+      ? { splitPaid: { amount: splitPaidAmt, ...(splitPaidMethod ? { method: splitPaidMethod } : {}) } }
+      : {}),
   };
-  const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   const now = new Date();
-  const todayId = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
-  const timeId = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
+  const localeTag = lang === 'en' ? 'en-US' : 'id-ID';
+  const todayId = now.toLocaleDateString(localeTag, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  const timeId = now.toLocaleTimeString(localeTag, { hour: '2-digit', minute: '2-digit' });
 
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
@@ -229,11 +264,11 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
   // Pratinjau struk: SATU scroll milik layar (tanpa ScrollView bersarang di
   // dalam kartu), semua item tampil, urutan baris SELARAS ReceiptScreen
-  // (diskon → service → feeESB → tax → voucher → ongkir → rounding → TOTAL).
+  // (diskon → service → feeESB → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
   const receipt = (
     <View style={styles.receipt}>
         <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
-        <Text style={styles.shopSub}>Kasir {getSession()?.name ?? getSession()?.username ?? ''} • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
+        <Text style={styles.shopSub}>{t('c_cashier')} {getSession()?.name ?? getSession()?.username ?? ''} • {[orderMode ?? t('title_dinein'), route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
         <View style={styles.divider} />
         {miniItems.map((it) => (
           <View key={it.id} style={styles.row}>
@@ -283,6 +318,12 @@ export default function SuccessScreen({ navigation, route }: Props) {
             <Text style={styles.value}>{rp(ongkir)}</Text>
           </View>
         )}
+        {ongkirCut > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('rc_ongkir_cut')}</Text>
+            <Text style={styles.value}>-{rp(ongkirCut)}</Text>
+          </View>
+        )}
         {rounding !== 0 && (
           <View style={styles.row}>
             <Text style={styles.label}>{t('rounding')}</Text>
@@ -296,17 +337,17 @@ export default function SuccessScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.row}>
           <Text style={styles.label}>{t('ok_method')}</Text>
-          <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
+          <Text style={styles.value}>{methodLabel(method)}</Text>
         </View>
         {splitPaidAmt > 0 && (
           <View style={styles.row}>
-            <Text style={styles.label}>Dibayar{splitPaidMethod ? ` (${METHOD_LABEL[splitPaidMethod] ?? splitPaidMethod})` : ''}</Text>
+            <Text style={styles.label}>{t('suc_paid').replace('{m}', splitPaidMethod ? ` (${methodLabel(splitPaidMethod)})` : '')}</Text>
             <Text style={styles.value}>{rp(splitPaidAmt)}</Text>
           </View>
         )}
         {groupRemain !== null && (
           <View style={styles.row}>
-            <Text style={styles.label}>Sisa</Text>
+            <Text style={styles.label}>{t('suc_remain')}</Text>
             <Text style={styles.value}>{rp(groupRemain)}</Text>
           </View>
         )}
@@ -344,7 +385,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
       <View style={styles.wrap}>
         <View style={[styles.dialog, isTablet && styles.dialogTablet]}>
           <Text style={styles.dTitle}>{t('hist_mail_title')}</Text>
-          <Text style={styles.dSub}>Struk {orderNo} • {rp(total)}</Text>
+          <Text style={styles.dSub}>{t('rc_title')} {orderNo} • {rp(total)}</Text>
           <AppInput
             value={mailTo}
             onChangeText={setMailTo}
