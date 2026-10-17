@@ -11,6 +11,9 @@ export interface ShiftStatus {
 }
 
 /** Baris shift terakhir, atau null bila riwayat kosong / DB belum siap. */
+/** Baris shift terakhir (absensi dikecualikan), atau status tutup bila riwayat
+ *  hanya berisi absensi, atau null bila instalasi fresh (riwayat kosong total)
+ *  / DB belum siap. Hanya null yang berarti bebas (demo/screenshot). */
 export async function getShiftStatus(): Promise<ShiftStatus | null> {
   try {
     await initDb();
@@ -20,14 +23,25 @@ export async function getShiftStatus(): Promise<ShiftStatus | null> {
       status: string | null;
       cashInDrawer: number | null;
     }>(
-      'SELECT clockIn, clockOut, status, cashInDrawer FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+      // Baris absensi (status 'absen') dikecualikan: clock-in/out kehadiran
+      // BUKAN shift kasir; tanpa filter, absen-masuk setelah shift tutup
+      // (clockOut NULL) terbaca "open" dan gerbang kasir bocor.
+      'SELECT clockIn, clockOut, status, cashInDrawer FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
     );
-    if (!row) return null;
-    return {
-      open: row.status === 'open' || !row.clockOut,
-      clockIn: row.clockIn,
-      cashInDrawer: Math.round(Number(row.cashInDrawer) || 0),
-    };
+    if (row) {
+      return {
+        open: row.status === 'open' || !row.clockOut,
+        clockIn: row.clockIn,
+        cashInDrawer: Math.round(Number(row.cashInDrawer) || 0),
+      };
+    }
+    // Tanpa baris shift: bedakan fresh install (bebas) vs hanya-absensi
+    // (kasir sudah absen tapi belum pernah buka shift → tetap wajib buka shift).
+    const total = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_shiftlog');
+    if (total && Number(total.c) > 0) {
+      return { open: false, clockIn: null, cashInDrawer: 0 };
+    }
+    return null;
   } catch {
     return null;
   }

@@ -5,6 +5,7 @@
  * Server menang untuk master; hanya jalan saat base URL terisi.
  */
 import { ApiPath, apiGet, getBaseUrl, getBranchId, getServerEnv } from '../config/server';
+import { getApiMode } from './apiSource';
 import { initDb, run } from './db';
 import { getWatermark, setWatermark } from './sync';
 
@@ -86,8 +87,9 @@ const DOMAINS: Domain[] = [
   {
     // RBAC: hak akses per user dari server (kontrak clean-room
     // main/get-user-access). Server menang (INSERT OR REPLACE default);
-    // baris template peran lokal ('kasir'/'supervisor' dari seed) aman
-    // karena server hanya mengirim userId asli.
+    // baris template peran lokal ('Merchant Owner'/'Merchant Staff' dari
+    // seed, dibaca access.ts via normalizeRole) aman karena server hanya
+    // mengirim userId asli.
     key: 'useraccess',
     path: ApiPath.pullUserAccess,
     table: 'ms_posuseraccess',
@@ -311,13 +313,21 @@ export interface PullResult {
 }
 
 /**
- * Tarik semua domain master - HANYA ke server milik sendiri (env Custom).
- * Melempar bila bukan Custom / respons cacat.
+ * Tarik semua domain master - HANYA ke server milik sendiri (env Custom)
+ * DAN hanya dalam Real Mode (EXPO_PUBLIC_API_BASE_URL terisi).
+ * Bila mode BUKAN 'real' (local/dummy), kembalikan hasil kosong TANPA
+ * menulis apa pun ke SQLite - dummy pull tidak boleh mengotori seed/data
+ * asli. Guard ini sekaligus melindungi semua pemanggil (Settings/Sync
+ * manual, terminal.ts syncTerminalSettings) tanpa mengubah file mereka.
+ * Melempar bila bukan Custom / respons cacat (hanya di Real Mode).
  * Bila `only` diisi (mis. dari WS FORCE_PULL {domains}), hanya domain
  * bernama itu yang ditarik; nama tak dikenal (mis. promotion yang tabelnya
  * belum ada, lihat TODO M9-4) diabaikan diam-diam.
  */
 export async function pullMaster(only?: string[]): Promise<PullResult> {
+  if (getApiMode() !== 'real') {
+    return { total: 0, per: {}, at: new Date().toISOString() };
+  }
   if (getServerEnv() !== 'custom' || !getBaseUrl()) {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
   }

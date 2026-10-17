@@ -4,7 +4,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { enqueueSync } from '../../lib/sync';
+import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query, run } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -17,19 +17,7 @@ const SECTION_OF: Record<string, string> = {
   B1: 'Teras', B2: 'Teras', B3: 'Teras',
   C1: 'VIP', C2: 'VIP',
 };
-const OCCUPIED: Occupied[] = [
-  { table: 'A2', guest: 'Budi · 2 tamu', items: 3, total: 185000 },
-  { table: 'B1', guest: 'Andi · 4 tamu', items: 4, total: 96000 },
-  { table: 'B2', guest: 'B2+B3 · 12 tamu', items: 8, total: 320000 },
-];
-const EMPTY = [
-  'A1 (Dalam · 2 kursi)',
-  'A3 (Dalam · 4 kursi)',
-  'A4 (Dalam · 4 kursi)',
-  'B3 (Teras · 6 kursi)',
-  'C1 (VIP · 2 kursi)',
-  'C2 (VIP · 8 kursi)',
-];
+/** Contoh tamu lama dihapus — daftar terisi & kosong murni dari SQLite (live-only). */
 
 /**
  * Pindah Meja (move_table) - pindah seluruh transaksi ke meja lain.
@@ -46,13 +34,13 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? OCCUPIED[0]?.table ?? 'A2'));
-  const [to, setTo] = useState(EMPTY[0] as string);
+  const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? ''));
+  const [to, setTo] = useState('');
   const [done, setDone] = useState(false);
   /** Peringatan validasi tujuan (meja sama / asal belum dipilih). */
   const [warn, setWarn] = useState('');
-  // T7: katalog live dari SQLite (bill aktif + ms_table); konstanta di atas
-  // hanya fallback saat DB kosong (instalasi baru / belum ada bill terbuka).
+  // T7: katalog live dari SQLite (bill aktif + ms_table); tanpa bill
+  // terbuka = daftar kosong yang jujur.
   const [liveOcc, setLiveOcc] = useState<Occupied[] | null>(null);
   const [liveEmpty, setLiveEmpty] = useState<string[] | null>(null);
 
@@ -65,7 +53,29 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           `SELECT tableNo, customerName, grandTotal FROM tr_saleshead
            WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
-        if (!on || heads.length === 0) return;
+        if (!on) return;
+        if (heads.length === 0) {
+          // Jujur: tak ada bill terbuka = tak ada meja terisi. Muat daftar
+          // meja kosong dari ms_table; tanpa itu = daftar kosong.
+          try {
+            const tRows = await query<{ id: string; tableNo: string | null }>(
+              'SELECT id, tableNo FROM ms_table LIMIT 60',
+            );
+            const free = tRows
+              .map((r) => ((r.tableNo || r.id) || '').trim())
+              .filter((no) => !!no);
+            if (!on) return;
+            setLiveOcc([]);
+            setLiveEmpty(free.length > 0 ? free : []);
+            setFrom('');
+            if (free.length > 0) setTo((prev) => (prev && free.includes(prev) ? prev : free[0]));
+          } catch {
+            if (!on) return;
+            setLiveOcc([]);
+            setLiveEmpty([]);
+          }
+          return;
+        }
         const byTable = new Map<string, { guest: string; bills: number; total: number }>();
         for (const h of heads) {
           const tb = h.tableNo.trim();
@@ -101,7 +111,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
             if (free.length > 0) empty = free;
           }
         } catch {
-          /* ms_table kosong - fallback konstanta */
+          /* ms_table kosong - daftar kosong */
         }
         if (!on) return;
         setLiveOcc(occ);
@@ -109,7 +119,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         setFrom((prev) => (occ.some((o) => o.table === prev) ? prev : occ[0].table));
         if (empty) setTo((prev) => (empty.includes(prev) ? prev : empty[0]));
       } catch {
-        /* SQLite belum siap - fallback konstanta tetap tampil */
+        /* SQLite belum siap - daftar tetap kosong */
       }
     })();
     return () => {
@@ -117,8 +127,9 @@ export default function MoveTableScreen({ navigation, route }: Props) {
     };
   }, []);
 
-  const occupied = liveOcc ?? OCCUPIED;
-  const emptyList = liveEmpty ?? EMPTY;
+  // Live-only: tanpa bill terbuka = daftar kosong.
+  const occupied = liveOcc ?? [];
+  const emptyList = liveEmpty ?? [];
   const src = occupied.find((o) => o.table === from);
   /** Kode meja dari label "A1 (Dalam · 2 kursi)" ke "A1" (dulu split(' ')[0] yang rapuh). */
   const destCode = to.replace(/\s*\(.*\)\s*$/, '').trim();
@@ -146,6 +157,22 @@ export default function MoveTableScreen({ navigation, route }: Props) {
           `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status <> 'paid'`,
           [destCode, src.table],
         );
+        // Tandai bill pindahan kotor per salesNum agar ikut push berikutnya.
+        try {
+          const moved = await query<{ salesNum: string }>(
+            `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid'`,
+            [destCode],
+          );
+          for (const m of moved) {
+            try {
+              await enqueueOutbox('tr_saleshead', m.salesNum, 'update');
+            } catch {
+              /* abaikan per baris */
+            }
+          }
+        } catch {
+          /* syncDate NULL di atas tetap menandai kotor */
+        }
         try {
           await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['kosong', src.table]);
         } catch { /* master meja opsional */ }

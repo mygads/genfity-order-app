@@ -5,6 +5,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import { useLang } from '../../lib/i18n';
+import { getApiMode } from '../../lib/apiSource';
 
 type Nav = { goBack: () => void };
 
@@ -12,8 +13,11 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [username, setUsername] = useState('gista.kasir');
+  const [username, setUsername] = useState('');
   const [sent, setSent] = useState(false);
+  // Jujur offline-first: tanpa server (local/dummy) tak ada "instruksi"
+  // yang bisa dikirim — tunjukkan arahan reset via owner, bukan klaim palsu.
+  const offline = getApiMode() !== 'real';
 
   return (
     <ScreenRoot style={styles.root}>
@@ -23,8 +27,9 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
       {sent ? (
         <>
           <Text style={[styles.desc, isTablet && styles.descBig]}>
-            {t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}
-            {t('g_forgot_sent_post')}
+            {offline ? t('g_forgot_offline') : (
+              <>{t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}{t('g_forgot_sent_post')}</>
+            )}
           </Text>
           <AppButton
             size="md"

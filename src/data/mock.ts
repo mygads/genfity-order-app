@@ -49,6 +49,8 @@ export interface KitchenItem {
   name: string;
   qty: number;
   note?: string;
+  /** Harga satuan nyata dari tr_salesmenu; undefined = tiket push tanpa harga. */
+  price?: number;
 }
 
 export interface KitchenTicket {

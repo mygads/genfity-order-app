@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
 type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale } from '../../lib/sales';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -11,11 +11,13 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;};/** * Matriks QR dekoratif deterministik dari nominal - pola finder 3 sudut ala QR. * Bukan payload QRIS asli (payload asli butuh merchant ID dari backend). */function FauxQr({ seed }: { seed: number }) { const N = 21; const cells: boolean[] = []; for (let r = 0; r < N; r++) { for (let c = 0; c < N; c++) { const inFinder = (r < 7 && c < 7) || (r < 7 && c >= N - 7) || (r >= N - 7 && c < 7); if (inFinder) { const lr = r >= N - 7 ? r - (N - 7) : r; const lc = c >= N - 7 ? c - (N - 7) : c; cells.push(lr === 0 || lr === 6 || lc === 0 || lc === 6 || (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4)); } else { cells.push((r * 31 + c * 17 + seed * 13) % 7 < 3); } } } return (<View style={styles.qrMatrix}>{cells.map((on, i) => (<View key={i} style={[styles.qrCell, on && styles.qrCellOn]} /> ))}</View> );}export default function QrisScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const total = route?.params?.total ?? 101200;
+  const { t } = useLang(); const totalParam = route?.params?.total; const hasTotal = typeof totalParam === 'number' && Number.isFinite(totalParam) && totalParam > 0; const total = hasTotal ? Math.round(totalParam) : 0;
   const items = route?.params?.items; const discount = route?.params?.discount ?? 0; const voucherCode = route?.params?.voucherCode; const orderMode = route?.params?.mode; const tableNo = route?.params?.table; const ongkir = route?.params?.ongkir ?? 0; const customerName = route?.params?.customer; const memberId = route?.params?.memberId; const serviceParam = Math.max(0, Math.round(Number(route?.params?.service) || 0)); const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0)); const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0)); const roundingParam = Math.round(Number(route?.params?.rounding) || 0); const [seconds, setSeconds] = useState(5 * 60);
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
   const [pollCount, setPollCount] = useState(0);
+  /** Mode sumber data: 'local' (tanpa server) = mode uji berlabel. */
+  const apiMode = getApiMode();
 
   const pollRef = useRef(0); /** Kode referensi mock - di app nyata dari backend saat generate QR. */
   const refCode = useMemo(() => {
@@ -54,10 +56,23 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 
   /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja). */ const settlePaid = async () => {
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
-    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS: Real Mode tanya order/view (status PAID = lunas); * Dummy Mode simulasi realistis (lunas pada cek ke-3 ≈ ±30 dtk); * offline/gagal = tetap menunggu. Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
-    setStatus('checking'); pollRef.current += 1; setPollCount(pollRef.current); let paid = false; try { const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
-
-  const { data } = unwrap<Record<string, unknown>>(r.data); paid = r.fromDummy ? pollRef.current >= 3 : String(data.status ?? '').toUpperCase() === 'PAID'; } catch {
+    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+   *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
+   *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
+   *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
+    setStatus('checking'); pollRef.current += 1; setPollCount(pollRef.current); const mode = getApiMode(); let paid = false; try {
+      if (mode === 'real') {
+        const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
+        if (!r.fromDummy) {
+          const { data } = unwrap<Record<string, unknown>>(r.data); paid = String(data.status ?? '').toUpperCase() === 'PAID';
+        } else {
+          paid = false;
+        }
+      } else {
+        // Local (mode uji berlabel) + Dummy eksplisit: simulasi lunas.
+        paid = pollRef.current >= 3;
+      }
+    } catch {
     paid = false; } if (paid) {
       setStatus('paid');
       void settlePaid(); } else { setStatus('waiting'); }
@@ -65,6 +80,23 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 
   const statusChip =
     status === 'paid' ? t('qris_paid') : status === 'expired' ? t('qris_expired') : status === 'checking' ? t('qris_checking') : t('qris_wait');
+
+  // Nominal wajib dari Pay (route.params.total) — tanpa params tampilkan
+  // empty-state jujur, bukan Rp101,2rb + QR fiktif.
+  if (!hasTotal) {
+    return (
+      <View style={styles.root}>
+        <ScreenHeader title={t('qris_title')} onBack={() => navigation?.goBack()} />
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyTitle}>{t('qris_empty_total')}</Text>
+          <Text style={styles.emptySub}>{t('qris_empty_total_sub')}</Text>
+          <TouchableOpacity style={[styles.checkBtn, styles.emptyBtn]} onPress={() => navigation?.goBack()}>
+            <Text style={styles.checkBtnText}>‹ {t('c_back')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -90,6 +122,9 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           <Text style={[styles.totalValue, isTablet && styles.totalValueTablet]}>{rp(total)}</Text>
           <Text style={styles.refCode}>{refCode} - {t('qris_valid')}</Text>
           <Text style={styles.refCode}>{acqLabel}</Text>
+          {apiMode === 'local' && (
+            <Text style={styles.testBadge}>{t('qris_test_mode')}</Text>
+          )}
 
           <View style={styles.qrBox}>
             <Image
@@ -169,6 +204,11 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     </View>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  /** Empty-state jujur bila QRIS dibuka tanpa total dari Pay. */
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, textAlign: 'center' },
+  emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, marginBottom: 16 },
+  emptyBtn: { flex: 0, alignSelf: 'stretch' },
   headRight: {
      color: colors.white, fontFamily: fonts.semibold, fontSize: 13, textAlign: 'right' },
 
@@ -185,6 +225,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   // Tablet: nominal besar proporsional panel + QR tidak raksasa (matriks tetap).
   totalValueTablet: { fontSize: 36 },
   refCode: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, marginTop: 4 },
+  /** Label mode uji (Local Mode): simulasi lunas, bukan pembayaran nyata. */
+  testBadge: { fontFamily: fonts.semibold, fontSize: 12, color: colors.orange, backgroundColor: colors.paleOrange, marginTop: 6, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' },
   qrBox: {
     marginTop: 18,
     backgroundColor: colors.card,

@@ -18,6 +18,7 @@ import { startRealtime } from '../../lib/realtime';
 import { setWsForeground } from '../../native/printer';
 import { loginByQrCode, parseQrLoginPayload, validateEmployee, type EmployeeSession } from '../../lib/apiSource';
 import { ensureSeeded } from '../../lib/seed';
+import { trimTestUsers } from '../../lib/seedUsers';
 import { queryFirst } from '../../lib/db';
 import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
 import { useLang } from '../../lib/i18n';
@@ -173,6 +174,9 @@ export default function LoginScreen({ navigation }: Props) {
         // lama, storage dibersihkan), pastikan admin lokal ada TEPAT sebelum
         // validasi. Idempoten — PIN yang sudah diganti tidak ditimpa.
         try { await ensureSeeded(); } catch { /* validasi yang memutuskan */ }
+        // Tegakkan "2 user saja": buang u-owner hasil seed (seed.ts milik
+        // lane lain, tak disentuh) SEBELUM validasi agar tak bisa dipakai login.
+        try { await trimTestUsers(); } catch { /* validasi yang memutuskan */ }
         const s = await validateEmployee(username.trim(), password);
         if (!s.ok || !s.userId) {
           // DB lokal kosong total = seed gagal total di perangkat ini. Jangan

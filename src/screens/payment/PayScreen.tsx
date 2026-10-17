@@ -129,12 +129,7 @@ const WALLETS = [
   { id: 'shopeepay', name: 'ShopeePay', img: null },
 ];
 
-/** Deposit member mock - last-resort bila query ms_member melempar; DB kosong = empty-state. */
-const MEMBER_DEPOSIT_DB = [
-  { id: 'M001', nama: 'Budi Santoso', saldo: 150000 },
-  { id: 'M002', nama: 'Sinta Dewi', saldo: 500000 },
-  { id: 'M003', nama: 'Andi Pratama', saldo: 0 },
-];
+/** Tanpa mock member: DB kosong/gagal baca = empty-state pay_dep_empty (jujur). */
 
 let splitSeq = 0;
 
@@ -152,7 +147,12 @@ export default function PayScreen({ navigation, route }: Props) {
    * sebagai peringatan di atas metode bayar - semua jalur (tunai/nontunai/
    * online/member/lainnya + ExtraPay + Qris/Edc) tetap bisa dipakai. */
   const syncBlocked = syncWarnLevel() === 'block7';
-  const total = route?.params?.total ?? 266000;
+  // Nominal wajib dari kasir (route.params.total) — tanpa params tampilkan
+  // empty-state jujur (pay_empty_total), bukan Rp266rb fiktif.
+  const totalParam = route?.params?.total;
+  const hasTotal =
+    typeof totalParam === 'number' && Number.isFinite(totalParam) && totalParam > 0;
+  const total = hasTotal ? Math.round(totalParam) : 0;
   const orderMode = route?.params?.mode;
   const tableNo = route?.params?.table;
   const ongkir = route?.params?.ongkir ?? 0;
@@ -244,11 +244,10 @@ export default function PayScreen({ navigation, route }: Props) {
   );
   const [ovoPhone, setOvoPhone] = useState('');
 
-  // Deposit member live dari ms_member (seed/pull); [] = empty-state, mock hanya bila query melempar.
+  // Deposit member live dari ms_member (seed/pull); [] = empty-state, tanpa mock.
   const [memberQ, setMemberQ] = useState('');
   const [memberSel, setMemberSel] = useState<string | null>(null);
   const [dbMembers, setDbMembers] = useState<LiveMember[] | null>(null);
-  const [memberFailed, setMemberFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -268,18 +267,19 @@ export default function PayScreen({ navigation, route }: Props) {
             .filter((m) => m.id.length > 0),
         );
       } catch {
-        if (alive) setMemberFailed(true);
+        // Gagal baca = anggap kosong agar empty-state tampil (bukan mock).
+        if (alive) setDbMembers([]);
       }
     })();
     return () => { alive = false; };
   }, []);
-  // Pra-pilih bila memberId params cocok ID live (atau mock last-resort).
+  // Pra-pilih bila memberId params cocok ID live.
   useEffect(() => {
     if (!memberIdParam || memberSel) return;
-    const src = dbMembers ?? (memberFailed ? MEMBER_DEPOSIT_DB : null);
+    const src = dbMembers;
     if (!src) return;
     if (src.some((m) => m.id === memberIdParam)) setMemberSel(memberIdParam);
-  }, [dbMembers, memberFailed, memberIdParam, memberSel]);
+  }, [dbMembers, memberIdParam, memberSel]);
 
   // Pluxee / Ultra / lainnya
   const [tenderCode, setTenderCode] = useState('');
@@ -471,7 +471,7 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   // ---- Deposit member actions (live ms_member; nol-baris = empty-state pay_dep_empty) ----
-  const memberSource: LiveMember[] = dbMembers ?? (memberFailed ? MEMBER_DEPOSIT_DB : []);
+  const memberSource: LiveMember[] = dbMembers ?? [];
   const memberHits = memberSource.filter(
     (m) =>
       memberQ.trim() === '' ||
@@ -1079,6 +1079,7 @@ export default function PayScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
+      {hasTotal ? (
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {renderBanner()}
         {syncBlocked && (
@@ -1091,6 +1092,13 @@ export default function PayScreen({ navigation, route }: Props) {
         {renderBody()}
         <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
       </ScrollView>
+      ) : (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyTitle}>{t('pay_empty_total')}</Text>
+        <Text style={styles.emptySub}>{t('pay_empty_total_sub')}</Text>
+        <AppButton title={`‹ ${t('c_back')}`} onPress={() => navigation?.goBack()} size="md" fullWidth={false} style={styles.emptyBtn} />
+      </View>
+      )}
     </View>
   );
 }
@@ -1110,6 +1118,11 @@ const styles = StyleSheet.create({
   onlineDotGrey: { backgroundColor: colors.stroke, marginRight: 5 },
   onlineText: { color: colors.white, fontFamily: fonts.semibold, fontSize: 12 },
   body: { padding: 12, paddingBottom: 24 },
+  /** Empty-state jujur bila Pay dibuka tanpa total dari kasir. */
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  emptyTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, textAlign: 'center' },
+  emptySub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8 },
+  emptyBtn: { marginTop: 16 },
   /** Kartu peringatan sync >7 hari - info saja, pembayaran tetap jalan. */
   syncWarn: { backgroundColor: colors.paleAmber, borderRadius: 10, padding: 12, marginTop: 10 },
   syncWarnT: { fontFamily: fonts.bold, fontSize: 13, color: colors.amberDark },

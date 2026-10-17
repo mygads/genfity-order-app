@@ -10,7 +10,7 @@ import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
-import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
+import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -129,7 +129,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       }
       setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
     } catch {
-      applyVoid(id, wantVoid);
+      // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
+      // terapkan void tanpa otorisasi.
+      setVoidAuthMsg('Izin tak dapat diperiksa / Access check failed — void ditolak');
       return;
     }
     setVoidPin('');
@@ -141,11 +143,17 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const unvoidItem = (id: string) => {
     void requestVoid(id, false);
   };
-  /** Konfirmasi PIN supervisor untuk target void yang tertunda (fail-closed saat offline). */
+  /** Konfirmasi PIN supervisor untuk target void yang tertunda: server dulu,
+   * lalu eskalasi lokal saat offline (fail-closed untuk PIN salah/tanpa hak). */
   const confirmVoidPin = () => {
-    if (!voidTarget || voidPin.replace(/\D/g, '').length !== 6 || voidConfirming) return;
+    if (!voidTarget || voidPin.replace(/\D/g, '').length < 4 || voidConfirming) return;
     setVoidConfirming(true);
     void authorizeSupervisor(voidPin).then((res) => {
+      if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
+        return verifyLocalEscalation(voidPin, 'order.void');
+      }
+      return res;
+    }).then((res) => {
       if (!res.ok) {
         setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} remaining)`);
         setVoidConfirming(false);
@@ -576,7 +584,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 size="sm"
                 title={voidConfirming ? '...' : 'Setujui / Approve'}
                 onPress={confirmVoidPin}
-                disabled={voidPin.replace(/\D/g, '').length !== 6 || voidConfirming}
+                disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
                 fullWidth={false}
                 style={[styles.modalPrimary, { marginTop: 0, backgroundColor: colors.navy }]}
                 textStyle={styles.modalPrimaryT}

@@ -496,15 +496,32 @@ export default function MemberScreen({ navigation, route }: Props) {
     void persistDeposit(selected.id, n, 'cepat');
     const mid = selected.id;
     const nowIso = new Date().toISOString();
-    // Catat transaksi nyata ke SQLite: saldo member + log deposit.
+    // Catat transaksi nyata ke SQLite: saldo member + log deposit + outbox/sync
+    // (paritas TopupDepositScreen agar topup cepat ikut ter-push server).
     void (async () => {
       try {
         await initDb();
-        await run('UPDATE ms_member SET depositBalance = depositBalance + ? WHERE id = ?', [n, mid]);
+        const depId = `dep-${Date.now()}`;
+        await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [n, mid]);
         await run(
           'INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, trxType, amount, balanceAfter, trxDate, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL)',
-          [`dep-${Date.now()}`, mid, 'topup', n, selected.saldo + n, nowIso],
+          [depId, mid, 'topup', n, selected.saldo + n, nowIso],
         );
+        try {
+          await enqueueOutbox('ms_member', mid, 'update');
+        } catch {
+          /* abaikan */
+        }
+        try {
+          await enqueueOutbox('tr_memberdeposit', depId, 'insert');
+        } catch {
+          /* abaikan */
+        }
+        try {
+          enqueueSync('other', { kind: 'deposit-topup', memberId: mid, nominal: n, method: 'cepat' });
+        } catch {
+          /* abaikan */
+        }
       } catch {
         /* abaikan - state memori tetap jalan */
       }

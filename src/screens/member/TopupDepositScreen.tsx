@@ -12,7 +12,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
-import { initDb, run } from '../../lib/db';
+import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
@@ -34,6 +34,23 @@ const MIN_TOPUP = 10000;
  * agar aman offline; inquiry-deposit hanya untuk cek saldo, bukan top up.
  */
 async function persistTopup(memberId: string, nominal: number, method: string, note?: string, balanceAfter?: number): Promise<void> {
+  // Saldo member ikut naik di DB lokal (kolom depositBalance, selaras
+  // MemberScreen.saveDeposit) agar layar Member + pembayaran deposit langsung
+  // konsisten offline; syncDate NULL menandai untuk push berikutnya.
+  let after = balanceAfter ?? null;
+  try {
+    await initDb();
+    if (after == null) {
+      const cur = await queryFirst<{ depositBalance: number | null }>(
+        'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+        [memberId],
+      );
+      after = Math.max(0, Math.round(Number(cur?.depositBalance) || 0)) + nominal;
+    }
+    await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, memberId]);
+  } catch {
+    /* abaikan */
+  }
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
   } catch {
@@ -48,7 +65,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
     const userId = getSession()?.username ?? getSession()?.name ?? null;
     await run(
       `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
-      [depId, memberId, getTerminal().branchId || null, nominal, balanceAfter ?? null, userId, nowIso],
+      [depId, memberId, getTerminal().branchId || null, nominal, after ?? null, userId, nowIso],
     );
     await enqueueOutbox('tr_memberdeposit', depId, 'insert');
   } catch {
@@ -69,10 +86,32 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
 export default function TopupDepositScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
-  const memberId = route?.params?.memberId ?? 'M001';
-  const nama = route?.params?.nama ?? 'Budi Santoso';
-  const saldoAwal = route?.params?.saldo ?? 150000;
+  const { lang, t } = useLang();
+  // Tanpa memberId param = layar dibuka di luar alur (deep-link/dev) — JANGAN
+  // tulis ke member contoh. Guard hasMember menonaktifkan submit di bawah.
+  const hasMember = !!(route?.params?.memberId && route?.params?.memberId.trim());
+  const memberId = route?.params?.memberId ?? '';
+  const nama = route?.params?.nama ?? '';
+  // Saldo awal dari param route bisa basi (top up cepat dari Member tidak
+  // lewat sini) — segarkan dari ms_member lokal saat mount.
+  const [saldoAwal, setSaldoAwal] = useState(route?.params?.saldo ?? 0);
+  useEffect(() => {
+    if (!memberId) return;
+    let live = true;
+    (async () => {
+      try {
+        await initDb();
+        const row = await queryFirst<{ depositBalance: number | null }>(
+          'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+          [memberId],
+        );
+        if (live && row) setSaldoAwal(Math.max(0, Math.round(Number(row.depositBalance) || 0)));
+      } catch {
+        /* offline - fallback saldo route */
+      }
+    })();
+    return () => { live = false; };
+  }, [memberId]);
 
   const [nominal, setNominal] = useState('');
   const [method, setMethod] = useState(METHODS[0]);
@@ -113,7 +152,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   }, [memberId]);
 
   const nominalNum = Number(nominal.replace(/\D/g, '')) || 0;
-  const ready = nominalNum >= MIN_TOPUP && method !== '' && !saving;
+  const ready = hasMember && nominalNum >= MIN_TOPUP && method !== '' && !saving;
   const saldoAkhir = saldoAwal + nominalNum;
 
   /** Submit: persist/outbox dulu, lalu tampilkan sukses (saldo kembali ke Member). */
@@ -183,6 +222,9 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
         </View>
         {!online && (
           <Text style={s.offlineBanner}>{t('top_queued')}</Text>
+        )}
+        {!hasMember && (
+          <Text style={s.offlineBanner}>{lang === 'id' ? 'Buka layar ini dari daftar member agar ID member terbawa.' : 'Open this screen from the member list so the member ID is carried over.'}</Text>
         )}
 
         <View style={s.card}>

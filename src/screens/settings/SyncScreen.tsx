@@ -174,7 +174,11 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         </View>
       ))}
 
-      <AppButton size="md" title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
+      {/* Simulasi hanya di build dev: di produksi tombol disembunyikan agar
+        banner peringatan sync tak bisa dipalsukan kasir. */}
+      {__DEV__ ? (
+        <AppButton size="md" title={t('sync.simOld')} onPress={simulateOld} variant="secondary" style={styles.simBtn} textStyle={styles.simBtnText} />
+      ) : null}
       <Text style={styles.foot}>{t('sync_foot')}</Text>
       </ScrollView>
     </View>

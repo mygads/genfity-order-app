@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printReceiptData, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { printReceiptData, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getSession } from '../../session';import { getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const no = route?.params?.no ?? '#148';
-  const method = route?.params?.method ?? 'QRIS';
-  const mode = route?.params?.mode ?? 'Bawa Pulang';
+  const { t } = useLang(); // Tanpa params = nilai kosong yang jujur (bukan TRX/#148/QRIS/Bawa Pulang karangan).
+  const no = route?.params?.no ?? '';
+  const method = route?.params?.method ?? '';
+  const mode = route?.params?.mode ?? '';
   // Label tampil: nilai data 'ESB Order' (dipakai logika fee/mode) tetap, yang tampil jadi nama produk.
   const modeLabel = mode === 'ESB Order' ? 'Genfity Order' : mode;
   const cash = route?.params?.cash ?? 0;
@@ -33,7 +34,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   // (sebelumnya service/rounding/feeESB tak dikurangi → subtotal kebesaran).
   const subtotal  = hasItems ? itemsSum : Math.max(0, total + discount - ongkir - service - rounding - feeESB);
 
-  const cashierLine = [route?.params?.cashier ?? 'Kasir Gista', route?.params?.table ?? route?.params?.customer ?? 'QoQi'].join(' · ');
+  const cashierLine = [route?.params?.cashier ?? getSession()?.name ?? getSession()?.username ?? '', route?.params?.table ?? route?.params?.customer ?? ''].filter((s) => s && s.trim()).join(' · ');
   // Rincian void dari CancelScreen/History (T8): tampil sebagai seksi struk tersendiri.
   const voidLines = route?.params?.voidLines ?? [];
   const voidReason = route?.params?.reason ?? '';
@@ -44,8 +45,10 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const approvalCode = route?.params?.approvalCode ?? '';
   const cardLast4 = route?.params?.cardLast4 ?? '';
   const edcLine = [route?.params?.bank, route?.params?.terminal].filter(Boolean).join(' · ');
-  const shopName = route?.params?.shopName ?? 'Genfity Cabang Poris';
-  const shopAddr = route?.params?.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
+  // Nama + alamat gerai dari terminal aktif (bukan hardcode Poris); alamat
+  // kosong = baris alamat disembunyikan.
+  const shopName = route?.params?.shopName ?? getTerminal().branchName ?? 'Genfity';
+  const shopAddr = route?.params?.shopAddr ?? '';
   const customFooter = route?.params?.footer ?? '';
   const [printing, setPrinting] = useState(false);
   /** Cetak nyata: ESC/POS rincian penuh (selaras tampilan kertas) → printer
@@ -63,7 +66,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const paper = (<View style={[styles.paper, isTablet && styles.paperTablet]}>
-      <Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text><Text style={styles.addr}>{shopAddr}</Text><Text style={styles.line}>No: {no}    {modeLabel}</Text>
+      <Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text>{shopAddr ? <Text style={styles.addr}>{shopAddr}</Text> : null}<Text style={styles.line}>No: {no}    {modeLabel}</Text>
       <Text style={styles.line}>{cashierLine}</Text>
       <Text style={styles.line}>{todayId} · {timeId}</Text>
       <View style={styles.div} />

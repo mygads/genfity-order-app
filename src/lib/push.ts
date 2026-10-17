@@ -6,6 +6,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { ApiPath } from '../config/server';
+import { getNotif } from '../config/device';
 import { apiFetch, getApiMode } from './apiSource';
 
 Notifications.setNotificationHandler({
@@ -127,11 +128,19 @@ export function notifyPushSyncSuccess(): void {
   void retryPendingPushToken();
 }
 
-/** Notifikasi lokal: order online baru, sync warning, dsb. */
+/** Notifikasi lokal: order online baru, sync warning, dsb. Bunyi mengikuti
+ *  toggle Pengaturan "Bunyi order baru" (soundNewOrder) agar "masuk dan bunyi"
+ *  benar-benar terjadi saat ON dan diam saat OFF. */
 export async function notifyLocal(title: string, body: string, data?: Record<string, unknown>): Promise<void> {
   try {
+    let soundOn = true;
+    try {
+      soundOn = getNotif().soundNewOrder !== false;
+    } catch {
+      /* preferensi belum siap - bunyi default */
+    }
     await Notifications.scheduleNotificationAsync({
-      content: { title, body, data: data ?? {} },
+      content: { title, body, data: data ?? {}, ...(soundOn ? { sound: 'default' as const } : { sound: null }) },
       trigger: null,
     });
   } catch {

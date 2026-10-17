@@ -11,6 +11,8 @@
  */
 import { ApiPath, getBaseUrl } from '../config/server';
 import { apiFetch, getApiMode, unwrap } from './apiSource';
+import { requireAccess } from './access';
+import { verifyAttendancePin } from './pin';
 import { tOf } from './i18n';
 
 const MAX_ATTEMPTS = 5;
@@ -61,10 +63,56 @@ function locked(): AuthResult {
   return { ok: false, code: 'locked', message: msg };
 }
 
+export interface EscalationResult extends AuthResult {
+  /** Id user ms_posuser pemilik PIN (hanya bila ok) — untuk audit/eskalasi. */
+  userId?: string;
+}
+
+/**
+ * Fallback eskalasi offline-first untuk aksi sensitif (void, kompliment,
+ * non-penjualan). HANYA dipanggil pemanggil bila authorizeSupervisor
+ * mengembalikan 'offline'/'unconfigured' (pola yang sama dengan buka/tutup
+ * shift di ShiftScreen/EndShiftScreen).
+ *
+ * Jujur + fail-closed: PIN dicocokkan ke hash lokal (lib/pin.ts), lalu
+ * pemegang PIN WAJIB punya hak accessKey via requireAccess (kasir Staff
+ * dengan deny order.void tetap ditolak; owner/admin lolos). PIN salah /
+ * tak dikenal / tanpa hak = tolak + hitung attempt (kunci 5x beruntun).
+ */
+export async function verifyLocalEscalation(
+  pin: string,
+  accessKey: string,
+): Promise<EscalationResult> {
+  const clean = pin.replace(/[^0-9]/g, '');
+  if (!clean) {
+    return { ok: false, code: 'invalid', message: tOf('sup_invalid') };
+  }
+  let v: { ok: boolean | null; userId?: string };
+  try {
+    v = await verifyAttendancePin(clean);
+  } catch {
+    return fail('offline', tOf('sup_offline'));
+  }
+  if (v.ok !== true || !v.userId) {
+    if (v.ok === false) return fail('invalid', tOf('sup_invalid'));
+    return fail('offline', tOf('sup_offline'));
+  }
+  let gate: { ok: boolean };
+  try {
+    gate = await requireAccess(v.userId, accessKey);
+  } catch {
+    return fail('denied', tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1)));
+  }
+  if (!gate.ok) {
+    return fail('denied', tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1)));
+  }
+  return { ok: true, code: 'ok', message: tOf('sup_ok'), userId: v.userId };
+}
+
 /** Minta persetujuan supervisor ke server; offline selalu ditolak. */
 export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
   const clean = pin.replace(/[^0-9]/g, '').slice(0, 6);
-  if (clean.length !== 6) {
+  if (!clean) {
     return { ok: false, code: 'invalid', message: tOf('sup_invalid') };
   }
   // Kunci kedaluwarsa memberi jendela baru; kunci aktif menolak tanpa panggil server.
@@ -73,8 +121,17 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     lockedUntil = 0;
   }
   if (isLocked()) return locked();
-  if (!getBaseUrl()) {
+  // Mode local = offline-first tanpa server (apiFetch short-circuit tanpa
+  // dial network): kembalikan 'unconfigured' TANPA gerbang panjang-PIN agar
+  // pemanggil shift (buka/tutup) bisa lanjut ke fallback PIN lokal 4-digit
+  // (seed: 1111/2222/1234). Validasi 6 digit hanya berlaku untuk jalur server
+  // di bawah; pemanggil aksi sensitif (void/refund) tetap fail-closed karena
+  // mereka tidak punya fallback lokal.
+  if (getApiMode() === 'local' || !getBaseUrl()) {
     return fail('unconfigured', tOf('sup_unconfigured'));
+  }
+  if (clean.length !== 6) {
+    return { ok: false, code: 'invalid', message: tOf('sup_invalid') };
   }
   try {
     // Lewat apiFetch (bukan apiPost langsung): Dummy Mode dilayani fixture

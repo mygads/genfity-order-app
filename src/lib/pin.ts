@@ -14,7 +14,7 @@
 // expo-secure-store terdaftar di package.json (native + web).
 import * as SecureStore from 'expo-secure-store';
 import { initDb, query, queryFirst } from './db';
-import { getItem, setItem } from './storage';
+import { getItem, removeItem, setItem } from './storage';
 
 export interface PinRecord {
   v: number;
@@ -210,6 +210,21 @@ export async function loadPinRecord(userId: string): Promise<PinRecord | null> {
     return JSON.parse(fb) as PinRecord;
   } catch {
     return null;
+  }
+}
+
+/** Buang record hash PIN (SecureStore + fallback); idempoten, tak melempar. */
+export async function removePinHash(userId: string): Promise<void> {
+  const key = pinKey(userId);
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {
+    /* lanjut ke fallback di bawah */
+  }
+  try {
+    await removeItem(key);
+  } catch {
+    /* abaikan */
   }
 }
 

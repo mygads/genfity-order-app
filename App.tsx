@@ -8,10 +8,10 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, loginDemo, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
-import { ensureSeeded } from './src/lib/seed';
+import { seedIfEmpty } from './src/lib/seed';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { pullMaster } from './src/lib/master';
@@ -137,7 +137,10 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
           return;
         }
         const openRow = await queryFirst<{ c: number }>(
-          "SELECT COUNT(*) AS c FROM tr_shiftlog WHERE status = 'open' OR clockOut IS NULL",
+          // Baris absensi (status 'absen') dikecualikan: clock-in kehadiran
+          // BUKAN shift kasir; tanpa filter, absen-masuk setelah shift tutup
+          // (clockOut NULL) terbaca "open" dan gerbang navigator bocor.
+          "SELECT COUNT(*) AS c FROM tr_shiftlog WHERE (status = 'open' OR clockOut IS NULL) AND (status IS NULL OR status <> 'absen')",
         );
         if (alive) setShiftClosed(Number(openRow?.c ?? 0) === 0);
       } catch {
@@ -335,9 +338,9 @@ export default function App() {
     initDb()
       .then(async () => {
         try {
-          await ensureSeeded();
+          await seedIfEmpty();
         } catch (e) {
-          console.warn('[seed] ensureSeeded failed', e);
+          console.warn('[seed] seedIfEmpty failed', e);
         }
       })
       .catch(() => {});
@@ -451,11 +454,11 @@ export default function App() {
         (globalThis as any).__NAV__ = {          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           go: (name: string, params?: any) => {
             if (getSession() === null) {
-              loginDemo();
-              setTimeout(() => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (navRef as any).navigate(name as never, params as never);
-              }, 300);
+              // JANGAN cetak sesi demo: identitas wajib dari login nyata
+              // (kasir/2222 dsb. jalan offline-first). Tanpa sesi, arahkan
+              // ke Login agar hook tak memalsukan identitas.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (navRef as any).navigate('Login' as never);
               return;
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

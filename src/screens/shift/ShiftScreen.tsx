@@ -33,7 +33,7 @@ const MAX_KAS_AWAL = 10000000;
 
   const [lastShift, setLastShift] = useState<LastShift | null>(null);
   // Shift terakhir dari SQLite (tr_shiftlog), bukan hardcoded.
-  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1'); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || 'Kasir Utama', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE status IN (\'open\', \'closed\') ORDER BY clockIn DESC LIMIT 1'); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || '-', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
 
   const openPin = () => {
     if (kasAwalNum <= 0) {
@@ -47,10 +47,11 @@ const MAX_KAS_AWAL = 10000000;
 
   const confirmOpen = async () => {
     if (openingRef.current) return;
-    // FIX2-4a: authorizeSupervisor butuh tepat 6 digit (titik PIN dan pad sudah 6);
-    // guard disamakan agar pesan jujur.
-    if (pin.length < 6) {
-      setError('Masukkan PIN (6 digit)');
+    // Tanpa gerbang panjang-PIN lokal (cermin EndShiftScreen): PIN seed uji
+    // 4 digit (1111/2222/1234) harus lolos ke authorizeSupervisor +
+    // verifyAttendancePin; hanya PIN kosong yang ditolak di sini.
+    if (!pin.replace(/\D/g, '')) {
+      setError('Masukkan PIN terlebih dahulu');
       return;
     }
     openingRef.current = true;
@@ -89,11 +90,15 @@ const MAX_KAS_AWAL = 10000000;
       const nowIso = new Date().toISOString();
       const shiftId = `shift-${Date.now()}`;
       const term = getTerminal();
-      const nm = getSession()?.name ?? 'Kasir';
+      // Kolom userId WAJIB id user nyata (dipakai rekap/hak/eskalasi), BUKAN
+      // nama tampilan; cashierName menyimpan nama untuk struk/rekap.
+      const sess = getSession();
+      const shiftUserId = sess?.userId || sess?.username || '';
+      const shiftCashier = sess?.name || sess?.username || '';
       try {
         await run(
-          `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, 'open', NULL)`,
-          [shiftId, term.branchId || null, term.terminalCode || null, nm, 'Shift', nowIso, kasAwalNum],
+          `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 'open', NULL)`,
+          [shiftId, term.branchId || null, term.terminalCode || null, shiftUserId, shiftCashier, 'Shift', nowIso, kasAwalNum],
         );
         // Buka shift tercatat ke outbox agar ikut push berikutnya (parity EndShift).
         try {

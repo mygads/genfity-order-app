@@ -1,10 +1,61 @@
 import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang,
 
-type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_DISCOUNT = 5000;const PROMO_PACK_PRICE = 55000;const PROMO_IMAGES = [
+type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang(); const [idx, setIdx] = useState(0);
+  /** Nama cabang live dari klaim terminal; fallback label generik. */
+  const shopName = (() => {
+    try {
+      const b = (getTerminal().branchName ?? '').trim();
+      return b || t('disp_shop');
+    } catch { return t('disp_shop'); }
+  })();
+  /** Order terbuka cabang ini (live, bukan angka contoh). */
+  const [openCount, setOpenCount] = useState(0);
+  /** SSID Wi-Fi hanya bila merchant mengaturnya di ms_setting; bila tak ada,
+   * kotak Wi-Fi disembunyikan (tanpa SSID contoh). */
+  const [wifiSsid, setWifiSsid] = useState('');
+  /** Promo live dari ms_promotion (aktif + berlaku hari ini); kosong = slide netral toko. */
+  const [dbPromos, setDbPromos] = useState<Array<{ id: string; title: string; desc: string }>>([]);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        await initDb();
+        const d = new Date();
+        const p = (n: number) => String(n).padStart(2, '0');
+        const now = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        const rows = await query<{ promoCode: string | null; promoName: string | null }>(
+          `SELECT promoCode, promoName FROM ms_promotion WHERE flagActive = 1 AND (validFrom IS NULL OR validFrom = '' OR validFrom <= ?) AND (validTo IS NULL OR validTo = '' OR validTo >= ?) ORDER BY promoCode LIMIT 6`,
+          [now, now],
+        );
+        if (!live) return;
+        setDbPromos(
+          rows
+            .filter((r) => ((r.promoName ?? r.promoCode ?? '') as string).trim())
+            .map((r) => ({ id: String(r.promoCode ?? r.promoName), title: String(r.promoCode ?? ''), desc: String(r.promoName ?? '') })),
+        );
+      } catch { /* tanpa promo — slide netral toko dipakai */ }
+      try {
+        let branchId = '';
+        try { branchId = getBranchId(); } catch { branchId = 'B001'; }
+        const cnt = await query<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM tr_saleshead WHERE (status IS NULL OR status <> 'paid') AND (branchId = ? OR branchId IS NULL OR branchId = '')`,
+          [branchId],
+        );
+        if (live) setOpenCount(Number(cnt[0]?.n) || 0);
+      } catch { /* hitungan opsional */ }
+      try {
+        const ws = await query<{ value1: string | null }>(
+          `SELECT value1 FROM ms_setting WHERE key1 = 'Network' AND key2 = 'WifiSsid' LIMIT 1`,
+        );
+        if (live) setWifiSsid((ws[0]?.value1 ?? '').trim());
+      } catch { /* tanpa SSID — kotak disembunyikan */ }
+    })();
+    return () => { live = false; };
+  }, []);
   /** Notice gerbang shift saat ketuk kembali order (shift tutup → ke layar Shift). */
   const [gateNotice, setGateNotice] = useState('');
 
@@ -16,7 +67,7 @@ type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shi
     })();
   };
 
-  const promos = [ { id: 'p1', title: t('idle_promo1_title'), desc: `${t('idle_promo1_pre')}${rp(PROMO_DISCOUNT)}${t('idle_promo1_post')}` }, { id: 'p2', title: t('idle_promo2_title'), desc: `${t('idle_promo2_pre')}${rp(PROMO_PACK_PRICE)}` }, { id: 'p3', title: t('idle_promo3_title'), desc: t('idle_promo3_desc') }, ]; useEffect(() => {
+  const promos = dbPromos.length > 0 ? dbPromos : [{ id: 'shop', title: shopName, desc: t('idle_welcome') }]; useEffect(() => {
     const timer = setInterval(() => setIdx((i) => (i + 1) % promos.length), 5000);
     return () => clearInterval(timer);
   }, [promos.length]);
@@ -27,11 +78,11 @@ type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shi
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View><View style={styles.hero}>
         <Image source={require('../../../assets/images/esb_logo_white.webp')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
-        <Text style={[styles.shop, isTablet && styles.shopBig]}>{t('disp_shop')}</Text>
+        <Text style={[styles.shop, isTablet && styles.shopBig]}>{shopName}</Text>
         <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>
       </View>
       <View style={styles.promoCard}>
-        <Image source={PROMO_IMAGES[idx]} style={[styles.promoImg, isTablet && styles.promoImgTablet]} resizeMode="contain" />
+        <Image source={PROMO_IMAGES[idx % PROMO_IMAGES.length]} style={[styles.promoImg, isTablet && styles.promoImgTablet]} resizeMode="contain" />
         <Text style={[styles.promoTitle, isTablet && styles.promoTitleBig]}>{promo.title}</Text>
         <Text style={[styles.promoDesc, isTablet && styles.promoDescBig]}>{promo.desc}</Text>
         <View style={styles.dots}>
@@ -45,13 +96,15 @@ type Lang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shi
           <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_hours')}</Text>
           <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val')}</Text>
         </View>
-        <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
-          <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_wifi')}</Text>
-          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>GNF-PORIS</Text>
-        </View>
+        {wifiSsid ? (
+          <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
+            <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_wifi')}</Text>
+            <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{wifiSsid}</Text>
+          </View>
+        ) : null}
         <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
           <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_queue')}</Text>
-          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_queue_val')}</Text>
+          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{openCount} {t('idle_queue_suffix')}</Text>
         </View>
       </View>
       <TouchableOpacity style={styles.cta} onPress={goCashier}>

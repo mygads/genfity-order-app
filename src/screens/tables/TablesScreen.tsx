@@ -53,7 +53,7 @@ async function writeTimerStore(no: string, elapsed: number): Promise<void> {
 catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved/...) ke status denah lokal. */function mapBeStatus(raw: unknown): TableStatus { const v = String(raw ?? '').trim().toLowerCase(); if (v === 'occupied' || v === 'busy' || v === 'terisi' || v === 'isi') return 'terisi'; if (v === 'reserved' || v === 'booked' || v === 'booking' || v === 'res' || v === 'reservasi' || v === 'dipesan') return 'dipesan'; if (v === 'merged' || v === 'merge' || v === 'combined' || v === 'join' || v === 'gabung') return 'gabung'; return 'kosong'; }type MsTableRow = { id: string; tableNo: string | null; sectionId: string | null; capacity: number | null; status: string | null };/** Tulis status balik ke ms_table (best-effort, tak memblokir UI). */function persistTableStatus(tb: { id: string; no: string }, status: TableStatus): void { void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE id = ? OR TRIM(tableNo) = ?', [status, tb.id, tb.no]); } catch { /* master belum tersedia */ } })(); }/** Denah meja - section, status, timer durasi, hold order, transaksi cepat (QS). */export default function TablesScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>([]); const [liveSections, setLiveSections] = useState<string[] | null>(null);
+  const { lang, t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [tables, setTables] = useState<Table[]>([]); const [liveSections, setLiveSections] = useState<string[] | null>(null);
   const [section, setSection] = useState('Semua');
   const [filter, setFilter] = useState<'semua' | TableStatus>('semua');
   const [selected, setSelected] = useState<Table | null>(null);
@@ -257,7 +257,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       <ScrollView contentContainerStyle={[s.grid, isTablet && wideCenterLg]}>
         {shown.length === 0 && (
           <View style={s.emptyWrap}>
-            <Text style={[s.emptyTxt, isTablet && s.emptyTxtBig]}>Belum ada meja.</Text>
+            <Text style={[s.emptyTxt, isTablet && s.emptyTxtBig]}>{lang === 'id' ? 'Belum ada meja.' : 'No tables yet.'}</Text>
           </View>
         )}
         {shown.map((tb) => {

@@ -1,8 +1,39 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getBranchId, getServerEnv, getTerminal } from '../../config/server';import { initDb, query } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const go = (route: string) => navigation?.navigate(route); return (
+  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false);
+  // Identitas live: cabang + terminal dari klaim terminal, printer dari
+  // ms_station aktif; '-' jujur bila belum ada (tanpa contoh Poris/TRM-001).
+  let branchId = 'B001';
+  let branchName = '';
+  let terminalCode = '';
+  let serverEnv = '';
+  try { branchId = getBranchId(); } catch { /* default */ }
+  try {
+    const term = getTerminal();
+    branchName = (term.branchName ?? '').trim();
+    terminalCode = (term.terminalCode ?? '').trim();
+    if ((term.branchId ?? '').trim()) branchId = term.branchId.trim();
+  } catch { /* default */ }
+  try { serverEnv = getServerEnv(); } catch { /* label i18n */ }
+  const branchLabel = branchName ? `${branchName} - ${branchId}` : branchId;
+  const [printerLabel, setPrinterLabel] = useState('-');
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        await initDb();
+        const rows = await query<{ stationName: string | null }>(
+          'SELECT stationName FROM ms_station WHERE flagActive = 1 ORDER BY flagDefault DESC LIMIT 3',
+        );
+        if (!on) return;
+        const names = rows.map((r) => (r.stationName ?? '').trim()).filter(Boolean);
+        if (names.length > 0) setPrinterLabel(names.join(' · '));
+      } catch { /* '-' jujur */ }
+    })();
+    return () => { on = false; };
+  }, []); const go = (route: string) => navigation?.navigate(route); return (
     <View style={styles.root}>
       <ScreenHeader title={t('settings.about')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
@@ -20,10 +51,10 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
       <View style={isTablet ? wideCenterLg : undefined}>
       <View style={styles.card}>
         <Row label={t('about.package')} value="Genfity Order (Expo RN)" />
-        <Row label={t('about.branch')} value="Genfity Cabang Poris - BR-01" />
-        <Row label={t('about.terminal')} value="TRM-001" />
-        <Row label={t('about.env')} value={t('about.envVal')} />
-        <Row label={t('about.printer')} value="BT SPP - LAN - Star" />
+        <Row label={t('about.branch')} value={branchLabel} />
+        <Row label={t('about.terminal')} value={terminalCode || '-'} />
+        <Row label={t('about.env')} value={serverEnv || t('about.envVal')} />
+        <Row label={t('about.printer')} value={printerLabel} />
       </View>
       <View style={styles.card}>
         <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('about.title')}</Text>

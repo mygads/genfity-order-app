@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import { getSession, logout } from '../../session';
-import { getTerminal } from '../../config/server';
+import { getBranchId, getTerminal } from '../../config/server';
 import { initDb, query, queryFirst } from '../../lib/db';
 import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -31,6 +31,7 @@ interface TableMini {
 }
 
 interface StockMini {
+  id: string;
   name: string;
   left: number;
 }
@@ -75,10 +76,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const [yest, setYest] = useState<{ total: number; trx: number } | null>(null);
   const [tables, setTables] = useState<TableMini[]>([]);
   const [lowStock, setLowStock] = useState<StockMini[]>([]);
+  // Kartu shift mulai kosong (tertutup) sampai tr_shiftlog dibaca di bawah —
+  // tanpa shift terbuka = ajakan buka shift, bukan 'Shift Pagi 08:57' fiktif.
   const [shift, setShift] = useState(() => ({
-    open: true,
-    clockIn: s?.clockIn ?? '08:57',
-    cash: s?.cash ?? 200000,
+    open: false,
+    clockIn: s?.clockIn ?? '--:--',
+    cash: s?.cash ?? 0,
   }));
   const [lastSync, setLastSync] = useState(() => getLastSync());
   const [pending, setPending] = useState(() => pendingCount());
@@ -120,27 +123,35 @@ export default function DashboardScreen({ navigation }: Props) {
         if (alive && tRows.length > 0) {
           setTables(tRows.map((r) => ({ id: r.tableNo || r.id, s: mapStatus(r.status ?? '') })));
         }
-        const lRows = await query<{ name: string | null; left: number | null }>(
-          `SELECT COALESCE(m.menuName, b.menuId) AS name, b.qty AS left
+        const lRows = await query<{ id: string | null; name: string | null; left: number | null }>(
+          `SELECT b.menuId AS id, COALESCE(m.menuName, b.menuId) AS name, b.qty AS left
              FROM ms_branchmenu b LEFT JOIN ms_menu m ON m.id = b.menuId
-             WHERE b.flagSoldOut = 0 AND b.qty <= 8 ORDER BY b.qty ASC LIMIT 5`,
+             WHERE b.branchId = ? AND b.flagSoldOut = 0 AND b.qty <= 8 ORDER BY b.qty ASC LIMIT 5`,
+          [getBranchId()],
         );
         if (alive && lRows.length > 0) {
-          setLowStock(lRows.map((r) => ({ name: r.name ?? '-', left: Math.round(Number(r.left) || 0) })));
+          setLowStock(lRows.map((r) => ({ id: r.id ?? '', name: r.name ?? '-', left: Math.round(Number(r.left) || 0) })));
         }
         const shiftRow = await queryFirst<{
           shiftName: string | null; clockIn: string | null; cashInDrawer: number | null;
           clockOut: string | null; status: string | null;
         }>(
-          'SELECT shiftName, clockIn, cashInDrawer, clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+          // Absensi (status 'absen') dikecualikan: clock-in kehadiran bukan shift kasir.
+          'SELECT shiftName, clockIn, cashInDrawer, clockOut, status FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
         );
         if (alive && shiftRow) {
           const hhmm = String(shiftRow.clockIn ?? '').slice(11, 16);
           setShift({
             open: shiftRow.status === 'open' || !shiftRow.clockOut,
-            clockIn: hhmm || s?.clockIn || '08:57',
+            clockIn: hhmm || s?.clockIn || '--:--',
             cash: Number(shiftRow.cashInDrawer) || s?.cash || 0,
           });
+        } else if (alive) {
+          // Tanpa baris shift: hanya-absensi (belum pernah buka shift) = tutup.
+          const shiftTotal = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_shiftlog');
+          if (shiftTotal && Number(shiftTotal.c) > 0) {
+            setShift((prev) => ({ ...prev, open: false }));
+          }
         }
         // NAV-04: order online baru (belum diproses) + total member terdaftar.
         const esbRow = await queryFirst<{ c: number }>(
@@ -351,7 +362,7 @@ export default function DashboardScreen({ navigation }: Props) {
         </View>
         <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{lowStock.length} {t('dash_restock')}</Text>
         {lowStock.map((i) => (
-          <View key={i.name} style={styles.stockRow}>
+          <View key={i.id || i.name} style={styles.stockRow}>
             <Text style={[styles.stockName, isTablet && styles.stockNameBig]}>{i.name}</Text>
             <Text style={[styles.stockLeft, isTablet && styles.stockLeftBig]}>{t('unit_left')} {i.left}</Text>
           </View>

@@ -5,7 +5,7 @@ import { useLang } from '../../lib/i18n';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { EXTRA_METHODS, type ExtraMethodId } from '../../lib/payments';
-import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
+import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 /**
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
@@ -58,7 +58,12 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     if (!authFor || busy) return;
     setBusy(true);
     setMsg(t('xp_requesting'));
-    const r = await authorizeSupervisor(pin);
+    let r = await authorizeSupervisor(pin);
+    // Offline-first: kompliment/non-penjualan butuh hak order.void; PIN staf
+    // atau salah tetap ditolak (fail-closed).
+    if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
+      r = await verifyLocalEscalation(pin, 'order.void');
+    }
     setBusy(false);
     if (!r.ok) {
       // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
@@ -102,7 +107,7 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
               <AppButton title={t('xp_cancel')} variant="secondary" disabled={busy} onPress={() => setAuthFor(null)} fullWidth={false} size="md" style={styles.modalBtn} />
               <AppButton
                 title={busy ? t('xp_checking') : t('xp_approve')}
-                disabled={pin.length !== 6 || busy}
+                disabled={pin.replace(/[^0-9]/g, '').length < 4 || busy}
                 onPress={() => { void approve(); }}
                 fullWidth={false}
                 size="md"

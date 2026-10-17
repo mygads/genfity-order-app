@@ -17,14 +17,20 @@ export interface Session {
   cash: number;
 }
 
+/**
+ * Basis sesi netral — BUKAN identitas fiktif. Nama/username selalu ditimpa
+ * hasil validateEmployee saat login nyata (loginEmployee di bawah); outlet +
+ * shift mengikuti identitas cabang seed (B001 'Genfity Cabang Poris').
+ * clockIn/cash mulai kosong sampai shift nyata dibaca Dashboard.
+ */
 const DEMO: Session = {
-  name: 'Gista',
-  username: 'gista.kasir',
+  name: '',
+  username: '',
   role: 'Merchant Staff',
   outlet: 'Genfity Cabang Poris',
   shift: 'Shift Pagi',
-  clockIn: '08:57',
-  cash: 200000,
+  clockIn: '--:--',
+  cash: 0,
 };
 
 const LS_SESSION = 'genfity.session.current';
@@ -72,28 +78,22 @@ export function isLoggedIn(): boolean {
   return current !== null;
 }
 
-/** Simulasi login dev - tombol "Masuk Demo" di LoginScreen memanggil ini. */
-export function loginDemo(): Session {
-  restore();
-  current = { ...DEMO };
-  persist();
-  emit();
-  return current;
-}
-
 /**
  * Login karyawan tervalidasi server (T1): nama + username dari hasil
- * validateEmployee; outlet/shift/kas ikut sesi berjalan bila ada,
- * else default demo. loginDemo tetap ada untuk kompatibilitas alur lain.
+ * validateEmployee; peran + userId dikunci dari hasil login ini.
+ * Outlet/shift/kas HANYA diwarisi bila username sama (login ulang sesi
+ * sendiri); user berbeda selalu mulai dari basis netral agar identitas,
+ * shift, dan kas user sebelumnya tak bocor ke sesi baru.
  */
 export function loginEmployee(e: { nama: string; username: string; role?: string; userId?: string }): Session {
   restore();
-  const base = current ?? DEMO;
+  const uname = e.username.trim();
+  const base = current && current.username === uname ? current : DEMO;
   const userId = (e.userId ?? '').trim();
   current = {
     ...base,
     name: e.nama.trim() || base.name,
-    username: e.username.trim() || base.username,
+    username: uname || base.username,
     role: (e.role ?? '').trim() || 'Merchant Staff',
     ...(userId ? { userId } : {}),
   };

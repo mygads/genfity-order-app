@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
+import { initDb, query } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Route = { params?: { itemId?: string; id?: string; itemName?: string; name?: string } };
 type Props = { navigation?: Nav; route?: Route };
 
-const STATIONS = ['Dapur Utama', 'Bar / Minuman', 'Dessert', 'Lainnya'];
+const STATION_FALLBACK = ['Dapur Utama', 'Bar / Minuman', 'Dessert', 'Lainnya'];
 const QUICK = ['Less Sugar', 'Less Ice', 'Extra Pedas', 'Tanpa MSG', 'Matang Sempurna', 'Sambal Pisah'];
 
 /** Menu custom (custom_menu) - item dadakan harga manual + station dapur + notes. */
@@ -18,19 +19,42 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  // Form mulai kosong yang jujur (bukan harga/note contoh terisi).
   const [name, setName] = useState('');
-  const [price, setPrice] = useState('25000');
+  const [price, setPrice] = useState('');
   const [qty, setQty] = useState('1');
-  const [station, setStation] = useState(STATIONS[0] as string);
-  const [notes, setNotes] = useState<string[]>(['Less Sugar', 'Less Ice']);
-  const [free, setFree] = useState('Gula aren 50%');
+  // Station dari ms_station live; fallback daftar statis bila DB kosong.
+  const [stations, setStations] = useState<string[]>(STATION_FALLBACK);
+  const [station, setStation] = useState(STATION_FALLBACK[0] as string);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [free, setFree] = useState('');
   const [added, setAdded] = useState<string[]>([]);
   const [warn, setWarn] = useState('');
 
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        await initDb();
+        const rows = await query<{ stationName: string | null }>(
+          'SELECT stationName FROM ms_station WHERE flagActive = 1 ORDER BY rowid LIMIT 20',
+        );
+        const names = rows.map((r) => (r.stationName ?? '').trim()).filter(Boolean);
+        if (on && names.length > 0) {
+          setStations(names);
+          setStation((prev) => (names.includes(prev) ? prev : names[0]));
+        }
+      } catch {
+        /* fallback statis tetap dipakai */
+      }
+    })();
+    return () => { on = false; };
+  }, []);
+
   // Item yang sedang diedit/dipilih - id dikirim pemanggil via params route.
-  // Fallback 'p11' mempertahankan perilaku lama bila params belum dikirim.
-  const targetId = route?.params?.itemId ?? route?.params?.id ?? 'p11';
-  const targetName = route?.params?.itemName ?? route?.params?.name ?? 'Sudirman Coffee';
+  // Tanpa params = tanpa target (string kosong, bukan nama/id contoh).
+  const targetId = route?.params?.itemId ?? route?.params?.id ?? '';
+  const targetName = route?.params?.itemName ?? route?.params?.name ?? '';
 
   const priceNum = Number(price.replace(/[^0-9]/g, '')) || 0;
   const qtyNum = Math.max(1, Number(qty.replace(/[^0-9]/g, '')) || 1);
@@ -58,6 +82,12 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
   };
 
   const saveNotes = () => {
+    // Tanpa item target (dibuka langsung, bukan dari kasir) = tolak jujur,
+    // bukan kirim note ke id kosong yang tak cocok apa-apa.
+    if (!targetId) {
+      setWarn(t('fillNameFirst'));
+      return;
+    }
     const note = [...notes, free].filter(Boolean).join(' · ');
     // Tempel notes ke item kasir (dulu hilang tanpa params).
     navigation?.navigate('Cashier', { itemNote: { id: targetId, note } });
@@ -67,7 +97,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
     <View style={styles.root}>
       <ScreenHeader title={t('customMenuTitle')} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.list} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <Text style={styles.meta}>TRX-047 · tambah item di luar katalog</Text>
+      <Text style={styles.meta}>{t('customMenuTitle')} · {t('customMenuHint')}</Text>
       <Text style={styles.sec}>{t('customMenuSec')}</Text>
       <Text style={styles.hint}>{t('customMenuHint')}</Text>
       {added.length === 0
@@ -99,13 +129,13 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       </View>
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('kitchenStation')}</Text>
       <View style={styles.chips}>
-        {STATIONS.map((st) => (
+        {stations.map((st) => (
           <TouchableOpacity key={st} style={[styles.chip, station === st && styles.chipOn, isTablet && styles.chipBig]} onPress={() => setStation(st)}>
             <Text style={[styles.chipT, station === st && styles.chipTOn]}>{st}</Text>
           </TouchableOpacity>
         ))}
       </View>
-      <Text style={styles.sub2}>{station === 'Dapur Utama' ? 'gorengan · nasi' : station === 'Bar / Minuman' ? 'kopi · jus' : station === 'Dessert' ? 'cake · es' : 'tanpa routing'} · {rp(priceNum)} × {qtyNum} = {rp(priceNum * qtyNum)}</Text>
+      <Text style={styles.sub2}>{station} · {rp(priceNum)} × {qtyNum} = {rp(priceNum * qtyNum)}</Text>
       {warn ? <Text style={styles.warn}>{warn}</Text> : null}
       <AppButton
         size="md"

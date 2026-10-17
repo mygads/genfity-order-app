@@ -94,7 +94,35 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
   const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS); useEffect(() => { let alive = true; (async () => {
-  const [cachedRoutes, cachedOpts] = await Promise.all([ getJSON<MenuRoute[]>(LS_ROUTES, DEFAULT_ROUTES), getJSON<PrintOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; if (cachedRoutes.length > 0) setRoutes(cachedRoutes); setOpts({ ...DEFAULT_OPTS, ...cachedOpts }); })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_ROUTES, routes); }, [routes]); useEffect(() => { void setJSON(LS_OPTS, opts); void persistRoutes(routes, opts);
+  const [cachedRoutes, cachedOpts] = await Promise.all([ getJSON<MenuRoute[]>(LS_ROUTES, DEFAULT_ROUTES), getJSON<PrintOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; const base = cachedRoutes.length > 0 ? cachedRoutes : DEFAULT_ROUTES; if (cachedRoutes.length > 0) setRoutes(cachedRoutes); setOpts({ ...DEFAULT_OPTS, ...cachedOpts });
+      // Hitungan item jujur dari ms_menu live per grup (bukan angka contoh
+      // 24/12/18/8/6); grup merchant sendiri tetap dipertahankan.
+      try {
+        await initDb();
+        const counts = await query<{ g: string | null; n: number }>(
+          'SELECT categoryId AS g, COUNT(*) AS n FROM ms_menu GROUP BY categoryId',
+        );
+        if (alive && counts.length > 0) {
+          const byGroup: Record<string, number> = {};
+          for (const c of counts) {
+            const g = (c.g ?? '').trim();
+            if (g) byGroup[g] = Number(c.n) || 0;
+          }
+          if (Object.keys(byGroup).length > 0) {
+            setRoutes((prev) => {
+              const src = prev.length > 0 ? prev : base;
+              let changed = false;
+              const next = src.map((r) => {
+                const n = byGroup[r.group];
+                if (n === undefined || n === r.items) return r;
+                changed = true;
+                return { ...r, items: n };
+              });
+              return changed ? next : prev;
+            });
+          }
+        }
+      } catch { /* hitungan opsional - cache tetap dipakai */ } })(); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_ROUTES, routes); }, [routes]); useEffect(() => { void setJSON(LS_OPTS, opts); void persistRoutes(routes, opts);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.topMargin, opts.showPaymentInfo, opts.showSalesTime]);
 

@@ -189,7 +189,7 @@ export default function RecapScreen({ navigation }: Props) {
           "SELECT shiftName, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE shiftName IS NULL OR shiftName <> 'Absensi' ORDER BY clockIn DESC LIMIT 1",
         );
         if (!on) return;
-        const nm = getSession()?.name ?? 'Gista';
+        const nm = getSession()?.name ?? getSession()?.username ?? '';
         const splitRows = paySplit
           .filter((r) => (r.nama || '').trim() && num(r.total) > 0)
           .map((r) => ({ nama: `${(r.nama || t('sync_kind_other')).trim()} (${num(r.n)} trx)`, total: Math.round(num(r.total)) }));
@@ -235,7 +235,7 @@ export default function RecapScreen({ navigation }: Props) {
   const cancelled = db?.cancelled ?? [];
   const cancelQty = cancelled.reduce((s, c) => s + c.qty, 0);
   const expenseTotal = db?.expense ?? 0;
-  const shiftLabel = db?.shiftLabel ?? `${t('fallback_shift')} · ${t('c_cashier')} ${getSession()?.name ?? 'Gista'}`;
+  const shiftLabel = db?.shiftLabel ?? `${t('fallback_shift')} · ${t('c_cashier')} ${getSession()?.name ?? getSession()?.username ?? ''}`;
   const hours = db?.hours ?? '';
 
   return (

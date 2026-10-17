@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { ensureShiftOpen } from '../../lib/shiftGuard';
-import { initDb, run } from '../../lib/db';
+import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
+import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -33,10 +34,13 @@ function statusStyle(status: Status) {
 
 const NEXT: Record<Status, Status | null> = { Terjadwal: 'Datang', Datang: 'Selesai', Selesai: null };
 
-/** Daftar reservasi hanya dari perangkat (AsyncStorage); kosong = empty-state. */
+/** Daftar reservasi tersimpan di perangkat PER CABANG agar bertahan saat dibuka
+ * ulang; kosong = empty-state (tanpa contoh). Kunci dicabang supaya reservasi
+ * cabang A tak bocor ke cabang B. */
+const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || 'B001').trim() || 'B001'}`;
 
-/** Daftar reservasi tersimpan di perangkat agar bertahan saat aplikasi dibuka ulang. */
-const BOOK_KEY = 'genfity.booking.list';
+/** Baris meja untuk chip + validasi kapasitas (kanonis fallback / live ms_table). */
+interface LiveTable { no: string; section: string; kap: number; }
 
 /** Kanonis mengikuti TablesScreen: no tanpa strip + section Dalam/Teras/VIP. */
 const CANON_TABLES: { no: string; section: string; kap: number }[] = [
@@ -69,6 +73,20 @@ export default function BookingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  const [branchId] = useState(() => {
+    try { return getBranchId(); } catch { return 'B001'; }
+  });
+  const bookKey = bookKeyFor(branchId);
+  const shopLabel = (() => {
+    try {
+      const term = getTerminal();
+      return (term.branchName ?? '').trim() || branchId;
+    } catch { return branchId; }
+  })();
+  /** Meja live dari ms_table (denah merchant via Tables); null = belum muat. */
+  const [liveTables, setLiveTables] = useState<LiveTable[] | null>(null);
+  const tablesSrc: LiveTable[] = liveTables ?? CANON_TABLES;
+  const tablesFree = tablesSrc.map(tableLabel);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [list, setList] = useState<Resv[]>([]);
   const [onlyToday, setOnlyToday] = useState(false);
@@ -87,7 +105,7 @@ export default function BookingScreen({ navigation }: Props) {
 
   useEffect(() => {
     let on = true;
-    void getJSON<Resv[]>(BOOK_KEY, []).then((v) => {
+    void getJSON<Resv[]>(bookKey, []).then((v) => {
       if (!on || !Array.isArray(v)) return;
       const base = v;
       // Migrasi kode lama ber-strip ke kanonis sekali saat muat.
@@ -101,18 +119,50 @@ export default function BookingScreen({ navigation }: Props) {
     return () => {
       on = false;
     };
+  }, [bookKey]);
+
+  // Live: chip + kapasitas mengikuti denah ms_table (merchant bisa ubah via
+  // Tables); DB kosong = fallback kanonis. Pilihan default ikut label live
+  // bila pengguna belum menyentuh form.
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        await initDb();
+        const rows = await query<{ tableNo: string | null; sectionId: string | null; capacity: number | null }>(
+          'SELECT tableNo, sectionId, capacity FROM ms_table LIMIT 60',
+        );
+        const mapped: LiveTable[] = [];
+        for (const r of rows) {
+          const no = canonTableNo(String(r.tableNo ?? ''));
+          if (!no) continue;
+          mapped.push({
+            no,
+            section: (r.sectionId ?? '').trim() || 'Dalam',
+            kap: Number(r.capacity) || 0,
+          });
+        }
+        if (!on || mapped.length === 0) return;
+        setLiveTables(mapped);
+        const first = mapped[0];
+        if (first) setTable((prev) => (prev === TABLES_FREE[0] ? tableLabel(first) : prev));
+      } catch {
+        /* master belum tersedia - fallback kanonis tetap dipakai */
+      }
+    })();
+    return () => { on = false; };
   }, []);
 
   const persist = (next: Resv[]) => {
     setList(next);
-    void setJSON(BOOK_KEY, next);
+    void setJSON(bookKey, next);
   };
 
   const shown = onlyToday ? list.filter((r) => r.date === 'Hari ini') : list;
 
   const resetForm = () => {
     setName(''); setPhone(''); setPax(''); setTime(''); setNote('');
-    setDate('Hari ini'); setTable(TABLES_FREE[0] as string);
+    setDate('Hari ini'); setTable(tablesFree[0] as string);
     setEditingId(null); setWarn('');
   };
 
@@ -129,7 +179,7 @@ export default function BookingScreen({ navigation }: Props) {
     const code = canonTableNo(table);
     // Validasi kapasitas ala POSLite: tamu tak boleh melebihi kursi meja tujuan.
     // Kunci i18n khusus belum ada (lihat laporan) - pesan ID ringkas di sini.
-    const picked = CANON_TABLES.find((tb) => tb.no === code);
+    const picked = tablesSrc.find((tb) => tb.no === code);
     const paxNum = Number(tamu) || 2;
     if (picked && paxNum > picked.kap) {
       setWarn(`Tamu (${paxNum}) melebihi kapasitas meja ${code} (${picked.kap} kursi).`);
@@ -176,7 +226,7 @@ export default function BookingScreen({ navigation }: Props) {
     void (async () => {
       try {
         await initDb();
-        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', code]);
+        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ? OR id = ?', ['dipesan', code, code]);
       } catch {
         /* master belum tersedia */
       }
@@ -198,8 +248,8 @@ export default function BookingScreen({ navigation }: Props) {
     setName(r.name);
     setPhone(r.phone === '-' ? '' : r.phone);
     setPax(String(r.tamu));
-    const match = CANON_TABLES.find((tb) => tb.no === canonTableNo(r.table));
-    setTable(match ? tableLabel(match) : TABLES_FREE[0] as string);
+    const match = tablesSrc.find((tb) => tb.no === canonTableNo(r.table));
+    setTable(match ? tableLabel(match) : tablesFree[0] as string);
     setDate(r.date);
     setTime(r.time);
     setNote(r.note === '-' ? '' : r.note);
@@ -227,7 +277,7 @@ export default function BookingScreen({ navigation }: Props) {
     void (async () => {
       try {
         await initDb();
-        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['kosong', r.table]);
+        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ? OR id = ?', ['kosong', r.table, r.table]);
       } catch {
         /* master belum tersedia */
       }
@@ -236,7 +286,7 @@ export default function BookingScreen({ navigation }: Props) {
 
   const reservasiList = (
     <>
-      <Text style={[styles.count, isTablet && styles.countBig]}>Genfity Cabang Poris · {shown.length} reservasi aktif</Text>
+      <Text style={[styles.count, isTablet && styles.countBig]}>{shopLabel} · {shown.length} reservasi aktif</Text>
       <TouchableOpacity onPress={() => setOnlyToday((v) => !v)} style={styles.todayToggle}>
         <Text style={styles.todayToggleT}>{onlyToday ? '☑ Hari ini saja' : '☐ Hari ini saja'}</Text>
       </TouchableOpacity>
@@ -326,7 +376,7 @@ export default function BookingScreen({ navigation }: Props) {
       <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('c_table')}</Text>
       <View style={styles.chips}>
-        {TABLES_FREE.map((tb) => (
+        {tablesFree.map((tb) => (
           <TouchableOpacity key={tb} style={[styles.chip, table === tb && styles.chipOn]} onPress={() => setTable(tb)}>
             <Text style={[styles.chipT, table === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
           </TouchableOpacity>
@@ -356,7 +406,7 @@ export default function BookingScreen({ navigation }: Props) {
           <Text style={styles.cancelEditT}>{t('bok_cancel_edit')}</Text>
         </TouchableOpacity>
       ) : null}
-      <Text style={styles.fine}>{t('bok_example')}: Andini · 4 {t('guests')} · {rp(86400)} · {t('c_table')} A2.</Text>
+      <Text style={styles.fine}>{t('bok_example')}: Andini · 4 {t('guests')} · {t('c_table')} A2 · 19:00.</Text>
     </>
   );
 

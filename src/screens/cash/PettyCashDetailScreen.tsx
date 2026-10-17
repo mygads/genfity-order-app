@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
+import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';import { getSession } from '../../session';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
   navigation?: Nav;
   route?: {
     params?: {
@@ -15,7 +15,7 @@ import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, T
   const coa = p.coa ?? 'Operasional';
   const arus = p.arus ?? 'Keluar';
   const jumlah = p.jumlah ?? 45000;
-  const kasir = p.kasir ?? 'Gista';
+  const kasir = p.kasir ?? getSession()?.name ?? getSession()?.username ?? '';
   const photo = p.photo ?? null;
   const [disetujui, setDisetujui] = useState(p.disetujui ?? true);
 

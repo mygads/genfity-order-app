@@ -1,10 +1,79 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';import { initDb, query } from '../../lib/db';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Mock hanya referensi tipe — tak pernah ditampilkan; layar memakai baris live tr_salesmenu. */const ITEMS = [
-  { id: 'c1', name: 'Sudirman Coffee', price: 12900, qty: 2 },
-  { id: 'c2', name: 'Lele goreng kremes', price: 15000, qty: 1 },
-  { id: 'c3', name: 'Es Teh Manis', price: 8000, qty: 2 },];type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Mock hanya referensi tipe — tak pernah ditampilkan (render memakai array kosong). */ const SPLITS = [
-  { id: 's1', label: 'Split #1 - QoQi', amount: 41000, paid: true },
-  { id: 's2', label: 'Split #2 - Bimo', amount: 32500, paid: false },
-  { id: 's3', label: 'Split #3 - Sinta', amount: 12900, paid: false },];/** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. */async function persistVoid( orderId: string, voidLines: { id: string; qty: number }[], reason: string,): Promise<void> { try { await enqueueOutbox('tr_saleshead', orderId, 'update'); } catch { /* abaikan */ } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { apiFetch } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, query, run } from '../../lib/db';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Tulis void nyata via outbox + antrean sync (lihat persistVoid). *//** * Simpan void (kontrak §5.1.1 action-flag): catat ke outbox tr_saleshead + antrean sync agar aman offline, * coba kirim POST order/finish {action:'void', no, reason} langsung bila online. *//** * Tulis void ke DB lokal dulu (sumber kebenaran offline), lalu outbox/sync/POST:
+ * - satu baris tr_cancelmenu per item (alasan + user + syncDate NULL = kotor),
+ * - qty tr_salesmenu dikurangi sejumlah void (baris habis = qty 0),
+ * - tr_saleshead jadi 'void' bila tak ada sisa, 'open' + total dihitung ulang
+ *   bila void sebagian.
+ * Tak pernah melempar: outbox di persistVoid tetap jalan walau tulis lokal gagal. */
+async function applyVoidLocal(
+  orderId: string,
+  lines: { id: string; qty: number }[],
+  reason: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const userId = getSession()?.userId || getSession()?.username || '';
+  await initDb();
+  for (const ln of lines) {
+    const want = Math.max(0, Math.round(Number(ln.qty) || 0));
+    if (!ln.id || want <= 0) continue;
+    const rows = await query<{ id: string; menuName: string | null; qty: number | null; price: number | null }>(
+      'SELECT id, menuName, qty, price FROM tr_salesmenu WHERE salesNum = ? AND (menuId = ? OR id = ?) ORDER BY rowid',
+      [orderId, ln.id, ln.id],
+    );
+    let left = want;
+    let menuName: string | null = null;
+    for (const r of rows) {
+      if (left <= 0) break;
+      const have = Math.max(0, Math.round(Number(r.qty) || 0));
+      if (have <= 0) continue;
+      menuName = menuName ?? r.menuName;
+      const cut = Math.min(have, left);
+      const price = Math.max(0, Math.round(Number(r.price) || 0));
+      await run('UPDATE tr_salesmenu SET qty = ?, subtotal = ?, syncDate = NULL WHERE id = ?', [
+        have - cut,
+        price * (have - cut),
+        r.id,
+      ]);
+      try {
+        await enqueueOutbox('tr_salesmenu', r.id, 'update');
+      } catch {
+        /* abaikan */
+      }
+      left -= cut;
+    }
+    const voided = want - left;
+    if (voided > 0) {
+      const cid = `cx-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      await run(
+        `INSERT INTO tr_cancelmenu (id, salesNum, menuId, menuName, qty, reasonId, reasonNote, userId, cancelDate, syncDate)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+        [cid, orderId, ln.id, menuName, voided, reason, userId || null, now],
+      );
+      try {
+        await enqueueOutbox('tr_cancelmenu', cid, 'insert');
+      } catch {
+        /* abaikan */
+      }
+    }
+  }
+  // Hitung ulang head: sisa qty > 0 = open + total baru; nol = void.
+  const rest = await query<{ qty: number | null; price: number | null }>(
+    'SELECT qty, price FROM tr_salesmenu WHERE salesNum = ?',
+    [orderId],
+  );
+  let subtotal = 0;
+  for (const r of rest) subtotal += Math.max(0, Math.round(Number(r.qty) || 0)) * Math.max(0, Math.round(Number(r.price) || 0));
+  if (subtotal <= 0) {
+    await run('UPDATE tr_saleshead SET status = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['void', now, orderId]);
+  } else {
+    await run('UPDATE tr_saleshead SET status = ?, subtotal = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['open', subtotal, subtotal, now, orderId]);
+  }
+}
+async function persistVoid( orderId: string, voidLines: { id: string; qty: number }[], reason: string,): Promise<void> {
+  try {
+    await applyVoidLocal(orderId, voidLines, reason);
+  } catch {
+    /* tulis lokal gagal - outbox di bawah tetap jalan */
+  } } catch { /* abaikan */ } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const orderId = (route?.params?.orderId ?? '').trim();
@@ -19,9 +88,6 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
   const [pin, setPin] = useState('');
   const [authMsg, setAuthMsg] = useState(''); const [confirming, setConfirming] = useState(false); const [done, setDone] = useState(false);
 
-  const [voidSplits, setVoidSplits] = useState<string[]>([]); const toggleSplit = (id: string) =>
-    setVoidSplits((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]));
-
   const step = (id: string, delta: number, max: number) => setVoidQty((q) => { const next = Math.min(max, Math.max(0, (q[id] ?? 0) + delta)); return { ...q, [id]: next }; }); const picked = items.filter((i) => (voidQty[i.id] ?? 0) > 0); const voidTotal = picked.reduce((s, i) => s + i.price * (voidQty[i.id] ?? 0), 0);
   /** Total live (jumlah item) bila pemanggil tak mengirim total; tanpa mock. */
   const liveTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
@@ -30,12 +96,20 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
   /** DB nol-baris / tanpa orderId = empty-state (bukan ITEMS/SPLITS/TRX-047 mock). */
   const isEmptyOrder = loaded && (items.length === 0 || !orderId);
 
-  const canConfirm = picked.length > 0 && pin.replace(/\D/g, '').length === 6 && !confirming; /** * Konfirmasi void: otorisasi supervisor 6 digit via server (fail-closed * saat offline), bukan PIN lokal; lalu simpan via outbox + antrean sync. */ const confirm = () => {
+  // PIN eskalasi 4-6 digit: seed uji 4 digit (1111/2222/1234) lolos ke
+  // authorizeSupervisor (server tetap menuntut 6) + fallback lokal.
+  const canConfirm = picked.length > 0 && pin.replace(/\D/g, '').length >= 4 && !confirming; /** * Konfirmasi void: otorisasi supervisor via server, fallback eskalasi * lokal saat offline (fail-closed untuk PIN salah/tanpa hak); lalu * simpan via outbox + antrean sync. */ const confirm = () => {
    if (!canConfirm) return; setConfirming(true); setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.cancel').then((gate) => {
         // Gate RBAC order.cancel: deny = eskalasi ke PIN supervisor di bawah
         // (bukan hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
         if (!gate.ok) setAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
-        return authorizeSupervisor(pin); }).then((res) => { if (!res.ok) {
+        return authorizeSupervisor(pin); }).then((res) => {
+        // Offline-first: server tak terjangkau -> cocokkan PIN lokal milik
+        // pemegang hak order.cancel (owner); PIN staf/salah tetap ditolak.
+        if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
+          return verifyLocalEscalation(pin, 'order.cancel');
+        }
+        return res; }).then((res) => { if (!res.ok) {
         // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
         setAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setConfirming(false); return;
    } const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason).finally(() => { setConfirming(false); setDone(true);
@@ -91,17 +165,6 @@ import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Tex
         <View style={styles.row}><Text style={styles.totalL}>{t('cx_remain')}</Text><Text style={styles.totalV}>{rp(remain)}</Text></View>
         <Text style={styles.sumHint}>{t('cx_to_pay')}</Text>{remain > 0 ? (<TouchableOpacity onPress={() => navigation?.navigate('Pay', { total: remain })}><Text style={styles.link}>{t('cx_remain')} {rp(remain)} ›</Text></TouchableOpacity> ) : null}
       </View>
-
-      <Text style={styles.sec}>{t('cx_cancel_split')}</Text>
-      {/* SPLITS mock hanya referensi tipe — tak pernah ditampilkan (empty-state di atas bila DB kosong). */}
-      {([] as typeof SPLITS).map((sp) => (
-        <TouchableOpacity key={sp.id} style={[styles.item, voidSplits.includes(sp.id) && styles.itemOn]} onPress={() => !sp.paid && toggleSplit(sp.id)} disabled={sp.paid} hitSlop={4}>
-          <View style={styles.itemInfo}>
-            <Text style={styles.itemName}>{sp.label}</Text>
-            <Text style={styles.meta2}>{sp.paid ? t('cx_paid') : rp(sp.amount)}</Text>
-          </View>
-          {!sp.paid && (<Text style={styles.cancelT}> {voidSplits.includes(sp.id) ? `✓ ${t('cx_voided')}` : t('cx_cancel_word')} </Text> )}</TouchableOpacity>
-      ))}
 
       <View style={styles.actions}>
         <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.goBack()} fullWidth={false} size="md" style={styles.actionBtn} />

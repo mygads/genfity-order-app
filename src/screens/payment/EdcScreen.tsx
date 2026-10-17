@@ -40,7 +40,9 @@ export default function EdcScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const total = route?.params?.total ?? 33900;
+  // Tanpa total terusan (dibuka di luar alur bayar) = 0 yang jujur; tombol
+  // simpan mati sampai nominal > 0 + approval 6 digit.
+  const total = Math.max(0, Math.round(Number(route?.params?.total) || 0));
   const [phase, setPhase] = useState<Phase>('waiting');
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
@@ -75,7 +77,7 @@ export default function EdcScreen({ navigation, route }: Props) {
   }, [phase, secs]);
 
   const retry = () => { setSecs(60); setPhase('waiting'); };
-  const canSave = approval.length === 6;
+  const canSave = approval.length === 6 && total > 0;
 
   // Simpan + teruskan approval 6-digit & 4 digit kartu ke Success dan ke payload antrean.
   // Satu nomor TRX untuk DB + Success + Receipt (selaras PayScreen).
@@ -236,7 +238,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       <View style={[styles.card, isTablet && styles.approvalTablet]}>
         <Text style={styles.cardTitle}>{t('edc_approval_title')}</Text>
         <Text style={styles.meta}>{t('edc_approval_ex')}</Text>
-        <AppInput value={approval} onChangeText={(v) => setApproval(v.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="482913" keyboardType="numeric" maxLength={6} style={styles.centerField} />
+        <AppInput value={approval} onChangeText={(v) => setApproval(v.replace(/[^0-9]/g, '').slice(0, 6))} placeholder="••••••" keyboardType="numeric" maxLength={6} style={styles.centerField} />
         <AppButton
           title={t('edc_save')}
           disabled={!canSave}

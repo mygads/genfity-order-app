@@ -329,7 +329,7 @@ export default function SettingsScreen({ navigation }: Props) {
             <Text style={styles.dialogTitle}>{t('settings.claimTerminal')}</Text>
             <Text style={styles.dialogSub}>{t('settings.claimSub')}</Text>
             <AppInput label={t('settings.terminalCode')} value={draftCode} onChangeText={setDraftCode} placeholder="TRM-001" autoCapitalize="characters" />
-            <AppInput label={t('settings.branchId')} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="BR-01" />
+            <AppInput label={t('settings.branchId')} value={draftBranchId} onChangeText={setDraftBranchId} placeholder="B001" />
             <AppInput label={t('settings.branchName')} value={draftBranchName} onChangeText={setDraftBranchName} placeholder="Cabang Poris" />
             <View style={styles.dialogBtns}>
               <AppButton size="sm" title={t('common.cancel')} onPress={() => setTerminalOpen(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />

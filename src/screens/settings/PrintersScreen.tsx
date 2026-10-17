@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -22,7 +22,30 @@ import { useEffect, useState } from 'react';import {
   mac: string;
   paired: boolean;
   /** true = hasil pindai BLE (mac diawali `BLE:`), bisa langsung dipakai. */
-  ble?: boolean;}const LS_STATIONS = 'genfity.printer.stations';function roleColor(r: StationRole) {
+  ble?: boolean;}const LS_STATIONS = 'genfity.printer.stations';
+
+/** Baris ms_station (printerType receipt) -> Station UI. */
+interface StationRow {
+  id: string; stationName: string | null; printerName: string | null;
+  printerPort: string | null; connection: string | null; printerType: string | null;
+  charPerLine: number | null; flagDefault: number | null; flagAutocut: number | null;
+}
+function rowToStation(r: StationRow): Station {
+  const connRaw = (r.connection ?? '').trim();
+  const conn: ConnType = connRaw === 'LAN' ? 'LAN' : connRaw === 'Star' ? 'Star' : 'Bluetooth';
+  const pt = (r.printerType ?? '').trim().toLowerCase();
+  const role: StationRole = pt === 'kitchen' ? 'Dapur' : pt === 'checker' ? 'Checker' : pt === 'label' ? 'Label' : 'Kasir';
+  return {
+    id: String(r.id),
+    name: (r.stationName ?? r.printerName ?? r.id ?? '').trim() || String(r.id),
+    role, conn,
+    address: (r.printerPort ?? '').trim(),
+    cpl: Number(r.charPerLine) === 48 ? 48 : 32,
+    autocut: Number(r.flagAutocut ?? 1) !== 0,
+    isDefault: Number(r.flagDefault ?? 0) !== 0,
+    connected: false,
+  };
+}function roleColor(r: StationRole) {
   if (r === 'Kasir') return colors.navy;
   if (r === 'Dapur') return colors.orange;
   if (r === 'Checker') return colors.blue;
@@ -70,7 +93,33 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   const roleLabel = (r: StationRole) =>
     r === 'Kasir' ? t('printers.role_kasir') : r === 'Dapur' ? t('printers.role_dapur') : r === 'Checker' ? t('printers.role_checker') : t('printers.role_label');
 
-  useEffect(() => { let alive = true; void getJSON<Station[]>(LS_STATIONS, []).then((cached) => { if (alive) setStations(cached); }); return () => { alive = false; }; }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]);
+  // DB-first: printer terkonfigurasi (printerPort terisi) dari ms_station;
+  // cache JSON hanya fallback bila DB kosong/belum siap.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await initDb();
+        const rows = await query<StationRow>(
+          `SELECT id, stationName, printerName, printerPort, connection, printerType,
+                  charPerLine, flagDefault, flagAutocut
+             FROM ms_station WHERE flagActive = 1
+               AND printerPort IS NOT NULL AND TRIM(printerPort) <> ''
+             ORDER BY flagDefault DESC LIMIT 20`,
+        );
+        if (!alive) return;
+        if (rows.length > 0) {
+          const mapped = rows.filter((r) => r.id).map(rowToStation);
+          if (mapped.length > 0) { setStations(mapped); return; }
+        }
+      } catch { /* fallback cache di bawah */ }
+      try {
+        const cached = await getJSON<Station[]>(LS_STATIONS, []);
+        if (alive) setStations(cached);
+      } catch { /* daftar kosong */ }
+    })();
+    return () => { alive = false; };
+  }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]);
 
   const patchStation = (id: string, patch: Partial<Station>) =>
     { setStations((ss) => { const next = ss.map((x) => (x.id === id ? { ...x, ...patch } : x));

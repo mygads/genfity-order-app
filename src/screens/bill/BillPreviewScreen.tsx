@@ -27,6 +27,10 @@ type Props = {
       feeESB?: number; rounding?: number;
       mode?: string; table?: string; ongkir?: number;
       customer?: string; memberId?: string;
+      /** Nomor order bila sudah ada (alir balik History); pratinjau baru = tanpa nomor. */
+      no?: string;
+      /** Identitas resto/kasir untuk kepala struk (cermin ReceiptScreen). */
+      shopName?: string; shopAddr?: string; cashier?: string;
     };
   };
 };
@@ -58,15 +62,24 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const roundingVal = p.rounding ?? 0;
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
-  // Kepala struk mengikuti order berjalan (meja/pelanggan/member asli bila dioper
-  // pemanggil); fallback tampilan lama bila dibuka tanpa params.
-  const metaTable = p.table ?? 'A-03';
-  const metaGuest = p.customer ?? p.memberId ?? 'QoQi';
+  // Kepala struk mengikuti order berjalan (meja/pelanggan/member/kasir/no
+  // asli bila dioper pemanggil); tanpa params tampilkan '-' (jujur).
+  // Default resto = identitas cabang seed B001 (sama dengan ReceiptScreen).
+  const metaTable = p.table ?? '-';
+  const metaGuest = p.customer ?? p.memberId ?? '-';
+  const shopName = p.shopName ?? 'Genfity Cabang Poris';
+  const shopAddr = p.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
+  const metaCashier = p.cashier ?? '-';
+  const metaNo = p.no ?? 'Pratinjau / Preview';
+  const metaTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');
+  // Kunci split per ID item (bukan nama): dua item beda ID boleh bernama
+  // sama tanpa tabrakan alokasi.
+  const itemKey = (it: OrderItemParam): string => it.id ?? it.name;
   const [mode, setMode] = useState<Mode>('none');
   const [splits, setSplitsRaw] = useState(3);
   const [paid, setPaid] = useState<boolean[]>([false, false, false]);
   const [assign, setAssign] = useState<Record<string, number>>(() =>
-    Object.fromEntries(orderItems.map((it, i) => [it.name, i % 3])),
+    Object.fromEntries(orderItems.map((it, i) => [itemKey(it), i % 3])),
   );
   const [nominals, setNominals] = useState<string[]>(['', '', '']);
 
@@ -74,21 +87,22 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     setSplitsRaw(n);
     setPaid(Array(n).fill(false));
     setNominals(Array(n).fill(''));
-    setAssign(Object.fromEntries(orderItems.map((it, i) => [it.name, i % n])));
+    setAssign(Object.fromEntries(orderItems.map((it, i) => [itemKey(it), i % n])));
   };
 
   const togglePaid = (i: number) => setPaid((p) => p.map((v, j) => (j === i ? !v : v)));
-  const cycleAssign = (name: string) =>
-    setAssign((a) => ({ ...a, [name]: ((a[name] ?? 0) + 1) % splits }));
+  const cycleAssign = (key: string) =>
+    setAssign((a) => ({ ...a, [key]: ((a[key] ?? 0) + 1) % splits }));
 
-  const splitNames = ['QoQi', 'Bimo', 'Sinta', 'Guest'];
+  // Label split generik bernomor (tanpa nama orang fiktif).
+  const splitLabel = (i: number): string => `Split #${i + 1}`;
   // Bagi rata: sisa rupiah didistribusikan satu per satu ke split awal - jumlah split pas = total.
   const splitBase = Math.floor(total / splits);
   const splitRem = total - splitBase * splits;
   const splitVal = (i: number) => splitBase + (i < splitRem ? 1 : 0);
   const itemTotals = Array(splits).fill(0) as number[];
   orderItems.forEach((it) => {
-    itemTotals[assign[it.name] ?? 0] += lineAmount(it);
+    itemTotals[assign[itemKey(it)] ?? 0] += lineAmount(it);
   });
   const nominalNums = nominals.map((s) => Number(s.replace(/[^0-9]/g, '')) || 0);
   const nominalSum = nominalNums.reduce((s, v) => s + v, 0);
@@ -140,14 +154,14 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         onBack={() => navigation?.goBack()}
       />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-        <Text style={styles.meta}>TRX hari ini · {metaTable} · {metaGuest}</Text>
+        <Text style={styles.meta}>{metaNo} · {metaTable} · {metaGuest}</Text>
       {/* Tablet: struk dibatasi sempit + tengahkan agar proporsional. */}
       <View style={[styles.bill, isTablet && wideCenterSm]}>
-        <Text style={styles.shop}>GENFITY CABANG PORIS</Text>
-        <Text style={styles.addr}>Jl. Poris Indah No. 88 · 021-5566-7788</Text>
-        <Text style={styles.trx}>TRX-047 · {metaTable} · Kasir Gista · 12:41</Text>
-        {orderItems.map((i) => (
-          <View key={i.name} style={styles.row}>
+        <Text style={styles.shop}>{shopName}</Text>
+        <Text style={styles.addr}>{shopAddr}</Text>
+        <Text style={styles.trx}>{metaNo} · {metaTable} · {metaCashier} · {metaTime}</Text>
+        {orderItems.map((i, idx) => (
+          <View key={`${itemKey(i)}-${idx}`} style={styles.row}>
             <Text style={styles.item}>{i.qty}× {i.name}</Text>
             <Text style={styles.price}>{rp(lineAmount(i))}</Text>
           </View>
@@ -233,9 +247,9 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
             <>
               <Text style={styles.hint}>{t('bill_item_hint')}</Text>
               {orderItems.map((it) => (
-                <TouchableOpacity key={it.name} style={styles.row} onPress={() => cycleAssign(it.name)}>
+                <TouchableOpacity key={itemKey(it)} style={styles.row} onPress={() => cycleAssign(itemKey(it))}>
                   <Text style={styles.item}>{it.qty}× {it.name}</Text>
-                  <Text style={styles.splitBadge}>Split #{(assign[it.name] ?? 0) + 1} ›</Text>
+                  <Text style={styles.splitBadge}>Split #{(assign[itemKey(it)] ?? 0) + 1} ›</Text>
                 </TouchableOpacity>
               ))}
             </>
@@ -244,9 +258,9 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           {mode === 'nominal' && (
             <>
               <Text style={styles.hint}>{t('bill_nom_hint').replace('{t}', rp(total))}</Text>
-              {splitNames.slice(0, splits).map((n, i) => (
-                <View key={n} style={styles.nomRow}>
-                  <Text style={styles.item}>{t('bill_split_of').replace('{i}', String(i + 1)).replace('{n}', n)}</Text>
+              {Array.from({ length: splits }, (_, i) => (
+                <View key={i} style={styles.nomRow}>
+                  <Text style={styles.item}>{splitLabel(i)}</Text>
                   <AppInput
                     value={nominals[i]}
                     onChangeText={(v) =>
@@ -275,12 +289,12 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
             </>
           )}
 
-          {splitNames.slice(0, splits).map((n, i) => {
+          {Array.from({ length: splits }, (_, i) => {
             const val = mode === 'item' ? itemTotals[i] : mode === 'nominal' ? nominalNums[i] : splitVal(i);
             return (
-              <View key={n} style={styles.splitRow}>
+              <View key={i} style={styles.splitRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.item}>{t('bill_split_of').replace('{i}', String(i + 1)).replace('{n}', n)}</Text>
+                  <Text style={styles.item}>{splitLabel(i)}</Text>
                   <Text style={paid[i] ? styles.lunas : styles.price}>{paid[i] ? t('bill_lunas') : rp(val)}</Text>
                 </View>
                 {!paid[i] && (

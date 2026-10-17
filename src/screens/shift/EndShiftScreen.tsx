@@ -5,14 +5,16 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
 /** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { t } = useLang();
-  const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 200000, penjualanTunai: 1575000, pengeluaran: 75000, fromDb: false, });
+  const { lang, t } = useLang();
+  // Mulai NOL (bukan angka contoh): efek di bawah menimpa dengan hitungan
+  // SQLite; tanpa shift/data = nol jujur, bukan Rp1.575.000 fiktif.
+  const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 0, penjualanTunai: 0, pengeluaran: 0, fromDb: false, });
   const  [kasFisik, setKasFisik] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
@@ -21,15 +23,15 @@ import React, { useEffect, useState } from 'react';import {
   const [error, setError] = useState('');
 
   // Ringkasan dari shift berjalan (tr_shiftlog) + penjualan lunas + pengeluaran.
-  useEffect(() => { let on = true; (async () => { try { await initDb(); const open = await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null; }>(`SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status = 'open' ORDER BY clockIn DESC LIMIT 1`); const latest = open ?? (await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null }>( 'SELECT id, cashInDrawer, clockIn FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1', )); if (!on || !latest) return; const since = latest.clockIn ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString();    // Kas tunai MURNI: jumlah pembayaran cash dari tr_salespayment yang
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const branchId = getTerminal().branchId || null; const open = await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null; }>(`SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status = 'open' AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1`, [branchId, branchId]); const latest = open ?? (await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null }>( 'SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status <> "absen" AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1', [branchId, branchId], )); if (!on || !latest) return; const since = latest.clockIn ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString();    // Kas tunai MURNI: jumlah pembayaran cash dari tr_salespayment yang
     // head-nya lunas - tanpa fallback ke semua metode (RIW-07).
-    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since], ); const tunai = num(cash?.total); const exp = await queryFirst<{ total: number }>( 'SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense WHERE expenseDate >= ?', [since], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.total)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran } = summary; const kasSeharusnya = modalAwal + penjualanTunai - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
+    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since, branchId, branchId], ); const tunai = num(cash?.total); const exp = await queryFirst<{ total: number }>( 'SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense WHERE expenseDate >= ? AND (branchId = ? OR ? IS NULL)', [since, branchId, branchId], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.total)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran } = summary; const kasSeharusnya = modalAwal + penjualanTunai - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
   const touched = kasFisik.length > 0;
   const selisih = touched ? kasFisikNum - kasSeharusnya : 0;
 
   const askClose = () => {
     if (!touched) {
-      setError('Masukkan kas fisik (hasil hitung laci) terlebih dahulu');
+      setError(lang === 'id' ? 'Masukkan kas fisik (hasil hitung laci) terlebih dahulu' : 'Enter the physical cash (drawer count) first');
       return;
     }
     setError('');
@@ -43,22 +45,26 @@ import React, { useEffect, useState } from 'react';import {
   };
 
   const confirmClose = async () => {
-    // FIX2-4b: samakan dengan ShiftScreen - verifikasi ke server dulu via
-    // authorizeSupervisor (tepat 6 digit); PIN lokal (lib/pin.ts) hanya fallback
-    // saat server tak terjangkau (offline/unconfigured), bukan satu-satunya cek.
-    if (pin.length < 6) {
-      setError(t('sup_invalid'));
-      return;
-    }
+    // Tutup shift = aksi level supervisor (parity POSLite end_shift_confirm):
+    // verifikasi ke server dulu via authorizeSupervisor; offline/unconfigured
+    // lanjut ke eskalasi lokal yang mewajibkan PIN milik user BERHAK Owner
+    // (verifyLocalEscalation cek hak via requireAccess) - PIN kasir Staff yang
+    // dikenal sistem TETAP DITOLAK. Tanpa gerbang panjang-PIN lokal:
+    // authorizeSupervisor menilai 6 digit untuk jalur server, PIN 4-digit
+    // seed tetap bisa lewat fallback lokal saat offline (bila pemiliknya Owner).
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
     const auth = await authorizeSupervisor(pin);
     if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') { setError(auth.message); return; }
-    if (!auth.ok) { try { const v = await verifyAttendancePin(pin); if (v.ok === false) { setError('PIN supervisor tidak dikenal - hubungi supervisor.'); return; } } catch { /* DB belum siap - lanjut dengan gerbang panjang-PIN */ } }
+    if (!auth.ok) { const esc = await verifyLocalEscalation(pin, 'settings.edit'); if (!esc.ok) { setError(esc.message); return; } }
     // Tutup shift di SQLite + rincian per metode (tr_shiftlogdetail) + selisih,
 // lalu antre sync dan kembali ke layar Shift.
-    const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? 'Kasir'; let shiftId: string | null = summary.openId; try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); } else { const term = getTerminal(); shiftId = `shift-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, cashActual, cashDiff, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'closed', NULL)`, [shiftId, term.branchId || null, term.terminalCode || null, nm, 'Shift', since, nowIso, Math.round(modalAwal), Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih)], ); }
-    // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16).
-    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? GROUP BY p.paymentMethod`, [since], ); for (const m of byMethod) { try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [`sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
+    const nowIso = new Date().toISOString(); const branchId = getTerminal().branchId || null; let shiftId: string | null = summary.openId;
+    // Tolak tutup tanpa shift terbuka: jangan karang baris shift 'closed' yatim
+    // (dulu else-branch INSERT shift palsu dari tengah malam).
+    if (!shiftId) { setError(lang === 'id' ? 'Tidak ada shift terbuka - buka shift dulu sebelum menutup.' : 'No open shift - open a shift before closing.'); return; }
+    try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); }
+    // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16), dibatasi cabang aktif.
+    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
     setPin('');
     navigation?.navigate?.('Shift');
   };
@@ -94,16 +100,16 @@ import React, { useEffect, useState } from 'react';import {
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('end_summary')}</Text>
-          <Row label="Modal Awal (Kas Awal)" value={rp(modalAwal)} />
-          <Row label="Penjualan Tunai" value={rp(penjualanTunai)} />
+          <Row label={lang === 'id' ? 'Modal Awal (Kas Awal)' : 'Opening Float'} value={rp(modalAwal)} />
+          <Row label={lang === 'id' ? 'Penjualan Tunai' : 'Cash Sales'} value={rp(penjualanTunai)} />
           <Row label={t('title_expense')} value={'- ' + rp(pengeluaran)} negative />
           <View style={s.divider} />
           <View style={s.totalRow}>
-            <Text style={s.totalLabel}>Kas Seharusnya</Text>
+            <Text style={s.totalLabel}>{lang === 'id' ? 'Kas Seharusnya' : 'Expected Cash'}</Text>
             <Text style={s.totalValue}>{rp(kasSeharusnya)}</Text>
           </View>
           <Text style={s.formula}>
-            Modal awal + penjualan tunai - pengeluaran
+            {lang === 'id' ? 'Modal awal + penjualan tunai - pengeluaran' : 'Opening float + cash sales - expenses'}
           </Text>
         </View>
 
@@ -146,7 +152,7 @@ import React, { useEffect, useState } from 'react';import {
           </View>
         ) : null}
         <TouchableOpacity onPress={() => navigation?.navigate?.('Recap')}>
-          <Text style={s.link}>Cek dulu → Rekap penjualan shift ini</Text>
+          <Text style={s.link}>{lang === 'id' ? 'Cek dulu → Rekap penjualan shift ini' : 'Check first → This shift sales recap'}</Text>
         </TouchableOpacity>
         <View style={{ height: 90 }} />
       </ScrollView>
@@ -155,7 +161,7 @@ import React, { useEffect, useState } from 'react';import {
         {isTablet ? (
           <View style={s.footerInnerTablet}>
             <View style={s.footerInfo}>
-              <Text style={s.footerLabel}>Kas seharusnya</Text>
+              <Text style={s.footerLabel}>{lang === 'id' ? 'Kas seharusnya' : 'Expected cash'}</Text>
               <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
             </View>
             <AppButton
@@ -169,7 +175,7 @@ import React, { useEffect, useState } from 'react';import {
         ) : (
         <>
         <View style={s.footerInfo}>
-          <Text style={s.footerLabel}>Kas seharusnya</Text>
+          <Text style={s.footerLabel}>{lang === 'id' ? 'Kas seharusnya' : 'Expected cash'}</Text>
           <Text style={s.footerValue}>{rp(kasSeharusnya)}</Text>
         </View>
         <AppButton
@@ -186,7 +192,7 @@ import React, { useEffect, useState } from 'react';import {
       <Modal visible={confirmVisible} transparent animationType="fade">
         <View style={s.modalBg}>
           <View style={[s.dialog, isTablet && s.dialogTablet]}>
-            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>Akhiri Shift?</Text>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{lang === 'id' ? 'Akhiri Shift?' : 'End Shift?'}</Text>
             <Text style={s.modalHint}>
               Kas seharusnya {rp(kasSeharusnya)}{'\n'}Kas fisik {rp(kasFisikNum)}
               {'\n'}Selisih {selisih >= 0 ? '+' : '-'}
@@ -201,7 +207,7 @@ import React, { useEffect, useState } from 'react';import {
                 onPress={() => setConfirmVisible(false)}
               />
               <AppButton
-                title="Lanjut"
+                title={lang === 'id' ? 'Lanjut' : 'Continue'}
                 variant="danger"
                 fullWidth={false}
                 style={{ flex: 1, marginTop: 0, marginLeft: 8 }}
@@ -216,7 +222,7 @@ import React, { useEffect, useState } from 'react';import {
         <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>PIN Supervisor</Text>
-            <Text style={s.modalHint}>Diperlukan persetujuan supervisor</Text>
+            <Text style={s.modalHint}>{lang === 'id' ? 'Diperlukan persetujuan supervisor' : 'Supervisor approval required'}</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />

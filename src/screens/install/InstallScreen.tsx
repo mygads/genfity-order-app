@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';
-import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation }: { navigation?: Nav }) {
+import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { code?: string } } };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [code, setCode] = useState('');
+  const { t } = useLang(); const [code, setCode] = useState(route?.params?.code ?? '');
   const [error, setError] = useState('');
   const [showHelp, setShowHelp] = useState(false);
 

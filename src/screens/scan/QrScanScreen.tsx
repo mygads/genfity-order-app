@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
-  claim: '', esb: 'GNF-88121', member: 'MBR-QOQI-342', voucher: 'VC-DISKON10K',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
+import { useEffect, useRef, useState } from 'react';import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { CameraView, useCameraPermissions } from 'expo-camera';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterSm } from '../../theme';import { useLang } from '../../lib/i18n';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, queryFirst } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ScanTab = 'claim' | 'esb' | 'member' | 'voucher';const TABS: ScanTab[] = ['claim', 'esb', 'member', 'voucher'];const TAB_DEFAULT_CODE: Record<ScanTab, string> = {
+  claim: '', esb: '', member: '', voucher: '',};const TAB_PLACEHOLDER: Record<ScanTab, string> = {
   claim: 'TRM-XXXX-XXXX',
   esb: 'GNF-XXXXX',
   member: 'MBR-XXXX',
@@ -7,9 +7,11 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [tab, setTab] = useState<ScanTab>('voucher');
-  const [code, setCode] = useState('VC-DISKON10K');
-  const [result, setResult] = useState(true);
+  const [code, setCode] = useState('');
+  const [result, setResult] = useState(false);
   const [msg, setMsg] = useState('');
+  // Hasil validasi lokal: label nyata dari DB (nama voucher/member), bukan fiksi.
+  const [found, setFound] = useState<{ kind: 'voucher' | 'member'; label: string; amount: number } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   // Auto-start kamera saat mount (parity POSLite: izin -> kamera langsung buka; web tetap manual).
@@ -48,36 +50,88 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     setTab(x);
     setResult(false);
     setMsg('');
+    setFound(null);
     setCode(TAB_DEFAULT_CODE[x]);
   };
 
-  const check = () => {
-    if (!code.trim()) {
+  /** Cek kode ke SQLite lokal: voucher/member harus dikenal (status aktif,
+   * kuota > 0 / flag aktif). claim/esb hanya format — validasi final tetap
+   * di layar Install/EsbOrder. */
+  const check = async () => {
+    const clean = code.trim();
+    if (!clean) {
       setMsg(t('scan_need_code'));
       setResult(false);
       return;
+    }
+    setFound(null);
+    if (tab === 'voucher' || tab === 'member') {
+      try {
+        await initDb();
+        if (tab === 'voucher') {
+          const row = await queryFirst<{ voucherCode: string | null; voucherName: string | null; amount: number | null; quota: number | null; status: string | null }>(
+            'SELECT voucherCode, voucherName, amount, quota, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
+            [clean],
+          );
+          if (!row || (row.status ?? '').toLowerCase() !== 'available' || Math.round(Number(row.quota) || 0) <= 0) {
+            setMsg(t('scan_unknown_voucher'));
+            setResult(false);
+            return;
+          }
+          setFound({ kind: 'voucher', label: String(row.voucherName ?? row.voucherCode ?? clean), amount: Math.max(0, Math.round(Number(row.amount) || 0)) });
+        } else {
+          const row = await queryFirst<{ id: string; memberName: string | null }>(
+            'SELECT id, memberName FROM ms_member WHERE UPPER(id) = UPPER(?) LIMIT 1',
+            [clean],
+          );
+          if (!row) {
+            setMsg(t('scan_unknown_member'));
+            setResult(false);
+            return;
+          }
+          setFound({ kind: 'member', label: String(row.memberName ?? row.id), amount: 0 });
+        }
+      } catch {
+        setMsg(t('scan_unknown_voucher'));
+        setResult(false);
+        return;
+      }
     }
     setMsg('');
     setResult(true);
   };
 
   const useCode = async () => {
-    if (code.trim().length < 3) { setMsg(t('scan_short')); setResult(false); return; } if (tab === 'claim') {
-      navigation?.navigate('Install');
+    const clean = code.trim();
+    if (clean.length < 3) { setMsg(t('scan_short')); setResult(false); return; } if (tab === 'claim') {
+      navigation?.navigate('Install', { code: clean.toUpperCase() });
       return;
     }
     if (tab === 'esb') {
-      navigation?.navigate('EsbOrder');
+      navigation?.navigate('EsbOrder', { code: clean });
       return;
     }
     // Gerbang kasir: shift tutup → pesan + buka shift dulu.
     if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setMsg))) return;
-    navigation?.navigate('Cashier');
+    if (tab === 'member') {
+      navigation?.navigate('Cashier', { memberId: clean });
+      return;
+    }
+    // Voucher yang lolos check() membawa nominal hasil validasi lokal.
+    navigation?.navigate('Cashier', found?.kind === 'voucher'
+      ? { voucher: { code: clean, amount: found.amount } }
+      : { voucherCode: clean });
   };
 
   const descFor = () => {
-    if (tab === 'voucher') return `${t('scan_desc_voucher_pre')}${rp(10000)}${t('scan_desc_voucher_post')}`;
-    if (tab === 'member') return t('scan_desc_member');
+    if (tab === 'voucher') {
+      if (found?.kind === 'voucher') return `${t('scan_desc_voucher_pre')}${rp(found.amount)} - ${found.label}`;
+      return t('scan_desc_voucher_pre');
+    }
+    if (tab === 'member') {
+      if (found?.kind === 'member') return `${code.trim()} - ${found.label}`;
+      return t('scan_desc_member');
+    }
     if (tab === 'esb') return t('scan_desc_esb');
     return t('scan_desc_claim');
   };

@@ -1,13 +1,19 @@
 /**
- * Pemilih sumber data API: Dummy Mode vs Backend asli (satu titik wiring).
+ * Pemilih sumber data API: Local Mode vs Dummy Mode vs Backend asli
+ * (satu titik wiring).
  *
- * - Bila EXPO_PUBLIC_API_BASE_URL kosong (default) -> Dummy Mode: semua
- *   request dilayani dari JSON lokal di src/data/dummy (offline-first,
- *   tanpa dial ke server pihak ketiga mana pun).
  * - Bila EXPO_PUBLIC_API_BASE_URL terisi URL backend sendiri -> Real Mode:
  *   request memakai apiGet/apiPost (header X-Terminal-Code/X-Branch-Id/
  *   Idempotency-Key/Bearer ala src/config/server.ts). Bila fetch gagal atau
  *   offline, otomatis jatuh kembali ke JSON dummy lokal.
+ * - Bila URL kosong DAN EXPO_PUBLIC_DUMMY === '1' -> Dummy Mode (eksplisit
+ *   untuk screenshot/demo): semua request dilayani dari JSON lokal di
+ *   src/data/dummy, tanpa dial ke server pihak ketiga mana pun.
+ * - Selain itu (default: URL kosong, tanpa flag dummy) -> Local Mode:
+ *   TIDAK ada dial network dan TIDAK ada JSON dummy; apiFetch mengembalikan
+ *   { ok:false, status:0, data:null, fromDummy:false } agar layar memakai
+ *   jalur SQLite lokal + empty-state jujur. Dummy pull yang di-cache ke
+ *   SQLite tidak boleh mengotori data asli/seed.
  *
  * Layar memanggil helper di file ini (bukan apiGet/apiPost langsung dan
  * bukan require JSON langsung), sehingga saat backend asli jadi cukup ganti
@@ -25,7 +31,7 @@ import { getItem, setItem } from './storage';
 import { initDb, queryFirst } from './db';
 import { loadPinRecord, verifyPinHash } from './pin';
 
-export type ApiMode = 'dummy' | 'real';
+export type ApiMode = 'dummy' | 'real' | 'local';
 
 /** Baca EXPO_PUBLIC_API_BASE_URL tanpa bergantung ke tipe Node. */
 export function readEnvBaseUrl(): string {
@@ -34,6 +40,18 @@ export function readEnvBaseUrl(): string {
       process?: { env?: Record<string, string | undefined> };
     }).process;
     return (p?.env?.['EXPO_PUBLIC_API_BASE_URL'] ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Baca flag screenshot/demo eksplisit EXPO_PUBLIC_DUMMY tanpa tipe Node. */
+export function readEnvDummy(): string {
+  try {
+    const p = (globalThis as {
+      process?: { env?: Record<string, string | undefined> };
+    }).process;
+    return (p?.env?.['EXPO_PUBLIC_DUMMY'] ?? '').trim();
   } catch {
     return '';
   }
@@ -51,9 +69,18 @@ if (ENV_URL) {
   }
 }
 
-/** Mode aktif saat ini: dummy bila env kosong, real bila env terisi. */
+/**
+ * Mode aktif saat ini:
+ * - 'real' bila EXPO_PUBLIC_API_BASE_URL terisi (backend sendiri);
+ * - 'dummy' bila URL kosong DAN EXPO_PUBLIC_DUMMY === '1' (eksplisit
+ *   untuk screenshot/demo);
+ * - 'local' untuk selain itu (default offline-first tanpa server:
+ *   tanpa dial network, tanpa JSON dummy).
+ */
 export function getApiMode(): ApiMode {
-  return readEnvBaseUrl() ? 'real' : 'dummy';
+  if (readEnvBaseUrl()) return 'real';
+  if (readEnvDummy() === '1') return 'dummy';
+  return 'local';
 }
 
 export interface ApiResult<T = unknown> {
@@ -179,17 +206,34 @@ function dummyResponse(path: string): { found: boolean; body: unknown } {
 }
 
 /**
- * Panggil endpoint lewat backend asli (Real Mode) atau JSON dummy lokal
- * (Dummy Mode / fetch gagal / offline). Selalu resolve, tidak melempar
- * untuk kasus dummy; hanya melempar bila Real Mode gagal total dan dummy
- * pun tak tersedia (tak terjadi untuk path terkatalog).
+ * Panggil endpoint lewat backend asli (Real Mode), JSON dummy lokal
+ * (Dummy Mode eksplisit), atau tanpa sumber data sama sekali (Local Mode).
+ *
+ * - Local Mode: TIDAK dial network, TIDAK layani JSON dummy. Selalu
+ *   resolve { ok:false, status:0, data:null, fromDummy:false } agar layar
+ *   memakai jalur SQLite lokal + empty-state jujur (tanpa dummy yang
+ *   mengotori cache/seed).
+ * - Real Mode: coba backend asli; bila fetch gagal/offline, jatuh kembali
+ *   ke JSON dummy lokal (fromDummy:true) agar kasir tetap jalan.
+ * - Dummy Mode: layani langsung dari JSON dummy lokal.
+ *
+ * Selalu resolve, tidak melempar untuk kasus dummy/local; hanya melempar
+ * bila Real Mode gagal total dan dummy pun tak tersedia (tak terjadi untuk
+ * path terkatalog).
  */
 export async function apiFetch<T = unknown>(
   path: string,
   opts?: FetchOpts,
 ): Promise<ApiResult<T>> {
+  const mode = getApiMode();
+  if (mode === 'local') {
+    // Tanpa server: tanpa network, tanpa dummy. Layar sudah punya jalur
+    // SQLite + empty-state; pemanggil yang butuh cache wajib cek fromDummy
+    // / ok:false dan melewati penulisan ke SQLite.
+    return { ok: false, status: 0, data: null as T, fromDummy: false };
+  }
   const method = opts?.method ?? 'POST';
-  if (getApiMode() === 'real') {
+  if (mode === 'real') {
     try {
       const res =
         method === 'GET'
@@ -348,6 +392,48 @@ export interface VoucherCheck {
  * voucher dipasang / tender diterima - tidak ada kode yang lolos tanpa
  * validasi. Dummy Mode memakai JSON lokal; Real Mode ke backend asli.
  */
+interface LocalVoucherRow {
+  amount: number | null;
+  quota: number | null;
+  validFrom: string | null;
+  validTo: string | null;
+  status: string | null;
+}
+
+/**
+ * Validasi voucher ke ms_voucher lokal (seed/pull): kode cocok (case-insensitive),
+ * status 'available', kuota > 0, dan dalam jendela validitas. Dipakai bila
+ * server tak menjawab (local mode / offline / fallback dummy) agar voucher
+ * tetap bisa dipakai offline-first — bukan fixture dummy.
+ */
+async function validateVoucherCodeLocal(
+  code: string,
+  grandTotal: number,
+): Promise<VoucherCheck> {
+  const nope: VoucherCheck = { ok: false, amount: 0, minSpend: 0, fromDummy: false };
+  const clean = (code ?? '').trim().toUpperCase();
+  if (!clean || !(grandTotal > 0)) return nope;
+  try {
+    await initDb();
+    const row = await queryFirst<LocalVoucherRow>(
+      `SELECT amount, quota, validFrom, validTo, status FROM ms_voucher
+        WHERE UPPER(voucherCode) = ? LIMIT 1`,
+      [clean],
+    );
+    if (!row) return nope;
+    if ((row.status ?? '').toLowerCase() !== 'available') return nope;
+    if (Math.round(Number(row.quota) || 0) <= 0) return nope;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    if (row.validFrom && row.validFrom > now) return nope;
+    if (row.validTo && row.validTo < now) return nope;
+    const amount = Math.round(Number(row.amount) || 0);
+    if (amount <= 0) return nope;
+    return { ok: true, amount, minSpend: 0, fromDummy: false };
+  } catch {
+    return nope;
+  }
+}
+
 export async function validateVoucherCode(
   code: string,
   grandTotal: number,
@@ -355,16 +441,21 @@ export async function validateVoucherCode(
   const r = await apiFetch(ApiPath.voucherValidate, {
     body: { code, grandTotal: Math.round(grandTotal) },
   });
-  const { data } = unwrap<Record<string, unknown>>(r.data);
-  const d = data as { valid?: unknown; amount?: unknown; minSpend?: unknown };
-  const amount = Math.round(Number(d.amount ?? 0)) || 0;
-  const minSpend = Math.round(Number(d.minSpend ?? 0)) || 0;
-  return {
-    ok: d.valid === true && amount > 0,
-    amount,
-    minSpend,
-    fromDummy: r.fromDummy,
-  };
+  // Server menang hanya bila benar-benar menjawab (bukan fixture dummy:
+  // jaringan real-mode yang gagal JANGAN divalidasi pakai voucher dummy).
+  if (r.ok && !r.fromDummy) {
+    const { data } = unwrap<Record<string, unknown>>(r.data);
+    const d = data as { valid?: unknown; amount?: unknown; minSpend?: unknown };
+    const amount = Math.round(Number(d.amount ?? 0)) || 0;
+    const minSpend = Math.round(Number(d.minSpend ?? 0)) || 0;
+    return {
+      ok: d.valid === true && amount > 0,
+      amount,
+      minSpend,
+      fromDummy: r.fromDummy,
+    };
+  }
+  return validateVoucherCodeLocal(code, grandTotal);
 }
 
 export interface EmployeeSession {
@@ -527,8 +618,14 @@ export function parseQrLoginPayload(raw: string): QrLoginPayload | null {
 /**
  * Login kasir via QR dari BE (kontrak auth/cashier-login): kirim kredensial
  * hasil pindaian apa adanya, server yang memutuskan (jangan login lokal saja).
+ * Fail-closed di luar Real Mode: tanpa server, QR tak bisa divalidasi siapa
+ * pun (local: unwrap(null) akan melempar; dummy: fixture bukan identitas
+ * nyata) sehingga tolak dengan ok:false.
  */
 export async function loginByQrCode(p: QrLoginPayload): Promise<EmployeeSession> {
+  if (getApiMode() !== 'real') {
+    return { ok: false, userId: '', nama: '', authKey: '', role: '', fromDummy: false };
+  }
   const r = await apiFetch(ApiPath.cashierLogin, {
     body: { username: p.username, pin: p.pin, ...(p.terminalId ? { terminalId: p.terminalId } : {}) },
   });

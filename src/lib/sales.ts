@@ -79,12 +79,15 @@ export async function saveSale(s: SaleInput): Promise<string> {
     ],
   );
   for (const it of items) {
+    // Id baris dipakai ulang sebagai salesMenuId extras agar move/split
+    // menemukan addon-nya (sebelumnya extras menunjuk id cart -> orphan).
+    const smId = uid('sm');
     await run(
       `INSERT INTO tr_salesmenu (id, salesNum, menuId, menuName, qty, price,
         discount, subtotal, note, status, syncDate, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'served', NULL, ?)`,
       [
-        uid('sm'), salesNum, it.id, it.name, it.qty, r(it.basePrice),
+        smId, salesNum, it.id, it.name, it.qty, r(it.basePrice),
         r(it.discount ?? 0), r(lineSubtotal(it)),
         it.note ?? null, now,
       ],
@@ -94,8 +97,37 @@ export async function saveSale(s: SaleInput): Promise<string> {
         `INSERT INTO tr_salesmenuextra (id, salesMenuId, salesNum, extraId,
           extraName, qty, price, subtotal, syncDate)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-        [uid('se'), it.id, salesNum, m.name, m.name, it.qty, r(m.price), r(m.price * it.qty)],
+        [uid('se'), smId, salesNum, m.name, m.name, it.qty, r(m.price), r(m.price * it.qty)],
       );
+    }
+    // Stok cabang ikut turun per item terjual (qty NULL = tak dilacak, tak
+    // diubah); tembus <= 0 otomatis flagSoldOut agar kasir + alert low-stock
+    // Dashboard konsisten (paritas logika StockScreen; opt allowSellEmpty
+    // bisa membuka lagi dari layar Stok). Custom-menu (tanpa baris
+    // branchmenu) tak kena apa-apa.
+    try {
+      const branch = t.branchId || null;
+      const soldQty = Math.max(0, Math.round(Number(it.qty) || 0));
+      if (branch && it.id && soldQty > 0) {
+        await run(
+          `UPDATE ms_branchmenu SET qty = qty - ?, syncDate = NULL
+            WHERE branchId = ? AND menuId = ? AND qty IS NOT NULL`,
+          [soldQty, branch, it.id],
+        );
+        await run(
+          `UPDATE ms_branchmenu SET flagSoldOut = 1, syncDate = NULL
+            WHERE branchId = ? AND menuId = ? AND qty IS NOT NULL AND qty <= 0
+              AND (flagSoldOut IS NULL OR flagSoldOut = 0)`,
+          [branch, it.id],
+        );
+        try {
+          await enqueueOutbox('ms_branchmenu', `${branch}:${it.id}`, 'update');
+        } catch {
+          /* abaikan */
+        }
+      }
+    } catch {
+      /* stok gagal turun - penjualan tetap sah, selisih terlihat di Stok */
     }
   }
   for (const p of payments) {
@@ -114,6 +146,13 @@ export async function saveSale(s: SaleInput): Promise<string> {
       `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
        VALUES (?, ?, ?, ?, 'burn', NULL)`,
       [uid('sv'), salesNum, s.voucherCode, voucherAmt],
+    );
+    // Kuota lokal ikut turun agar voucher tak bisa dipakai ulang offline;
+    // syncDate NULL menandai perubahan untuk push berikutnya.
+    await run(
+      `UPDATE ms_voucher SET quota = quota - 1, syncDate = NULL
+        WHERE UPPER(voucherCode) = UPPER(?) AND quota > 0`,
+      [s.voucherCode],
     );
   }
   // Tiket dapur lahir dari penjualan nyata: satu baris per order dengan status

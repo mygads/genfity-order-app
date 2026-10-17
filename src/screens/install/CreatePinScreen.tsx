@@ -1,6 +1,6 @@
 import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
-import { loginDemo } from '../../session';import { createPinOnServer } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];export default function CreatePinScreen({ navigation, route }: Props) {
+import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];export default function CreatePinScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const branch = route?.params?.branch ?? 'Genfity Cabang Poris';
@@ -13,14 +13,16 @@ import { loginDemo } from '../../session';import { createPinOnServer } from '../
   const val = active === 'pin' ? pin : confirm;
   const setVal = active === 'pin' ? setPin : setConfirm;
 
-  // PIN dikirim sekali ke server via apiSource (Dummy Mode offline / backend
-  // asli bila env terisi), lalu disimpan sebagai HASH via SecureStore - PIN
-  // plaintext tidak pernah disimpan. Verifikasi login tetap revalidasi ke
-  // server (validateEmployee), bukan PIN lokal saja.
+  // PIN dikirim sekali ke server via apiSource (backend asli bila env
+  // terisi; Local Mode langsung simpan hash lokal di bawah), lalu disimpan
+  // sebagai HASH via SecureStore - PIN plaintext tidak pernah disimpan.
+  // Verifikasi login tetap revalidasi ke server (validateEmployee) saat
+  // online, bukan PIN lokal saja.
   // userId dari params bila pemanggil sudah validate employee, else akun
-  // demo Gista (U07) agar alur install-langsung tetap jalan.
-  const userId = route?.params?.userId ?? 'U07';
-  const submitPin = async (matched: string) => { setSaving(true); setError(''); try { const r = await createPinOnServer(userId, matched); if (!r.ok) throw new Error('create-pin gagal'); await savePinHash(userId, matched); setOk(true); } catch { setError(t('inst_pin_fail')); setPin(''); setConfirm(''); } finally { setSaving(false); } };
+  // admin perangkat ('u-admin' seed) karena alur install membuat PIN admin
+  // pertama — BUKAN 'U07' (id fiktif fixture dummy yang sudah disapu seed).
+  const userId = route?.params?.userId ?? 'u-admin';
+  const submitPin = async (matched: string) => { setSaving(true); setError(''); try { if (!userId) throw new Error('tanpa user'); if (getApiMode() === 'local') { await savePinHash(userId, matched); setOk(true); return; } const r = await createPinOnServer(userId, matched); if (!r.ok) throw new Error('create-pin gagal'); await savePinHash(userId, matched); setOk(true); } catch { setError(t('inst_pin_fail')); setPin(''); setConfirm(''); } finally { setSaving(false); } };
   const press = (k: string) => {
     if (saving) return; setError('');
     if (k === 'C') setVal('');
@@ -49,7 +51,7 @@ import { loginDemo } from '../../session';import { createPinOnServer } from '../
         <AppButton
           size="md"
           title={t('inst_pin_enter')}
-          onPress={() => { loginDemo(); navigation?.navigate('Login'); }}
+          onPress={() => { navigation?.navigate('Login'); }}
           style={styles.primary}
         />
       </ScrollView>

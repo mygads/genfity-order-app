@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -6,6 +6,10 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
+import { getSession } from '../../session';
+import { getTerminal } from '../../config/server';
+import { initDb, run } from '../../lib/db';
+import { enqueueSync } from '../../lib/sync';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -58,13 +62,15 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const total = route?.params?.total ?? 101200;
-  const method = route?.params?.method ?? 'cash';
+  // Tanpa params (dibuka di luar alur bayar) = nilai kosong yang jujur:
+  // total 0, metode apa adanya, nomor order kosong.
+  const total = Math.max(0, Math.round(Number(route?.params?.total) || 0));
+  const method = route?.params?.method ?? '';
   const cash = route?.params?.cash ?? 0;
   const change = route?.params?.change ?? 0;
   // Nomor order: nomor struk asli dari layar bayar (Pay goSuccess kirim L-timestamp,
-  // Qris kirim refCode-nya); fallback format L-timestamp selaras saveSale bila tak dioper.
-  const orderNo = route?.params?.orderNo ?? `L-${Date.now()}`;
+  // Qris kirim refCode-nya); kosong bila tak dioper (bukan nomor karangan).
+  const orderNo = route?.params?.orderNo ?? '';
   const ongkir = route?.params?.ongkir ?? 0;
   const orderMode = route?.params?.mode;
   const discount = route?.params?.discount ?? 0;
@@ -81,6 +87,26 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const feeESB = route?.params?.feeESB ?? 0;
   // Ringkasan mini: hitung subtotal dari item agar rinciannya ikut tampil (bukan cuma total).
   const miniItems = route?.params?.items ?? [];
+  // Meja dibebaskan saat penjualan lunas: draft menandai 'terisi' sejak
+  // disimpan (LoadOrderScreen) — sukses bayar = meja kosong kembali + sync.
+  useEffect(() => {
+    const tb = String(route?.params?.table ?? '').trim();
+    if (!tb) return;
+    void (async () => {
+      try {
+        await initDb();
+        await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['kosong', tb]);
+      } catch {
+        /* abaikan */
+      }
+      try {
+        enqueueSync('other', { op: 'table-clear', table: tb, at: new Date().toISOString() });
+      } catch {
+        /* abaikan */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const lineTotal = (it: SaleItemIn): number =>
     it.qty * it.basePrice +
     (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) -
@@ -145,8 +171,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const receipt = (
     <View style={styles.receipt}>
       <ScrollView>
-        <Text style={styles.shopName}>Genfity Cabang Poris</Text>
-        <Text style={styles.shopSub}>Kasir Gista • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
+        <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
+        <Text style={styles.shopSub}>Kasir {getSession()?.name ?? getSession()?.username ?? ''} • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
         <View style={styles.divider} />
         {miniShown.map((it) => (
           <View key={it.id} style={styles.row}>

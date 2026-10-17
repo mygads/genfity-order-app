@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppButton from '../../components/AppButton';import { publishDisplay, subscribeDisplay } from '../../lib/display';import { onWsMessage, startRealtime } from '../../lib/realtime';import { initDb, query } from '../../lib/db';import { useLang,
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppButton from '../../components/AppButton';import { publishDisplay, subscribeDisplay } from '../../lib/display';import { onWsMessage, startRealtime } from '../../lib/realtime';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
 
-type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];const PROMO_DISCOUNT = 5000;/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
+type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t } = useLang(); const [mode, setMode] = useState<ViewMode>('queue');
   const [ready, setReady] = useState<string[]>(EMPTY_TICKETS);
   const [prep, setPrep] = useState<string[]>(EMPTY_TICKETS);
   const [liveItems, setLiveItems] = useState<LiveItem[]>(EMPTY_ITEMS);
+  const [promo, setPromo] = useState<LivePromo | null>(null);
+  /** Nama cabang live dari klaim terminal; fallback label generik. */
+  const shopName = (() => {
+    try {
+      const b = (getTerminal().branchName ?? '').trim();
+      return b || t('disp_shop');
+    } catch { return t('disp_shop'); }
+  })();
+  /** Tag order berjalan (nomor antre/meja) untuk judul kartu order. */
+  const [openTag, setOpenTag] = useState('');
   const runningTotal = liveItems.reduce((s, it) => s + it.qty * it.price, 0);
 
   useEffect(() => subscribeDisplay((e) => {
@@ -59,9 +69,22 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     const poll = async () => {
       try {
         await initDb();
+        let branchId = '';
+        try { branchId = getBranchId(); } catch { branchId = 'B001'; }
         const heads = await query<{ salesNum: string; tableNo: string | null; queueNumber: string | null; status: string | null }>(
-          'SELECT salesNum, tableNo, queueNumber, status FROM tr_saleshead ORDER BY createdAt DESC LIMIT 20',
+          'SELECT salesNum, tableNo, queueNumber, status FROM tr_saleshead WHERE (branchId = ? OR branchId IS NULL OR branchId = ?) ORDER BY createdAt DESC LIMIT 20',
+          [branchId, ''],
         );
+        try {
+          const pr = await query<{ promoCode: string | null; promoName: string | null; value: number | null }>(
+            'SELECT promoCode, promoName, value FROM ms_promotion WHERE flagActive = 1 ORDER BY rowid LIMIT 1',
+          );
+          if (alive) {
+            const r0 = pr[0];
+            const code = (r0?.promoCode ?? '').trim();
+            setPromo(code ? { code, name: (r0?.promoName ?? '').trim() || code, value: Math.round(Number(r0?.value) || 0) } : null);
+          }
+        } catch { /* promo opsional - banner disembunyikan */ }
         if (!alive || heads.length === 0) return;
         const tag = (h: { salesNum: string; tableNo: string | null; queueNumber: string | null }) =>
           h.queueNumber || h.tableNo || h.salesNum;
@@ -71,6 +94,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         if (readyLive.length > 0) setReady(readyLive);
         const openHead = heads.find((h) => (h.status ?? 'open') !== 'paid');
         if (!openHead) return;
+        if (alive) setOpenTag(tag(openHead));
         const rows = await query<{ menuName: string | null; qty: number | null; price: number | null }>(
           'SELECT menuName, qty, price FROM tr_salesmenu WHERE salesNum = ?',
           [openHead.salesNum],
@@ -109,7 +133,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       {mode === 'queue' ? (
         <>
           <View style={styles.hero}>
-            <Text style={[styles.shop, isTablet && styles.shopBig]}>{t('disp_shop')}</Text>
+            <Text style={[styles.shop, isTablet && styles.shopBig]}>{shopName}</Text>
             <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('disp_hero_sub')}</Text>
           </View>
           <View style={[styles.cols, !isTablet && styles.colsPhone]}>
@@ -132,9 +156,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
               ))}
             </View>
           </View>
-          <View style={styles.promo}>
-            <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${rp(PROMO_DISCOUNT)}${t('disp_promo_post')}`} </Text>
-          </View>
+          {promo ? (
+            <View style={styles.promo}>
+              <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${promo.code} · ${promo.name} (${rp(promo.value)})${t('disp_promo_post')}`} </Text>
+            </View>
+          ) : null}
           <AppButton
             size="md"
             title={prep.length === 0 ? t('disp_all_ready') : `${t('disp_call_pre')}${prep[0]}${t('disp_call_post')}`}
@@ -146,7 +172,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
       {mode === 'order' ? (
         <View style={styles.orderCard}>
-          <Text style={styles.shopDark}>{t('disp_running_title')}</Text>
+          <Text style={styles.shopDark}>{openTag ? `${t('disp_running_title_base')} - ${openTag}` : t('disp_running_title_base')}</Text>
           <Text style={styles.orderSub}>{t('disp_running_sub')}</Text>
           <View style={styles.divider} />
           {liveItems.length === 0 && <Text style={styles.empty}>{t('disp_empty')}</Text>}

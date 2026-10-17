@@ -19,19 +19,7 @@ const SECTION_OF: Record<string, string> = {
   B1: 'Teras', B2: 'Teras', B3: 'Teras',
   C1: 'VIP', C2: 'VIP',
 };
-const SOURCE: Record<string, MoveItem[]> = {
-  A2: [
-    { id: 'm1', name: 'Sudirman Coffee', qty: 2, price: 12900 },
-    { id: 'm2', name: 'Lele goreng kremes', qty: 2, price: 15000 },
-    { id: 'm3', name: 'Es Teh Manis', qty: 1, price: 8000 },
-  ],
-  'B1': [
-    { id: 'm4', name: 'Ayam Geprek', qty: 1, price: 18000 },
-    { id: 'm5', name: 'Jus Alpukat', qty: 1, price: 15000 },
-  ],
-};
-
-const DESTS = ['A1 (kosong)', 'A3 (kosong)', 'A4 (kosong)', 'C1 (kosong)', 'B1 (terisi)'];
+/** Contoh katalog lama dihapus — sumber & tujuan murni dari SQLite (live-only). */
 
 /** Normalisasi kode lama ber-strip ("A-03" → "A3") ke kanonis tanpa strip. */
 function canonTableNo(raw: string): string {
@@ -49,8 +37,8 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  // T7: katalog live dari SQLite (bill aktif per meja + ms_table); konstanta
-  // SOURCE/DESTS hanya fallback saat DB kosong (instalasi baru / kasir web).
+  // T7: katalog live dari SQLite (bill aktif per meja + ms_table); tanpa bill
+  // terbuka = katalog kosong yang jujur.
   const [liveSource, setLiveSource] = useState<Record<string, MoveItem[]> | null>(null);
   const [liveDests, setLiveDests] = useState<string[] | null>(null);
 
@@ -64,7 +52,33 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
            WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
         const names = tables.map((r) => r.tableNo.trim()).filter(Boolean);
-        if (!on || names.length === 0) return;
+        if (!on) return;
+        if (names.length === 0) {
+          // Jujur: tak ada bill terbuka = tak ada sumber. Muat daftar tujuan
+          // dari ms_table; katalog sumber kosong (BUKAN contoh SOURCE/DESTS).
+          try {
+            const tRows = await query<{ id: string; tableNo: string | null }>(
+              'SELECT id, tableNo FROM ms_table LIMIT 60',
+            );
+            const free = tRows
+              .map((r) => ((r.tableNo || r.id) || '').trim())
+              .filter((no) => !!no);
+            if (!on) return;
+            setLiveSource({});
+            setLiveDests(free.length > 0 ? free.map((no) => `${no} (kosong)`) : []);
+            setFrom('');
+            if (free.length > 0) setTo((prev) => (prev && free.includes(prev.replace(/\s*\(.*\)\s*$/, '').trim()) ? prev : `${free[0]} (kosong)`));
+            else setTo('');
+          } catch {
+            if (!on) return;
+            setLiveSource({});
+            setLiveDests([]);
+            setFrom('');
+            setTo('');
+          }
+          setPickedQty({});
+          return;
+        }
         const catalog: Record<string, MoveItem[]> = {};
         for (const tb of names) {
           // Kelompokkan per menu + harga + catatan + diskon agar catatan dapur
@@ -108,7 +122,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
             if (dests.length === 0) dests = null;
           }
         } catch {
-          /* ms_table kosong - fallback DESTS */
+          /* ms_table kosong - daftar tujuan kosong */
         }
         if (!on) return;
         setLiveSource(catalog);
@@ -117,7 +131,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         if (dests) setTo((prev) => (dests.includes(prev) ? prev : dests[0]));
         setPickedQty({});
       } catch {
-        /* SQLite belum siap - fallback konstanta tetap tampil */
+        /* SQLite belum siap - katalog tetap kosong, bukan contoh */
       }
     })();
     return () => {
@@ -126,13 +140,14 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const catalog = liveSource ?? SOURCE;
-  const destList = liveDests ?? DESTS;
+  // Live-only: tanpa bill terbuka = katalog kosong.
+  const catalog = liveSource ?? {};
+  const destList = liveDests ?? [];
   const tables = useMemo(() => Object.keys(catalog), [catalog]);
-  const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? tables[0] ?? 'A2'));
+  const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? tables[0] ?? ''));
   // qty yang dipilih untuk dipindah per item (mendukung pindah sebagian, mis. 2x pindah 1).
   const [pickedQty, setPickedQty] = useState<Record<string, number>>({});
-  const [to, setTo] = useState(destList[0] as string);
+  const [to, setTo] = useState(destList[0] ?? '');
   const [movedQty, setMovedQty] = useState<Record<string, number>>({});
   const [doneMsg, setDoneMsg] = useState('');
 
@@ -232,7 +247,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         markMoved();
         return;
       } catch {
-        /* DB tak cocok (fallback konstanta / multi-bill) - pakai antrean manual */
+        /* DB tak cocok (tanpa baris cocok / multi-bill) - pakai antrean manual */
       }
       // Catat pindah item ke antrean sync agar diteruskan ke server (offline-first).
       // Catatan dan diskon per baris ikut agar dapur/struk tujuan tetap sama.

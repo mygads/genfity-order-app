@@ -96,7 +96,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
   const clockedIn = inTime !== null && outTime === null;
 
-  const outlet = s?.outlet ?? 'Genfity Cabang Poris'; const who = s?.name ?? 'Gista'; return (
+  const outlet = s?.outlet ?? 'Genfity Cabang Poris'; const who = s?.name ?? s?.username ?? '-'; return (
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
@@ -106,8 +106,8 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
       <View style={styles.card}>
         <Text style={styles.cardT}>{t('att_outlet')} {outlet}</Text>
-        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{who} ({s?.username ?? 'gista.kasir'})</Text>
-        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{s?.shift ?? t('fallback_shift')} · {t('att_cash')} {rp(s?.cash ?? 200000)} · {t('dash_shift_open')}</Text>
+        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{who} ({s?.username ?? '-'})</Text>
+        <Text style={[styles.meta, isTablet && styles.metaTablet]}>{s?.shift ?? t('fallback_shift')} · {t('att_cash')} {rp(s?.cash ?? 0)} · {t('dash_shift_open')}</Text>
       </View>
 
       <Text style={styles.sec}>{t('att_list')}</Text>

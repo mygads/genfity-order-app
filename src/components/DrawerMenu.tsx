@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
-import { logout } from '../session';
+import { getSession, logout } from '../session';
 import { useLang } from '../lib/i18n';
 import { getDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
@@ -58,10 +58,18 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
       try {
         await initDb();
         const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
-          'SELECT clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+          // Baris absensi (status 'absen') dikecualikan agar clock-in kehadiran
+          // tak menyalakan dot hijau shift (clockOut NULL terbaca "open").
+          'SELECT clockOut, status FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
         );
         if (!alive) return;
-        setShiftDbOpen(row ? row.status === 'open' || !row.clockOut : null);
+        if (row) {
+          setShiftDbOpen(row.status === 'open' || !row.clockOut);
+          return;
+        }
+        // Tanpa baris shift: hanya-absensi (belum pernah buka shift) = tutup/merah.
+        const total = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_shiftlog');
+        if (alive) setShiftDbOpen(total && Number(total.c) > 0 ? false : null);
       } catch {
         /* DB belum siap - dot tetap kuning (tak diketahui) */
       }
@@ -71,6 +79,19 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     };
   }, [visible, shiftOpenProp]);
   const shiftOpen = shiftOpenProp ?? shiftDbOpen;
+  // Nama user: prop pemanggil dulu, lalu sesi login nyata. Kunci demo i18n
+  // hanya last-resort (tanpa sesi = drawer tak bisa dibuka dari layar auth).
+  const sessUser = (() => {
+    if (user) return user;
+    try {
+      const s = getSession();
+      if (!s) return undefined;
+      const nm = (s.name || s.username || '').trim();
+      return nm ? `${nm} | ${s.shift}` : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   // Drawer tampil/hilang SEKEtika tanpa animasi apa pun (keputusan produk:
   // slide + scrim terbaca sebagai dua animasi berurutan di HP).
   // Modal tetap animationType="none". Buka-tutup dikontrol murni oleh `visible`.
@@ -135,7 +156,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
                   shiftOpen === null && styles.shiftDotUnknown,
                 ]}
               />
-              <Text style={styles.shiftText}>{user ?? t('drawer_demo_user')}</Text>
+              <Text style={styles.shiftText}>{sessUser ?? t('drawer_demo_user')}</Text>
             </View>
           </View>
           {/* Daftar menu digulir agar tombol bahasa/logout tak terpotong

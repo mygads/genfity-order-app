@@ -20,9 +20,9 @@ import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
-import { attemptsLeft, authorizeSupervisor } from '../../lib/supervisor';
+import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 import { ApiPath, getTerminal } from '../../config/server';
-import { apiFetch, unwrap } from '../../lib/apiSource';
+import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { syncWarnLevel } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
@@ -43,6 +43,8 @@ type Props = {
       memberId?: string;
       ongkir?: number;
       voucher?: { code: string; amount: number; kind?: string };
+      /** Kode voucher mentah (mis. dari scan kamera) - divalidasi ke DB lokal di bawah. */
+      voucherCode?: string;
       customItem?: { name: string; price: number; qty: number; note?: string };
       itemNote?: { id: string; note: string };
       loadItems?: CartItem[];
@@ -113,6 +115,7 @@ const CATEGORY_OF: Record<string, string> = {
   Dessert: 'Dessert',
   Cake: 'Cake',
   Pasta: 'Pasta',
+  Snack: 'Snack',
 };
 
 function mapCategory(raw: string | null): string {
@@ -199,6 +202,8 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [voucher, setVoucher] = useState<{ code: string; amount: number; kind?: string } | null>(
     route?.params?.voucher ?? null,
   );
+  /** Pesan validasi kode voucher mentah (scan) - ditampil jujur, bukan diam. */
+  const [voucherMsg, setVoucherMsg] = useState('');
   /** Ongkir - bawaan per mode dari FEE_DEFAULTS, bisa diubah via dialog tombol Ongkir, diteruskan ke CartDetail/Pay. */
   const [ongkir, setOngkir] = useState(Math.max(0, Number(route?.params?.ongkir ?? defaultOngkirForMode('DINE IN')) || 0));
   const [ongkirOpen, setOngkirOpen] = useState(false);
@@ -212,8 +217,10 @@ export default function CashierScreen({ navigation, route }: Props) {
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   /** Sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync hanya banner info -
-   * tombol Bayar tetap hidup, Pay tampilkan peringatan tapi tetap bisa bayar. */
-  const syncBlocked = syncWarnLevel() === 'block7';
+   * tombol Bayar tetap hidup, Pay tampilkan peringatan tapi tetap bisa bayar.
+   * Local Mode (tanpa server untuk sync): banner TIDAK tampil - tak ada
+   * server yang bisa di-sync, dan kasir harus tetap bisa dipakai. */
+  const syncBlocked = syncWarnLevel() === 'block7' && getApiMode() !== 'local';
   const renderSyncBlock = () =>
     syncBlocked ? (
       <TouchableOpacity style={styles.modeNote} onPress={() => navigation?.navigate('Sync')}>
@@ -229,18 +236,10 @@ export default function CashierScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
-  const [cart, setCart] = useState<CartItem[]>([
-    {
-      id: 'p11',
-      name: 'Sudirman Coffee',
-      basePrice: 12900,
-      qty: 1,
-      modifiers: [{ name: 'Creamy Pandan Kayu Manis', price: 7000 }],
-      discount: 0,
-    },
-    { id: 'p6', name: 'test baru', basePrice: 20000, qty: 1, modifiers: [], discount: 0 },
-    { id: 'p2', name: 'Ayam Goreng Dada', basePrice: 15000, qty: 3, modifiers: [], discount: 2500 },
-  ]);
+  // Keranjang mulai kosong (offline-first): diisi dari menu yang diketuk /
+  // draft atau order yang dibuka (loadItems/salesNum), bukan 3 item contoh.
+  // DB kosong + tanpa draft = empty-state kasir yang jujur.
+  const [cart, setCart] = useState<CartItem[]>([]);
   // Editor catatan/diskon/void per item
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -281,7 +280,9 @@ export default function CashierScreen({ navigation, route }: Props) {
             const at = new Date().toISOString();
             const res = await apiFetch(ApiPath.pullMenu, { method: 'GET' });
             const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
-            const items = Array.isArray(data?.items) ? data.items : [];
+            // Sekat dummy: hanya cache ke SQLite bila data server asli
+            // (r.fromDummy = lewati tulis, lindungi seed/data asli).
+            const items = !res.fromDummy && Array.isArray(data?.items) ? data.items : [];
             for (const it of items) {
               const id = String(it.menuId ?? it.id ?? '').trim();
               if (!id) continue;
@@ -302,7 +303,8 @@ export default function CashierScreen({ navigation, route }: Props) {
             }
             const resB = await apiFetch(ApiPath.pullBranchMenu, { method: 'GET' });
             const { data: dataB } = unwrap<{ items?: Record<string, unknown>[] }>(resB.data);
-            const itemsB = Array.isArray(dataB?.items) ? dataB.items : [];
+            // Sekat dummy: sama seperti pullMenu di atas.
+            const itemsB = !resB.fromDummy && Array.isArray(dataB?.items) ? dataB.items : [];
             for (const it of itemsB) {
               const menuId = String(it.menuId ?? '').trim();
               if (!menuId) continue;
@@ -396,9 +398,11 @@ export default function CashierScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbProducts]);
 
-  /** Status shift nyata dari tr_shiftlog untuk header (open bila status open / belum clockOut).
-   * null = DB kosong → fallback menganggap buka agar demo/screenshot tetap jalan.
-   * hasHistory menandai ada riwayat shift: dipakai jaring pengaman blokir kasir. */
+  /** Status shift nyata cabang aktif dari tr_shiftlog (open bila status open /
+   * belum clockOut). null = DB kosong → fallback menganggap buka agar kasir
+   * tetap bisa dipakai; hasHistory menandai ada riwayat shift. Baris absensi
+   * (status 'absen') dikecualikan agar clock-in kehadiran tak terbaca open;
+   * riwayat yang hanya berisi absensi = belum pernah buka shift → tutup. */
   const [shiftInfo, setShiftInfo] = useState<{ open: boolean; hasHistory: boolean } | null>(null);
 
   useEffect(() => {
@@ -406,11 +410,23 @@ export default function CashierScreen({ navigation, route }: Props) {
     (async () => {
       try {
         await initDb();
+        const branchId = getTerminal().branchId || CASHIER_BRANCH_FALLBACK;
         const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
-          'SELECT clockOut, status FROM tr_shiftlog ORDER BY clockIn DESC LIMIT 1',
+          'SELECT clockOut, status FROM tr_shiftlog WHERE branchId = ? AND (status IS NULL OR status <> \'absen\') ORDER BY clockIn DESC LIMIT 1',
+          [branchId],
         );
-        if (!alive || !row) return;
-        setShiftInfo({ open: row.status === 'open' || !row.clockOut, hasHistory: true });
+        if (!alive) return;
+        if (row) {
+          setShiftInfo({ open: row.status === 'open' || !row.clockOut, hasHistory: true });
+          return;
+        }
+        const total = await queryFirst<{ c: number }>(
+          'SELECT COUNT(*) AS c FROM tr_shiftlog WHERE branchId = ?',
+          [branchId],
+        );
+        if (alive && total && Number(total.c) > 0) {
+          setShiftInfo({ open: false, hasHistory: true });
+        }
       } catch {
         /* DB belum siap - fallback buka */
       }
@@ -424,7 +440,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const sess = getSession();
   const outletName = sess?.outlet || getTerminal().branchName || 'Genfity Cabang Poris';
   const shiftOpen = shiftInfo?.open ?? true;
-  const shiftLabel = `${sess?.name ?? 'Gista'} | ${shiftOpen ? t('dash_shift_open') : t('dash_shift_closed')}`;
+  const shiftLabel = `${sess?.name ?? sess?.username ?? ''} | ${shiftOpen ? t('dash_shift_open') : t('dash_shift_closed')}`;
 
   /** Terima kiriman layar lain: voucher, item custom, notes, hasil muat order, mode. */
   useEffect(() => {
@@ -432,6 +448,29 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (!p) return;
     if (p.table !== undefined) setTable(p.table);
     if (p.voucher) setVoucher(p.voucher);
+    // Kode voucher mentah (scan kamera QrScan tanpa check()): validasi ke
+    // ms_voucher lokal; tak dikenal = diabaikan + pesan, bukan voucher fiksi.
+    if (typeof p.voucherCode === 'string' && p.voucherCode.trim() && !p.voucher) {
+      const rawCode = p.voucherCode.trim();
+      void (async () => {
+        try {
+          await initDb();
+          const row = await queryFirst<{ voucherName: string | null; amount: number | null; quota: number | null; status: string | null }>(
+            'SELECT voucherName, amount, quota, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
+            [rawCode],
+          );
+          if (row && (row.status ?? '').toLowerCase() === 'available' && Math.round(Number(row.quota) || 0) > 0) {
+            setVoucher({ code: rawCode.toUpperCase(), amount: Math.max(0, Math.round(Number(row.amount) || 0)) });
+            setVoucherMsg('');
+          } else {
+            setVoucher(null);
+            setVoucherMsg(t('scan_unknown_voucher'));
+          }
+        } catch {
+          /* DB belum siap - abaikan kode */
+        }
+      })();
+    }
     if (p.memberId !== undefined) setMemberId(p.memberId ?? '');
     if (typeof p.salesNum === 'string' && p.salesNum.trim()) setSalesNum(p.salesNum.trim());
     /** Booking oper nama + jumlah tamu - gabung ke kolom info (bisa diedit kasir). */
@@ -558,7 +597,9 @@ export default function CashierScreen({ navigation, route }: Props) {
       }
       setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
     } catch {
-      applyVoid(id, wantVoid);
+      // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
+      // terapkan void tanpa otorisasi.
+      setVoidAuthMsg('Izin tak dapat diperiksa / Access check failed — void ditolak');
       return;
     }
     setVoidPin('');
@@ -573,11 +614,17 @@ export default function CashierScreen({ navigation, route }: Props) {
     void requestVoid(id, false);
   };
 
-  /** Konfirmasi PIN supervisor untuk target void yang tertunda (fail-closed saat offline). */
+  /** Konfirmasi PIN supervisor untuk target void yang tertunda: server dulu,
+   * lalu eskalasi lokal saat offline (fail-closed untuk PIN salah/tanpa hak). */
   const confirmVoidPin = () => {
-    if (!voidTarget || voidPin.replace(/\D/g, '').length !== 6 || voidConfirming) return;
+    if (!voidTarget || voidPin.replace(/\D/g, '').length < 4 || voidConfirming) return;
     setVoidConfirming(true);
     void authorizeSupervisor(voidPin).then((res) => {
+      if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
+        return verifyLocalEscalation(voidPin, 'order.void');
+      }
+      return res;
+    }).then((res) => {
       if (!res.ok) {
         setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} remaining)`);
         setVoidConfirming(false);
@@ -738,7 +785,7 @@ export default function CashierScreen({ navigation, route }: Props) {
               size="sm"
               title={voidConfirming ? '...' : 'Setujui / Approve'}
               onPress={confirmVoidPin}
-              disabled={voidPin.replace(/\D/g, '').length !== 6 || voidConfirming}
+              disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
               fullWidth={false}
               style={[styles.dialogPrimary, { marginTop: 0 }]}
               textStyle={styles.dialogPrimaryT}
@@ -1199,6 +1246,11 @@ export default function CashierScreen({ navigation, route }: Props) {
             <Text style={[styles.totalVal, styles.discVal]}>-{rp(discountTotal)}</Text>
           </View>
         )}
+        {voucherMsg ? (
+          <View style={styles.totalRow}>
+            <Text style={[styles.totalLabel, { color: colors.red }]}>{voucherMsg}</Text>
+          </View>
+        ) : null}
         {voucher && !useOngkirCut && (
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Voucher {voucher.code}</Text>
