@@ -523,6 +523,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           <View style={styles.linksRow}>
             <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', {
               items: active, total, mode,
+              // Nomor draft = SATU salesNum grup split (anti struk ganda, anti hantu).
+              ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),

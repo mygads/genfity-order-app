@@ -62,7 +62,8 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
     await initDb();
     const nowIso = new Date().toISOString();
     const depId = `dep-${Date.now()}`;
-    const userId = getSession()?.username ?? getSession()?.name ?? null;
+    // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
+    const userId = getSession()?.userId || getSession()?.username || null;
     await run(
       `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
       [depId, memberId, getTerminal().branchId || null, nominal, after ?? null, userId, nowIso],

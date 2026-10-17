@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale } from '../../lib/sales';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment } from '../../lib/sales';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number; orderNo?: string; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
+  route?: { params?: { total?: number; orderNo?: string; salesNum?: string; splitGroup?: boolean; orderTotal?: number; splits?: { method?: string; amount?: number }[]; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; customer?: string; memberId?: string; };
 };};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
@@ -54,9 +54,40 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, seconds]);
 
-  /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja). */ const settlePaid = async () => {
+  /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja).
+   * Nomor + kaki split terusan dari Pay dipakai ulang (sisa QRIS = kaki
+   * terakhir SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor. */
+  const settlePaid = async () => {
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
-    const orderNo = await nextSalesNum(); const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: total, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [{ method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+    const p = route?.params ?? {};
+    const orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    const fwdSplits = (p.splits ?? [])
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
+      .filter((s) => s.amount > 0);
+    const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
+    const fullTotal = paidBefore + total;
+    // Split grup (SplitBill via Pay): kunjungan QRIS ikut SATU salesNum.
+    // Pertama = saveSale penuh (grand = total order); berikut = append kaki
+    // (tanpa stok/voucher/dapur ganda). Struk = total penuh + splitPaid.
+    const groupNo = p.splitGroup === true && (p.salesNum ?? '').trim()
+      && Math.max(0, Math.round(Number(p.orderTotal) || 0)) > 0
+      ? (p.salesNum ?? '').trim() : '';
+    if (groupNo) {
+      const orderTotalFull = Math.max(0, Math.round(Number(p.orderTotal) || 0));
+      const visitPay = [...fwdSplits, { method: 'qris', amount: total }];
+      try {
+        if (await saleHeadExists(groupNo)) {
+          await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0 });
+        } else {
+          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), };
+          recordSale(gInput);
+          try { await saveSale(gInput); } catch { /* DB gagal - kasir tetap jalan */ }
+        }
+      } catch { /* DB gagal - kasir tetap jalan */ }
+      navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
+      return;
+    }
+    const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;

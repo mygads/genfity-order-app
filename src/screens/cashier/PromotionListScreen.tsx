@@ -277,6 +277,10 @@ export default function PromotionListScreen({ navigation, route }: Props) {
           setWarn(`Belanja ${rp(subtotal)} belum mencapai ${t('minSpend')} ${rp(r.minSpend)} untuk ${p.code}.`);
           return;
         }
+        // Server menjawab definitif-tak-valid: TOLAK, jangan fail-open ke
+        // nilai lokal (backstop saveSale tetap menolak saat simpan).
+        setWarn(t('vou_unknown').replace('{k}', p.code));
+        return;
       }
     } catch {
       /* offline - pakai nilai lokal */

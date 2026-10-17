@@ -178,7 +178,7 @@ export function totals(input: TotalsInput): TotalsResult {
     : isPercentVoucher
       ? Math.min(voucherPctAmt, dasarBelanja)
       : Math.min(amount, dasarBelanja);
-  const subtotal = gross - discount - voucherAmt;
+  const subtotal = Math.max(0, gross - discount - voucherAmt);
   const service = Math.round(subtotal * FEE_DEFAULTS.serviceRate);
   /** Pajak inclusive info-only (kontrak §10.3: default 11 -> round(net * 11/111), setting-driven via ms_setting Tax/PPN). */
   const taxIncl = Math.round((subtotal * rate) / (100 + rate));

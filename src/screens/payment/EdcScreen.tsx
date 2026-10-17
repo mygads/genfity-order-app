@@ -15,6 +15,8 @@ type Props = {
   route?: {
     params?: {
       total?: number;
+      salesNum?: string;
+      splits?: { method?: string; amount?: number }[];
       items?: SaleItemIn[];
       discount?: number;
       voucherCode?: string;
@@ -81,12 +83,19 @@ export default function EdcScreen({ navigation, route }: Props) {
 
   // Simpan + teruskan approval 6-digit & 4 digit kartu ke Success dan ke payload antrean.
   // Satu nomor TRX untuk DB + Success + Receipt (selaras PayScreen).
+  // Nomor + kaki split terusan dari Pay dipakai ulang (EDC = kaki terakhir
+  // SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor.
   const save = async () => {
     if (!canSave) return;
     const p = route?.params ?? {};
     const method = `EDC ${bank}`;
     const cardLast4 = cardNo.slice(-4);
-    const orderNo = await nextSalesNum();
+    const orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    const fwdSplits = (p.splits ?? [])
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
+      .filter((s) => s.amount > 0);
+    const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
+    const fullTotal = paidBefore + total;
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
@@ -94,11 +103,11 @@ export default function EdcScreen({ navigation, route }: Props) {
     const input: SaleInput = {
       method,
       salesNum: orderNo,
-      grandTotal: total,
-      cash: total,
+      grandTotal: fullTotal,
+      cash: fullTotal,
       change: 0,
       items: p.items,
-      payments: [{ method, amount: total, approvalCode: approval }],
+      payments: [...fwdSplits, { method, amount: total, approvalCode: approval }],
       discountTotal: p.discount ?? 0,
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
@@ -119,9 +128,9 @@ export default function EdcScreen({ navigation, route }: Props) {
       /* DB gagal - kasir tetap jalan */
     }
     navigation?.navigate('Success', {
-      total,
+      total: fullTotal,
       method,
-      cash: total,
+      cash: fullTotal,
       change: 0,
       orderNo,
       approvalCode: approval,

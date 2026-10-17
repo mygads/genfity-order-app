@@ -278,6 +278,29 @@ async function drainPhysicalQueue(): Promise<PushResult> {
   return { sent, failed };
 }
 
+// Operasi cermin-lokal tanpa endpoint push di kontrak §5 (status meja di
+// ms_table + data booking di AsyncStorage): tak ada yang perlu dikirim —
+// tandai terkirim-lokal agar badge antrean tak menumpuk selamanya. Mutasi
+// DB-nya tetap kotor (syncDate NULL) + tercatat di outbox fisik.
+const LOCAL_OPS = new Set([
+  'table-occupy',
+  'table-clear',
+  'merge-table',
+  'order-hold-toggle',
+  'table-add',
+  'table-delete',
+  'booking-create',
+  'booking-update',
+  'booking-cancel',
+]);
+
+// Kind deposit tanpa endpoint khusus (kontrak hanya punya
+// member-deposit-withdrawal/topup + inquiry-deposit): baris mutasi
+// tr_memberdeposit-nya tetap terkirim via outbox fisik (jalur tabel generik),
+// sehingga item ringan ini cukup ditandai terkirim-lokal. JANGAN arahkan ke
+// endpoint topup — semantiknya berbalik (kredit vs debit).
+const DEPOSIT_LOCAL_KINDS = new Set(['deposit-refund', 'deposit-withdraw']);
+
 export async function pushAll(): Promise<PushResult> {
   hydrate();
   if (getServerEnv() !== 'custom') {
@@ -315,10 +338,19 @@ export async function pushAll(): Promise<PushResult> {
       item.note = tr('sync.masterQueued');
       continue;
     }
-    // kind "other" tanpa endpoint yang cocok (mis. booking lokal) dilewati
-    // agar tidak terkirim ke endpoint salah; tetap antre + tercatat fisik.
+    // kind "other" tanpa endpoint yang cocok: bedakan cermin-lokal /
+    // deposit-lokal (tandai terkirim, bukan antre selamanya) dari yang
+    // benar-benar menunggu endpoint (tetap antre + tercatat fisik).
     const path = pathFor(item.kind, item.payload);
     if (!path) {
+      const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown };
+      const op = String(p.op ?? '');
+      const k = String(p.kind ?? '');
+      if (LOCAL_OPS.has(op) || DEPOSIT_LOCAL_KINDS.has(k)) {
+        item.status = 'terkirim';
+        item.note = tr(op ? 'sync.localOnly' : 'sync.depositLocal');
+        continue;
+      }
       item.note = tr('sync.masterQueued');
       continue;
     }

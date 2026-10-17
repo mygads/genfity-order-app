@@ -11,7 +11,7 @@ import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
  * non-penjualan. Dua terakhir wajib otorisasi supervisor (fail-closed).
  */
-export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string) => void }) {
+export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void }) {
   // Tablet: kartu 4 sebaris proporsional di dalam konten PayScreen.
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -59,10 +59,16 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     setBusy(true);
     setMsg(t('xp_requesting'));
     let r = await authorizeSupervisor(pin);
+    // Identitas penyetuju diteruskan ke Pay agar diaudit (tr_salesinfo +
+    // payload). Jalur server tak mengembalikan userId — hanya eskalasi lokal
+    // yang membawa identitas (verifyLocalEscalation → userId).
+    let approver: string | undefined;
     // Offline-first: kompliment/non-penjualan butuh hak order.void; PIN staf
     // atau salah tetap ditolak (fail-closed).
     if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
-      r = await verifyLocalEscalation(pin, 'order.void');
+      const local = await verifyLocalEscalation(pin, 'order.void');
+      if (local.ok) approver = local.userId;
+      r = local;
     }
     setBusy(false);
     if (!r.ok) {
@@ -72,7 +78,7 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     }
     const m = EXTRA_METHODS.find((x) => x.id === authFor);
     setAuthFor(null);
-    if (m) onDone(m.label);
+    if (m) onDone(m.label, undefined, approver);
   };
 
   return (

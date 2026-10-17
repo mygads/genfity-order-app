@@ -119,7 +119,8 @@ export async function loadHistory(limit = 300): Promise<Transaction[]> {
  */
 export async function persistVoidDb(salesNum: string, reason: string): Promise<void> {
   const now = new Date().toISOString();
-  const user = getSession()?.name ?? '';
+  // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
+  const userId = (getSession()?.userId || getSession()?.username || '').trim();
   try {
     await initDb();
     await run(
@@ -138,16 +139,22 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     }
     for (const it of items) {
       try {
+        const cid = `cm-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
         await run(
           `INSERT INTO tr_cancelmenu (id, salesNum, menuId, menuName, qty,
             reasonId, reasonNote, userId, cancelDate, syncDate)
            VALUES (?, ?, ?, ?, ?, 'VOID', ?, ?, ?, NULL)`,
           [
-            `cm-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+            cid,
             salesNum, it.menuId, it.menuName, it.qty ?? 0,
-            reason, user, now,
+            reason, userId || null, now,
           ],
         );
+        try {
+          await enqueueOutbox('tr_cancelmenu', cid, 'insert');
+        } catch {
+          /* abaikan */
+        }
       } catch {
         /* abaikan */
       }
@@ -187,22 +194,32 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
         /* abaikan */
       }
     }
-    // 2) Kuota voucher kembali + status available lagi.
-    if (vHead?.voucherCode) {
-      try {
+    // 2) Kuota voucher kembali + status available lagi — HANYA untuk kode
+    // yang benar-benar terbakar (usage 'burn'). Yang 'rejected' tak pernah
+    // menyentuh kuota sehingga tak boleh +1 (backstop saveSale #1/#2).
+    // Ambil dari usage agar kaki tender ikut pulih, bukan cuma head.
+    try {
+      const burned = await query<{ voucherCode: string | null }>(
+        `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
+         WHERE salesNum = ? AND status = 'burn'`,
+        [salesNum],
+      );
+      for (const b of burned) {
+        const code = String(b.voucherCode ?? '').trim();
+        if (!code) continue;
         await run(
           `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
             WHERE UPPER(voucherCode) = UPPER(?)`,
-          [vHead.voucherCode],
+          [code],
         );
         try {
-          await enqueueOutbox('ms_voucher', vHead.voucherCode.toUpperCase(), 'update');
+          await enqueueOutbox('ms_voucher', code.toUpperCase(), 'update');
         } catch {
           /* abaikan */
         }
-      } catch {
-        /* abaikan */
       }
+    } catch {
+      /* abaikan */
     }
     // 3) Deposit kembali ke saldo member + ledger refund.
     try {
@@ -232,7 +249,7 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
           await run(
             `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
              VALUES (?, ?, ?, 'refund', ?, ?, ?, ?, NULL)`,
-            [rid, vHead.memberId, vHead.branchId ?? null, depBack, after, user || null, now],
+            [rid, vHead.memberId, vHead.branchId ?? null, depBack, after, userId || null, now],
           );
           try {
             await enqueueOutbox('tr_memberdeposit', rid, 'insert');

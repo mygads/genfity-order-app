@@ -69,11 +69,20 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       try {
         await initDb();
         if (tab === 'voucher') {
-          const row = await queryFirst<{ voucherCode: string | null; voucherName: string | null; amount: number | null; quota: number | null; status: string | null }>(
-            'SELECT voucherCode, voucherName, amount, quota, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
+          const row = await queryFirst<{ voucherCode: string | null; voucherName: string | null; amount: number | null; quota: number | null; validFrom: string | null; validTo: string | null; status: string | null }>(
+            'SELECT voucherCode, voucherName, amount, quota, validFrom, validTo, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
             [clean],
           );
-          if (!row || (row.status ?? '').toLowerCase() !== 'available' || Math.round(Number(row.quota) || 0) <= 0) {
+          // Cek penuh selaras validateVoucherCodeLocal: status + kuota +
+          // jendela validitas + nominal > 0.
+          const nowIso = new Date().toISOString();
+          const usable = !!row
+            && (row.status ?? '').toLowerCase() === 'available'
+            && Math.round(Number(row.quota) || 0) > 0
+            && Math.max(0, Math.round(Number(row.amount) || 0)) > 0
+            && !(row.validFrom && row.validFrom > nowIso)
+            && !(row.validTo && row.validTo < nowIso);
+          if (!usable) {
             setMsg(t('scan_unknown_voucher'));
             setResult(false);
             return;

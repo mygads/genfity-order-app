@@ -458,11 +458,20 @@ export default function CashierScreen({ navigation, route }: Props) {
       void (async () => {
         try {
           await initDb();
-          const row = await queryFirst<{ voucherName: string | null; amount: number | null; quota: number | null; status: string | null }>(
-            'SELECT voucherName, amount, quota, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
+          const row = await queryFirst<{ voucherName: string | null; amount: number | null; quota: number | null; validFrom: string | null; validTo: string | null; status: string | null }>(
+            'SELECT voucherName, amount, quota, validFrom, validTo, status FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?) LIMIT 1',
             [rawCode],
           );
-          if (row && (row.status ?? '').toLowerCase() === 'available' && Math.round(Number(row.quota) || 0) > 0) {
+          // Cek penuh selaras validateVoucherCodeLocal: status + kuota +
+          // jendela validitas + nominal > 0.
+          const nowIso = new Date().toISOString();
+          const usable = !!row
+            && (row.status ?? '').toLowerCase() === 'available'
+            && Math.round(Number(row.quota) || 0) > 0
+            && Math.max(0, Math.round(Number(row.amount) || 0)) > 0
+            && !(row.validFrom && row.validFrom > nowIso)
+            && !(row.validTo && row.validTo < nowIso);
+          if (usable) {
             setVoucher({ code: rawCode.toUpperCase(), amount: Math.max(0, Math.round(Number(row.amount) || 0)) });
             setVoucherMsg('');
           } else {
@@ -869,6 +878,10 @@ export default function CashierScreen({ navigation, route }: Props) {
           items: cart,
           ongkir,
           salesNum: num,
+          // Rantai draft utuh: voucher/member/tamu ikut agar tak hilang saat dimuat (G4).
+          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+          ...(memberId ? { memberId } : {}),
+          ...(customer.trim() ? { customer: customer.trim() } : {}),
         },
       });
     })();

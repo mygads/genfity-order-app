@@ -16,7 +16,7 @@ import { useLang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { nextSalesNum, saveSale } from '../../lib/sales';
+import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment } from '../../lib/sales';
 import { validateVoucherCode } from '../../lib/apiSource';
 import { syncWarnLevel } from '../../lib/sync';
 import { initDb, query as queryDb } from '../../lib/db';
@@ -95,6 +95,10 @@ type Props = {
       feeESB?: number;
       /** Nomor struk bawaan (dari Simpan/LoadOrder via kasir) - pakai ulang bila ada. */
       salesNum?: string;
+      /** Split grup (dari SplitBill): kunjungan bayar memakai SATU salesNum. */
+      splitGroup?: boolean;
+      /** Total PENUH order grup (tagihan kunjungan ini tetap di `total`). */
+      orderTotal?: number;
     };
   };
 };
@@ -385,9 +389,69 @@ export default function PayScreen({ navigation, route }: Props) {
    * dipakai saveSale + push + Success + Receipt (sebelumnya Success/Receipt
    * memakai L-timestamp yang beda dari yang tersimpan di DB).
    */
-  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string }) => {
+  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
     const orderNo = paramSalesNum || (await nextSalesNum());
     const saleMemberId = detail?.memberId ?? memberIdParam;
+    // Split grup (dari SplitBill): SATU nomor struk untuk semua kunjungan.
+    // Kunjungan pertama = saveSale penuh (status auto 'open'); berikutnya =
+    // appendGroupPayment (tanpa stok/voucher/dapur ganda). Struk tampilkan
+    // total PENUH + baris splitPaid kunjungan ini (bukan porsi saja).
+    const splitGroup = route?.params?.splitGroup === true;
+    const orderTotalFull = Math.max(0, Math.round(Number(route?.params?.orderTotal) || 0));
+    if (splitGroup && paramSalesNum && orderTotalFull > 0) {
+      const visitPay = [
+        ...splits.map((s) => ({ method: s.method, amount: s.amount })),
+        { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
+      ];
+      try {
+        if (await saleHeadExists(paramSalesNum)) {
+          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change });
+        } else {
+          const gInput: SaleInput = {
+            method,
+            salesNum: paramSalesNum,
+            grandTotal: orderTotalFull,
+            discountTotal: effDiscount,
+            ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
+            ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
+            ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+            ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
+            cash,
+            change,
+            items: route?.params?.items,
+            payments: visitPay,
+            ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
+            ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+            ...(saleMemberId ? { memberId: saleMemberId } : {}),
+            ...(tableNo ? { tableId: tableNo } : {}),
+            ...(orderMode ? { mode: orderMode } : {}),
+            ...(ongkir > 0 ? { ongkir } : {}),
+            ...(customerName ? { customer: customerName } : {}),
+          };
+          recordSale(gInput);
+          await saveSale(gInput);
+        }
+      } catch {
+        /* DB gagal - kasir tetap jalan, push via antrean */
+      }
+      navigation?.navigate('Success', {
+        total: orderTotalFull, method, cash, change, orderNo: paramSalesNum,
+        items: route?.params?.items, discount: effDiscount,
+        splitPaid: { amount: payable, method },
+        ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
+        ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+        ...(saleMemberId ? { memberId: saleMemberId } : {}),
+        ...(serviceParam > 0 ? { service: serviceParam } : {}),
+        ...(taxParam > 0 ? { tax: taxParam } : {}),
+        ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
+        ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(ongkir > 0 ? { ongkir } : {}),
+        ...(orderMode ? { mode: orderMode } : {}),
+        ...(tableNo ? { table: tableNo } : {}),
+        ...(customerName ? { customer: customerName } : {}),
+      });
+      return;
+    }
     const input: SaleInput = {
       method,
       salesNum: orderNo,
@@ -406,6 +470,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ],
       ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+      ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
       ...(saleMemberId ? { memberId: saleMemberId } : {}),
       ...(tableNo ? { tableId: tableNo } : {}),
       ...(orderMode ? { mode: orderMode } : {}),
@@ -423,6 +488,7 @@ export default function PayScreen({ navigation, route }: Props) {
       items: route?.params?.items, discount: effDiscount,
       ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
+      ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
       ...(saleMemberId ? { memberId: saleMemberId } : {}),
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
@@ -483,6 +549,12 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(customerName ? { customer: customerName } : {}),
         ...(memberIdParam ? { memberId: memberIdParam } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
+        // Rantai grup ke QRIS: kunjungan QRIS ikut SATU salesNum + tahu total penuh.
+        ...(route?.params?.splitGroup === true ? { splitGroup: true } : {}),
+        ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
+        // Kaki split yang sudah dibayar diteruskan agar QRIS/EDC mencatat
+        // SATU bill utuh (bukan hanya sisa): nomor + kaki lama dipakai ulang.
+        ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
       });
       return;
     }
@@ -920,6 +992,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(customerName ? { customer: customerName } : {}),
           ...(memberIdParam ? { memberId: memberIdParam } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
+          ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
         })}>
         <Text style={styles.edcLinkText}>{t('pay_edc_guide')} ›</Text>
       </TouchableOpacity>
@@ -1145,7 +1218,12 @@ export default function PayScreen({ navigation, route }: Props) {
           </View>
         )}
         {renderBody()}
-        <ExtraPaySection onDone={(label, ref) => void goSuccess(extraLabelToMethod(label), payable, 0, ref ? { approvalCode: ref } : undefined)} />
+        <ExtraPaySection onDone={(label, ref, approver) => {
+          const detail: { approvalCode?: string; approvedBy?: string } = {};
+          if (ref) detail.approvalCode = ref;
+          if (approver) detail.approvedBy = approver;
+          void goSuccess(extraLabelToMethod(label), payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
+        }} />
       </ScrollView>
       ) : (
       <View style={styles.emptyWrap}>

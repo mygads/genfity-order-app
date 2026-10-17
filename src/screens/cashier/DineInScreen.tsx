@@ -148,6 +148,30 @@ export default function DineInScreen({ navigation, route }: Props) {
       });
     })();
   };
+  /** Split bill: nomor grup diterbitkan di sini agar semua kunjungan memakai
+   * SATU salesNum (anti struk/item/stok ganda, anti hantu draft di Success). */
+  const goSplit = () => {
+    if (active.length === 0) return;
+    void (async () => {
+      let num = '';
+      try {
+        num = await nextSalesNum();
+      } catch {
+        num = '';
+      }
+      navigation?.navigate('SplitBill', {
+        items: active, total,
+        ...(num ? { salesNum: num } : {}),
+        ...(mode ? { mode } : {}),
+        ...(table ? { table } : {}),
+        ...(guest.trim() ? { customer: guest.trim() } : {}),
+        ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
+        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+        ...(memberId ? { memberId } : {}),
+        discount: discountTotal + voucherAmt,
+      });
+    })();
+  };
   /** Paket struk penuh ala POSLite: item + diskon + voucher + ongkir + meja + tamu. */
   const discountForChain = discountTotal + voucherAmt;
   const goPrint = () =>
@@ -329,16 +353,7 @@ export default function DineInScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={() => navigation?.navigate('MoveTable', { from: table })}>
           <Text style={[styles.link, isTablet && styles.linkBig]}>{t('moveTable')}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation?.navigate('SplitBill', active.length > 0 ? {
-          items: active, total,
-          ...(mode ? { mode } : {}),
-          ...(table ? { table } : {}),
-          ...(guest.trim() ? { customer: guest.trim() } : {}),
-          ...(ongkirNet > 0 ? { ongkir: ongkirNet } : {}),
-          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
-          ...(memberId ? { memberId } : {}),
-          discount: discountTotal + voucherAmt,
-        } : {})}>
+        <TouchableOpacity onPress={active.length > 0 ? goSplit : undefined}>
           <Text style={[styles.link, isTablet && styles.linkBig]}>{t('splitBill')}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={goCashier}>

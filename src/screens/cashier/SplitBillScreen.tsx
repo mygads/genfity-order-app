@@ -5,6 +5,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -23,6 +24,10 @@ type SplitParams = {
   voucher?: VoucherParam;
   discount?: number;
   service?: number;
+  /** Nomor draft/order pengirim = dipakai sebagai SATU salesNum grup. */
+  salesNum?: string;
+  tax?: number;
+  feeESB?: number;
 };
 
 type Props = { navigation?: Nav; route?: { params?: SplitParams } };
@@ -105,9 +110,25 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   );
   const [methods, setMethods] = useState<string[]>(['Tunai', 'QRIS']);
   const [paid, setPaid] = useState<boolean[]>([false, false]);
-  /** Klaim kode voucher sekali per order: split pertama yang dibayar membawa kode
-   * (kuota terbakar 1x di saveSale); split berikut melipat porsi voucher ke diskon. */
-  const [voucherClaimed, setVoucherClaimed] = useState(false);
+  // Nomor grup: SATU salesNum untuk semua kunjungan split (dari pengirim =
+  // salesNum draft agar Success hapus draft tepat sasaran; fallback terbitkan
+  // bila pengirim lama tak mengirim). Head grup dibuat kunjungan pertama,
+  // kunjungan berikut append kaki (tanpa stok/voucher/dapur ganda).
+  const [groupNum, setGroupNum] = useState(() => asText(params.salesNum));
+  useEffect(() => {
+    if (groupNum) return;
+    let alive = true;
+    void nextSalesNum()
+      .then((n) => {
+        if (alive && n) setGroupNum(n);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [groupNum]);
+  /** Kebenaran DB grup (anti centang optimistis): nominal terbayar + status lunas. */
+  const [groupPaid, setGroupPaid] = useState({ paidTotal: 0, grandTotal: 0, fullyPaid: false, payCount: 0 });
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11) untuk rumus kanonik. */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   useEffect(() => {
@@ -123,7 +144,6 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const resetSplits = (n: number) => {
     setSplits(n);
     setPaid(Array(n).fill(false));
-    setVoucherClaimed(false);
     setNominals(Array(n).fill(''));
     setMethods(Array.from({ length: n }, (_, i) => METHODS[i % METHODS.length] as string));
     setAssign(Object.fromEntries(items.map((it, i) => [it.id, i % n])));
@@ -234,40 +254,70 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const payBill = (i: number) => {
     const val = billVal(i);
     if (val <= 0 || paid[i]) return;
+    // Tanpa nomor grup = belum siap (nomor fallback masih diterbitkan).
+    if (!groupNum) return;
+    // Grup lunas penuh = tak ada kunjungan lagi.
+    if (groupPaid.fullyPaid) return;
     // Mode nominal diblokir bila sisa != 0 (nominal belum pas dengan total).
     if (splitMode === 'nominal' && !nominalPas) return;
-    // perItem meneruskan item bill ini; rata/nominal meneruskan semua item.
-    const members = splitMode === 'perItem' ? items.filter((it) => (assign[it.id] ?? 0) === i) : items;
-    // Kontrak Pay (PayScreen read-only): total + items/mode/table/ongkir/voucher/diskon
-    // + rincian info-only (service/fee/pajak) agar Pay teruskan ke Success > Receipt.
-    // total = tagihan penuh split ini (selaras CartDetail yang kirim total penuh).
-    // Kode voucher hanya dibawa split pertama yang dibayar (kuota terbakar 1x di
-    // saveSale); split berikut melipat porsi voucher ke diskon tercatat agar total
-    // struk tetap pas tanpa catat ganda.
-    // Rounding tak diteruskan per split: tiap bill sudah bulat persis (pembulatan
+    // Kontrak grup: SELALU konteks penuh (semua item + diskon + voucher +
+    // service/fee/pajak/ongkir) + SATU salesNum grup; kunjungan ini menagih
+    // porsi `val` (di `total`), total order di `orderTotal`. Pay paham
+    // splitGroup: kunjungan pertama saveSale penuh, berikut append kaki.
+    // Voucher selalu bawa kode penuh: kuota terbakar 1x di create (append
+    // abaikan voucher) — tanpa klaim manual yang rapuh.
+    // Rounding tak diteruskan: tiap bill sudah bulat persis (pembulatan
     // pemanggil sudah dilipat ke ongkirEff via residual).
-    const vShare = (voucherShares[i] as number) || 0;
-    const dShare = (discountShares[i] as number) || 0;
-    const carryCode = !!voucherCode && !voucherClaimed;
-    const discountTotal = dShare + (carryCode ? 0 : vShare);
     navigation?.navigate('Pay', {
       total: val,
+      orderTotal,
+      salesNum: groupNum,
+      splitGroup: true,
       method: methods[i],
-      items: members,
+      items,
       ...(mode ? { mode } : {}),
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
-      ...((ongkirShares[i] as number) > 0 ? { ongkir: ongkirShares[i] } : {}),
-      ...(carryCode ? { voucher: { code: voucherCode, amount: vShare, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
-      ...(discountTotal > 0 ? { discount: discountTotal } : {}),
-      ...((serviceShares[i] as number) > 0 ? { service: serviceShares[i] } : {}),
-      ...((feeShares[i] as number) > 0 ? { feeESB: feeShares[i] } : {}),
-      ...((taxShares[i] as number) > 0 ? { tax: taxShares[i] } : {}),
+      ...(ongkirEff > 0 ? { ongkir: ongkirEff } : {}),
+      ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherEff, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+      ...(discountEff + voucherEff > 0 ? { discount: discountEff + voucherEff } : {}),
+      ...(serviceEff > 0 ? { service: serviceEff } : {}),
+      ...(feeEff > 0 ? { feeESB: feeEff } : {}),
+      ...(canon.taxIncl > 0 ? { tax: canon.taxIncl } : {}),
     });
-    if (carryCode) setVoucherClaimed(true);
-    setPaid((p) => p.map((v, j) => (j === i ? true : v)));
   };
+
+  // Sinkron kebenaran DB tiap grup/bill berubah (termasuk kembali dari Pay):
+  // cocokkan nominal kaki DB ke tiap bill (multiset) agar centang Lunas hanya
+  // untuk bill yang benar dibayar; header Terbayar = angka DB, bukan tebakan.
+  useEffect(() => {
+    if (!groupNum) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const g = await getGroupPaid(groupNum);
+        if (!alive) return;
+        setGroupPaid({ paidTotal: g.paidTotal, grandTotal: g.grandTotal, fullyPaid: g.fullyPaid, payCount: g.payCount });
+        const rest = [...g.amounts];
+        const flags = Array.from({ length: splits }, (_, idx) => {
+          const v = billVal(idx);
+          if (v <= 0) return false;
+          const k = rest.findIndex((a) => a === v);
+          if (k < 0) return false;
+          rest.splice(k, 1);
+          return true;
+        });
+        setPaid(flags);
+      } catch {
+        /* abaikan: centang lama bertahan, kasir tetap jalan */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupNum, splits, splitMode, itemSplits, rataTotals, nominalNums, billTotals]);
 
   return (
     <View style={styles.root}>
@@ -345,6 +395,12 @@ export default function SplitBillScreen({ navigation, route }: Props) {
             <Text style={styles.metaL}>{t('total')}</Text>
             <Text style={styles.billTotal}>{rp(orderTotal)}</Text>
           </View>
+          {groupPaid.payCount > 0 && (
+            <View style={styles.metaRow}>
+              <Text style={styles.metaL}>Terbayar {groupPaid.payCount} kaki</Text>
+              <Text style={styles.metaV}>{rp(groupPaid.paidTotal)} / {rp(groupPaid.grandTotal > 0 ? groupPaid.grandTotal : orderTotal)}</Text>
+            </View>
+          )}
         </View>
 
         <Text style={styles.sec}>{t('sp_items_sec')} · {rp(grand)}</Text>

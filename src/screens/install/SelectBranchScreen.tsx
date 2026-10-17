@@ -21,12 +21,17 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
     if (navigation?.goBack) navigation.goBack();
   };
 
-  const branch = BRANCHES.find((b) => b.id === branchId)?.name ?? BRANCHES[0].name;
+  const branch = BRANCHES.find((b) => b.id === branchId)?.name ?? branchId;
   // Status cabang dicek ke server lewat apiSource (Dummy Mode offline /
   // backend asli bila env terisi); selain active tampilkan pesan blokir.
   const goSelect = async () => { if (loading || checking) return; setChecking(true); setError(''); try { const r = await checkBranch(branchId); if (r.status !== 'active') { setError(t('inst_branch_blocked')); return; } navigation?.navigate('InstallProgress', { branch }); } catch { setError(t('inst_branch_blocked')); } finally { setChecking(false); } }; const list = BRANCHES.filter((b) =>
     (b.name + ' ' + b.addr).toLowerCase().includes(query.trim().toLowerCase()),
   );
+  // ID di luar daftar bawaan (tanpa endpoint daftar cabang di server):
+  // ketikan yang tak cocok ditawarkan sebagai ID kustom, tetap divalidasi
+  // checkBranch oleh goSelect. Tanpa kunci i18n baru.
+  const customId = query.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  const customOffer = customId.length >= 3 && list.length === 0 ? customId : '';
 
   return (
     <ScreenRoot style={styles.root}>
@@ -78,7 +83,24 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
             </View>
           </TouchableOpacity>
         ))}
-        {list.length === 0 ? (
+        {customOffer ? (
+          <TouchableOpacity
+            key={customOffer}
+            style={[styles.card, branchId === customOffer && styles.cardOn]}
+            onPress={() => { setBranchId(customOffer); setError(''); }}>
+            <View style={[styles.avatar, branchId === customOffer && styles.avatarOn]}>
+              <Text style={[styles.avatarT, branchId === customOffer && styles.avatarTOn]}>C</Text>
+            </View>
+            <View style={styles.info}>
+              <Text style={[styles.name, isTablet && styles.nameBig]}>{customOffer}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{t('sel_choose')}</Text>
+            </View>
+            <View style={[styles.radio, branchId === customOffer && styles.radioOn]}>
+              {branchId === customOffer && <View style={styles.radioDot} />}
+            </View>
+          </TouchableOpacity>
+        ) : null}
+        {list.length === 0 && !customOffer ? (
           <Text style={styles.empty}>{t('sel_empty')}</Text>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}</>
@@ -89,7 +111,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           size="lg"
           title={checking ? t('inst_branch_checking') : t('sel_choose')}
           onPress={goSelect}
-          disabled={loading || list.length === 0 || checking}
+          disabled={loading || checking || (list.length === 0 && !customOffer)}
           style={styles.primary}
         />
       </View>

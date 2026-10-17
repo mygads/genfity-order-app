@@ -9,6 +9,7 @@ import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/pay
 import { getSession } from '../../session';
 import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
+import { getGroupPaid } from '../../lib/sales';
 import { enqueueSync } from '../../lib/sync';
 
 type Nav = {
@@ -28,6 +29,8 @@ type Props = {
       bank?: string; terminal?: string; memberId?: string;
       tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
       rounding?: number; feeESB?: number;
+      /** Kunjungan split grup: nominal + metode yang dibayar kunjungan ini. */
+      splitPaid?: { amount?: number; method?: string };
     };
   };
 };
@@ -85,6 +88,31 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
   const rounding = route?.params?.rounding ?? 0;
   const feeESB = route?.params?.feeESB ?? 0;
+  // Kunjungan split: yang dibayar + sisa grup (sisa dari DB, best-effort).
+  const splitPaidParam = route?.params?.splitPaid;
+  const splitPaidAmt = Math.max(0, Math.round(Number(splitPaidParam?.amount) || 0));
+  const splitPaidMethod = typeof splitPaidParam?.method === 'string' ? splitPaidParam.method : '';
+  const [groupRemain, setGroupRemain] = useState<number | null>(null);
+  useEffect(() => {
+    if (splitPaidAmt <= 0 && !splitPaidMethod) return;
+    const no = String(orderNo ?? '').trim();
+    if (!no) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const g = await getGroupPaid(no);
+        if (!alive) return;
+        const grand = g.grandTotal > 0 ? g.grandTotal : total;
+        setGroupRemain(Math.max(0, grand - g.paidTotal));
+      } catch {
+        /* abaikan: baris sisa disembunyikan */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Ringkasan mini: hitung subtotal dari item agar rinciannya ikut tampil (bukan cuma total).
   const miniItems = route?.params?.items ?? [];
   // Draft yang baru dibayar = hapus dari tr_draftorder agar tak jadi hantu di
@@ -104,12 +132,23 @@ export default function SuccessScreen({ navigation, route }: Props) {
   }, []);
   // Meja dibebaskan saat penjualan lunas: draft menandai 'terisi' sejak
   // disimpan (LoadOrderScreen) — sukses bayar = meja kosong kembali + sync.
+  // Grup split: cicilan (belum lunas penuh di DB) = meja tetap terisi; bebas
+  // hanya saat genap. Tanpa head (alur lama) = bebaskan seperti biasa.
   useEffect(() => {
     const tb = String(route?.params?.table ?? '').trim();
     if (!tb) return;
     void (async () => {
       try {
         await initDb();
+        const no = String(orderNo ?? '').trim();
+        if (no) {
+          try {
+            const g = await getGroupPaid(no);
+            if (g.grandTotal > 0 && !g.fullyPaid) return;
+          } catch {
+            /* tak tahu = bebaskan seperti biasa */
+          }
+        }
         await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['kosong', tb]);
       } catch {
         /* abaikan */
@@ -252,6 +291,18 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <Text style={styles.label}>{t('ok_method')}</Text>
           <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
         </View>
+        {splitPaidAmt > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>Dibayar{splitPaidMethod ? ` (${METHOD_LABEL[splitPaidMethod] ?? splitPaidMethod})` : ''}</Text>
+            <Text style={styles.value}>{rp(splitPaidAmt)}</Text>
+          </View>
+        )}
+        {groupRemain !== null && (
+          <View style={styles.row}>
+            <Text style={styles.label}>Sisa</Text>
+            <Text style={styles.value}>{rp(groupRemain)}</Text>
+          </View>
+        )}
         {approvalCode ? (
           <View style={styles.row}>
             <Text style={styles.label}>{t('ok_approval')}</Text>

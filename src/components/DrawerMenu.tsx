@@ -3,6 +3,7 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowD
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
 import { getSession, logout } from '../session';
+import { getBranchId } from '../config/server';
 import { useLang } from '../lib/i18n';
 import { getDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
@@ -60,7 +61,9 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
         const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
           // Baris absensi (status 'absen') dikecualikan agar clock-in kehadiran
           // tak menyalakan dot hijau shift (clockOut NULL terbaca "open").
-          'SELECT clockOut, status FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
+          // Lingkup cabang: shift cabang lain tak boleh menyalakan dot kami.
+          'SELECT clockOut, status FROM tr_shiftlog WHERE (status IS NULL OR status <> \'absen\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1',
+          [getBranchId()],
         );
         if (!alive) return;
         if (row) {

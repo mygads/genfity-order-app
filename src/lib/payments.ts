@@ -62,6 +62,8 @@ export interface SaleInput {
   payments?: SalePaymentIn[];
   voucherCode?: string;
   approvalCode?: string;
+  /** Id user ms_posuser penyetuju eskalasi (kompliment/non-penjualan) — audit. */
+  approvedBy?: string;
   memberId?: string;
   tableId?: string;
   /** Konteks order dari kasir (dine-in/bawa-pulang/delivery, dst). */
@@ -161,6 +163,7 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.change !== undefined ? { change: r(s.change) } : {}),
     ...(s.voucherCode ? { voucherCode: s.voucherCode } : {}),
     ...(s.approvalCode ? { approvalCode: s.approvalCode } : {}),
+    ...(s.approvedBy ? { approvedBy: s.approvedBy } : {}),
     ...(s.memberId ? { memberId: s.memberId } : {}),
     ...(s.tableId ? { tableId: s.tableId } : {}),
     ...(s.mode ? { mode: normalizeSalesMode(s.mode), salesMode: normalizeSalesMode(s.mode) } : {}),

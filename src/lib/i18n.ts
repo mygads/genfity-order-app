@@ -1221,6 +1221,8 @@ const STR: Record<string, Entry> = {
   'ws.pullDone': { id: 'Data master diperbarui dari server.', en: 'Master data updated from server.' },
   'ws.pullFail': { id: 'Gagal menarik data master - coba via layar Sync.', en: 'Master pull failed - try the Sync screen.' },
   'sync.masterQueued': { id: 'Master tersimpan lokal - menunggu endpoint push.', en: 'Master saved locally - awaiting push endpoint.' },
+  'sync.localOnly': { id: 'Lokal - tak perlu push.', en: 'Local-only - no push needed.' },
+  'sync.depositLocal': { id: 'Deposit tercatat lokal + outbox fisik.', en: 'Deposit recorded locally + physical outbox.' },
 
   // ---- batch-4 susulan (BillPreview T5 + sweep CartDetail/Booking/TableTimer) ----
   bill_qr_after_pay: { id: 'QR struk tercetak setelah pembayaran.', en: 'The receipt QR prints only after payment.' },

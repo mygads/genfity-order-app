@@ -5,6 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { getSession } from '../../session';
+import { getBranchId } from '../../config/server';
 import { initDb, queryFirst } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -71,11 +72,14 @@ export default function RecapScreen({ navigation }: Props) {
       try {
         await initDb();
         const { since, until } = rangeBounds(range);
+        // Lingkup cabang: semua agregat rekap hanya milik cabang perangkat ini
+        // (baris lama tanpa branchId dianggap milik kami agar tak hilang).
+        const bid = getBranchId();
         const heads = await import('../../lib/db').then((m) =>
           m.query<{ grandTotal: number; paymentMethod: string | null; cashierName: string | null; userId: string | null }>(
             `SELECT grandTotal, paymentMethod, cashierName, userId FROM tr_saleshead
-             WHERE status = 'paid' AND salesDate >= ? AND salesDate < ?`,
-            [since, until],
+             WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND salesDate >= ? AND salesDate < ?`,
+            [bid, since, until],
           ),
         );
         if (!on) return;
@@ -102,23 +106,23 @@ export default function RecapScreen({ navigation }: Props) {
         const menus = await query<{ nama: string; qty: number; total: number }>(
           `SELECT m.menuName AS nama, SUM(m.qty) AS qty, SUM(m.subtotal) AS total
            FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
-           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           WHERE h.status = 'paid' AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') AND h.salesDate >= ? AND h.salesDate < ?
            GROUP BY m.menuName ORDER BY total DESC`,
-          [since, until],
+          [bid, since, until],
         );
         const cats = await query<{ nama: string; qty: number; total: number }>(
           `SELECT COALESCE(c.categoryName, 'Lainnya') AS nama, SUM(m.qty) AS qty, SUM(m.subtotal) AS total
            FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
            LEFT JOIN ms_menu mm ON mm.id = m.menuId
            LEFT JOIN ms_category c ON c.id = mm.categoryId
-           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           WHERE h.status = 'paid' AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') AND h.salesDate >= ? AND h.salesDate < ?
            GROUP BY COALESCE(c.categoryName, 'Lainnya') ORDER BY total DESC`,
-          [since, until],
+          [bid, since, until],
         );
         const modes = await query<{ salesMode: string | null; n: number; total: number }>(
           `SELECT salesMode, COUNT(*) AS n, SUM(grandTotal) AS total FROM tr_saleshead
-           WHERE status = 'paid' AND salesDate >= ? AND salesDate < ? GROUP BY salesMode`,
-          [since, until],
+           WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND salesDate >= ? AND salesDate < ? GROUP BY salesMode`,
+          [bid, since, until],
         );
         // FIX3-RECAP custom_menu_sales (dossier tablet): item custom = menuId
         // 'custom-%' (CustomMenuScreen -> Cashier cart id 'custom-<ts>' -> sales.ts
@@ -126,10 +130,10 @@ export default function RecapScreen({ navigation }: Props) {
         const customMenus = await query<{ nama: string; qty: number; total: number }>(
           `SELECT m.menuName AS nama, SUM(m.qty) AS qty, SUM(m.subtotal) AS total
            FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
-           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           WHERE h.status = 'paid' AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') AND h.salesDate >= ? AND h.salesDate < ?
              AND m.menuId LIKE 'custom-%'
            GROUP BY m.menuName ORDER BY total DESC`,
-          [since, until],
+          [bid, since, until],
         );
         // FIX3-RECAP per_payment (dossier tablet): rincian split-payment nyata
         // dari tr_salespayment (satu bill bisa multi-metode); fallback ke agregat
@@ -137,19 +141,21 @@ export default function RecapScreen({ navigation }: Props) {
         const paySplit = await query<{ nama: string | null; n: number; total: number }>(
           `SELECT p.paymentMethod AS nama, COUNT(DISTINCT p.salesNum) AS n, SUM(p.amount) AS total
            FROM tr_salespayment p INNER JOIN tr_saleshead h ON h.salesNum = p.salesNum
-           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           WHERE h.status = 'paid' AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') AND h.salesDate >= ? AND h.salesDate < ?
            GROUP BY p.paymentMethod`,
-          [since, until],
+          [bid, since, until],
         );
         const exp = await queryFirst<{ total: number }>(
           `SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense
-           WHERE expenseDate >= ? AND expenseDate < ?`,
-          [since, until],
+           WHERE (branchId = ? OR branchId IS NULL OR branchId = '') AND expenseDate >= ? AND expenseDate < ?`,
+          [bid, since, until],
         );
+        // tr_cancelmenu tak punya branchId: ikut cabang head via salesNum.
         const canc = await query<{ nama: string; qty: number; alasan: string | null }>(
-          `SELECT menuName AS nama, SUM(qty) AS qty, reasonNote AS alasan FROM tr_cancelmenu
-           WHERE cancelDate >= ? AND cancelDate < ? GROUP BY menuName, reasonNote`,
-          [since, until],
+          `SELECT c.menuName AS nama, SUM(c.qty) AS qty, c.reasonNote AS alasan FROM tr_cancelmenu c
+           INNER JOIN tr_saleshead h ON h.salesNum = c.salesNum
+           WHERE c.cancelDate >= ? AND c.cancelDate < ? AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') GROUP BY c.menuName, c.reasonNote`,
+          [since, until, bid],
         );
         // T6: ringkasan pemakaian voucher dari SQLite (join ke head agar ikut
         // rentang tanggal; tabel usage tak punya kolom tanggal sendiri).
@@ -158,18 +164,18 @@ export default function RecapScreen({ navigation }: Props) {
         const usePromo = await query<{ voucherCode: string | null; n: number; total: number }>(
           `SELECT u.voucherCode AS voucherCode, COUNT(*) AS n, COALESCE(SUM(u.voucherAmount), 0) AS total
            FROM tr_salesvoucherusage u INNER JOIN tr_saleshead h ON h.salesNum = u.salesNum
-           WHERE h.status = 'paid' AND h.salesDate >= ? AND h.salesDate < ?
+           WHERE h.status = 'paid' AND (h.branchId = ? OR h.branchId IS NULL OR h.branchId = '') AND h.salesDate >= ? AND h.salesDate < ?
              AND u.voucherCode IS NOT NULL AND TRIM(u.voucherCode)<> ''
            GROUP BY u.voucherCode`,
-          [since, until],
+          [bid, since, until],
         );
         const headPromo = await query<{ voucherCode: string | null; n: number; total: number }>(
           `SELECT voucherCode, COUNT(*) AS n, COALESCE(SUM(voucherAmount), 0) AS total
            FROM tr_saleshead
-           WHERE status = 'paid' AND salesDate >= ? AND salesDate < ?
+           WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND salesDate >= ? AND salesDate < ?
              AND voucherCode IS NOT NULL AND TRIM(voucherCode)<> ''
            GROUP BY voucherCode`,
-          [since, until],
+          [bid, since, until],
         );
         const promoMap = new Map<string, { n: number; total: number }>();
         for (const r of headPromo) {
@@ -186,7 +192,8 @@ export default function RecapScreen({ navigation }: Props) {
         // FIX2-3b: abaikan baris absensi ('Absensi') agar label shift rekap
         // selalu dari shift kasir sungguhan.
         const shift = await queryFirst<{ shiftName: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null }>(
-          "SELECT shiftName, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE shiftName IS NULL OR shiftName <> 'Absensi' ORDER BY clockIn DESC LIMIT 1",
+          "SELECT shiftName, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE (shiftName IS NULL OR shiftName <> 'Absensi') AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY clockIn DESC LIMIT 1",
+          [bid],
         );
         if (!on) return;
         const nm = getSession()?.name ?? getSession()?.username ?? '';
