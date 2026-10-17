@@ -13,7 +13,7 @@
  * punya kolom nama/flagActive; ms_setting memakai value1/value2).
  */
 import { initDb, queryFirst, run } from './db';
-import { savePinHash } from './pin';
+import { loadPinRecord, savePinHash } from './pin';
 
 const SEED_MENUS: Array<{ id: string; name: string; cat: string; price: number }> = [
   { id: 'm-nasi-goreng', name: 'Nasi Goreng', cat: 'c-makanan', price: 15000 },
@@ -115,6 +115,26 @@ export async function ensureSeeded(): Promise<void> {
   // (GAP-11).
   await run(`UPDATE ms_posuser SET role = 'Merchant Owner' WHERE id = 'u-admin' AND (role IS NULL OR role = '')`);
 
+  // Admin lokal dijamin ADA + punya PIN, SENGAJA tanpa gate flag seed
+  // (seperti CoA dan RBAC di atas): instalasi lama yang flag seed-nya sudah
+  // '1' sebelum baris admin ada tidak akan pernah dapat user admin bila ikut
+  // gate — itulah penyebab login admin/1234 gagal total di instalasi lama
+  // maupun saat record PIN hilang (mis. storage dibersihkan) sementara baris
+  // user tetap ada. INSERT OR IGNORE + seed PIN hanya bila record belum ada
+  // (PIN yang diganti belakangan via Lupa PIN dihormati, tidak ditimpa).
+  // ms_posuser: id, username, pinHash, password, authKey, branchId, role.
+  // PIN disimpan sebagai hash via SecureStore/AsyncStorage, bukan kolom DB.
+  await run(
+    `INSERT OR IGNORE INTO ms_posuser (id, username, branchId, role)
+     VALUES ('u-admin', 'admin', 'B001', 'Merchant Owner')`,
+  );
+  try {
+    const rec = await loadPinRecord('u-admin');
+    if (!rec) await savePinHash('u-admin', '1234');
+  } catch {
+    /* seed PIN gagal — login masih coba fallback legacy */
+  }
+
   const flag = await queryFirst<{ value1: string | null }>(
     `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
   );
@@ -125,14 +145,7 @@ export async function ensureSeeded(): Promise<void> {
     `INSERT OR IGNORE INTO ms_setting (key1, key2, value1) VALUES ('Tax', 'PPN', '11')`,
   );
 
-  // Satu user admin lokal (ms_posuser: id, username, pinHash, password,
-  // authKey, branchId, role, syncDate). PIN disimpan sebagai hash via
-  // SecureStore/AsyncStorage, bukan di kolom DB. Role kanonis Owner.
-  await run(
-    `INSERT OR IGNORE INTO ms_posuser (id, username, branchId, role)
-     VALUES ('u-admin', 'admin', 'B001', 'Merchant Owner')`,
-  );
-  await savePinHash('u-admin', '1234');
+  // (User admin lokal dijamin di blok tanpa-gate di atas, bukan di sini.)
 
   // 3 kategori (ms_category: id, categoryName, sortOrder, flagActive, syncDate).
   const cats: Array<[string, string, number]> = [
