@@ -314,6 +314,16 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   }
   // S6 immediate-first: coba POST langsung (timeout singkat) dengan client_id
   // twin; twin ringan (id SAMA) hanya bila immediate gagal.
+  // GAP-15 (2026-10-17, terverifikasi): approvedBy (userId approver eskalasi)
+  // dibawa di KEDUA jalur sync — body POST immediate
+  // {action:'void', ..., approvedBy} di bawah DAN payload antrean
+  // enqueueSync('order', {action:'void', ..., approvedBy}) — pushLightItem
+  // (lib/sync.ts) menyebar ...rawPayload apa adanya ke body ESB (payload void
+  // tanpa `op`/items tak tersentuh terjemahan Go-POS), jadi field ini tiba di
+  // server. Kolom approvedBy sisi server (Go backend, repo terpisah) tak bisa
+  // dipastikan dari repo app ini — payload best-effort + jujur; daya tahan
+  // lokal dijamin via tr_cancelmenu.userId (applyVoidLocal memakai approver
+  // bila ada, bukan sesi kasir).
   const twinId = uuidv7();
   let sent = false;
   try {

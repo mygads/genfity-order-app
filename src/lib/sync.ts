@@ -147,9 +147,12 @@ function hydrate(): void {
 }
 
 /**
- * Endpoint push per tabel (kontrak §5). Tabel master (ms_*) tidak punya
- * endpoint push di kontrak (server menang untuk master, §4) sehingga
- * dikembalikan null oleh tablePushPath dan tidak dikirim ke order/finish.
+ * Endpoint push per tabel. Tabel master (ms_*) local-only (M9-3): backend Go
+ * tak punya domain/ep push master (cek schema.sql: tanpa tabel menu) dan
+ * pull master server-wins — sehingga dikembalikan null dan tidak dikirim ke
+ * order/finish. Keputusan M9-3: push-master tak didefinisikan; sebagai ganti
+ * edit master dinyatakan local-only jujur di UI (master.localOnlyNote +
+ * kartu "Hanya di perangkat ini" di SyncScreen).
  */
 function tablePushPath(table: string): string | null {
   if (table === 'tr_branchexpense' || table === 'tr_branchexpensedocument') return ApiPath.pushExpense;
@@ -226,10 +229,15 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
   return ApiPath.pushOrderFinish;
 }
 
-// TODO(M9-3): kontrak §5 belum mendefinisikan endpoint push master
-// (sold-out / branch-menu / station). Bila BE menambahkannya (mis.
-// main/update-branch-menu), daftarkan di ApiPath + tablePushPath dan
-// aktifkan lagi antrean ringan untuk ms_* di enqueueOutbox.
+// M9-3 (diputuskan): endpoint push master (sold-out / branch-menu /
+// station) TIDAK didefinisikan — backend Go tak punya domain master
+// (tanpa tabel menu di schema.sql) sehingga kontrak push-master butuh
+// proyek lintas-repo tersendiri, bukan tambahan path di sini. Sebagai ganti:
+// edit master = local-only jujur (status 'lokal' + kartu SyncScreen +
+// master.localOnlyNote di layar penyunting). Bila BE kelak punya domain
+// master (mis. main/update-branch-menu), daftarkan di ApiPath +
+// tablePushPath dan aktifkan lagi antrean ringan untuk ms_* di
+// enqueueOutbox.
 
 // ---------------------------------------------------------------------------
 // GO-POS COMPAT (wire-app): backend Go TIDAK melayani path bentuk-ESB
@@ -640,12 +648,13 @@ function conflictTag(code: string): string {
 /**
  * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
  * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
- * (ms_*, server-wins §4/M9-3) atau tanpa endpoint push — biarkan antre lokal,
- * jangan hitung gagal.
+ * (ms_*, local-only M9-3) atau tanpa endpoint push. Untuk ms_* pemanggil
+ * (drain) memfinalkan status 'lokal' — bukan antre, bukan gagal.
  */
 async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
   const table = String(row.tableName ?? '');
-  // Master (ms_*) tidak punya endpoint push (§5/M9-3): biarkan antre lokal.
+  // Master (ms_*) local-only (M9-3): backend Go tak punya endpoint push
+  // master dan pull server-wins menimpa edit lokal. Jangan kirim.
   if (!table || table.startsWith('ms_')) return 'skipped';
   const path = tablePushPath(table);
   if (!path) return 'skipped';
@@ -922,14 +931,17 @@ export async function pushAll(): Promise<PushResult> {
         failed += 1;
         consecFails += 1;
       } else if (String(e.row.tableName ?? '').startsWith('ms_')) {
-        // Cermin master (server-wins §5/M9-3, tanpa endpoint push): hapus dari
-        // antrean fisik agar tak menumpuk selamanya, menggelembungkan badge
-        // Sync, dan menutupi baris tr_* di balik jendela LIMIT 200 (starvasi
-        // drain permanen — baris skip tak pernah keluar jendela). Mutasi DB-nya
-        // tetap kotor (syncDate NULL) + pull server tetap menang via REPLACE.
+        // Cermin master local-only (M9-3, tanpa endpoint push): finalkan
+        // status 'lokal', BUKAN antre/gagal dan BUKAN delete-diam-diam.
+        // 'lokal' = status terminal: keluar dari jendela LIMIT 200 (tak ada
+        // starvasi drain), keluar dari badge pending (tak menggelembungkan
+        // hitungan Sync), tapi barisnya TETAP ADA dan tampil di layar Sync
+        // ("Hanya di perangkat ini") via listLocalOnly. Mutasi DB-nya tetap
+        // kotor (syncDate NULL) + pull server tetap menang via REPLACE —
+        // semantik ini dinyatakan jujur di UI (master.localOnlyNote).
         // Tabel non-ms_ tanpa endpoint dibiarkan antre (kontrak BE menyusul).
         try {
-          await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [e.row.id]);
+          await run("UPDATE tr_esoprocessqueue SET status = 'lokal' WHERE id = ?", [e.row.id]);
         } catch {
           /* abaikan */
         }
@@ -982,15 +994,19 @@ export async function pushAll(): Promise<PushResult> {
 
 /**
  * Dorong satu item ringan (path endpoint tidak berubah). 'sent'/'failed'
- * dihitung pushAll; 'skipped' = master-menunggu-endpoint atau cermin lokal
+ * dihitung pushAll; 'skipped' = master-local-only atau cermin lokal
  * (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya).
  */
 async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipped'> {
-  // Perubahan master lokal (ms_*) tidak punya endpoint push di kontrak §5:
+  // Perubahan master lokal (ms_*) local-only (M9-3, tanpa endpoint push):
   // lewati agar tidak terkirim ke order/finish; baris tetap kotor
-  // (syncDate NULL) + tercatat di tr_esoprocessqueue.
+  // (syncDate NULL) + tercatat di tr_esoprocessqueue (status 'lokal' oleh
+  // drain fisik). Tandai flag local ala S21 agar badge Sync menampilkannya
+  // sebagai "lokal", bukan antre-selamanya. Hanya relevan untuk antrean
+  // ringan warisan — enqueueOutbox tak lagi membuat twin ringan ms_*.
   const itemTable = String((item.payload as { table?: unknown })?.table ?? '');
   if (itemTable.startsWith('ms_')) {
+    item.local = true;
     item.note = tr('sync.masterQueued');
     return 'skipped';
   }
@@ -1176,6 +1192,47 @@ export async function countPhysicalQueue(): Promise<number> {
     return row?.n ?? 0;
   } catch {
     return 0;
+  }
+}
+
+/** Baris local-only M9-3 (status 'lokal', ms_* tanpa endpoint push). */
+export interface LocalOnlyRow {
+  id: string;
+  tableName: string;
+  op: string;
+  rowId: string;
+  createdAt: string;
+}
+
+/** Jumlah baris local-only — tampil di SyncScreen, tak masuk badge pending. */
+export async function countLocalOnly(): Promise<number> {
+  try {
+    const row = await queryFirst<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM tr_esoprocessqueue WHERE status = 'lokal'`,
+    );
+    return row?.n ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Daftar baris local-only terbaru (maks 50) untuk kartu SyncScreen. */
+export async function listLocalOnly(limit = 50): Promise<LocalOnlyRow[]> {
+  try {
+    const n = Math.max(1, Math.min(200, Math.floor(limit) || 50));
+    const rows = await all<{ id: string; tableName: string | null; op: string | null; orderID: string | null; createdAt: string | null }>(
+      `SELECT id, tableName, op, orderID, createdAt FROM tr_esoprocessqueue
+       WHERE status = 'lokal' ORDER BY createdAt DESC LIMIT ${n}`,
+    );
+    return rows.map((r) => ({
+      id: String(r.id ?? ''),
+      tableName: String(r.tableName ?? ''),
+      op: String(r.op ?? ''),
+      rowId: String(r.orderID ?? ''),
+      createdAt: String(r.createdAt ?? ''),
+    }));
+  } catch {
+    return [];
   }
 }
 

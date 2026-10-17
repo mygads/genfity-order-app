@@ -12,7 +12,7 @@ import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { adoptTerminalBinding } from '../../session';
 import { getDeviceId } from '../../lib/apiSource';
 import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';
-import { bindTerminal, validateTerminalPin } from '../../lib/terminalApi';
+import { bindTerminal, claimTerminalPin, validateTerminalPin } from '../../lib/terminalApi';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -57,6 +57,57 @@ export default function TerminalPinScreen({
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
   const [kicked, setKicked] = useState('');
+  // Fase-1b: bind 409 = terminal terokupansi → tawarkan claim (ambil alih)
+  // dengan PIN terminal yang SAMA (sudah diketik user), bukan error offline.
+  const [occupied, setOccupied] = useState('');
+  const [claimBusy, setClaimBusy] = useState(false);
+
+  /** Kunci binding pasca-bind/claim (dishared kedua jalur): validasi tag +
+   * adopt SEMUA store sekaligus + cermin peran. False + setError bila gagal
+   * (fail-closed, tanpa binding setengah jadi). */
+  const finishBinding = async (
+    tagRaw: string,
+    kickedUserId: string,
+    deviceId: string,
+  ): Promise<boolean> => {
+    // F11 fail-closed: tag kosong/tak dikenal → tolak bind (bind_failed).
+    // JANGAN default 'full_access' diam-diam — tag adalah gerbang keamanan.
+    const tag = parseDeviceRole((tagRaw || p.tag || '').trim());
+    if (!tag) {
+      setError(t('bind_failed'));
+      return false;
+    }
+    // Kontrak antar-paket: adoptTerminalBinding = logout + clearGrant +
+    // tulis SEMUA store binding (sesi, kontrak, server) sekaligus — JANGAN
+    // setTerminal/saveBinding terpisah agar tak ada store yang tertinggal.
+    // REBIND-STALE-GRANT: grant basi terminal sebelumnya ikut dicabut di
+    // dalamnya (logout menandai pendingRevoke untuk flush E06/E07).
+    try {
+      await adoptTerminalBinding({
+        terminalId,
+        terminalCode,
+        branchId,
+        branchName,
+        merchantName: branchName,
+        tag,
+        deviceId,
+      });
+    } catch {
+      setError(t('bind_failed'));
+      return false;
+    }
+    // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
+    // adopt) — home guard tetap fail-safe bila ini gagal.
+    try {
+      setDeviceRoleForTag(tag);
+    } catch {
+      /* peran bertahan — home guard tetap fail-safe */
+    }
+    if (kickedUserId) setKicked(kickedUserId);
+    setOccupied('');
+    setDone(true);
+    return true;
+  };
 
   const submit = async () => {
     if (busy || done) return;
@@ -87,6 +138,13 @@ export default function TerminalPinScreen({
       const deviceId = await getDeviceId();
       const r = await bindTerminal(terminalId, pin.trim(), deviceId);
       if (!r.ok) {
+        // Fase-1b: 409 okupansi → tawarkan claim dengan PIN yang SAMA
+        // (sudah diketik user), bukan error offline. Pesan server
+        // (serverMessage) didahulukan; fallback takeover_msg beku.
+        if (r.status === 409) {
+          setOccupied(r.serverMessage || t('takeover_msg'));
+          return;
+        }
         setError(r.reason === 'need_be' ? t('need_be') : t('sup_offline'));
         return;
       }
@@ -94,43 +152,48 @@ export default function TerminalPinScreen({
         setError(t('bind_failed'));
         return;
       }
-      // F11 fail-closed: tag kosong/tak dikenal → tolak bind (bind_failed).
-      // JANGAN default 'full_access' diam-diam — tag adalah gerbang keamanan.
-      const tag = parseDeviceRole((r.data.tag || p.tag || '').trim());
-      if (!tag) {
-        setError(t('bind_failed'));
-        return;
-      }
-      // Kontrak antar-paket: adoptTerminalBinding = logout + clearGrant +
-      // tulis SEMUA store binding (sesi, kontrak, server) sekaligus — JANGAN
-      // setTerminal/saveBinding terpisah agar tak ada store yang tertinggal.
-      // REBIND-STALE-GRANT: grant basi terminal sebelumnya ikut dicabut di
-      // dalamnya (logout menandai pendingRevoke untuk flush E06/E07).
-      try {
-        await adoptTerminalBinding({
-          terminalId,
-          terminalCode,
-          branchId,
-          branchName,
-          merchantName: branchName,
-          tag,
-          deviceId,
-        });
-      } catch {
-        setError(t('bind_failed'));
-        return;
-      }
-      // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
-      // adopt) — home guard tetap fail-safe bila ini gagal.
-      try {
-        setDeviceRoleForTag(tag);
-      } catch {
-        /* peran bertahan — home guard tetap fail-safe */
-      }
-      if (r.data.kickedUserId) setKicked(r.data.kickedUserId);
-      setDone(true);
+      await finishBinding(r.data.tag || '', r.data.kickedUserId || '', deviceId);
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Fase-1b: claim (ambil alih) dengan PIN terminal yang SAMA — tanpa
+   * layar PIN terpisah. Sukses → finishBinding yang sama dengan jalur bind.
+   * PIN salah/terkunci (401/423) → kembali ke form PIN; konflik tag (409) →
+   * pesan server di kartu claim; offline → pesan jujur. */
+  const submitClaim = async () => {
+    if (claimBusy || done) return;
+    if (pin.trim().length < 4) {
+      setOccupied('');
+      setError(t('terminal_pin_hint'));
+      return;
+    }
+    setClaimBusy(true);
+    setError('');
+    try {
+      const deviceId = await getDeviceId();
+      const r = await claimTerminalPin(terminalId, pin.trim(), deviceId);
+      if (!r.ok) {
+        if (r.status === 401 || r.status === 423) {
+          setOccupied('');
+          setError(t('bind_failed'));
+          return;
+        }
+        if (r.status === 409 && r.serverMessage) {
+          setOccupied(r.serverMessage);
+          return;
+        }
+        setError(r.reason === 'need_be' ? t('need_be') : t('sup_offline'));
+        return;
+      }
+      if (!r.data.bound) {
+        setError(t('bind_failed'));
+        return;
+      }
+      await finishBinding(r.data.tag || '', r.data.kickedUserId || '', deviceId);
+    } finally {
+      setClaimBusy(false);
     }
   };
 
@@ -156,31 +219,59 @@ export default function TerminalPinScreen({
           {branchName} · {terminalName}
         </Text>
         {!done ? (
-          <>
-            <Text style={[styles.desc, isTablet && styles.descBig]}>
-              {t('terminal_pin_hint')}
-            </Text>
-            <TextInput
-              style={styles.pinInput}
-              value={pin}
-              onChangeText={(v) => {
-                setPin(v.replace(/[^0-9]/g, ''));
-                setError('');
-              }}
-              secureTextEntry
-              keyboardType="number-pad"
-              maxLength={12}
-              editable={!busy}
-            />
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <AppButton
-              size="lg"
-              title={t('terminal_pin_title')}
-              onPress={submit}
-              disabled={busy || pin.trim().length < 4}
-              style={styles.primary}
-            />
-          </>
+          occupied ? (
+            // Fase-1b: kartu konfirmasi claim — PIN yang SAMA dipakai ulang,
+            // tanpa input ulang. Kunci i18n beku (takeover_title/login_claim/
+            // c_back); pesan okupansi dari server (occupied) apa adanya.
+            <View style={styles.doneCard}>
+              <Text style={styles.doneTitle}>{t('takeover_title')}</Text>
+              <Text style={styles.doneSub}>{occupied}</Text>
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <AppButton
+                size="lg"
+                title={t('login_claim')}
+                onPress={submitClaim}
+                disabled={claimBusy}
+                style={styles.primary}
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  setOccupied('');
+                  setError('');
+                }}
+                disabled={claimBusy}
+                hitSlop={12}
+                style={styles.cancelRow}>
+                <Text style={styles.cancelText}>{t('c_back')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <Text style={[styles.desc, isTablet && styles.descBig]}>
+                {t('terminal_pin_hint')}
+              </Text>
+              <TextInput
+                style={styles.pinInput}
+                value={pin}
+                onChangeText={(v) => {
+                  setPin(v.replace(/[^0-9]/g, ''));
+                  setError('');
+                }}
+                secureTextEntry
+                keyboardType="number-pad"
+                maxLength={12}
+                editable={!busy}
+              />
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <AppButton
+                size="lg"
+                title={t('terminal_pin_title')}
+                onPress={submit}
+                disabled={busy || pin.trim().length < 4}
+                style={styles.primary}
+              />
+            </>
+          )
         ) : (
           <View style={styles.doneCard}>
             <Text style={styles.doneTitle}>{t('bind_success')}</Text>
@@ -260,5 +351,12 @@ const styles = StyleSheet.create({
     color: GREY,
     marginTop: 6,
     lineHeight: 19,
+  },
+  cancelRow: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  cancelText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.navy,
+    textDecorationLine: 'underline',
   },
 });

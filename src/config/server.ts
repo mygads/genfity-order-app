@@ -131,36 +131,46 @@ export const ApiPath = {
   memberErpDeposit: 'erp/member/deposit',
   memberErpSales: 'erp/member/sales',
   // ---- E01-E28: endpoint kontrak sesi terminal (SPEC-TERMINAL-SESSION §11,
-  // tabel final; BE Go pemilik kebenaran — sebagian BELUM ADA: klien wajib
-  // fallback jujur offline/unconfigured, fail-closed untuk terminal-access,
-  // verifikasi PIN, dan login pertama). '{id}'/'{viewId}' diganti caller.
-  staffLogin: 'api/v1/auth/terminal-login', // E01 POST login single-stage {username,password,terminalCode,deviceId} (SPEC §4)
+  // tabel final; BE Go pemilik kebenaran — yang BELUM ADA (MISSING-BE, klien
+  // wajib fail-closed, JANGAN di-wire diam-diam): E05 occupant, E08 (POST
+  // /branches scope-terminal; scope-merchant ada di bawah auth berbeda),
+  // E13 /tag khusus (ganti tag via E11 PATCH generik), E17–E22 scope-terminal
+  // (scope-merchant ada, auth berbeda), E23, E24, E25-consume. E04/E10/E11/E12
+  // SUDAH ADA (mendarat 2026-10-17). '{id}'/'{viewId}' diganti caller.
+  staffLogin: 'api/v1/auth/terminal-login', // E01 POST LOGIN-FIRST F1 (single-stage, BUKAN dua kredensial): {username,password,deviceId,terminalCode?,terminalPin?,merchantId?} → tahap-A {stage:'pick-terminal'} tanpa terminalCode, tahap-B sesi penuh + pinRequired SELALU. `staffPin` TAK ADA (server abaikan); PIN user SELALU langkah 2 via E29 (cek hybrid berversi, bukan gate buta).
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
   terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding
-  terminalOccupant: 'api/v1/terminals/{id}/occupant', // E05 GET sesi aktif terminal
-  authLogout: 'api/v1/auth/logout', // E06 POST revoke session
+  terminalOccupant: 'api/v1/terminals/{id}/occupant', // E05 GET sesi aktif terminal — MISSING-BE (tanpa rute BE; fetchOccupant fail-closed, 0 pemanggil). Alternatif disetujui swarm: snapshot okupansi via SSE (lane BE).
+  authLogout: 'api/v1/auth/terminal-logout', // E06/E31 POST akhiri sesi {deviceId} → {loggedOut, deviceStillBound} (BE tak punya /auth/logout; logout = terminal-logout, device tetap bound)
   branches: 'api/v1/branches', // E07 GET branch milik user
-  createBranch: 'api/v1/branches', // E08 POST owner bikin branch
+  createBranch: 'api/v1/branches', // E08 POST owner bikin branch — MISSING-BE scope-terminal (scope-merchant GET+POST ada di bawah auth berbeda, tak bisa dipakai alur UserAuth terminal).
   branchTerminals: 'api/v1/branches/{id}/terminals', // E09 GET terminal picker
   createTerminal: 'api/v1/branches/{id}/terminals', // E10 POST owner create {name,tag}
   patchTerminal: 'api/v1/terminals/{id}', // E11 PATCH {name,tag}
   deleteTerminal: 'api/v1/terminals/{id}', // E12 DELETE hapus/revoke
-  setTerminalTag: 'api/v1/terminals/{id}/tag', // E13 PATCH 1 dari 5 tag
+  setTerminalTag: 'api/v1/terminals/{id}/tag', // E13 KHUSUS — MISSING-BE (tanpa rute) → DEPRECATED: ganti tag via patchTerminal (E11 PATCH generik /terminals/{id} {tag}). Konstanta dipertahankan agar impor lama tak pecah; JANGAN dipakai untuk call baru.
   setTerminalPin: 'api/v1/terminals/{id}/set-pin', // E14 POST owner set/rotate PIN
   pairView: 'api/v1/terminals/{viewId}/pair', // E15 POST pair view→kasir (E422 bila ganda)
   unpairView: 'api/v1/terminals/{viewId}/pair', // E16 DELETE lepas pairing
-  createStaff: 'api/v1/staff', // E17 POST {username,password,branchIds[]}
-  listStaff: 'api/v1/staff', // E18 GET list staff owner
-  patchStaff: 'api/v1/staff/{id}', // E19 PATCH {branchIds[]}/reset password/PIN
-  deleteStaff: 'api/v1/staff/{id}', // E20 DELETE nonaktifkan staff
-  staffBranches: 'api/v1/staff/{id}/branches', // E21 GET branch satu staff
-  branchStaff: 'api/v1/branches/{id}/staff', // E22 GET staff satu branch
-  approvals: 'api/v1/approvals', // E23 POST {action:void|cancel|compliment, ownerPin, refId}
-  ownerAudit: 'api/v1/audit/owner-actions', // E24 GET rekap pemakaian PIN owner
-  terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2)
+  createStaff: 'api/v1/staff', // E17 POST — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  listStaff: 'api/v1/staff', // E18 GET — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  patchStaff: 'api/v1/staff/{id}', // E19 PATCH — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  deleteStaff: 'api/v1/staff/{id}', // E20 DELETE — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  staffBranches: 'api/v1/staff/{id}/branches', // E21 GET — MISSING-BE scope-terminal
+  branchStaff: 'api/v1/branches/{id}/staff', // E22 GET — MISSING-BE scope-terminal
+  approvals: 'api/v1/approvals', // E23 POST {action:void|cancel|compliment, ownerPin, refId} — MISSING-BE
+  ownerAudit: 'api/v1/audit/owner-actions', // E24 GET rekap pemakaian PIN owner — MISSING-BE
+  terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2) — MISSING-BE (pasangan qr-issue/qr-consume SUDAH ADA dan ter-wire; E25-login-qr endpoint terpisah bila masih dibutuhkan)
   terminalEvents: 'api/v1/terminals/{id}/events', // E26 GET SSE feed per terminal
   queueEvents: 'api/v1/branches/{id}/queue-events', // E27 GET SSE antrean per branch
+  // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
+  terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
+  terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}
+  terminalLogout: 'api/v1/auth/terminal-logout', // E31 POST akhiri sesi {deviceId} → {loggedOut, deviceStillBound} (device tetap bound)
+  terminalClaim: 'api/v1/terminals/{id}/claim', // E32 POST ambil alih {pin,deviceId} → {bound, kickedUserId} (fase-1b: PIN terminal WAJIB; pindah device saja, kapasitas per-tag 409 TAG_CONFLICT)
+  terminalQrIssue: 'api/v1/terminals/{id}/qr-issue', // POST terbitkan token QR login sekali-pakai (tanpa body; member-only) → {qrToken, expiresAt, ttlSeconds} (TTL 60 dtk BE; E25 login-qr TBD Q2)
+  terminalQrConsume: 'api/v1/terminals/{id}/qr-consume', // POST tukar token QR hasil scan {qrToken, deviceId?} (PUBLIC, HP belum bersesi) → {terminalId, terminalCode, merchantId, pinVersion advisory} — TANPA sesi/grant/binding; PIN terminal tetap wajib tahap-B
   // E28: tanpa endpoint — policy max_offline_grant_days via pull-terminal-settings
   // (lihat offlineGrantPolicyKey di bawah).
 } as const;
@@ -404,6 +414,60 @@ export async function apiPost(
   if (postToken) headers['Authorization'] = `Bearer ${postToken}`;
   return fetch(apiUrl(path), {
     method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * D (E16 unpair): DELETE tanpa body — pasangan apiPost untuk lepas-pairing
+ * view. Bearer/idempotency + header kontrak X-Terminal-Code/Branch-Id ala
+ * apiPost agar konsisten dengan panggilan kontrak-Go lain.
+ */
+export async function apiDelete(
+  path: string,
+  opts?: { idempotencyKey?: string; token?: string },
+): Promise<Response> {
+  const t = getTerminal();
+  const headers: Record<string, string> = {};
+  if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+  if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  const delToken = opts?.token
+    ? opts.token
+    : needsSessionBearer(path)
+      ? resolveSessionToken()
+      : '';
+  if (delToken) headers['Authorization'] = `Bearer ${delToken}`;
+  return fetch(apiUrl(path), {
+    method: 'DELETE',
+    headers,
+  });
+}
+
+/**
+ * D (E11 patch): PATCH dengan body JSON — pasangan apiPost/apiDelete untuk
+ * update parsial (E11 {name?, tag?}). Bearer/idempotency + header kontrak
+ * ala apiPost.
+ */
+export async function apiPatch(
+  path: string,
+  body: unknown,
+  opts?: { idempotencyKey?: string; token?: string },
+): Promise<Response> {
+  const t = getTerminal();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+  if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  const patchToken = opts?.token
+    ? opts.token
+    : needsSessionBearer(path)
+      ? resolveSessionToken()
+      : '';
+  if (patchToken) headers['Authorization'] = `Bearer ${patchToken}`;
+  return fetch(apiUrl(path), {
+    method: 'PATCH',
     headers,
     body: JSON.stringify(body),
   });

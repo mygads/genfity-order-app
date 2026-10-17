@@ -207,8 +207,9 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
   /** Soft-guard shift: instalasi fresh (tr_shiftlog kosong) bebas ke Dashboard/Cashier
    * agar demo/screenshot jalan; bila ada riwayat shift tapi tak ada yang open → mulai di Shift. */
   const [shiftClosed, setShiftClosed] = useState(false);
-  /** Kunci peran perangkat: DAPUR mulai di Kitchen, DISPLAY di
-   * CustomerDisplay, dan rute di luar peran di-reset paksa ke beranda. */
+  /** Kunci peran perangkat: dapur mulai di Kitchen, view_pelanggan di
+   * CustomerDisplay, view_queue di QueueView; rute di luar allowlist view
+   * di-reset paksa ke beranda (kasir/dapur/full_access = fitur penuh). */
   const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => getDeviceRole());
   useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);
   /** Kunci peran perangkat (D3-04, E2 APP-FIXUP): gerbang shift berlaku untuk
@@ -294,8 +295,10 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
         const routes = st && Array.isArray(st.routes) ? st.routes : [];
         const cur = routes.length > 0 && typeof st?.index === 'number' ? routes[st.index]?.name : undefined;
         const bottom = routes.length > 0 ? routes[0]?.name : undefined;
-        // Kunci peran: DAPUR/DISPLAY tak boleh mendarat di rute kasir
-        // (mis. deep-link sisa sesi) - kembalikan ke beranda peran.
+        // Kunci peran: tag view (view_pelanggan/view_queue) tak boleh mendarat
+        // di luar satu halamannya (mis. deep-link sisa sesi) - kembalikan ke
+        // beranda peran. kasir/dapur/full_access = fitur penuh
+        // (allowedRoutesFor null → lewati reset di bawah; deviceRole.ts kanonis).
         // F13: hanya bila home ada di stack aktif (stack authed sudah
         // mount); stack tamu yang masih transisi jangan di-reset.
         const allowed = allowedRoutesFor(deviceRole);
@@ -318,7 +321,7 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
    * F13: hanya tegakkan di stack authed — butuh loggedIn DAN rute home ada
    * di stack aktif. Tanpa cek ini, stack tamu (tanpa CustomerDisplay/
    * Kitchen/ Dashboard) ikut di-reset ke beranda peran saat peran
-   * DISPLAY/DAPUR aktif. */
+   * view_pelanggan/view_queue aktif. */
   useEffect(() => {
     if (!loggedIn) return undefined;
     const allowed = allowedRoutesFor(deviceRole);

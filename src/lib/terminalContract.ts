@@ -301,9 +301,11 @@ export async function getContractDeviceId(): Promise<string> {
 // Endpoint kontrak.
 // ---------------------------------------------------------------------------
 
-/** Hasil terminal-login single-stage (DEAD CODE 2026-10-17: nol pemanggil —
+/** Hasil terminal-login STAGED fase-1a (DEAD CODE 2026-10-17: nol pemanggil —
  * jalur hidup = callStaffLogin di LoginScreen; dipertahankan sebagai acuan
- * bentuk + diperbaiki ke RoE live: sesi penuh langsung + tookOver). */
+ * bentuk + diperbaiki ke RoE live: langkah 1+2 (password + PIN terminal) →
+ * materi sesi penuh + tookOver; langkah 3 (PIN user) SELALU via E29
+ * pin-verify — pinRequired:true sampai lolos). */
 export interface TerminalLoginSuccess {
   userId: string;
   role: string;
@@ -318,13 +320,18 @@ export interface TerminalLoginSuccess {
   authToken: string;
   /** Eviksi: user yang ditendang login ini ('' bila tidak ada). */
   tookOverKickedUserId: string;
+  /** Login staged: PIN user/workforce WAJIB diverifikasi via E29 berikutnya. */
+  pinRequired: boolean;
+  /** PIN terminal terverifikasi pada langkah 1+2 (false = bound-device fast-path). */
+  terminalPinVerified: boolean;
 }
 
 export async function terminalLogin(input: {
   username: string;
   password: string;
-  terminalCode: string;
+  terminalCode?: string;
   deviceId: string;
+  terminalPin?: string;
 }): Promise<CallResult<TerminalLoginSuccess>> {
   const r = await postJson<Record<string, unknown>>('/auth/terminal-login', input);
   if (!r.ok || !r.data) return { ok: false, status: r.status, offline: r.offline, data: null };
@@ -367,6 +374,8 @@ export async function terminalLogin(input: {
       sessionId: str(d.sessionId ?? d.session_id),
       authToken: str(d.authToken ?? d.token ?? authKey),
       tookOverKickedUserId: str(tookOver.kickedUserId ?? d.kickedUserId),
+      pinRequired: bool(d.pinRequired),
+      terminalPinVerified: bool(d.terminalPinVerified),
     },
   };
 }
@@ -452,14 +461,17 @@ export async function bindTerminal(
   };
 }
 
-/** Claim terminal: usir sesi sebelumnya (evict previous). */
+/** Claim terminal: usir sesi sebelumnya (evict previous). Fase-1a: server
+ * WAJIBkan PIN terminal (faktor 2) — pin opsional agar pemanggil lama tak
+ * pecah; tanpa pin server menolak PIN_REQUIRED (pemanggil wajib isi). */
 export async function claimTerminal(
   terminalId: string,
   deviceId: string,
+  pin?: string,
 ): Promise<CallResult<{ bound: boolean; kickedUserId: string }>> {
   const r = await postJson<Record<string, unknown>>(
     `/terminals/${encodeURIComponent(terminalId)}/claim`,
-    { deviceId },
+    pin ? { deviceId, pin } : { deviceId },
   );
   if (!r.ok || !r.data) return { ok: false, status: r.status, offline: r.offline, data: null };
   const d = unwrapData<Record<string, unknown>>(r.data);

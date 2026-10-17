@@ -14,10 +14,12 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import {
+  adoptTerminalBinding,
   buildGrant as buildSessionGrant,
   consumeKickNotice,
   describeGrantProblem,
   getBinding as getSessionBinding,
+  getGrantPinVersion,
   getMaxOfflineGrantDays,
   getSession,
   hydrateTerminalState,
@@ -35,13 +37,15 @@ import { startRealtime } from '../../lib/realtime';
 import { flushPendingRevokes } from '../../lib/sync';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
+import { pinVerifyTerminalPin } from '../../lib/terminalApi';
 import {
   getContractDeviceId,
   loadBinding,
   type TerminalBinding as LegacyBinding,
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
-import { loadPinRecord, savePinHash, verifyPinHash } from '../../lib/pin';
+import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
+import { requireEscalationAccess } from '../../lib/access';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -221,7 +225,8 @@ async function resolveTermCtx(): Promise<TermCtx | null> {
         terminalCode: m.terminalCode,
         branchId: m.branchId,
         branchName: m.branchName,
-        merchantName: m.merchantName,
+        // Q1: merchantName opsional di Binding — cermin dari branchName.
+        merchantName: (m.merchantName || m.branchName || '').trim(),
         tag: m.tag,
         deviceId: (m.deviceId || '').trim(),
       };
@@ -232,14 +237,17 @@ async function resolveTermCtx(): Promise<TermCtx | null> {
   return null;
 }
 
-/** E01 terminal-login SINGLE-STAGE (SPEC §4/§11 E01; koreksi 2026-10-17 atas
- * arah 2-tahap yang SALAH): POST /api/v1/auth/terminal-login
- * {username,password,terminalCode,deviceId} → LANGSUNG sesi penuh (session +
- * JWT pair + terminal tag + branches + terminals + grant triple 7-hari +
- * tookOver{kickedUserId} bila eviksi). `staffPin` BUKAN bagian endpoint ini
- * (server mengabaikan field JSON tak dikenal) — PIN staff TAK PERNAH dikirim
- * ke server; gate PIN murni VERIFIKASI LOKAL (passesLocalWorkforcePin).
- * Payload SELALU bawa terminalCode+deviceId (okupansi tunggal per terminal).
+/** E01 terminal-login STAGED fase-1a (SPEC §4/§11 E01): POST
+ * /api/v1/auth/terminal-login {username,password,deviceId,terminalCode?,
+ * terminalPin?} → langkah 1+2 (password + PIN terminal; PIN terminal HANYA
+ * diminta bila device belum bound ke user ini — bound device lewat fast-path
+ * tanpa PIN). Respons SUKSES membawa materi sesi PENUH (session + JWT pair +
+ * terminal tag + branches + terminals + grant triple 7-hari + tookOver bila
+ * eviksi) + pinRequired:true SELALU — langkah 3 (PIN user/workforce) WAJIB
+ * lewat E29 pin-verify (callPinVerify) SEBELUM kasir dibuka. `staffPin`
+ * BUKAN bagian endpoint ini (server mengabaikan field JSON tak dikenal).
+ * Payload SELALU bawa deviceId; terminalCode OPSIONAL (bound device resolve
+ * via fast-path server); terminalPin ikut bila server memintanya.
  * Tak pernah melempar: {reached:false} = offline/unconfigured (mode 'local'
  * = tanpa server — pemanggil wajib lewat gate grant, fail-closed). */
 interface StaffLoginCall {
@@ -248,7 +256,7 @@ interface StaffLoginCall {
   body: Record<string, unknown>;
 }
 
-async function callStaffLogin(body: Record<string, string>): Promise<StaffLoginCall> {
+async function callStaffLogin(body: Record<string, string | number>): Promise<StaffLoginCall> {
   try {
     if (getApiMode() === 'local') return { reached: false, status: 0, body: {} };
     const res = await withTimeout(apiPost(ApiPath.staffLogin, body), 12000);
@@ -265,23 +273,101 @@ async function callStaffLogin(body: Record<string, string>): Promise<StaffLoginC
   }
 }
 
+/** E29 pin-verify (fase-1a, faktor 3 login staged): INTI HTTP TUNGGAL di
+ * lib/terminalApi.pinVerifyTerminalPin (termasuk bearer JWT tahap-B — temuan
+ * review Trek 1: login-first belum punya sesi tersimpan saat PIN modal karena
+ * completeOnline jalan SETELAH PIN lolos; tanpa token E29 selalu 401 dan
+ * login macet permanen). Wrapper ini hanya memetakan ke bentuk fail-closed
+ * layar: {reached:false} = jaringan putus / mode local / dummy → pemanggil
+ * fallback ke gerbang PIN lokal (kejujuran offline L1 tak berubah). */
+interface PinVerifyCall {
+  reached: boolean;
+  status: number;
+  errorCode: string;
+  serverMessage: string;
+  pinVersion: number;
+}
+
+async function callPinVerify(terminalId: string, pin: string, token?: string): Promise<PinVerifyCall> {
+  const blank: PinVerifyCall = { reached: false, status: 0, errorCode: '', serverMessage: '', pinVersion: 0 };
+  try {
+    if (!terminalId || getApiMode() === 'local') return blank;
+    const r = await withTimeout(
+      pinVerifyTerminalPin(terminalId, pin, token ? { token } : undefined),
+      12000,
+    );
+    if (r.fromDummy) return blank;
+    if (!r.ok) {
+      // Server menjawab penolakan (INVALID/LOCKED/NOT_SET): reached = server
+      // menang; kode + pesan diteruskan agar layar bedakan enroll vs tolak.
+      return { reached: true, status: r.status, errorCode: r.errorCode ?? '', serverMessage: r.serverMessage ?? '', pinVersion: 0 };
+    }
+    // Inti sukses selalu 2xx (BE 200): status literal cukup — pemanggil hanya
+    // cabang 2xx vs 400 vs lainnya.
+    return { reached: true, status: 200, errorCode: '', serverMessage: '', pinVersion: r.data.pinVersion };
+  } catch {
+    return blank;
+  }
+}
+
+/** B (PIN hybrid berversi): bandingkan pinVersion grant simpanan vs server
+ * pasca-E29 sukses. Beda = PIN diubah manajer setelah grant dibuat; user BARU
+ * SAJA membuktikan PIN saat ini ke server → tindakan benar = SEMBUHKAN
+ * (completeOnline di bawah menulis versi baru), BUKAN memblokir login yang
+ * sah. Kasus berbahaya (grant versi-lama dipakai OFFLINE) tak terlihat di
+ * sini — penegakannya milik Trek Sync (versi di payload pull / endpoint
+ * cek-versi ringan BE): mismatch → clearGrant(triple) + wajib re-login
+ * online + copy jujur (lihat POS-DECISIONS). Di sini hanya diagnostik. */
+function noteGrantPinVersion(userId: string, terminalId: string, deviceId: string, serverVersion: number): void {
+  if (!userId || !terminalId || !deviceId || !serverVersion) return;
+  try {
+    const stored = getGrantPinVersion({ userId, terminalId, deviceId });
+    if (stored !== null && stored !== 0 && stored !== serverVersion) {
+      console.info(
+        `[login] pinVersion server v${serverVersion} ≠ grant v${stored}: PIN diubah setelah grant dibuat — versi disembuhkan pasca-login ini.`,
+      );
+    }
+  } catch {
+    /* diagnostik saja; completeOnline menulis versi baru */
+  }
+}
+
 /** Penolakan eksplisit server (kredensial salah) vs tak-terjangkau.
  * 401 di SINI (pra-sesi, tanpa sesi aktif) = kredensial ditolak, BUKAN kick:
  * 401 = gagal auth final → re-login, tak pernah bukti kick (koreksi K1
  * 2026-10-17). Deteksi kick = event `takeover` SSE terminal (watcher sesi di
- * App.tsx) + pencocokan pola kick/takeover sisi-klien pada pesan WS. */
+ * App.tsx) + pencocokan pola kick/takeover sisi-klien pada pesan WS.
+ * PENGECUALIAN fase-1a: 401 PIN_REQUIRED/PIN_INVALID/PIN_LOCKED dan 423
+ * PIN_LOCKED = server meminta PIN terminal (faktor 2 login staged), BUKAN
+ * kredensial salah — pemanggil menampilkannya sebagai permintaan PIN, bukan
+ * login_fail (lihat submit). */
 function isExplicitReject(call: StaffLoginCall): boolean {
   if (!call.reached) return false;
-  if (call.status === 401 || call.status === 403 || call.status === 422) return true;
+  if (call.status === 409) return false; // 1-1-1: konflik okupansi, bukan kredensial
+  if (call.status === 401 || call.status === 403 || call.status === 422 || call.status === 423) {
+    const code = str((call.body as Record<string, unknown>).error);
+    if (code === 'PIN_REQUIRED' || code === 'PIN_INVALID' || code === 'PIN_LOCKED') return false;
+    return true;
+  }
   if (call.body.credentialOk === false) return true;
   return false;
 }
 
+/** Kode error terminal-login tahap-1 (envelope error tanpa `data`, baca
+ * top-level — beda dari respons sukses yang dibungkus `data`). */
+function loginErrorOf(call: StaffLoginCall): { code: string; message: string } {
+  const b = (call.body ?? {}) as Record<string, unknown>;
+  return { code: str(b.error), message: str(b.message) };
+}
+
 /** Respons pertama SUDAH membawa sesi penuh (single-stage live): userId ada.
  * BUKAN undangan tahap-2 — sesi dikunci setelah gerbang PIN LOKAL, tanpa
- * panggilan server kedua. */
+ * panggilan server kedua. PENGECUALIAN: stage-A login-first (`stage:
+ * 'pick-terminal' = picker tanpa sesi/token) — userId di sana BUKAN materi
+ * sesi, jangan kunci sesi darinya (ditangani cabang stage-A di submit). */
 function hasSessionMaterial(call: StaffLoginCall): boolean {
   if (!call.reached || call.status < 200 || call.status >= 300) return false;
+  if (str(call.body.stage) === 'pick-terminal') return false;
   return str(call.body.userId ?? call.body.user_id) !== '';
 }
 
@@ -298,6 +384,36 @@ function isCredentialOnly(call: StaffLoginCall): boolean {
 interface NormBranch {
   id: string;
   name: string;
+}
+
+/** Terminal tahap-A login-first (dari E01 stage pick-terminal). */
+interface NormTerminal {
+  id: string;
+  code: string;
+  name: string;
+  tag: string;
+  merchantId: string;
+}
+
+/** Normalisasi daftar terminal stage-A; opsional filter per cabang
+ * (picker chips memfilternya per pickBranch). Terminal tanpa merchantId
+ * dianggap milik semua cabang (backward-compat payload lama). */
+function normTerminals(v: unknown, branchId?: string): NormTerminal[] {
+  if (!Array.isArray(v)) return [];
+  return (v as Record<string, unknown>[])
+    .map((x) => ({
+      id: str(x.terminalId ?? x.id),
+      code: str(x.terminalCode ?? x.code),
+      name: str(x.name),
+      tag: str(x.tag).trim().toLowerCase(),
+      merchantId: str(x.merchantId ?? x.merchant_id ?? x.branchId),
+    }))
+    .filter(
+      (x) =>
+        x.id !== '' &&
+        x.code !== '' &&
+        (!branchId || x.merchantId === '' || x.merchantId === branchId),
+    );
 }
 
 function normBranches(v: unknown): NormBranch[] {
@@ -336,16 +452,18 @@ async function ensureLocalPinHash(userId: string, pin: string): Promise<void> {
 }
 
 /**
- * GERBANG PIN LOKAL (koreksi 2026-10-17): server TIDAK PERNAH memverifikasi
- * PIN staff — tak ada endpoint verify-PIN-staff (E02 validate-pin = PIN
- * TERMINAL untuk binding, bukan PIN staff; pin-reset owner-only tak dipakai
- * saat login). Maka modal PIN staff pasca-terminal-login adalah VERIFIKASI
- * LOKAL terhadap workforce-PIN record (lib/pin — store yang sama dibaca
- * layar absensi/shift via loadPinRecord):
+ * GERBANG PIN LOKAL (koreksi review Trek 1 — komentar lama "server tak pernah
+ * verifikasi PIN staff" SUDAH SALAH: E29 POST /terminals/{id}/pin-verify
+ * adalah verifikasi server dan WAJIB lolos saat reachable).
+ * Dipakai HANYA bila (a) server mengonfirmasi USER_PIN_NOT_SET (enroll
+ * progresif, online), atau (b) E29 tak terjangkau TAPI record PIN lokal sudah
+ * ada (user kembali). Tanpa record + tanpa server = fail-closed di pemanggil
+ * (need_be), BUKAN seed-if-absent — seed di sini MENGINGAT PIN sesi yang sudah
+ * lolos server, bukan verifikasi. Dipakai terhadap record yang sama dibaca
+ * layar absensi/shift via loadPinRecord.
  * - record ada → PIN wajib cocok (verifyPinHash), salah = tolak;
- * - record belum ada (login pertama) → seed sekali (savePinHash) agar grant
- *   offline + login berikut punya acuan. Jujur: ini MENGINGAT PIN yang
- *   dipakai saat sesi dinyatakan lolos BE, bukan verifikasi ke server.
+ * - record belum ada → seed sekali (savePinHash) agar grant offline + login
+ *   berikut punya acuan — HANYA dipanggil dari jalur (a)/(b) di atas.
  * Tak pernah melempar (gagal baca = false, fail-closed).
  */
 async function passesLocalWorkforcePin(userId: string, pin: string): Promise<boolean> {
@@ -365,11 +483,77 @@ async function passesLocalWorkforcePin(userId: string, pin: string): Promise<boo
 }
 
 /**
- * Kunci sesi online pasca-terminal-login single-stage (alur L1): saveSession
+ * GAP-14 owner-override (2026-10-17): modal PIN staff menerima PIN OWNER
+ * sebagai pengganti — login kandidat TETAP dikunci untuk user kandidat, tapi
+ * sesi membawa attribution approvedBy='owner:<approverUserId>' (Session,
+ * session.ts) sebagai jejak audit.
+ * - Online (E29 terjangkau): PIN diverifikasi server DULU via callPinVerify
+ *   (server menang bila INVALID/LOCKED — tanpa fallback lokal, agar lockout
+ *   server tak bisa di-bypass); NOT_SET → lanjut cek lokal (paritas
+ *   enroll-progresif jalur normal).
+ * - Offline (E29 tak terjangkau): fallback hash lokal via verifyAttendancePin
+ *   (disiplin pin.ts: throttle 5x/60 dtk bawaan; null = DB belum siap =
+ *   fail-closed, kembalikan gagal agar jalur normal yang memverdict).
+ * - Pemegang PIN lalu WAJIB lolos gerbang owner-only
+ *   (requireEscalationAccess 'settings.edit' — Staff di-deny di seed) — PIN
+ *   staff biasa / typo bukan owner → {ok:false} dan jalur normal yang
+ *   memutuskan (murni aditif: override gagal tak mengubah perilaku normal).
+ */
+async function verifyOwnerOverridePin(pin: string, stageToken?: string): Promise<{
+  ok: boolean;
+  approverUserId?: string;
+  pinVersion?: number;
+}> {
+  const clean = String(pin ?? '').trim();
+  if (!clean) return { ok: false };
+  let termId = '';
+  try {
+    termId = (await resolveTermCtx())?.terminalId ?? '';
+  } catch {
+    termId = '';
+  }
+  let pinVersion: number | undefined;
+  if (termId.trim()) {
+    const pv = await callPinVerify(termId.trim(), clean, stageToken);
+    if (pv.reached) {
+      if (pv.status >= 200 && pv.status < 300) {
+        pinVersion = pv.pinVersion;
+      } else if (!(pv.status === 400 && pv.errorCode === 'USER_PIN_NOT_SET')) {
+        // Server menolak eksplisit (INVALID/LOCKED/lainnya) = server menang.
+        return { ok: false };
+      }
+    }
+    // Tak terjangkau → jatuh ke hash lokal di bawah (offline honesty).
+  }
+  let v: { ok: boolean | null; userId?: string };
+  try {
+    v = await verifyAttendancePin(clean);
+  } catch {
+    return { ok: false };
+  }
+  if (v.ok !== true || !v.userId) return { ok: false };
+  let gate: { ok: boolean } = { ok: false };
+  try {
+    gate = await requireEscalationAccess(v.userId, 'settings.edit');
+  } catch {
+    gate = { ok: false };
+  }
+  if (!gate.ok) return { ok: false };
+  return {
+    ok: true,
+    approverUserId: v.userId,
+    ...(pinVersion !== undefined ? { pinVersion } : {}),
+  };
+}
+
+/**
+ * Kunci sesi online pasca-terminal-login login-first (alur L1): saveSession
  * + saveGrant 7-hari sliding (Q6; server-wins bila BE mengirim policy
  * max_offline_grant_days/E28). Materi sesi dari respons terminal-login
  * (pertama, atau refetch defensif TANPA staffPin) — PIN argumen dipakai
  * HANYA untuk grant hash + seed workforce-PIN lokal, bukan verifikasi server.
+ * pinVersion (E29, opsional) disimpan ke grant sebagai sumber versi PIN
+ * hybrid; 0 = belum diketahui (jalur fallback lokal / QR).
  */
 async function completeOnline(
   payload: Record<string, unknown>,
@@ -377,6 +561,10 @@ async function completeOnline(
   ctx: TermCtx,
   deviceId: string,
   username: string,
+  pinVersion?: number,
+  // GAP-14: attribution owner-override ('owner:<approverUserId>') — dicatat ke
+  // sesi apa adanya (jejak audit lokal); absen = login normal tanpa override.
+  approvedBy?: string,
 ): Promise<void> {
   const userId = str(payload.userId ?? payload.user_id);
   if (!userId) throw new Error('e01-no-user');
@@ -405,6 +593,8 @@ async function completeOnline(
     cash: sameUser && prev ? prev.cash : 0,
   };
   if (ctx.merchantName) sess.merchantName = ctx.merchantName;
+  // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
+  if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
   try {
     const pol = payload.policy as Record<string, unknown> | undefined;
@@ -414,7 +604,7 @@ async function completeOnline(
     /* default 7 hari */
   }
   try {
-    saveSessionGrant(buildSessionGrant({ userId, terminalId: ctx.terminalId, deviceId, staffPin: pin }));
+    saveSessionGrant(buildSessionGrant({ userId, terminalId: ctx.terminalId, deviceId, staffPin: pin, ...(pinVersion !== undefined ? { pinVersion } : {}) }));
   } catch (e) {
     console.warn('[login] saveGrant gagal:', e);
   }
@@ -430,7 +620,14 @@ async function completeOnline(
  * diperpanjang saat auth ONLINE sukses (completeOnline) — fungsi ini tak
  * pernah menyentuh grant. Tanpa grant valid fungsi ini tak pernah dipanggil.
  */
-async function completeOffline(userId: string, username: string, pin: string): Promise<void> {
+async function completeOffline(
+  userId: string,
+  username: string,
+  pin: string,
+  // GAP-14: attribution owner-override ('owner:<approverUserId>') — lihat
+  // completeOnline; absen = login offline normal tanpa override.
+  approvedBy?: string,
+): Promise<void> {
   const ctx = await resolveTermCtx();
   if (!ctx) throw new Error('unbound');
   const deviceId = ctx.deviceId || (await getContractDeviceId());
@@ -454,6 +651,8 @@ async function completeOffline(userId: string, username: string, pin: string): P
     cash: prev?.cash ?? 0,
   };
   if (ctx.merchantName) sess.merchantName = ctx.merchantName;
+  // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
+  if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
@@ -467,7 +666,9 @@ export default function LoginScreen({ navigation }: Props) {
   // split dua kolom hanya saat landscape agar tiap panel tetap lega.
   const showSplit = isTablet && width > height;
   const { lang, t } = useLang();
-  const [mode, setMode] = useState<'email' | 'qr'>('email');
+  // Q8 (2026-10-17): mode 'account' — satu field jujur username-ATAU-email
+  // (BE E01 menerima keduanya), bukan label 'email' yang menyesatkan.
+  const [mode, setMode] = useState<'account' | 'qr'>('account');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -483,6 +684,34 @@ export default function LoginScreen({ navigation }: Props) {
   const [staffPin, setStaffPin] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
   const [pinError, setPinError] = useState('');
+  // Throttle PIN offline (temuan review Trek 1): grant-PIN 4-digit tanpa
+  // throttle = brute-force via modal. 5x salah → kunci modal 60 dtk.
+  // Direset tiap modal dibuka + tiap sukses (bukan per user — satu modal
+  // satu kandidat; oracle grant-holder didokumentasikan sebagai residual).
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockUntil, setPinLockUntil] = useState(0);
+  // Fase-1a (login staged): PIN terminal HANYA diminta server bila device
+  // belum bound ke user ini (PIN_REQUIRED/INVALID/LOCKED) — kolom muncul di
+  // bawah password hanya bila server memintanya; bound device dilewati
+  // server (fast-path) sehingga kolom tak pernah muncul di sana.
+  const [termPin, setTermPin] = useState('');
+  const [needTermPin, setNeedTermPin] = useState(false);
+  /** Tahap-A login-first (F1): E01 tanpa terminalCode di device yang belum
+   * bound mengembalikan {stage:'pick-terminal', branches, terminals} TANPA
+   * sesi/token — layar menampilkan picker cabang+terminal, lalu tahap-B
+   * (submitPickA) memanggil E01 lagi DENGAN terminalCode (+merchantId).
+   * pickPin = PIN terminal bila tahap-B menuntutnya (PIN_REQUIRED). */
+  const [pickA, setPickA] = useState<null | {
+    username: string;
+    password: string;
+    deviceId: string;
+    branches: NormBranch[];
+    terminals: NormTerminal[];
+  }>(null);
+  const [pickBranch, setPickBranch] = useState('');
+  const [pickTerminal, setPickTerminal] = useState('');
+  const [pickPin, setPickPin] = useState('');
+  const [pickPinNeeded, setPickPinNeeded] = useState(false);
   /** online = respons terminal-login SUDAH bawa sesi (single-stage) + payload
    * tersimpan; PIN = gerbang VERIFIKASI LOKAL (passesLocalWorkforcePin),
    * tanpa panggilan server kedua. online-refetch = defensif (kredensial-ok
@@ -627,6 +856,11 @@ export default function LoginScreen({ navigation }: Props) {
     pin: string,
     ctx?: { branchId?: string; terminalCode?: string; terminalTag?: string; authKey?: string; role?: string },
   ) => {
+    // Fail-closed QR (temuan review Trek 1): pastikan ikatan SEBELUM sesi
+    // dibuat — throw 'unbound' setelah loginEmployee meninggalkan sesi yatim
+    // (isLoggedIn true tanpa ikatan hingga restart).
+    const preCtx = await resolveTermCtx();
+    if (!preCtx) throw new Error('unbound');
     try {
       const rec = await loadPinRecord(s.userId);
       if (!rec || !verifyPinHash(pin, rec)) {
@@ -706,25 +940,78 @@ export default function LoginScreen({ navigation }: Props) {
     setNotice('');
     setBlocked(null);
     setBusy(true);
+    // Race auto-skip (temuan review Trek 1): runStageB mengelola busy sendiri;
+    // bila tahap-B diambil alih (handedOff), finally submit JANGAN nol-kan busy.
+    let handedOff = false;
     void (async () => {
       try {
         const uname = username.trim();
-        // B1 prasyarat: device ter-bound (fail-closed).
+        // B1 prasyarat: device ter-bound (fail-closed) — KECUALI login-first
+        // F1: device belum bound + online → tahap-A E01 (username+password+
+        // deviceId, TANPA terminalCode) → picker cabang+terminal (pickA),
+        // lalu tahap-B (submitPickA) menyelesaikan login di terminal pilihan.
         const ctx = await resolveTermCtx();
         if (!ctx) {
-          // Unbound = BLOKIR eksplisit (model final, SEMUA build termasuk DEV):
-          // login pertama wajib lewat device terikat + BE (terminal-login
-          // single-stage) atau grant offline yang valid. Tak ada lagi jalur
-          // seed lokal tanpa binding - fail-closed, bukan fallback diam-diam.
-          setServerError(unboundText());
-          setBlocked({ kind: 'unbound' });
+          if (getApiMode() === 'local') {
+            // Tanpa server tak ada tahap-A dan tak ada triple grant → blokir.
+            setServerError(unboundText());
+            setBlocked({ kind: 'unbound' });
+            return;
+          }
+          const devId = await getContractDeviceId();
+          const stageA = await callStaffLogin({ username: uname, password, deviceId: devId });
+          if (stageA.reached && stageA.status >= 200 && stageA.status < 300 && str(stageA.body.stage) === 'pick-terminal') {
+            const branches = normBranches(stageA.body.branches);
+            const terminals = normTerminals(stageA.body.terminals);
+            if (!branches.length || !terminals.length) {
+              setServerError(needBeText());
+              return;
+            }
+            const data = { username: uname, password, deviceId: devId, branches, terminals };
+            const firstBranch = branches[0].id;
+            // S2 desain F1: 1 cabang + 1 terminal → langsung tahap-B tanpa
+            // menampilkan picker (state pickA tetap diisi untuk konsistensi).
+            const scoped = normTerminals(terminals, firstBranch);
+            setPickA(data);
+            setPickBranch(firstBranch);
+            setPickTerminal(scoped.length === 1 && branches.length === 1 ? scoped[0].id : '');
+            setPickPin('');
+            setPickPinNeeded(false);
+            setServerError('');
+            // F1 §2/§6 (temuan review Trek 1): password fase-1 di-nol-kan dari
+            // form segera setelah disalin ke memori pickA (data). Retry tahap-B
+            // memakai salinan memori, bukan form — form tak dibutuhkan lagi.
+            setPassword('');
+            if (branches.length === 1 && scoped.length === 1) {
+              handedOff = true;
+              runStageB(data, firstBranch, scoped[0], '');
+              return;
+            }
+            return;
+          }
+          if (isExplicitReject(stageA)) {
+            // Kredensial salah (401 INVALID_CREDENTIALS) — bukan offline.
+            setServerError(t('login_fail'));
+            return;
+          }
+          // Tak terjangkau / respons asing → fail-closed unbound (tanpa grant
+          // offline: triple user-terminal-device belum ada di device ini).
+          setServerError(stageA.reached ? unboundText() : needBeText());
+          if (stageA.reached) setBlocked({ kind: 'unbound' });
           return;
         }
         const deviceId = ctx.deviceId || (await getContractDeviceId());
-        // B1 langkah 1: E01 single-stage — username+password dulu, TANPA
-        // staffPin (server mengabaikan field tak dikenal). Payload SELALU
-        // bawa terminalCode+deviceId (kontrak E01).
-        const first = await callStaffLogin({ username: uname, password, terminalCode: ctx.terminalCode, deviceId });
+        // B1 langkah 1 fase-1a (login staged): username+password dulu, TANPA
+        // staffPin (server mengabaikan field tak dikenal). terminalCode
+        // OPSIONAL — bound device resolve via fast-path server; terminalPin
+        // ikut terkirim bila user sudah mengisinya (server meminta).
+        const first = await callStaffLogin({
+          username: uname,
+          password,
+          deviceId,
+          ...(ctx.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
+          ...(termPin.trim() ? { terminalPin: termPin.trim() } : {}),
+        });
         if (hasSessionMaterial(first)) {
           // Single-stage: sesi SUDAH ada di respons pertama — disimpan sebagai
           // kandidat, dikunci setelah gerbang PIN LOKAL (tanpa call kedua).
@@ -739,6 +1026,11 @@ export default function LoginScreen({ navigation }: Props) {
           setCandidate({ kind: 'online', username: uname, password, payload: first.body });
           setStaffPin('');
           setPinError('');
+          setPinAttempts(0);
+          setPinLockUntil(0);
+          // Kredensial diterima → form password dibuang (higiene F1:
+          // aliran PIN memakai candidate/payload, bukan form).
+          setPassword('');
           setPinOpen(true);
           return;
         }
@@ -748,6 +1040,10 @@ export default function LoginScreen({ navigation }: Props) {
           setCandidate({ kind: 'online-refetch', username: uname, password });
           setStaffPin('');
           setPinError('');
+          setPinAttempts(0);
+          setPinLockUntil(0);
+          // Form dibuang; refetch memakai salinan candidate (bukan form).
+          setPassword('');
           setPinOpen(true);
           return;
         }
@@ -755,6 +1051,33 @@ export default function LoginScreen({ navigation }: Props) {
           // Server MENOLAK eksplisit (bukan offline): kredensial salah.
           setServerError(t('login_fail'));
           return;
+        }
+        if (first.reached && first.status === 409) {
+          // Kapasitas per-tag / okupansi (TERMINAL_OCCUPIED /
+          // TERMINAL_DEVICE_CONFLICT / TERMINAL_TAG_CONFLICT): 1 user = 1
+          // kasir + 1 dapur + N view per cabang; full_access eksklusif.
+          // Pesan server jujur apa adanya; pindah binding HANYA via claim
+          // (install flow), bukan dari layar ini.
+          const err409 = loginErrorOf(first);
+          setServerError(err409.message || t('login_fail'));
+          return;
+        }
+        {
+          // Faktor 2 login staged: server meminta PIN terminal
+          // (PIN_REQUIRED/INVALID/LOCKED, 401/423) — tampilkan kolom PIN di
+          // bawah password; user isi lalu tekan Masuk lagi.
+          const loginErr = loginErrorOf(first);
+          if (
+            first.reached &&
+            (first.status === 401 || first.status === 423) &&
+            (loginErr.code === 'PIN_REQUIRED' ||
+              loginErr.code === 'PIN_INVALID' ||
+              loginErr.code === 'PIN_LOCKED')
+          ) {
+            setNeedTermPin(true);
+            setServerError(loginErr.message || t('login_fail'));
+            return;
+          }
         }
         // Offline/unconfigured: gate grant jujur — tanpa silent local login.
         const userId = await lookupLocalUserId(uname);
@@ -771,27 +1094,159 @@ export default function LoginScreen({ navigation }: Props) {
         setCandidate({ kind: 'offline', username: uname, userId });
         setStaffPin('');
         setPinError('');
+        setPinAttempts(0);
+        setPinLockUntil(0);
         setPinOpen(true);
         // JANGAN navigate manual ke Dashboard: GuardedStacks me-render ulang
         // bersyarat (tamu -> authed) dan stack authed mount dengan initial
         // Dashboard/Shift sendiri. Navigate sinkron di sini race melawan
         // setLoggedIn sehingga error "not handled by any navigator" di HP.
       } finally {
+        if (!handedOff) setBusy(false);
+      }
+    })();
+  };
+
+  /** Tahap-B login-first (F1): E01 lagi DENGAN terminalCode (+merchantId
+   * pilihan) memakai kredensial tahap-A — password tak diminta ulang. Inti
+   * tahap-B diparameterisasi (runStageB) agar auto-skip 1-cabang+1-terminal
+   * (S2) bisa memanggil jalur yang sama tanpa menunggu state picker.
+   * Sukses → cerminkan binding lokal (server sudah bind, lokal belum) via
+   * adoptTerminalBinding, lalu kandidat online seperti jalur utama (modal PIN
+   * staff + E29). PIN terminal yang dituntut server (PIN_REQUIRED) diminta di
+   * picker yang sama (pickPin), bukan form utama. Password tahap-A di-nol-kan
+   * dari memori usai tahap-B (desain F1 §2/§6: hanya transit di memori). */
+  const runStageB = (
+    data: { username: string; password: string; deviceId: string; branches: NormBranch[] },
+    branchId: string,
+    term: NormTerminal,
+    pin: string,
+  ) => {
+    setServerError('');
+    setBusy(true);
+    void (async () => {
+      try {
+        const merchantNum = Number(branchId);
+        const second = await callStaffLogin({
+          username: data.username,
+          password: data.password,
+          deviceId: data.deviceId,
+          terminalCode: term.code,
+          ...(Number.isFinite(merchantNum) && merchantNum > 0 ? { merchantId: merchantNum } : {}),
+          ...(pin.trim() ? { terminalPin: pin.trim() } : {}),
+        });
+        if (hasSessionMaterial(second)) {
+          // Server sudah bind device+user ke terminal ini; cerminkan ke store
+          // lokal (UNIFIKASI TULIS 3 store) agar fast-path + grant triple
+          // berlaku di login berikut. adopt = logout-safe (belum ada sesi).
+          try {
+            const pTerm = (second.body.terminal ?? {}) as Record<string, unknown>;
+            const pBranches = normBranches(second.body.branches);
+            const bName =
+              pBranches.find((b) => b.id === branchId)?.name ??
+              data.branches.find((b) => b.id === branchId)?.name ??
+              '';
+            adoptTerminalBinding({
+              terminalId: str(pTerm.terminalId) || term.id,
+              terminalCode: str(pTerm.terminalCode) || term.code,
+              branchId,
+              branchName: bName,
+              // Q1 (temuan review Trek 1): merchantName eksplisit = cermin
+              // bName segar — jangan biarkan fallback adopt mewarisi prev
+              // lintas-cabang. Pola sama seperti Install/TerminalPinScreen.
+              merchantName: bName,
+              tag: str(pTerm.tag) || term.tag,
+              deviceId: data.deviceId,
+            });
+          } catch (e) {
+            setServerError(e instanceof Error && e.message ? e.message : needBeText());
+            return;
+          }
+          const tookOver = second.body.tookOver as Record<string, unknown> | undefined;
+          const kickedUserId = str(tookOver?.kickedUserId ?? second.body.kickedUserId);
+          if (kickedUserId || second.body.wasKicked === true || second.body.kicked === true) {
+            setNotice(t('kicked_msg'));
+          }
+          setPickA(null);
+          setPickPin('');
+          setPickPinNeeded(false);
+          // F1 §2/§6: password fase-1 hanya transit di memori — kandidat
+          // 'online' TIDAK membawa password (jalur ini tak membaca
+          // candidate.password; faktor 3 = modal PIN staff via E29).
+          setCandidate({ kind: 'online', username: data.username, password: '', payload: second.body });
+          setStaffPin('');
+          setPinError('');
+          setPinAttempts(0);
+          setPinLockUntil(0);
+          setPinOpen(true);
+          return;
+        }
+        if (isExplicitReject(second)) {
+          setServerError(t('login_fail'));
+          return;
+        }
+        if (second.reached && second.status === 409) {
+          const err409 = loginErrorOf(second);
+          setServerError(err409.message || t('login_fail'));
+          return;
+        }
+        {
+          // Faktor 2 login staged di tahap-B: terminal pilihan ber-PIN →
+          // minta PIN di picker yang sama, user tekan Lanjut lagi.
+          const loginErr = loginErrorOf(second);
+          if (
+            second.reached &&
+            (second.status === 401 || second.status === 423) &&
+            (loginErr.code === 'PIN_REQUIRED' ||
+              loginErr.code === 'PIN_INVALID' ||
+              loginErr.code === 'PIN_LOCKED')
+          ) {
+            setPickPinNeeded(true);
+            setPickPin('');
+            setServerError(loginErr.message || t('login_fail'));
+            return;
+          }
+        }
+        setServerError(second.reached ? unboundText() : needBeText());
+      } finally {
         setBusy(false);
       }
     })();
   };
 
-  /** B1 langkah 2: gerbang PIN staff LOKAL (koreksi 2026-10-17 — server tak
-   * pernah memverifikasi PIN staff; E02 validate-pin = PIN terminal), lalu
-   * kunci sesi + konteks terminal.
-   * online (payload tahap-1 tersimpan) → verifikasi lokal → completeOnline
-   * (sesi dari respons terminal-login PERTAMA, tanpa call kedua);
-   * online-refetch (defensif) → ambil materi sesi TANPA staffPin → gerbang
-   * lokal → completeOnline (takeover ditahan untuk modal konfirmasi);
+  /** Lanjut dari picker (tombol Lanjut / onPress): validasi pilihan state
+   * lalu panggil inti tahap-B yang sama dengan auto-skip (runStageB). */
+  const submitPickA = () => {
+    if (busy || !pickA) return;
+    const branchId = pickBranch.trim();
+    const term = pickA.terminals.find((x) => x.id === pickTerminal.trim());
+    const termOk = term && (!term.merchantId || !branchId || term.merchantId === branchId);
+    if (!branchId || !termOk || !term) {
+      setServerError(t('pick_terminal_hint'));
+      return;
+    }
+    runStageB(pickA, branchId, term, pickPin);
+  };
+
+  /** B1 langkah 3 fase-1a: PIN user/workforce diverifikasi SERVER via E29
+   * (callPinVerify) DULU; gerbang lokal (passesLocalWorkforcePin) HANYA
+   * fallback bila server bilang USER_PIN_NOT_SET (400, belum enroll →
+   * enroll progresif) atau jaringan putus (offline honesty — grant sudah
+   * lolos di langkah 1). USER_PIN_INVALID/LOCKED = server menang (tolak).
+   * Sesi dikunci via completeOnline HANYA setelah salah satu gerbang lolos.
+   * online (payload tahap-1 tersimpan) → E29 → completeOnline (sesi dari
+   * respons terminal-login PERTAMA, tanpa call login kedua);
+   * online-refetch (defensif) → ambil materi sesi TANPA staffPin → E29 →
+   * gerbang lokal → completeOnline (takeover ditahan untuk modal konfirmasi);
    * offline → PIN vs hash grant. */
   const submitStaffPin = () => {
     if (pinBusy || !candidate) return;
+    // Modal dikunci sementara setelah 5x PIN salah (throttle offline).
+    if (Date.now() < pinLockUntil) {
+      const secs = Math.max(1, Math.ceil((pinLockUntil - Date.now()) / 1000));
+      setPinError(t('g_pin_offline_locked').split('{n}').join(String(secs)));
+      return;
+    }
     if (staffPin.trim().length < 4) {
       setPinError(t('login_pin_short'));
       return;
@@ -801,10 +1256,99 @@ export default function LoginScreen({ navigation }: Props) {
     void (async () => {
       try {
         const pin = staffPin.trim();
+        // GAP-14 owner-override (cek DULU, sebelum verdict normal): PIN owner
+        // meloloskan login kandidat dengan attribution approvedBy di sesi.
+        // Gagal override = lanjut jalur normal di bawah TANPA perubahan
+        // perilaku (verdict tetap milik jalur normal). Dilewati untuk
+        // online-refetch defensif (materi sesi belum ada — override di sana
+        // tak punya payload untuk dikunci; jalur normal yang menangani).
+        if (candidate.kind !== 'online-refetch') {
+          const ov = await verifyOwnerOverridePin(
+            pin,
+            candidate.kind === 'online'
+              ? str(candidate.payload.authToken ?? candidate.payload.token ?? candidate.payload.authKey)
+              : undefined,
+          );
+          if (ov.ok && ov.approverUserId) {
+            const approvedBy = `owner:${ov.approverUserId}`;
+            if (candidate.kind === 'offline') {
+              const oCtx = await resolveTermCtx();
+              const oDev = oCtx?.deviceId || (await getContractDeviceId());
+              const oTerm = (oCtx?.terminalId ?? '').trim();
+              if (!oCtx || !oTerm || !oDev) {
+                setPinError(needBeText());
+                return;
+              }
+              // Override offline: expiry grant kandidat TETAP diperiksa
+              // (paritas TOCTOU jalur normal), tapi PIN-vs-grant dilewati —
+              // PIN owner ≠ hash grant kandidat; owner menjadi penjamin.
+              const oRecheck = describeGrantProblem(candidate.userId, oTerm, oDev);
+              if (oRecheck) {
+                setPinError(oRecheck === 'grant-expired' ? grantExpiredText() : needBeText());
+                return;
+              }
+              try {
+                await completeOffline(candidate.userId, candidate.username, pin, approvedBy);
+              } catch (e) {
+                setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+                return;
+              }
+              setPinAttempts(0);
+              setPinLockUntil(0);
+              setPinOpen(false);
+              return;
+            }
+            const oCtx = await resolveTermCtx();
+            if (!oCtx) {
+              setPinError(needBeText());
+              return;
+            }
+            const oDev = oCtx.deviceId || (await getContractDeviceId());
+            const oUserId = str(candidate.payload.userId ?? candidate.payload.user_id);
+            if (!oUserId) {
+              setPinError(pinWrongText());
+              return;
+            }
+            await completeOnline(
+              candidate.payload, pin, oCtx, oDev, candidate.username,
+              ov.pinVersion, approvedBy,
+            );
+            try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
+            setPinOpen(false);
+            return;
+          }
+        }
         if (candidate.kind === 'offline') {
-          // L1 offline: PIN vs hash grant (fail-closed; tanpa bypass).
-          if (!verifyGrantPin(pin)) {
-            setPinError(pinWrongText());
+          // L1 offline: PIN vs hash grant TRIPLE-spesifik (grant-map F1 —
+          // grant terminal lain milik user yang sama tak boleh lolos).
+          // completeOffline me-resolve binding sendiri; triple di sini
+          // di-resolve sama agar verifikasi dan sesi konsisten.
+          const offCtx = await resolveTermCtx();
+          const offDevice = offCtx?.deviceId || (await getContractDeviceId());
+          const offTerm = (offCtx?.terminalId ?? '').trim();
+          if (!offCtx || !offTerm || !offDevice) {
+            setPinError(needBeText());
+            return;
+          }
+          // TOCTOU (temuan review Trek 1): grant bisa kedaluwarsa selagi modal
+          // PIN terbuka — verifyGrantPin hanya hash-compare tanpa cek expiry.
+          // Periksa ulang seperti jalur refetch sebelum completeOffline.
+          const recheck = describeGrantProblem(candidate.userId, offTerm, offDevice);
+          if (recheck) {
+            setPinError(recheck === 'grant-expired' ? grantExpiredText() : needBeText());
+            return;
+          }
+          if (!verifyGrantPin(pin, { userId: candidate.userId, terminalId: offTerm, deviceId: offDevice })) {
+            // Throttle: 5x salah → kunci modal 60 dtk (anti brute-force).
+            const n = pinAttempts + 1;
+            if (n >= 5) {
+              setPinLockUntil(Date.now() + 60_000);
+              setPinAttempts(0);
+              setPinError(t('g_pin_offline_locked').split('{n}').join('60'));
+            } else {
+              setPinAttempts(n);
+              setPinError(pinWrongText());
+            }
             return;
           }
           try {
@@ -815,12 +1359,13 @@ export default function LoginScreen({ navigation }: Props) {
             setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
             return;
           }
+          setPinAttempts(0);
+          setPinLockUntil(0);
           setPinOpen(false);
           return;
         }
-        // B1 langkah 2 online single-stage: materi sesi dari respons PERTAMA;
-        // PIN = gerbang VERIFIKASI LOKAL (passesLocalWorkforcePin) — bukan
-        // verifikasi server, dan TANPA panggilan server kedua.
+        // B1 langkah 3 online fase-1a: E29 pin-verify server DULU (faktor PIN
+        // user/workforce); gerbang lokal HANYA fallback NOT_SET/offline.
         const ctx = await resolveTermCtx();
         if (!ctx) {
           setPinError(needBeText());
@@ -833,6 +1378,51 @@ export default function LoginScreen({ navigation }: Props) {
             // Payload tanpa identitas = jangan buat sesi (fail-closed).
             setPinError(pinWrongText());
             return;
+          }
+          const termObj = (candidate.payload.terminal ?? {}) as Record<string, unknown>;
+          const grantObj = (candidate.payload.grant ?? {}) as Record<string, unknown>;
+          const verifyTermId = str(termObj.terminalId ?? grantObj.terminalId) || ctx.terminalId;
+          // Teruskan JWT tahap-B dari payload ( pola completeOnline:490 ) —
+          // sesi tersimpan belum ada di titik ini (adopt me-logout).
+          const stageToken = str(candidate.payload.authToken ?? candidate.payload.token ?? candidate.payload.authKey);
+          const pv = await callPinVerify(verifyTermId, pin, stageToken || undefined);
+          if (pv.reached) {
+            if (pv.status >= 200 && pv.status < 300) {
+              // Server memverifikasi — langsung kunci sesi (tanpa gerbang lokal).
+              // B: bandingkan versi grant vs server (sembuhkan, bukan blokir).
+              noteGrantPinVersion(userId, verifyTermId, deviceId, pv.pinVersion);
+              await completeOnline(candidate.payload, pin, ctx, deviceId, candidate.username, pv.pinVersion);
+              // F14-flush: login ONLINE sukses = momen kirim utang revoke.
+              try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
+              setPinOpen(false);
+              return;
+            }
+            if (!(pv.status === 400 && pv.errorCode === 'USER_PIN_NOT_SET')) {
+              // USER_PIN_INVALID (401) / USER_PIN_LOCKED (423) / lainnya =
+              // server menang — tampilkan pesan server jujur.
+              setPinError(pv.serverMessage || pinWrongText());
+              return;
+            }
+            // USER_PIN_NOT_SET → belum enroll: lanjut ke gerbang lokal di
+            // bawah (enroll progresif via passesLocalWorkforcePin).
+          }
+          // E29 tak terjangkau → status enroll PIN di server TAK DIKETAHUI.
+          // Gerbang lokal hanya bila record PIN lokal SUDAH ada (user kembali,
+          // server pernah konfirmasi). Tanpa record → fail-closed need_be:
+          // seed-if-absent di sini menerima PIN apa pun (= downgrade faktor
+          // server; temuan review Trek 1). Enroll progresif tetap via
+          // USER_PIN_NOT_SET yang dikonfirmasi server (pv.reached, di atas).
+          if (!pv.reached) {
+            let hasPinRecord = false;
+            try {
+              hasPinRecord = !!(await loadPinRecord(userId));
+            } catch {
+              hasPinRecord = false;
+            }
+            if (!hasPinRecord) {
+              setPinError(needBeText());
+              return;
+            }
           }
           if (!(await passesLocalWorkforcePin(userId, pin))) {
             setPinError(pinWrongText());
@@ -862,10 +1452,29 @@ export default function LoginScreen({ navigation }: Props) {
             setPinError(pinWrongText());
             return;
           }
-          // PIN tetap gerbang lokal (server tak memverifikasi staff PIN).
-          if (!(await passesLocalWorkforcePin(userId, pin))) {
-            setPinError(pinWrongText());
-            return;
+          // E29 fase-1a: PIN user diverifikasi server DULU; gerbang lokal
+          // HANYA fallback NOT_SET (enroll progresif) / offline.
+          const rTermObj = (p.terminal ?? {}) as Record<string, unknown>;
+          const rGrantObj = (p.grant ?? {}) as Record<string, unknown>;
+          const rVerifyTermId = str(rTermObj.terminalId ?? rGrantObj.terminalId) || ctx.terminalId;
+          const rpv = await callPinVerify(rVerifyTermId, pin);
+          if (rpv.reached) {
+            if (!(rpv.status >= 200 && rpv.status < 300)) {
+              if (rpv.status === 400 && rpv.errorCode === 'USER_PIN_NOT_SET') {
+                // Belum enroll → lanjut ke gerbang lokal di bawah.
+              } else {
+                // INVALID/LOCKED/lainnya = server menang.
+                setPinError(rpv.serverMessage || pinWrongText());
+                return;
+              }
+            }
+          }
+          if (!rpv.reached || (rpv.status === 400 && rpv.errorCode === 'USER_PIN_NOT_SET')) {
+            // Fallback gerbang lokal: NOT_SET (enroll progresif) atau offline.
+            if (!(await passesLocalWorkforcePin(userId, pin))) {
+              setPinError(pinWrongText());
+              return;
+            }
           }
           const tookOver = p.tookOver as Record<string, unknown> | undefined;
           const kickedUserId = str(tookOver?.kickedUserId ?? p.kickedUserId);
@@ -875,7 +1484,11 @@ export default function LoginScreen({ navigation }: Props) {
             setTakeover({ kickedUserId, payload: p, pin });
             return;
           }
-          await completeOnline(p, pin, ctx, deviceId, candidate.username);
+          if (rpv.reached && rpv.status >= 200 && rpv.status < 300) {
+            // B: bandingkan versi grant vs server (sembuhkan, bukan blokir).
+            noteGrantPinVersion(userId, rVerifyTermId, deviceId, rpv.pinVersion);
+          }
+          await completeOnline(p, pin, ctx, deviceId, candidate.username, rpv.reached ? rpv.pinVersion : undefined);
           // F14-flush: login ONLINE sukses = momen kirim utang revoke.
           try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
           setPinOpen(false);
@@ -885,10 +1498,11 @@ export default function LoginScreen({ navigation }: Props) {
           setPinError(pinWrongText());
           return;
         }
-        // Sempat offline di tengah langkah 2: fallback grant jujur.
+        // Sempat offline di tengah langkah 2: fallback grant jujur (triple-
+        // spesifik, grant-map F1).
         const userId = await lookupLocalUserId(candidate.username);
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
-        if (!problem && userId && verifyGrantPin(pin)) {
+        if (!problem && userId && verifyGrantPin(pin, { userId, terminalId: ctx.terminalId, deviceId })) {
           try {
             await completeOffline(userId, candidate.username, pin);
           } catch (e) {
@@ -896,6 +1510,8 @@ export default function LoginScreen({ navigation }: Props) {
             setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
             return;
           }
+          setPinAttempts(0);
+          setPinLockUntil(0);
           setPinOpen(false);
           return;
         }
@@ -1036,7 +1652,9 @@ export default function LoginScreen({ navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanOpen]);
 
-  const card = (which: 'email' | 'qr') => {
+  // Kartu mode login: 'account' (username-atau-email + password + deviceId)
+  // atau 'qr' (pairing QR instalasi, bila QR_LOGIN_VISIBLE).
+  const card = (which: 'account' | 'qr') => {
     const on = mode === which;
     return (
       <TouchableOpacity
@@ -1045,12 +1663,12 @@ export default function LoginScreen({ navigation }: Props) {
         onPress={() => { setMode(which); setError(false); setServerError(''); }}>
         <View style={[styles.iconBox, on ? styles.iconBoxOn : styles.iconBoxOff]}>
           <Image
-            source={which === 'email' ? (on ? ICONS.userBlue : ICONS.userGray) : on ? ICONS.qrBlue : ICONS.qrGray}
+            source={which === 'account' ? (on ? ICONS.userBlue : ICONS.userGray) : on ? ICONS.qrBlue : ICONS.qrGray}
             style={styles.iconImg}
             resizeMode="contain"
           />
         </View>
-        {which === 'email' ? (
+        {which === 'account' ? (
           <Text style={[styles.cardLabel, on ? styles.cardLabelOn : styles.cardLabelOff]}>
             <Text style={styles.cardLabelBold}>{t('g_login_card_user')}</Text> {t('g_login_card_or')}{' '}
             <Text style={styles.cardLabelBold}>{t('g_login_card_email')}</Text>
@@ -1127,13 +1745,104 @@ export default function LoginScreen({ navigation }: Props) {
               <Text style={styles.pinCancelT}>{t('c_back')}</Text>
             </TouchableOpacity>
           </View>
+        ) : pickA ? (
+        /* BODY-A2/B1: stage 'pick-terminal' (F1 login-first) — server
+         * mengembalikan cabar + terminal tempat user BOLEH login. Pilih
+         * cabang lalu terminal, tekan Lanjut (submitPickA = tahap-B:
+         * E01 lagi + terminalCode + merchantId + PIN terminal bila dituntut).
+         * Kembali → setPickA(null), kembali ke form kredensial. */
+        <View style={styles.form}>
+          <Text style={styles.title}>{t('pick_terminal_title')}</Text>
+          <Text style={[styles.sub, styles.pickHint]}>{t('pick_terminal_hint')}</Text>
+          {serverError ? (
+            <View style={styles.errorRow}>
+              <Image source={ICONS.fail} style={styles.errorIcon} resizeMode="contain" />
+              <Text style={styles.errorText}>{serverError}</Text>
+            </View>
+          ) : null}
+          {pickA.branches.length > 1 ? (
+            <>
+              <Text style={[styles.label, styles.labelGap]}>
+                {t('pick_branch_label')}<Text style={styles.star}>*</Text>
+              </Text>
+              <View style={styles.pickRow}>
+                {pickA.branches.map((b) => (
+                  <TouchableOpacity
+                    key={b.id}
+                    onPress={() => {
+                      setPickBranch(b.id);
+                      // Ganti cabang = reset pilihan terminal (anti stale —
+                      // temuan review Trek 1: Lanjut enabled tapi selalu gagal).
+                      setPickTerminal('');
+                    }}
+                    style={[styles.pickChip, pickBranch === b.id && styles.pickChipOn]}
+                    hitSlop={8}>
+                    <Text style={[styles.pickChipT, pickBranch === b.id && styles.pickChipTOn]}>
+                      {b.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : null}
+          <Text style={[styles.label, styles.labelGap]}>
+            {t('pick_terminal_label')}<Text style={styles.star}>*</Text>
+          </Text>
+          {normTerminals(pickA.terminals, pickBranch).length === 0 ? (
+            <Text style={styles.pickEmpty}>{t('pick_terminal_empty')}</Text>
+          ) : (
+            <View style={styles.pickRow}>
+              {normTerminals(pickA.terminals, pickBranch).map((tm) => (
+                <TouchableOpacity
+                  key={tm.id}
+                  onPress={() => setPickTerminal(tm.id)}
+                  style={[styles.pickChip, pickTerminal === tm.id && styles.pickChipOn]}
+                  hitSlop={8}>
+                  <Text style={[styles.pickChipT, pickTerminal === tm.id && styles.pickChipTOn]}>
+                    {tm.name || tm.code}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {pickPinNeeded ? (
+            <>
+              <Text style={[styles.label, styles.labelGap]}>
+                {t('inst_term_pin_title')}<Text style={styles.star}>*</Text>
+              </Text>
+              <View style={styles.inputBox}>
+                <TextInput
+                  style={styles.input}
+                  value={pickPin}
+                  onChangeText={(v) => { setPickPin(v); setServerError(''); }}
+                  placeholder={t('inst_term_pin_ph')}
+                  placeholderTextColor={INPUT_BORDER}
+                  secureTextEntry
+                  keyboardType="number-pad"
+                />
+              </View>
+            </>
+          ) : null}
+          <View style={styles.spacer} />
+          <AppButton
+            size="md"
+            title={t('pick_terminal_continue')}
+            onPress={submitPickA}
+            disabled={busy || !pickTerminal.trim()}
+            style={[styles.primary, (busy || !pickTerminal.trim()) && styles.primaryIdle]}
+            textStyle={styles.primaryT}
+          />
+          <TouchableOpacity onPress={() => { setPickA(null); setPassword(''); setServerError(''); }} hitSlop={12} style={styles.pinCancel}>
+            <Text style={styles.pinCancelT}>{t('c_back')}</Text>
+          </TouchableOpacity>
+        </View>
         ) : (<>
         <View style={styles.cards}>
-          {card('email')}
+          {card('account')}
           {QR_LOGIN_VISIBLE && card('qr')}
         </View>
 
-        {(mode === 'email' || !QR_LOGIN_VISIBLE) ? (
+        {(mode === 'account' || !QR_LOGIN_VISIBLE) ? (
           <View style={styles.form}>
             <Text style={styles.label}>
               {t('g_login_label_user')}<Text style={styles.star}>*</Text>
@@ -1179,6 +1888,30 @@ export default function LoginScreen({ navigation }: Props) {
                 />
               </TouchableOpacity>
             </View>
+
+            {needTermPin ? (
+              <>
+                <Text style={[styles.label, styles.labelGap]}>
+                  {t('inst_term_pin_title')}<Text style={styles.star}>*</Text>
+                </Text>
+                <View style={[styles.inputBox, (error || serverError) && styles.inputBoxError]}>
+                  <Image
+                    source={ICONS.password}
+                    style={[styles.fieldIcon, (error || serverError) && { tintColor: RED }]}
+                    resizeMode="contain"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    value={termPin}
+                    onChangeText={(v) => { setTermPin(v); setError(false); setServerError(''); }}
+                    placeholder={t('inst_term_pin_ph')}
+                    placeholderTextColor={INPUT_BORDER}
+                    secureTextEntry
+                    keyboardType="numeric"
+                  />
+                </View>
+              </>
+            ) : null}
 
             {error || serverError ? (
               <View style={styles.errorRow}>
@@ -1280,6 +2013,9 @@ export default function LoginScreen({ navigation }: Props) {
             </Text>
             {t('login_pin_hint') !== 'login_pin_hint' ? (
               <Text style={styles.pinSub}>{t('login_pin_hint')}</Text>
+            ) : null}
+            {t('login_pin_owner_hint') !== 'login_pin_owner_hint' ? (
+              <Text style={styles.pinSub}>{t('login_pin_owner_hint')}</Text>
             ) : null}
             <TextInput
               style={styles.pinInput}
@@ -1599,6 +2335,16 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', marginTop: 12,
   },
   outlineT: { fontFamily: fonts.bold, fontSize: 16, color: BLUE },
+  pickHint: { marginBottom: 4 },
+  pickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  pickChip: {
+    borderWidth: 1.5, borderColor: BORDER, borderRadius: 22,
+    paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFFFFF',
+  },
+  pickChipOn: { backgroundColor: BLUE_PALE, borderColor: BLUE },
+  pickChipT: { fontSize: 14, fontFamily: fonts.regular, color: TITLE_DARK },
+  pickChipTOn: { fontFamily: fonts.bold, color: BLUE },
+  pickEmpty: { fontFamily: fonts.regular, fontSize: 13, color: GREY, marginTop: 4 },
   qrHero: { alignItems: 'center', marginTop: 48 },
   tablet: {
     width: 280, height: 200, borderRadius: 18, backgroundColor: '#111111',

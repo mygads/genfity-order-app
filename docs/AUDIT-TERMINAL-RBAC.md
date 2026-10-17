@@ -46,6 +46,8 @@
 
 ## 3. Temuan per Dimensi
 
+> STATUS 2026-10-17 (lajur auth-app, Trek 1 + follow-up B/C/D/E + sweep): temuan arsitektur-lama di bawah DISUPERSEDE sebagian — E01 `terminal-login` single-stage wired (auth-01/02/06), flow bind E03 + PIN terminal E02/E14 wired (auth-03), grant triple user‖terminal‖device + fail-closed seed-offline (auth-07), tag + pairing dari respons login (auth-11), G2 allow-list live sisi BE (auth-12 gerbang masa depan). Baris-baris dipertahankan sebagai riwayat; acuan implementasi = SPEC §3–§7 + CONTRACT §9–§10.
+
 ### 3.1 Auth
 
 **Sudah sesuai (tidak perlu tindakan):**
@@ -355,8 +357,8 @@ Respons `terminal-login` (dan `validate`/`cashier-login` yang diperluas) minimal
 
 | Temuan | Status | Koreksi |
 |---|---|---|
-| auth-02 | Disempurnakan | Terminal picker bukan per login melainkan **per bind** (fresh device/re-bind); tetap belum ada |
-| auth-03 | Direvisi | PIN terminal **bukan** langkah login; gap sebenarnya: (a) flow bind + PIN terminal belum ada; (b) field PIN staff di login belum ada; (c) matriks approval PIN owner belum lengkap |
+| auth-02 | Disempurnakan + wired 2026-10-17 | Terminal picker **per bind** (fresh device/re-bind); klien `fetchBranches`/`fetchTerminals` wired (`InstallScreen`, `TerminalPickerScreen`) |
+| auth-03 | Direvisi + wired 2026-10-17 | PIN terminal **bukan** langkah login; flow bind + PIN terminal WIRED (`bindTerminal`/`validateTerminalPin`); PIN staff = verifikasi lokal pasca-E01; tersisa matriks approval PIN owner (E23 TBD) |
 | navgate-03 | Direvisi | "Login 4 langkah" menjadi: **bind 3 langkah (sekali)** + **login 3 faktor (per sesi)** + kick |
 | termreg-login-flow, contract-login-flow, contract-terminal-pin, offline-login-no-branch-terminal-pin-flow | Baca ulang | Tafsirkan lewat §7.1–§7.2 |
 | auth-07, offline-rbac-fail-open-info | Implikasi baru | Kick tidak dapat ditegakkan saat offline → butuh aturan rekonsiliasi saat reconnect (Q13) |
@@ -377,11 +379,11 @@ Respons `terminal-login` (dan `validate`/`cashier-login` yang diperluas) minimal
 
 | Method | Path (usulan) | Tujuan | Menutup temuan |
 |---|---|---|---|
-| POST | `/api/v1/terminals/{id}/bind` | Bind device: `{pin, deviceId}` → `{bound, kickedUserId?}` | SESS-03 |
-| POST | `/api/v1/terminals/{id}/unbind` | Owner lepas binding device (revoke) | SESS-09 |
-| GET | `/api/v1/terminals/{id}/occupant` | Sesi aktif terminal (atau via presence WS) | SESS-01/02 |
-| — | Push `SESSION_KICKED` ke device lama | Notifikasi logout paksa + alasan | SESS-02 |
-| POST | `/api/v1/auth/staff-login` | Login `{username, password, staffPin}` + cek RBAC + okupansi | SESS-04, auth-01 |
+| POST | `/api/v1/terminals/{id}/bind` | Bind device: `{pin, deviceId}` → `{bound, kickedUserId?}` — **LIVE (E03)** | SESS-03 |
+| POST | `/api/v1/terminals/{id}/unbind` | Owner lepas binding device (revoke) — **LIVE (E04, owner-only)** | SESS-09 |
+| GET | `/api/v1/terminals/{id}/occupant` | Sesi aktif terminal (atau via presence WS) — **MASIH MISSING (E05)** | SESS-01/02 |
+| — | Push `SESSION_KICKED` ke device lama | **DICABUT 2026-10-17 (K1: tak ada frame push; diganti event `takeover` SSE + `tookOver` ke device baru)** | SESS-02 |
+| POST | `~~/api/v1/auth/staff-login~~` | **DICABUT — diganti E01 `terminal-login` single-stage (SPEC §14); `staffPin` bukan bagian kontrak** | SESS-04, auth-01 |
 | POST | `/api/v1/approvals` | Approval `{action: void\|cancel\|compliment, ownerPin, ...}` | SESS-05 |
 | GET | `/api/v1/audit/owner-actions` | Rekap pemakaian PIN owner | SESS-08 |
 
@@ -428,24 +430,24 @@ Respons `terminal-login` (dan `validate`/`cashier-login` yang diperluas) minimal
 ### 10.1 Q11 CLOSED — login 3 faktor sekuensial (PIN via modal)
 
 - Urutan: form **username + password** → valid → **modal input PIN staff** → sesi dibuat. Ketiganya wajib; PIN staff BUKAN pengganti password.
-- Dampak: tambah langkah modal PIN di `LoginScreen` pasca-validate; PIN diverifikasi ke BE (`POST /api/v1/auth/staff-login {username, password, staffPin}`); saat offline, PIN dicocokkan ke hash grant cache (umur grant: Q6 tetap terbuka).
+- Dampak: tambah langkah modal PIN di `LoginScreen` pasca-validate; PIN staff = **VERIFIKASI LOKAL app** (koreksi 2026-10-17: arah lama "PIN diverifikasi ke BE via `POST /api/v1/auth/staff-login`" DICABUT — `staff-login` diganti E01 single-stage, SPEC §14); saat offline, PIN dicocokkan ke hash grant cache (umur grant: Q6 CLOSED 7 hari sliding).
 
 ### 10.2 Q12 CLOSED — picker di bind-time + tombol re-bind / keluar branch
 
 - Device ter-bound tidak pindah branch sendiri; pindah = aksi eksplisit lewat tombol **re-bind / keluar branch** di app (usulan penempatan: kecil di bawah sapaan merchant-terminal pada login screen ter-bound, dan/atau di Settings).
-- Re-bind = ulangi flow bind (pilih branch → pilih terminal → PIN terminal). Otorisasi yang dibutuhkan untuk re-bind + nasib binding lama: Q14 tetap terbuka.
+- Re-bind = ulangi flow bind (pilih branch → pilih terminal → PIN terminal). Otorisasi re-bind: **Q14 DECIDED 2026-10-17** — PIN terminal tujuan cukup (tanpa owner); binding lama auto-cabut + notif menumpang pola takeover (SPEC §15).
 
 ### 10.3 Q13 CLOSED — kick: tolak lama, terima baru, notif ke yang baru
 
 - Aturan: **sesi login fresh selalu menang**; sesi lama di-revoke.
 - Notifikasi takeover ke **user baru** ("Anda mengambil alih terminal X; sesi sebelumnya diakhiri").
-- Implementasi: saat online → revoke real-time + push `SESSION_KICKED` ke device lama bila reachable; device lama yang sedang offline belajar saat reconnect (server sudah menandai sesi revoked → paksa logout + tampilkan pesan). Login offline tetap diizinkan via grant cache; konflik sesi diselesaikan server saat reconnect dengan aturan yang sama (baru menang).
+- Implementasi: saat online → revoke real-time; device lama belajar TANPA push (koreksi K1 2026-10-17: arah lama "push `SESSION_KICKED` bila reachable" DICABUT — tak ada frame push sisi server) via event `takeover` SSE terminal + pencocokan pola sisi-klien; device lama yang sedang offline belajar saat reconnect (server sudah menandai sesi revoked → paksa logout + tampilkan pesan). Login offline tetap diizinkan via grant cache; konflik sesi diselesaikan server saat reconnect dengan aturan yang sama (baru menang).
 - Menutup arah `SESS-01/02` dan `offline-rbac-fail-open-info` (kecuali umur grant Q6).
 
 ### Status pertanyaan tersisa
 
 - Q7 (hibrida UUID + tersegmen): menunggu konfirmasi — mengunci skema DB + struk + kontrak push.
-- Terbuka: Q14 (otorisasi re-bind + nasib device lama), Q15 (audit trail PIN owner), Q2 (flow PIN via QR), Q4 (shift-gate display/dapur), Q6 (umur grant offline-login), Q8 (print-job dari BE), Q9 (stale vs offline-empty), Q10 (ketegasan 1 HP = 1 terminal).
+- Terbuka: Q2 (E25 login-qr; qr-issue/consume mendarat 2026-10-17), Q4 (shift-gate display/dapur), Q6 (umur grant offline-login), Q9 (stale vs offline-empty), Q10 (ketegasan 1 HP = 1 terminal). CLOSED 2026-10-17: Q14 (PIN terminal tujuan cukup), Q15 (retensi audit 90 hari), Q8 (print-job BE).
 
 ## 11. Keputusan ronde 3 (2026-10-17)
 
@@ -473,7 +475,7 @@ Respons `terminal-login` (dan `validate`/`cashier-login` yang diperluas) minimal
 ### Status pertanyaan tersisa
 
 - Q7 (hibrida UUID + tersegmen), Q6 (umur grant offline-login) — menahan Fase 1–3.
-- Terbuka non-blokir: Q14 (otorisasi re-bind), Q15 (audit trail PIN owner), Q2 (flow PIN via QR), Q4 (shift-gate display/dapur — catatan: tutup shift sudah pasti PIN staff), Q8 (print-job dari BE), Q9 (blank vs stale-berpenanda), Q10 (ketegasan 1 HP = 1 terminal).
+- Terbuka non-blokir: Q2 (E25 login-qr), Q4 (shift-gate display/dapur — catatan: tutup shift sudah pasti PIN staff), Q9 (blank vs stale-berpenanda), Q10 (ketegasan 1 HP = 1 terminal). CLOSED 2026-10-17: Q14, Q15, Q8 (lihat SPEC §15).
 
 ## 12. Penguncian Q6 + Q7 — model 100% terkunci untuk Fase 1–3 (2026-10-17)
 

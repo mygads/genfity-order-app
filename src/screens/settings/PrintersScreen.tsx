@@ -92,7 +92,9 @@ function previewText(s: Station, hint: string | null, L: { test: string; role: s
  * pemanggil menolak eksplisit, bukan mengirim target buta ke native. */function stationTarget(s: Station): PrinterTarget | null { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); const h = (host ?? '').trim(); if (!h) return null; return { transport: 'lan', host: h, port: Number(portRaw ?? 9100) || 9100 };
 }
 
-if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); if (!m) return null; return { transport: 'usb', vendorId: Number(m[1]), productId: Number(m[2]) }; } const addr = s.address.trim(); if (!addr) return null; if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (!mac) return null; return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master.
+if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); if (!m) return null; return { transport: 'usb', vendorId: Number(m[1]), productId: Number(m[2]) }; } const addr = s.address.trim(); if (!addr) return null; if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (!mac) return null; return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station (local-only M9-3: tanpa push master;
+ * alamat/MAC per-terminal justru milik perangkat ini — pull hanya menyentuh
+ * kolom milik server, lihat upsert parsial 'station' di lib/master.ts).
  * M14: peran dipetakan via roleToPrinterType + UPSERT kolom-terkelola (kolom
  * server lain lestari; binding terminalCode/branchId tetap di cache JSON). */async function persistStation(s: Station): Promise<void> {
   // R53: tanpa branch klaim, tulis DB/outbox ditahan — cache JSON tetap menyimpan.
@@ -585,6 +587,8 @@ function backupBindings(ss: Station[]): void {
           ))}
         </View>
         <AppButton title={t('printers.addStation')} onPress={addStation} disabled={!stName.trim()} style={styles.navyBlock} />
+        {/* M9-3: tambah/hapus station = local-only (tanpa push master). */}
+        <Text style={styles.hint}>{t('master.localOnlyNote')}</Text>
       </View>
 
       {preview ? (

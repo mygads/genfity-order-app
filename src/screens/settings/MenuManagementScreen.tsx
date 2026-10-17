@@ -390,6 +390,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
         </View>
       ) : null}
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
+      {/* M9-3: ubah menu = local-only (tanpa push master; pull server-wins). */}
+      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted, paddingHorizontal: 16, marginTop: 6 }}>{t('master.localOnlyNote')}</Text>
 
       {/* Tablet: kartu menu 2 kolom; phone tetap 1 kolom (wadah transparan). */}
       <View style={isTablet ? styles.gridTablet : undefined}>

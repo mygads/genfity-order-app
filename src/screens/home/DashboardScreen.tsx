@@ -10,6 +10,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { PayDonut, WeekBars, type PaySlice, type WeekPoint } from '../../components/MiniCharts';
 import { useLang } from '../../lib/i18n';
 import { ensureShiftOpen, getShiftStatus } from '../../lib/shiftGuard';
+import { terminalLogout } from '../../lib/terminalApi';
 import { useConnectivity } from '../../hooks/useConnectivity';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -289,6 +290,12 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const doLogout = () => {
+    // E31 fase-1a: terminal-logout best-effort (fire-and-forget; device tetap
+    // bound) — gagal jaringan = abaikan, logout lokal tetap jalan.
+    try {
+      const dev = (getSession()?.deviceId || '').trim();
+      if (dev) void terminalLogout(dev).catch(() => {});
+    } catch {}
     try {
       (navigation as any)?.reset({ index: 0, routes: [{ name: 'Login' as never }] });
     } catch {}

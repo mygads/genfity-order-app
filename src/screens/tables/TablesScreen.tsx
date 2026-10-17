@@ -655,6 +655,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               {t('tbl_manage_title')}
             </Text>
             <Text style={[s.modalHint, isTablet && s.modalHintBig]}>{t('tbl_manage_hint')}</Text>
+            {/* M9-3: tambah/hapus meja = local-only (tanpa push master). */}
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>{t('master.localOnlyNote')}</Text>
             <View style={s.inputRow}>
               <View style={[s.inputHalf, s.inputHalfWrap]}>
                 <AppInput

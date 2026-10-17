@@ -41,6 +41,11 @@ export interface Session {
   loginAt?: string;
   /** true = sesi dibuat offline dari grant cache (rekonsiliasi saat reconnect). */
   offline?: boolean;
+  /** GAP-14 owner-override attribution: 'owner:<approverUserId>' bila sesi
+   * dikunci lewat PIN owner sebagai pengganti PIN staff di modal login
+   * (LoginScreen submitStaffPin). Absen = login normal tanpa override.
+   * Murni jejak audit lokal (persist ikut sesi); bukan kredensial. */
+  approvedBy?: string;
   outlet: string;
   shift: string;
   clockIn: string;
@@ -56,7 +61,10 @@ export interface Binding {
   terminalCode: string;
   branchId: string;
   branchName: string;
-  merchantName: string;
+  /** Q1 (2026-10-17): branch IS merchant — nama merchant hanya cermin display.
+   * Opsional; diderivasi dari branchName saat disimpan (saveBinding/adopt).
+   * Jangan dipakai sebagai kunci/otorisasi. */
+  merchantName?: string;
   /** Satu dari 5 tag kanonis, disimpan lowercase (kasir|dapur|view_pelanggan|view_queue|full_access). */
   tag: string;
   /** Untuk tag view_pelanggan: terminal kasir pasangan (aturan 1:1, BE E15). */
@@ -74,6 +82,10 @@ export interface Binding {
  * dibuat saat auth online sukses (E01 staff-login), terikat triple
  * (user, terminal, device), TTL 7 hari sliding via max_offline_grant_days
  * (server-wins). staffPinHash adalah PinRecord — TIDAK PERNAH plaintext.
+ * pinVersion = versi PIN hybrid dari E29 pin-verify (0 = belum diketahui):
+ * cache PIN lokal diinvalidasi saat sync bila versi server berbeda.
+ * Satu user boleh memegang N terminal (kasir+dapur+N view, kapasitas per-tag
+ * di server) — store menyimpan SATU grant per triple (grant-map F1).
  */
 export interface Grant {
   userId: string;
@@ -84,6 +96,15 @@ export interface Grant {
   grantedAt: string;
   /** Kedaluwarsa efektif saat grant dibuat (ISO). */
   expiresAt: string;
+  /** Versi PIN server (E29 pinVersion); default 0 bila belum diketahui. */
+  pinVersion: number;
+}
+
+/** Triple identitas grant (kunci grant-map). */
+export interface GrantTriple {
+  userId: string;
+  terminalId: string;
+  deviceId: string;
 }
 
 /**
@@ -133,6 +154,10 @@ let binding: Binding | null = null;
 let bindingRestored = false;
 let grant: Grant | null = null;
 let grantRestored = false;
+/** Grant-map F1: satu grant per triple user|terminal|device (multi-terminal). */
+let grantMap: Record<string, Grant> = {};
+/** Kunci triple grant aktif (sesi berjalan); null = belum ada. */
+let activeGrantKey: string | null = null;
 let maxOfflineGrantDays = DEFAULT_MAX_OFFLINE_GRANT_DAYS;
 let policyDirty = false;
 let policyRestored = false;
@@ -183,7 +208,8 @@ function isBindingLike(v: unknown): v is Binding {
     typeof b['branchId'] === 'string' &&
     (b['branchId'] as string).trim() !== '' &&
     typeof b['branchName'] === 'string' &&
-    typeof b['merchantName'] === 'string' &&
+    // Q1: merchantName opsional (binding lama tanpa kunci ini tetap valid).
+    (b['merchantName'] === undefined || typeof b['merchantName'] === 'string') &&
     typeof b['tag'] === 'string' &&
     typeof b['boundAt'] === 'string'
   );
@@ -229,7 +255,8 @@ export function saveBinding(b: Binding): Binding {
     terminalCode: b.terminalCode.trim(),
     branchId: b.branchId.trim(),
     branchName: b.branchName,
-    merchantName: b.merchantName,
+    // Q1: materialisasi cermin display — simpanan selalu ada string.
+    merchantName: (b.merchantName ?? b.branchName ?? '').trim(),
     // Kanon SPEC §11.1: tag simpanan SELALU satu dari 5 nilai —
     // resolveTerminalTag memaksa explicit default 'full_access' untuk
     // string asing/kosong (tanpa '' diam-diam yang merusak DrawerMenu dkk).
@@ -294,11 +321,15 @@ export function adoptTerminalBinding(
     throw new Error('[session] adoptTerminalBinding: tag terminal tak dikenal');
   }
   const prev = binding;
+  // Q1: merchantName hanya cermin — input > binding lama > branchName (selalu
+  // non-kosong di titik ini, lolos validasi di atas).
   const merchantName =
-    String(input?.merchantName ?? '').trim() || prev?.merchantName || '';
+    String(input?.merchantName ?? '').trim() || prev?.merchantName || branchName;
   // Sesi user lama berakhir di device ini; binding lama tak boleh terbawa.
+  // Grant-map F1: hanya triple device ini yang dibuang (device pindah
+  // terminal → triple lama basi); grant user lain di device ini dipertahankan.
   logout();
-  clearGrant();
+  clearGrantsForDevice(deviceId);
   const boundAt = new Date().toISOString();
   const next = saveBinding({
     terminalId,
@@ -411,16 +442,72 @@ function isGrantLike(v: unknown): v is Grant {
   );
 }
 
+/** Kunci kanonis grant-map: user|terminal|device (trim, case-sensitive). */
+export function grantKeyOf(t: GrantTriple): string {
+  return `${String(t.userId ?? '').trim()}|${String(t.terminalId ?? '').trim()}|${String(t.deviceId ?? '').trim()}`;
+}
+
+function normPinVersion(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+}
+
+function normalizeGrant(g: Grant): Grant {
+  return {
+    userId: g.userId.trim(),
+    terminalId: g.terminalId.trim(),
+    deviceId: g.deviceId.trim(),
+    staffPinHash: g.staffPinHash,
+    grantedAt: g.grantedAt,
+    expiresAt: g.expiresAt,
+    pinVersion: normPinVersion((g as { pinVersion?: unknown }).pinVersion),
+  };
+}
+
+interface GrantStoreEnvelope {
+  v: 1;
+  active?: string;
+  grants: Record<string, Grant>;
+}
+
+function persistGrantMap(): void {
+  try {
+    const env: GrantStoreEnvelope = { v: 1, grants: grantMap };
+    if (activeGrantKey) env.active = activeGrantKey;
+    void setItem(LS_GRANT, JSON.stringify(env));
+  } catch {
+    /* abaikan */
+  }
+}
+
 /** Baca store ke memori (hanya mengisi bila memori kosong — tak pernah
- *  menimpa grant yang lebih baru hasil saveGrant/touchGrant). */
+ *  menimpa grant yang lebih baru hasil saveGrant/touchGrant). Legacy
+ *  single-grant JSON otomatis dimigrasi menjadi satu entri grant-map. */
 async function loadGrantStore(): Promise<Grant | null> {
   grantRestored = true;
-  if (!grant) {
+  if (!grant && Object.keys(grantMap).length === 0) {
     try {
       const raw = await getItem(LS_GRANT);
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
-        if (isGrantLike(parsed)) grant = parsed;
+        const env = parsed as Partial<GrantStoreEnvelope>;
+        if (env && typeof env === 'object' && env.grants && typeof env.grants === 'object') {
+          for (const [k, v] of Object.entries(env.grants)) {
+            if (isGrantLike(v)) grantMap[k] = normalizeGrant(v);
+          }
+          if (typeof env.active === 'string' && grantMap[env.active]) {
+            activeGrantKey = env.active;
+            grant = grantMap[env.active];
+          }
+        } else if (isGrantLike(parsed)) {
+          // Legacy: satu grant polos → migrasi ke map + persist envelope.
+          const g = normalizeGrant(parsed);
+          const k = grantKeyOf(g);
+          grantMap[k] = g;
+          activeGrantKey = k;
+          grant = g;
+          persistGrantMap();
+        }
       }
     } catch {
       /* abaikan */
@@ -437,15 +524,32 @@ function restoreGrant(): void {
   });
 }
 
-export function getGrant(): Grant | null {
+/**
+ * Grant aktif sesi berjalan; opsional triple untuk baca terarah tanpa
+ * mengubah sesi aktif. Tanpa triple: grant aktif memori, fallback satu-satunya
+ * entri map (kompatibilitas single-terminal lama), else null.
+ */
+export function getGrant(triple?: GrantTriple): Grant | null {
   restoreGrant();
-  return grant;
+  if (triple && (triple.userId || triple.terminalId || triple.deviceId)) {
+    const g = grantMap[grantKeyOf(triple)];
+    return g ?? null;
+  }
+  if (grant) return grant;
+  const keys = Object.keys(grantMap);
+  if (keys.length === 1) {
+    grant = grantMap[keys[0]];
+    activeGrantKey = keys[0];
+    return grant;
+  }
+  return null;
 }
 
 /**
- * Simpan grant dari hasil auth online (E01 terminal-login single-stage, live
- * 2026-10-17). Menolak plaintext
- * PIN/password bila ikut terbawa di objek (fail-fast, bukan bypass diam).
+ * Simpan grant dari hasil auth online (E01 terminal-login login-first F1).
+ * Menulis ke grant-map di bawah kunci triple-nya SEKALIGUS menjadikannya
+ * grant aktif. Menolak plaintext PIN/password bila ikut terbawa di objek
+ * (fail-fast, bukan bypass diam).
  */
 export function saveGrant(g: Grant): Grant {
   const raw = g as unknown as Record<string, unknown>;
@@ -461,24 +565,103 @@ export function saveGrant(g: Grant): Grant {
   if (!isGrantLike(g)) {
     throw new Error('[session] saveGrant: grant tak lengkap');
   }
-  grant = {
-    userId: g.userId.trim(),
-    terminalId: g.terminalId.trim(),
-    deviceId: g.deviceId.trim(),
-    staffPinHash: g.staffPinHash,
-    grantedAt: g.grantedAt,
-    expiresAt: g.expiresAt,
-  };
-  void setItem(LS_GRANT, JSON.stringify(grant));
+  const n = normalizeGrant(g);
+  const k = grantKeyOf(n);
+  grantMap[k] = n;
+  grant = n;
+  activeGrantKey = k;
+  persistGrantMap();
   emit();
   return grant;
 }
 
-/** Hapus grant cache (dipakai R1 re-bind + revoke/ganti-role; SPEC §7). */
-export function clearGrant(): void {
-  grant = null;
-  void removeItem(LS_GRANT);
+/**
+ * Hapus grant cache. Tanpa triple: hapus SEMUA (semantik lama — dipakai
+ * re-bind/ganti cabang/exitBranchAll). Dengan triple: hapus hanya entri itu
+ * (dipakai revokeKickedSession agar terminal lain user yang sama tak ikut
+ * tercabut). SPEC §7.
+ */
+export function clearGrant(triple?: GrantTriple): void {
+  if (triple) {
+    const k = grantKeyOf(triple);
+    delete grantMap[k];
+    if (activeGrantKey === k) {
+      activeGrantKey = null;
+      grant = null;
+    }
+  } else {
+    grantMap = {};
+    activeGrantKey = null;
+    grant = null;
+  }
+  try {
+    if (Object.keys(grantMap).length === 0) {
+      void removeItem(LS_GRANT);
+    } else {
+      persistGrantMap();
+    }
+  } catch {
+    /* abaikan */
+  }
   emit();
+}
+
+/**
+ * Hapus SEMUA entri grant milik satu device (dipakai adoptTerminalBinding:
+ * device pindah terminal → triple lama device ini basi; grant user yang sama
+ * di device LAIN tak tersentuh karena store per-device, dan grant user lain
+ * di device ini dipertahankan).
+ */
+export function clearGrantsForDevice(deviceId: string): void {
+  restoreGrant();
+  const dev = String(deviceId ?? '').trim();
+  if (!dev) return;
+  let changed = false;
+  for (const k of Object.keys(grantMap)) {
+    if (grantMap[k]?.deviceId === dev) {
+      delete grantMap[k];
+      changed = true;
+      if (activeGrantKey === k) {
+        activeGrantKey = null;
+        grant = null;
+      }
+    }
+  }
+  if (!changed) return;
+  try {
+    if (Object.keys(grantMap).length === 0) {
+      void removeItem(LS_GRANT);
+    } else {
+      persistGrantMap();
+    }
+  } catch {
+    /* abaikan */
+  }
+  emit();
+}
+
+/**
+ * Tambal pinVersion satu entri grant (sumber versi PIN hybrid E29).
+ * Mengembalikan grant terbarui, atau null bila triple tak punya grant.
+ */
+export function setGrantPinVersion(triple: GrantTriple, version: number): Grant | null {
+  restoreGrant();
+  const k = grantKeyOf(triple);
+  const g = grantMap[k];
+  if (!g) return null;
+  const n = { ...g, pinVersion: normPinVersion(version) };
+  grantMap[k] = n;
+  if (activeGrantKey === k) grant = n;
+  persistGrantMap();
+  emit();
+  return n;
+}
+
+/** Baca pinVersion tersimpan satu triple; null = tak ada grant (wajib online). */
+export function getGrantPinVersion(triple: GrantTriple): number | null {
+  restoreGrant();
+  const g = grantMap[grantKeyOf(triple)];
+  return g ? g.pinVersion : null;
 }
 
 /**
@@ -492,6 +675,8 @@ export function buildGrant(args: {
   deviceId: string;
   staffPin: string;
   grantedAt?: string;
+  /** Versi PIN server (E29 pinVersion) bila sudah diketahui saat membangun. */
+  pinVersion?: number;
 }): Grant {
   const userId = String(args.userId ?? '').trim();
   const terminalId = String(args.terminalId ?? '').trim();
@@ -516,17 +701,22 @@ export function buildGrant(args: {
     hash: r.hash,
     updatedAt: grantedAt,
   };
-  return { userId, terminalId, deviceId, staffPinHash, grantedAt, expiresAt };
+  return { userId, terminalId, deviceId, staffPinHash, grantedAt, expiresAt, pinVersion: normPinVersion(args.pinVersion) };
 }
 
-/** Cocokkan PIN kandidat ke hash grant tersimpan (login offline L1). */
-export function verifyGrantPin(pin: string): boolean {
+/**
+ * Cocokkan PIN kandidat ke hash grant tersimpan (login offline L1).
+ * Triple opsional = verifikasi terarah (dipakai LoginScreen offline yang
+ * sudah tahu user+terminal+device); tanpa triple = grant aktif (kompatibel).
+ */
+export function verifyGrantPin(pin: string, triple?: GrantTriple): boolean {
   restoreGrant();
-  if (!grant) return false;
+  const g = triple ? (grantMap[grantKeyOf(triple)] ?? null) : grant;
+  if (!g) return false;
   const clean = String(pin ?? '');
   if (!clean) return false;
   try {
-    return verifyPinHash(clean, grant.staffPinHash);
+    return verifyPinHash(clean, g.staffPinHash);
   } catch {
     return false;
   }
@@ -572,7 +762,15 @@ export function touchGrant(): Grant | null {
     grantedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + getMaxOfflineGrantDays() * DAY_MS).toISOString(),
   };
-  void setItem(LS_GRANT, JSON.stringify(grant));
+  // Write-through grant-map: entri triple yang sama ikut diperpanjang.
+  try {
+    const k = grantKeyOf(grant);
+    grantMap[k] = grant;
+    activeGrantKey = k;
+  } catch {
+    /* abaikan */
+  }
+  persistGrantMap();
   emit();
   return grant;
 }
@@ -636,17 +834,18 @@ export function describeGrantProblem(
   restoreGrant();
   restoreBinding();
   restore();
-  const g = grant;
-  if (!g) return 'no-grant';
   const u = String(userId ?? '').trim();
   const t = String(terminalId ?? '').trim();
-  if (!u || !t || g.userId !== u || g.terminalId !== t) {
-    return 'grant-mismatch';
-  }
+  if (!u || !t) return 'grant-mismatch';
   const dev = String(
     deviceId ?? binding?.deviceId ?? current?.deviceId ?? '',
   ).trim();
-  if (!dev || g.deviceId !== dev) return 'grant-mismatch';
+  if (!dev) return 'grant-mismatch';
+  // Grant-map F1: cari entri triple EKSAK (tanpa fallback grant aktif milik
+  // triple lain — user multi-terminal tak boleh lolos memakai grant terminal
+  // lain).
+  const g = grantMap[grantKeyOf({ userId: u, terminalId: t, deviceId: dev })];
+  if (!g) return 'no-grant';
   const now = Date.now();
   const exp = Date.parse(g.expiresAt);
   if (!Number.isFinite(exp)) return 'grant-expired';
@@ -896,7 +1095,15 @@ export function loginEmployee(
   const keepTerminalCode = binding?.terminalCode ?? prev?.terminalCode;
   const keepTag = binding?.tag ?? prev?.terminalTag;
   const keepDevice = binding?.deviceId ?? prev?.deviceId;
-  const keepMerchant = binding?.merchantName ?? prev?.merchantName;
+  // Q1 (temuan review Trek 1): merchantName murni cermin display — trim, dan
+  // JANGAN warisi prev lintas-cabang. Urutan: cermin binding sendiri >
+  // branchName binding sendiri > prev HANYA bila cabang tak berganti.
+  const keepMerchant =
+    (binding?.merchantName ?? '').trim() ||
+    (binding?.branchName ?? '').trim() ||
+    (!binding?.branchId || binding.branchId === prev?.branchId
+      ? (prev?.merchantName ?? '').trim()
+      : '');
   if (keepBranch) current.branchId = keepBranch;
   if (keepTerminalId) current.terminalId = keepTerminalId;
   if (keepTerminalCode) current.terminalCode = keepTerminalCode;
@@ -924,9 +1131,10 @@ export function loginEmployee(
 
 export function logout(): void {
   if (current) {
-    // E06/E07 revoke server-side BELUM ADA: catat utang revoke agar di-flush
-    // worker sync saat endpoint mendarat (SPEC §7/O1). Binding + grant cache
-    // SENGAJA dipertahankan agar login ulang offline masih bisa (SPEC §2).
+    // E06 revoke = POST /auth/terminal-logout (kanonis; /auth/logout memang
+    // tak ada — BUKAN 404/zombie): catat utang revoke agar di-flush worker
+    // sync (milik lane sync). Binding + grant cache SENGAJA dipertahankan
+    // agar login ulang offline masih bisa (SPEC §2).
     const who = current.userId ?? current.username;
     try {
       markPendingRevoke({
@@ -1006,6 +1214,8 @@ export function subscribeKickNotice(fn: Listener): () => void {
  * Cabut sesi + grant lokal perangkat yang ditendang. kickedUserId opsional:
  * bila diisi dan tak cocok dengan sesi aktif (userId/username) → abaikan
  * (false; bukan sesi kami). Tanpa argumen = cabut apa pun yang aktif.
+ * Grant-map F1: HANYA entri triple sesi ini yang dicabut — grant user yang
+ * sama di terminal lain tetap berlaku.
  * Selalu menandai pendingRevoke (reason 'kicked') agar revoke server-side
  * menyusul saat E06/E07 mendarat. Tak pernah melempar; true = sesi dicabut.
  */
@@ -1014,7 +1224,7 @@ export function revokeKickedSession(kickedUserId?: string): boolean {
     const who = current?.userId ?? current?.username ?? '';
     const k = String(kickedUserId ?? '').trim();
     if (k && who && k !== who && k !== (current?.username ?? '')) return false;
-    if (!current && !grant) return false;
+    if (!current && !grant && Object.keys(grantMap).length === 0) return false;
     try {
       markPendingRevoke({
         ...(who ? { userId: who } : {}),
@@ -1024,7 +1234,16 @@ export function revokeKickedSession(kickedUserId?: string): boolean {
       /* abaikan */
     }
     try {
-      clearGrant();
+      // Grant-map F1: HANYA entri triple sesi ini yang dicabut — grant user
+      // yang sama di terminal lain (kasir/dapur/view lain) tetap berlaku.
+      const tu = String(current?.userId ?? '').trim();
+      const tt = String(binding?.terminalId ?? current?.terminalId ?? '').trim();
+      const td = String(binding?.deviceId ?? current?.deviceId ?? '').trim();
+      if (tu && tt && td) {
+        clearGrant({ userId: tu, terminalId: tt, deviceId: td });
+      } else {
+        clearGrant();
+      }
     } catch {
       /* abaikan */
     }

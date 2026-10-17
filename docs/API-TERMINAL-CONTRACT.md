@@ -285,9 +285,9 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
   `offline:true`. PIN terminal **tidak** dipakai saat login.
 - **R1 — Re-bind / keluar branch**: tombol kecil di bawah sapaan login
   screen ter-bound + tombol di Settings. Otorisasi: PIN terminal tujuan
-  (wajib); perlu owner atau tidak = **Q14 TERBUKA** (usulan default: PIN
-  terminal cukup; binding lama otomatis dicabut + notifikasi ke device
-  lama bila reachable). Efek: binding lama dicabut (`E04`), grant cache
+  (wajib); owner TIDAK diperlukan — **Q14 DECIDED 2026-10-17** (adopsi
+  ALIGNMENT §7.6; binding lama auto-cabut + notif ke device lama menumpang
+  pola takeover). Efek: binding lama dicabut (`E04`), grant cache
   lama dihapus, session aktif di-logout-dulu, lanjut picker B1 (branch
   boleh beda). Unbind+bind lewat endpoint (atomik per langkah);
   **dilarang** mengedit store binding manual.
@@ -358,7 +358,8 @@ didobel di sini agar tidak divergen). Ringkas status + bentuk:
   device baru di `InstallScreen`; fixture `terminal-bind.json`
   bawa `kickedUserId`) → unbind owner E04 (WIRED app-side —
   inline `apiFetch(ApiPath.terminalUnbind)` di `SelectBranchScreen`
-  dalam `exitBranch`, best-effort sebelum local clear) → occupant E05
+  dalam `exitBranch`, best-effort sebelum local clear; klien bernama
+  `unbindTerminal` tersedia 2026-10-17) → occupant E05
   (PLANNED/UNWIRED — `fetchOccupant` di `terminalApi.ts` tanpa
   pemanggil) → logout revoke E06 (WIRED app-side — `logoutRevoke`
   fire-and-forget di `DrawerMenu` + `flushPendingRevokes`
@@ -372,12 +373,17 @@ didobel di sini agar tidak divergen). Ringkas status + bentuk:
   `fetchBranches` (dipanggil `InstallScreen`) + E09
   `fetchTerminals`/`fetchBranchTerminals` (dipanggil
   `InstallScreen` + `TerminalPickerScreen`; fixture
-  `branch-terminals.json`). PLANNED/UNWIRED = E08, E10–E14, E15/E16
-  pair-unpair, E17–E22 staff-CRUD (hanya konstanta path di
-  `server.ts`, nol pemanggil).
+  `branch-terminals.json`). WIRED 2026-10-17 (lajur auth-app) = E10
+  `createTerminal` + E11 `patchTerminal` (+ `apiPatch`) + E12
+  `deleteTerminal` + E14 `setTerminalPin` + E15 `pairTerminalView` /
+  E16 `unpairTerminalView`. PLANNED/UNWIRED = E08, E17–E22 staff-CRUD
+  (hanya konstanta path di `server.ts`, nol pemanggil).
 - **E23–E25**: approvals `{action:void|cancel|compliment, ownerPin,
-  refId}` → audit owner-actions → login-qr (TBD, Q2).
-  (PLANNED/UNWIRED — hanya konstanta path di `server.ts`,
+  refId}` → audit owner-actions → login-qr (E25-login-qr TBD, Q2).
+  WIRED 2026-10-17 = `qr-issue` (`issueTerminalQr`) + `qr-consume`
+  (`consumeTerminalQr`, advisory-only) — tersisa alur login sekali-pakai
+  E25 + UI. PLANNED/UNWIRED = E23/E24
+  (hanya konstanta path di `server.ts`,
   nol pemanggil; pengecualian: `pin-reset` di luar tabel dipakai
   `ForgotPinScreen` via `terminalContract.ts`.)
 - **E26–E27**: SSE per terminal (`cart-view`/`payment-qr` scope kasir

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
+import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';/** Dev fallback berlabel jelas (B2): HANYA tampil bila BE tak terjangkau,
@@ -71,9 +71,65 @@ const DEV_BRANCHES: BranchItem[] = [
     });
   };
 
-  /** R1: keluar branch — konfirmasi dulu, lalu cabut binding + sesi. */
+  /** GAP-11: keluar branch = role-change (peran → full_access) sehingga
+   * WAJIB gerbang PIN supervisor/owner via modal di bawah (bukan langsung
+   * Alert). State modal PIN. */
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+
+  /** R1: keluar branch — PIN supervisor/owner dulu (GAP-11), lalu konfirmasi,
+   * lalu cabut binding + sesi. Tanpa binding = tak ada yang dicabut, langsung
+   * konfirmasi warisan. */
   const exitBranch = () => {
     const b = getBinding();
+    if (!b) {
+      confirmExitBranch(null, undefined);
+      return;
+    }
+    setPin('');
+    setPinError('');
+    setPinOpen(true);
+  };
+
+  /** Verifikasi PIN modal keluar-branch: eskalasi lokal owner-only
+   * ('settings.edit' — Staff di-deny di seed) dengan throttle persisten
+   * bawaan verifyLocalEscalation (5x/60 dtk) + offline honesty (DB belum
+   * siap/unbound = tolak dengan pesan jujur, bukan bypass). Sukses → lanjut
+   * konfirmasi dengan attribution approvedBy. */
+  const submitExitPin = () => {
+    if (pinBusy) return;
+    const clean = pin.replace(/[^0-9]/g, '');
+    if (!clean || clean.length < 4) {
+      setPinError(t('sup_invalid'));
+      return;
+    }
+    setPinBusy(true);
+    setPinError('');
+    void (async () => {
+      try {
+        const res = await verifyLocalEscalation(clean, 'settings.edit');
+        if (!res.ok) {
+          setPinError(res.message);
+          return;
+        }
+        const b = getBinding();
+        const approvedBy = `owner:${(res.userId ?? '').trim() || 'unknown'}`;
+        setPinOpen(false);
+        setPin('');
+        confirmExitBranch(b, approvedBy);
+      } finally {
+        setPinBusy(false);
+      }
+    })();
+  };
+
+  /** Konfirmasi + eksekusi cabut binding (isi Alert warisan R1; approvedBy =
+   * attribution GAP-11, diteruskan best-effort ke body unbind server — field
+   * aditif, server boleh mengabaikan; jejak lokal: sesi/grant ikut dihapus
+   * exitBranchAll sehingga atribusi ini yang tersisa di sisi server). */
+  const confirmExitBranch = (b: ReturnType<typeof getBinding>, approvedBy?: string) => {
     Alert.alert(t('exit_branch'), b ? `${b.branchName || b.branchId} · ${b.terminalCode}` : '', [
       { text: t('c_cancel'), style: 'cancel' },
       {
@@ -89,8 +145,23 @@ const DEV_BRANCHES: BranchItem[] = [
               try {
                 await apiFetch(
                   ApiPath.terminalUnbind.replace('{id}', encodeURIComponent(termId)),
-                  { body: devId ? { deviceId: devId } : {} },
+                  // GAP-11 attribution: approvedBy aditif best-effort (server
+                  // boleh mengabaikan field tak dikenal; tanpa ini unbind
+                  // tanpa jejak siapa yang menyetujui role-change).
+                  { body: { ...(devId ? { deviceId: devId } : {}), ...(approvedBy ? { approvedBy } : {}) } },
                 );
+              } catch { /* abaikan: local clear sudah sah */ }
+            })();
+          }
+          // E30: occupant melepas binding MILIKNYA sendiri via releaseTerminal —
+          // best-effort (offline-safe, never block UI, fire-and-forget): gagal
+          // = abaikan, local clear di bawah tetap sah. WAJIB sebelum
+          // exitBranchAll menghapus state lokal. Butuh terminalId + deviceId;
+          // tanpa keduanya tak ada yang di-release.
+          if (termId && devId) {
+            void (async () => {
+              try {
+                await releaseTerminal(termId, devId);
               } catch { /* abaikan: local clear sudah sah */ }
             })();
           }
@@ -201,6 +272,39 @@ const DEV_BRANCHES: BranchItem[] = [
           style={styles.primary}
         />
       </View>
+      {/* GAP-11: modal PIN supervisor/owner untuk keluar-branch (role-change).
+       * Pola verifyAttendancePin-loop ada di verifyLocalEscalation
+       * (submitExitPin); PIN tak pernah disimpan. */}
+      <Modal visible={pinOpen} transparent animationType="fade" onRequestClose={() => setPinOpen(false)}>
+        <View style={styles.pinOverlay}>
+          <View style={styles.pinCard}>
+            <Text style={styles.pinTitle}>{t('exit_pin_title')}</Text>
+            <Text style={styles.pinSub}>{t('exit_pin_hint')}</Text>
+            <TextInput
+              style={styles.pinInput}
+              value={pin}
+              onChangeText={(v) => { setPin(v.replace(/[^0-9]/g, '').slice(0, 6)); setPinError(''); }}
+              placeholder={t('cx_pin_ph')}
+              placeholderTextColor={colors.faint}
+              secureTextEntry
+              keyboardType="number-pad"
+              maxLength={6}
+              editable={!pinBusy}
+            />
+            {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
+            <AppButton
+              size="md"
+              title={t('exit_branch')}
+              onPress={submitExitPin}
+              disabled={pinBusy || pin.replace(/[^0-9]/g, '').length < 4}
+              style={styles.primary}
+            />
+            <TouchableOpacity onPress={() => setPinOpen(false)} hitSlop={12} style={styles.pinCancel}>
+              <Text style={styles.pinCancelT}>{t('c_cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScreenRoot>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF', overflow: 'hidden' },
@@ -258,4 +362,13 @@ const DEV_BRANCHES: BranchItem[] = [
     alignItems: 'center', justifyContent: 'center',
   },
   primaryIdle: { backgroundColor: '#F6C28B' },
-  primaryT: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF' },});
+  primaryT: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF' },
+  /** GAP-11: modal PIN supervisor/owner (overlay + kartu ala LoginScreen). */
+  pinOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  pinCard: { width: '100%', maxWidth: 420, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20 },
+  pinTitle: { fontFamily: fonts.bold, fontSize: 17, color: TITLE_DARK, textAlign: 'center' },
+  pinSub: { fontFamily: fonts.regular, fontSize: 13, color: GREY, marginTop: 8, textAlign: 'center', lineHeight: 19 },
+  pinInput: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 16, height: 56, fontFamily: fonts.bold, fontSize: 18, color: TITLE_DARK, letterSpacing: 6, textAlign: 'center', marginTop: 16 },
+  pinError: { fontFamily: fonts.medium, fontSize: 13, color: '#D33A3F', textAlign: 'center', marginTop: 10 },
+  pinCancel: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  pinCancelT: { fontFamily: fonts.medium, fontSize: 14, color: colors.navy, textDecorationLine: 'underline' },});

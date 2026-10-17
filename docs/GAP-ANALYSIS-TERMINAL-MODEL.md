@@ -78,18 +78,18 @@ Legenda: OK = pertahankan · PARTIAL = setengah jalan · MISSING = belum ada · 
 |---|---|---|---|
 | 1 | Staff relasi multi-branch | MISSING | `ms_posuser.branchId` kolom tunggal; semua seed B001; tanpa junction table (`dbSchema.ts:14-16`) |
 | 2 | Pilih branch saat login bila >1 | MISSING | LoginScreen hanya username+PIN+QR; pilih cabang hanya di alur install |
-| 3 | RBAC akses-terminal | MISSING | `access.ts` hanya kunci aksi; body login `{username,pin}` tanpa identitas terminal |
+| 3 | RBAC akses-terminal | PARTIAL 2026-10-17 — BE live G2 allow-list (`pos_staff_terminal_access`, 00156; 403 `TERMINAL_ACCESS_DENIED`); app-side wiring TBD | `access.ts` hanya kunci aksi; body login `{username,pin}` tanpa identitas terminal |
 | 4 | Role kanonis Owner/Staff | OK | `access.ts:29-61` + normalizer legacy; pertahankan, tolak role tak dikenal eksplisit |
 
 **Ikatan, claim, presence**
 
 | # | Poin spec | Status | Bukti kode |
 |---|---|---|---|
-| 5 | PIN terminal terpisah | MISSING | Klaim = kode + deviceID (`InstallScreen.tsx:27,32`; `apiSource.ts:310-324`); grep `terminalPin/pinTerminal` nihil |
+| 5 | PIN terminal terpisah | OK 2026-10-17 — E02 validate-pin + E03 bind atomik + E14 set-pin wired (`validateTerminalPin`/`bindTerminal`/`setTerminalPin`) | Klaim = kode + deviceID (`InstallScreen.tsx:27,32`; `apiSource.ts:310-324`); grep `terminalPin/pinTerminal` nihil |
 | 6 | Ikatan device-terminal persisten lewat logout | OK | `genfity.server.terminal` + `genfity.device.id` stabil; logout hanya hapus sesi |
-| 7 | Welcome merchant+terminal di login | MISSING | Sapaan generik "Selamat Datang Juragan!"; nol pemakaian `getTerminal()` di LoginScreen |
-| 8 | Claim logout-kan user lama | MISSING | `loginEmployee` menimpa buta; nol handler kick; satu-satunya "KICK" di repo = tendangan laci kasir |
-| 9 | 1 user di N terminal | OK | Body login tanpa deviceID; authKey dibuang; login local-first per-device independen |
+| 7 | Welcome merchant+terminal di login | OK 2026-10-17 — sapaan "merchant — terminal" wired (`terminal_welcome` i18n) | Sapaan generik "Selamat Datang Juragan!"; nol pemakaian `getTerminal()` di LoginScreen |
+| 8 | Claim logout-kan user lama | OK 2026-10-17 — takeover "baru menang" wired dua lapis (notice `kicked_msg` device baru + watcher SSE `takeover` device lama; TANPA push `SESSION_KICKED`, TANPA 401-kick — K1) | `loginEmployee` menimpa buta; nol handler kick; satu-satunya "KICK" di repo = tendangan laci kasir |
+| 9 | 1 user di N terminal | OK — kapasitas ditegakkan server-side 2026-10-17 (1 kasir + 1 dapur + N view + N queue per user; full_akses eksklusif; 409 `TERMINAL_TAG_CONFLICT`) | Body login tanpa deviceID; authKey dibuang; login local-first per-device independen |
 
 **PIN & atribusi**
 
@@ -125,12 +125,12 @@ Legenda: OK = pertahankan · PARTIAL = setengah jalan · MISSING = belum ada · 
 
 - **Fase 1 — fondasi (app-only)**: 5 role perangkat 1:1 dengan tag; cabut lock DAPUR; kunci PELANGGAN/QUEUE (tutup backdoor Settings, `callNext`, CTA Idle); tutup shift PIN staff; modal PIN pasca-login; sapaan merchant+terminal.
 - **Fase 2 — identitas offline**: UUID v7 PK + nomor provisional/kanonis (§3); printer scope per `{branchId, terminalCode}`; tombol rebind/keluar-branch; kolom audit approver (`closedBy`, pemegang PIN void/cancel).
-- **Fase 3 — presence (butuh BE)**: endpoint occupant/bind + push `SESSION_KICKED` + handler `logout()` + 401 session-taken; pilih branch saat login; relasi multi-branch; RBAC akses-terminal.
+- **Fase 3 — presence (SEBAGIAN MENDARAT 2026-10-17)**: bind E03 + claim/takeover + SSE `takeover` (pengganti push `SESSION_KICKED` — K1: tak ada frame push) + logout-revoke = `terminal-logout` (pengganti handler `logout()`; 401 = gagal auth final, BUKAN session-taken) sudah live; tersisa: endpoint occupant E05, pilih branch pra-login lawan BE real, relasi multi-branch.
 - **Fase 4 — display**: model pairing kasir-display; layar queue level branch; SSE + fallback polling; QR bayar dinamis per order; view = no-local-poll + banner offline.
 
 ## 7. Kontrak BE yang dibutuhkan (di luar repo app ini)
 
-`bind/unbind/occupant`, PIN terminal verify, `SESSION_KICKED`, `auth/supervisor-approve` (aturan 6-digit + pemilik per outlet/merchant), penomoran kanonis saat sync, daftar branch+terminal per staff, RBAC akses-terminal. Repo Go saat ini belum punya entitas terminal — domain terminal harus dibangun backend-first.
+`bind/unbind/occupant`, PIN terminal verify, `SESSION_KICKED`, `auth/supervisor-approve` (aturan 6-digit + pemilik per outlet/merchant), penomoran kanonis saat sync, daftar branch+terminal per staff, RBAC akses-terminal. UPDATE 2026-10-17: domain terminal BE SUDAH live (grup rute terminal, migrasi 00149–00156, E01/E03/E04/E06-terminal-logout/E29/E30/E32/G2-access/S-READINESS/qr-issue+consume); klaim "belum punya entitas terminal" BASI. Tersisa: E05 occupant, E08, E13-dedikasi, E17–E25-login-qr, penomoran kanonis, supervisor-approve.
 
 ## 8. File kunci
 

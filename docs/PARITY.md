@@ -56,7 +56,7 @@ Legenda:
 | M9. Menu + stok + printing | DONE | `MenuManagementScreen.tsx` form Ubah (nama/harga/grup) persist `ms_menu` + `ms_branchmenu` + outbox, unduh gambar nyata (tanpa stub); `StockScreen.tsx` guard NaN + persist; `MenuPrintingScreen.tsx` routing persist (footnote mock dihapus) | Tanpa sisa |
 | M10. Display + idle + QR | DONE | `CustomerDisplayScreen.tsx` antrean + promo + `display.ts:18` (`subscribeDisplay`) / `:73` (`publishDisplay`); `IdleScreen.tsx` rotasi promo 5 dtk; `QrScanScreen.tsx` `CameraView` QR + 4 tab + ScreenHeader + toggle ID/EN; teks tablet varian Big; emoji display dihapus | T13 DONE (36 PNG 18 rute phone+tablet 14.44-14.46 + 10 PNG verifikasi Receipt/Success/Recap/Sync/QrScan; header tunggal terkonfirmasi di semua; nol emdash di UI; MoveTable/MoveItems header ganda hilang; Success phone "Lihat Riwayat" penuh grid 2x2). Quirk tersisa: tombol panel kanan tablet-Receipt tergeser/terpotong di web (phone pixel-perfect, style identik HEAD) - cek di device fisik (lihat T10) |
 | M11. Sync + log + bantuan + tentang | DONE | `sync.ts:86` (`enqueueSync`) + `:100` (`listOutbox`) + `:125` (`pushAll`) + `:170` (`enqueueOutbox`); `master.ts:99` (`pullMaster`) 6 domain; `SyncScreen.tsx` watermark + blokir E00044 >7 hari; `LogScreen.tsx:42` (`logApp`) persisten + filter tag + ekspor; `HelpScreen.tsx` 8 FAQ i18n; `AboutScreen.tsx` | Tanpa sisa |
-| M12. Auth + install | DONE | T1 DONE: `LoginScreen.tsx:15-16,127-141` revalidasi via `validateEmployee` + cocokkan/seed hash `verifyPinHash`/`savePinHash` (`src/lib/pin.ts`) + kunci sesi `loginEmployee`, tautan klaim `login_claim`; `CreatePinScreen.tsx:10,35,40-42` terima `userId` + `createPinOnServer` + `savePinHash`; 6 route tamu (Intro/Install/SelectBranch/InstallProgress/CreatePin/ForgotPin) + Login 2-panel + `WebView` registrasi; `session.ts:67` (`loginDemo`) + `:75` (`logout`); PIN demo lokal hanya demo | Catatan minor: peta eksplisit kode E401 belum ada (gagal server tampilkan `login_fail` generik; tautan klaim selalu tersedia); `CreatePin` fallback `userId='U07'` bila alur login belum dinamis; `pin.ts` fallback web via AsyncStorage (butuh dev-client produksi). Sisa: revalidasi dinamis penuh |
+| M12. Auth + install | DONE | T1 DONE: `LoginScreen.tsx:15-16,127-141` revalidasi via `validateEmployee` + cocokkan/seed hash `verifyPinHash`/`savePinHash` (`src/lib/pin.ts`) + kunci sesi `loginEmployee`, tautan klaim `login_claim`; `CreatePinScreen.tsx:10,35,40-42` terima `userId` + `createPinOnServer` + `savePinHash`; 6 route tamu (Intro/Install/SelectBranch/InstallProgress/CreatePin/ForgotPin) + Login 2-panel + `WebView` registrasi; `session.ts:67` (`loginDemo`) + `:75` (`logout`); PIN demo lokal hanya demo | Catatan minor: peta eksplisit kode E401 belum ada (gagal server tampilkan `login_fail` generik; tautan klaim selalu tersedia); `CreatePin` fallback `userId='U07'` bila alur login belum dinamis; `pin.ts` fallback web via AsyncStorage (butuh dev-client produksi). Sisa: revalidasi dinamis penuh. UPDATE 2026-10-17 (lajur auth-app, Trek 1): mekanisme login DIGANTI — E01 single-stage + PIN lokal + grant triple + E29; `validateEmployee`/`loginEmployee`/CreatePin-server legacy. Status parity layar tak berubah |
 
 ## 3. Rumus-BE kanonik
 
@@ -113,8 +113,10 @@ lunas jika remaining == 0
    `esb_api/pull/*`, `esb_apiv9/main/get-*`) - belum tertangkap; kontrak sisi
    kita tetapkan POST JSON (API-CONTRACT §4). [DOSSIER Lampiran D].
 3. B3: Nama header auth runtime `eso-api` (Api Key `ms_setting` vs `authKey`
-   user) - belum tertangkap; kontrak sisi kita: `X-Terminal-Key` +
-   `X-Terminal-Id` + `X-Device-Id` (API-CONTRACT §2). [DOSSIER Lampiran D].
+   user) - belum tertangkap; kontrak sisi kita: `X-Terminal-Code` +
+   `X-Branch-Id` + `Idempotency-Key` + `Authorization: Bearer` (API-CONTRACT §2;
+   nama lama `X-Terminal-Key`/`X-Terminal-Id`/`X-Device-Id` diganti via REAA-3).
+   [DOSSIER Lampiran D].
 4. B4: Path payment online server-side (OVO/deposit/online gateway) -
    belum tertangkap. [DOSSIER Lampiran D].
 5. B5: Host dan skema `/pos/auth/register` - belum tertangkap.
@@ -142,7 +144,10 @@ lunas jika remaining == 0
   (`ms_posuser`, PIN hash 32-char, `loginPinOnly`), tanpa bearer/JWT
   [DOSSIER]. Clone: PIN lokal hanya untuk demo (`loginDemo`); login produksi
   revalidasi server via `validateEmployee` + hash lokal via `pin.ts`
-  (T1 DONE; catatan minor di baris M12).
+  (T1 DONE; catatan minor di baris M12). UPDATE 2026-10-17 (lajur auth-app,
+  Trek 1): clone kini E01 `terminal-login` single-stage + PIN staff verifikasi
+  lokal + grant triple + E29 `pinVerifyTerminalPin`; `validateEmployee` legacy.
+  Status parity layar tak berubah.
 - S2: `Idle` + `CustomerDisplay` fullscreen tanpa `ScreenHeader` (display
   pelanggan, bukan layar kasir).
 - S3: `Cashier` masih pakai header kustom `renderHeader` (belum migrasi ke
@@ -163,7 +168,9 @@ dikerjakan terpisah).
 
 - T1 DONE: Revalidasi PIN ke server (`LoginScreen.tsx:15-16,127-141`,
   `src/lib/pin.ts:153,174,198`, `src/lib/apiSource.ts`; minor: tanpa peta E401
-  eksplisit, fallback `U07`, fallback web `pin.ts`).
+  eksplisit, fallback `U07`, fallback web `pin.ts`). UPDATE 2026-10-17: jalur
+  kini E01 + E29 (`pinVerifyTerminalPin`, inti-HTTP tunggal di `terminalApi.ts`);
+  401 non-PIN → auto-logout + `setUnauthorizedHandler`.
 - T2 DONE: `RootStackParamList` dilebarkan (`src/navigation/types.ts:6,13-16,22-23,26,29,34,37,52`).
 - T3 DONE: Ongkir + items asli + nomor asli di Pay/Qris/Success/Receipt
   (`PayScreen.tsx:170-201,238-246`, `QrisScreen.tsx:137-139`,

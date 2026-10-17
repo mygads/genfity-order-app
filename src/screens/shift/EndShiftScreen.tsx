@@ -51,7 +51,13 @@ import React, { useEffect, useState } from 'react';import {
     // pun yang dikenal sistem LOLOS. Owner-gate lama (verifyLocalEscalation
     // 'settings.edit') dicabut. ok===null (DB belum siap) ditolak seperti PIN
     // salah. Identitas penutup dicatat ke payload sync (closedBy); userId baris
-    // shift tetap milik pembuka (atribusi tak diubah).
+    // shift tetap milik pembuka (atribusi tak diubah). GAP-15 (2026-10-17,
+    // terverifikasi): closedBy TIBA di server — kind 'other' tak tersentuh
+    // terjemahan Go-POS (toGoPosRequest hanya kind 'order') dan pushLightItem
+    // (lib/sync.ts) menyebar ...rawPayload apa adanya ke body v1/push/shift.
+    // Lokal: tr_shiftlog TAK punya kolom closedBy (sengaja, lihat di atas);
+    // kolom closedBy sisi server (Go backend, repo terpisah) tak bisa
+    // dipastikan dari repo app ini — payload best-effort + jujur.
     let closedBy: string | null = null;
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
     const auth = await authorizeSupervisor(pin);

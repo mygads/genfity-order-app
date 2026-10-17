@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { DISPLAY_STALE_MS } from '../../lib/display';import { useLang,
 
-type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
+type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -110,6 +110,10 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
 
   const goCashier = () => {
     void (async () => {
+      // GAP-10: kunci view di handler (bukan hanya CTA disembunyikan) — hanya
+      // tag fitur-penuh (FULL_FEATURE_TAGS kanonis) lolos ke kasir; view/asing
+      // ditolak via notice, tanpa silent fail.
+      if (isViewLocked || activeTag === null || !(FULL_FEATURE_TAGS as string[]).includes(activeTag)) { setGateNotice(t('disp_locked_op')); return; }
       if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
       setGateNotice('');
       navigation?.navigate('Cashier');

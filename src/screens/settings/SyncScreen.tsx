@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke,
+import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
   applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS,
 
-type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
+type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
 // APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
 import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
@@ -80,6 +80,8 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const [physPending, setPhysPending] = useState(0);
   const [dirtyRows, setDirtyRows] = useState(0);
   const [pendingRevoke, setPendingRevoke] = useState<string[]>([]);
+  // M9-3: baris master local-only (status 'lokal') — informatif, bukan pending.
+  const [localOnly, setLocalOnly] = useState<LocalOnlyRow[]>([]);
   // APP-FIXUP(PRN-DRAIN-VISIBILITY): backlog cetak persisten (tr_printqueue
   // status antre/gagal) — identifier tabel apa adanya, label existing.
   const [printPending, setPrintPending] = useState(0);
@@ -87,8 +89,8 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
     let alive = true;
     (async () => {
       try {
-        const [p, d, r, pp] = await Promise.all([countPhysicalQueue(), countDirtyRows(), getPendingRevoke(), pendingPrintCount()]);
-        if (alive) { setPhysPending(p); setDirtyRows(d); setPendingRevoke(r); setPrintPending(pp); }
+        const [p, d, r, pp, lo] = await Promise.all([countPhysicalQueue(), countDirtyRows(), getPendingRevoke(), pendingPrintCount(), listLocalOnly()]);
+        if (alive) { setPhysPending(p); setDirtyRows(d); setPendingRevoke(r); setPrintPending(pp); setLocalOnly(lo); }
       } catch { /* DB/storage belum siap - panel tetap jalan */ }
     })();
     return () => { alive = false; };
@@ -208,7 +210,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
 
-      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending + physPending + dirtyRows + printPending} {t('sync.pending')}{localN > 0 ? ` · ${t('sync_local_n').replace('{n}', String(localN))}` : ''})</Text>{(physPending > 0 || dirtyRows > 0 || printPending > 0) && (<View style={styles.card}><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_esoprocessqueue</Text><Text style={styles.wmVal}>{physPending} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>syncDate NULL</Text><Text style={styles.wmVal}>{dirtyRows} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_printqueue</Text><Text style={styles.wmVal}>{printPending} {t('sync.pending')}</Text></View></View> )}{pendingRevoke.length > 0 && (<View style={styles.card}><Text style={styles.qDesc}>{t('action_logout')}: {t('sync.pending')} ({pendingRevoke.length})</Text></View> )}{queue.length === 0 && physPending === 0 && dirtyRows === 0 && printPending === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
+      <Text style={[styles.groupLabel, isTablet && { fontSize: 14 }]}>{t('sync.queue')} ({pending + physPending + dirtyRows + printPending} {t('sync.pending')}{localN > 0 ? ` · ${t('sync_local_n').replace('{n}', String(localN))}` : ''})</Text>{(physPending > 0 || dirtyRows > 0 || printPending > 0) && (<View style={styles.card}><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_esoprocessqueue</Text><Text style={styles.wmVal}>{physPending} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>syncDate NULL</Text><Text style={styles.wmVal}>{dirtyRows} {t('sync.pending')}</Text></View><View style={styles.wmRow}><Text style={styles.wmLabel}>tr_printqueue</Text><Text style={styles.wmVal}>{printPending} {t('sync.pending')}</Text></View></View> )}{pendingRevoke.length > 0 && (<View style={styles.card}><Text style={styles.qDesc}>{t('action_logout')}: {t('sync.pending')} ({pendingRevoke.length})</Text></View> )}{localOnly.length > 0 && (<View style={styles.card}><Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('sync.localOnlyTitle')} ({localOnly.length})</Text><Text style={styles.cardSub}>{t('sync.localOnlyDesc')}</Text>{localOnly.map((r) => (<View key={r.id} style={styles.wmRow}><Text style={styles.wmLabel}>{r.tableName} · {r.op}</Text><Text style={styles.wmVal}>{fmtTime(r.createdAt)}</Text></View>))}</View> )}{queue.length === 0 && physPending === 0 && dirtyRows === 0 && printPending === 0 && (<View style={styles.card}><Text style={styles.cardSub}>{t('sync.emptyQueue')}</Text></View> )}
       {queue.map((q) => (
         <View key={q.id} style={styles.card}>
           <View style={styles.qTop}>

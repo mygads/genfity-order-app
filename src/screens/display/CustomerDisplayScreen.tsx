@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { getBranchCurrency, initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
+import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { getBranchCurrency, initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
@@ -37,6 +37,9 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
    * langganan dipasang di efek [uiTick] di bawah agar ikut re-bind. */
   const [sseOk, setSseOk] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
+  /** GAP-19: cermin jam live untuk poll fallback (ref agar closure interval tak basi). */
+  const liveAtRef = useRef<number | null>(null);
+  useEffect(() => { liveAtRef.current = lastDataAt; }, [lastDataAt]);
   /** D4: jam poll fallback (tak dipakai label umur — label dari jam live). */
   const [, setLastPollAt] = useState<number | null>(null);
   /** D3-06: true bila device belum ter-bound — daftar dikosongkan + prompt ikat. */
@@ -280,6 +283,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           if (alive) setNeedBind(true);
           return;
         }
+        // GAP-19: poll SQLite HANYA fallback offline — bila data live
+        // (SSE/WS/bus lokal) segar, jangan timpa state live dengan snapshot
+        // lokal; penanda stale + banner eksisting tetap dari jam live.
+        try {
+          const la = liveAtRef.current;
+          if (la !== null && Date.now() - la <= DISPLAY_STALE_MS) return;
+        } catch { /* abaikan — lanjut fallback poll */ }
         if (isViewCustomer && scopeTid) {
           // D1: samakan namespace (kolom = terminalCode, id = id BE) via E09;
           // gagal = id mentah = kosong jujur (fail-closed).
@@ -321,7 +331,14 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     return () => { alive = false; clearInterval(timer); };
   }, [sseOk]);
 
+  /** Notice penolakan aksi operator di peran view (tanpa silent fail). */
+  const [opNotice, setOpNotice] = useState('');
   const callNext = () => {
+    // GAP-10: gerbang peran yang sama dengan goCashier IdleScreen — hanya tag
+    // fitur-penuh (FULL_FEATURE_TAGS kanonis) boleh memanggil; view/asing
+    // ditolak via notice, tanpa silent fail.
+    if (isLockedView || activeTag === null || !(FULL_FEATURE_TAGS as string[]).includes(activeTag)) { setOpNotice(t('disp_locked_op')); return; }
+    setOpNotice('');
     if (prep.length === 0) return;
     const [next, ...rest] = prep;
     setPrep(rest);
@@ -405,6 +422,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
             disabled={prep.length === 0}
           />
           )}
+          {opNotice ? <Text style={[styles.hint, { color: colors.red }]}>{opNotice}</Text> : null}
         </>
       ) : null}
 

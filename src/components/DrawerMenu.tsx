@@ -237,10 +237,23 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
               // S18: revoke server-side best-effort (fire-and-forget; logout
               // lokal tetap instan, utang revoke ditandai logout() seperti biasa
               // dan di-flush pushAll berikutnya).
+              // E31 fase-1a: terminal-logout best-effort (revoke sesi + grant
+              // triple server, device TETAP bound untuk fast-login) — gagal
+              // jaringan = abaikan, logout lokal tetap jalan.
               try {
                 const s = getSession();
+                const dev = (s?.deviceId || '').trim();
                 const who = (s?.userId || s?.username || '').trim();
-                if (who) void logoutRevoke({ userId: who }).catch(() => {});
+                // E (dedupe 2026-10-17): SATU POST ke /auth/terminal-logout —
+                // logoutRevoke + terminalLogout menunjuk endpoint yang sama;
+                // dua panggilan = revoke ganda sia-sia. deviceId eksplisit
+                // dari sesi (logoutRevoke resolve sendiri bila kosong).
+                if (dev || who) {
+                  void logoutRevoke({
+                    ...(who ? { userId: who } : {}),
+                    ...(dev ? { deviceId: dev } : {}),
+                  }).catch(() => {});
+                }
               } catch {
                 /* abaikan — logout lokal tetap jalan */
               }

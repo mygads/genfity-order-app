@@ -21,13 +21,16 @@
  */
 import {
   ApiPath,
+  apiDelete,
   apiGet,
+  apiPatch,
   apiPost,
   getTerminal,
   setCustomBaseUrl,
   setServerEnv,
 } from '../config/server';
 import { getItem, setItem } from './storage';
+import { logout } from '../session';
 import { dbNowLocal } from './datefmt';
 import { initDb, queryFirst } from './db';
 import { loadPinRecord, verifyPinHash } from './pin';
@@ -95,7 +98,7 @@ export interface ApiResult<T = unknown> {
 }
 
 export interface FetchOpts {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH';
   params?: Record<string, string | number>;
   body?: unknown;
   idempotencyKey?: string;
@@ -223,6 +226,39 @@ function dummyResponse(path: string): { found: boolean; body: unknown } {
  * bila Real Mode gagal total dan dummy pun tak tersedia (tak terjadi untuk
  * path terkatalog).
  */
+// ---------------------------------------------------------------------------
+// C (401 → re-login, koreksi K1): titik pusat penanganan sesi kedaluwarsa.
+// Default = logout() (sesi null → navigator root pindah ke tumpukan tamu/
+// Login via subscribeSession; binding + grant dipertahankan untuk fast-login).
+// Lintas-lane boleh menimpa via setUnauthorizedHandler (mis. App.tsx butuh
+// nav eksplisit, atau test). Dipanggil dari apiFetch di bawah, HANYA untuk
+// 401 mode real yang BUKAN faktor-PIN.
+// ---------------------------------------------------------------------------
+export interface UnauthorizedInfo {
+  path: string;
+  status: number;
+  errorCode: string;
+}
+export type UnauthorizedHandler = (info: UnauthorizedInfo) => void;
+let unauthorizedHandler: UnauthorizedHandler = () => {
+  logout();
+};
+export function setUnauthorizedHandler(fn: UnauthorizedHandler): void {
+  unauthorizedHandler = fn;
+}
+/** Kode error faktor-PIN: 401-nya = PIN salah/belum enroll, bukan sesi mati. */
+const PIN_FACTOR_401_RE = /^(USER_PIN_|PIN_REQUIRED)/;
+function errorCodeOf(body: unknown): string {
+  try {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const inner = (b.data ?? b) as Record<string, unknown>;
+    const e = inner.error ?? b.error;
+    return typeof e === 'string' ? e : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   opts?: FetchOpts,
@@ -240,13 +276,36 @@ export async function apiFetch<T = unknown>(
       const res =
         method === 'GET'
           ? await apiGet(path, opts?.params, { token: opts?.token, idempotencyKey: opts?.idempotencyKey })
-          : await apiPost(path, opts?.body ?? {}, {
-              idempotencyKey: opts?.idempotencyKey,
-              token: opts?.token,
-            });
+          : method === 'DELETE'
+            ? await apiDelete(path, {
+                idempotencyKey: opts?.idempotencyKey,
+                token: opts?.token,
+              })
+            : method === 'PATCH'
+              ? await apiPatch(path, opts?.body ?? {}, {
+                  idempotencyKey: opts?.idempotencyKey,
+                  token: opts?.token,
+                })
+              : await apiPost(path, opts?.body ?? {}, {
+                  idempotencyKey: opts?.idempotencyKey,
+                  token: opts?.token,
+                });
       const body = (await res.json()) as T;
       if (!res.ok) {
         // Backend menjawab error: teruskan apa adanya (bukan dummy).
+        // C: 401 mode real = gagal auth final (token buruk/kedaluwarsa) →
+        // bubarkan sesi via handler (default logout(); binding + grant utuh
+        // untuk fast-login). 401 faktor-PIN = PIN salah, BUKAN sesi mati.
+        if (res.status === 401) {
+          const code = errorCodeOf(body);
+          if (!PIN_FACTOR_401_RE.test(code)) {
+            try {
+              unauthorizedHandler({ path, status: res.status, errorCode: code });
+            } catch {
+              /* abaikan — pemanggil tetap terima {ok:false} */
+            }
+          }
+        }
         return { ok: false, status: res.status, data: body, fromDummy: false };
       }
       return { ok: true, status: res.status, data: body, fromDummy: false };

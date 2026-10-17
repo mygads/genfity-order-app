@@ -216,6 +216,8 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
       </View>
       {unboundBranch ? <Text style={[styles.foot, { color: colors.red }]}>{t('terminal_unbound_hint')}</Text> : null}
       <Text style={styles.foot}>{t('mprint.saved')}</Text>
+      {/* M9-3: routing cetak per menu = local-only (tanpa push master). */}
+      <Text style={styles.foot}>{t('master.localOnlyNote')}</Text>
       </ScrollView>
     </View>
   );}const styles = StyleSheet.create({

@@ -12,6 +12,7 @@ import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseU
 import { getNotif, setNotif } from '../../config/device';
 import { getLastSync, pushAll } from '../../lib/sync';
 import { requireAccess } from '../../lib/access';
+import { terminalLogout } from '../../lib/terminalApi';
 import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
 import { getDeviceRole, subscribeDeviceRole, normalizeTag, VIEW_TAGS } from '../../lib/deviceRole';
 
@@ -311,6 +312,12 @@ export default function SettingsScreen({ navigation }: Props) {
         title={t('settings.logout')}
         variant="danger"
         onPress={() => {
+          // E31 fase-1a: terminal-logout best-effort (fire-and-forget; device
+          // tetap bound) — gagal jaringan = abaikan, logout lokal tetap jalan.
+          try {
+            const dev = (getSession()?.deviceId || '').trim();
+            if (dev) void terminalLogout(dev).catch(() => {});
+          } catch {}
           logout();
           navigation?.navigate('Login');
         }}
