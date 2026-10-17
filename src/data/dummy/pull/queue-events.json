@@ -1,0 +1,18 @@
+{
+  "request": { "branchId": "B001", "lastEventId": "evt-20261017-0041" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "branchId": "B001",
+      "events": [
+        { "eventId": "evt-20261017-0042", "type": "queue-update", "branchId": "B001", "queue": [{ "ticketNo": "A-007", "status": "preparing" }, { "ticketNo": "A-008", "status": "waiting" }], "version": 42, "at": "2026-10-17 14:02:00" },
+        { "eventId": "evt-20261017-0043", "type": "call", "branchId": "B001", "ticketNo": "A-007", "version": 43, "at": "2026-10-17 14:03:00" },
+        { "eventId": "evt-20261017-0044", "type": "ready", "branchId": "B001", "ticketNo": "A-006", "version": 44, "at": "2026-10-17 14:04:00" }
+      ]
+    }
+  }
+}

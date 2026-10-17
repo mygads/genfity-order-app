@@ -1,8 +1,19 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';
+import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { saveBinding as saveSessionBinding } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
+  bindTerminal,
+  fetchBranches,
+  fetchTerminals,
+  getContractDeviceId,
+  isContractConfigured,
+  loadBinding,
+  saveBinding,
+  type BranchInfo,
+  type ContractTerminal,
+  type TerminalBinding,
+} from '../../lib/terminalContract';
 import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { code?: string } } };const GREY = '#757575';const STEP_KEYS = ['inst_step1', 'inst_step2', 'inst_step3'];export default function InstallScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [code, setCode] = useState(route?.params?.code ?? '');
+  const { lang, t } = useLang(); const [code, setCode] = useState(route?.params?.code ?? '');
   const [error, setError] = useState('');
   const [showHelp, setShowHelp] = useState(false);
 
@@ -23,13 +34,205 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
   // Klaim via lapisan apiSource (Dummy Mode offline / backend asli bila env
   // terisi). Kode terminal yang lolos disimpan ke setTerminal untuk header
   // request berikutnya.
+  // ------------------------------------------------------------------
+  // Bind flow kontrak backend Go (audit row 3, model akses terminal):
+  // branch -> terminal -> PIN terminal, SEKALI per device, persist lintas
+  // logout. Picker sebagai modal in-flow (navigation beku: tanpa rute baru).
+  // PIN terminal ≠ PIN staff ≠ PIN owner (row 5); PIN tak pernah disimpan,
+  // hanya diverifikasi per-bind oleh server. Bila kontrak absen/offline,
+  // jatuh ke klaim kode legacy di bawah (server lama) secara jujur.
+  // Daftar cabang/terminal diambil dari lib yang SAMA dengan
+  // SelectBranchScreen (reusable by bind — satu sumber, dua pemakai).
+  // ------------------------------------------------------------------
+  const [binding, setBinding] = useState<TerminalBinding | null>(null);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [terminals, setTerminals] = useState<ContractTerminal[]>([]);
+  const [selBranch, setSelBranch] = useState<BranchInfo | null>(null);
+  const [selTerminal, setSelTerminal] = useState<ContractTerminal | null>(null);
+  const [termPin, setTermPin] = useState('');
+  const [showBranches, setShowBranches] = useState(false);
+  const [showTerminals, setShowTerminals] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [bindError, setBindError] = useState('');
+  const [kickNotice, setKickNotice] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const b = await loadBinding();
+        if (live) setBinding(b);
+      } catch { /* tanpa ikatan - alur baru */ }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  // Literal netral ID/EN (lane beku: tanpa kunci i18n baru).
+  const L = {
+    bindTitle: lang === 'id' ? 'Ikat Perangkat ke Terminal' : 'Bind This Device to a Terminal',
+    bindDesc: lang === 'id'
+      ? 'Pilih cabang, pilih terminal, lalu masukkan PIN terminal (dari dashboard owner). Ikatan tersimpan di perangkat ini.'
+      : 'Pick a branch, pick a terminal, then enter the terminal PIN (from the owner dashboard). The binding stays on this device.',
+    bindBtn: lang === 'id' ? 'Mulai Ikat Terminal' : 'Start Terminal Binding',
+    rebindBtn: lang === 'id' ? 'Ikat ulang (pindah terminal/cabang)' : 'Re-bind (move terminal/branch)',
+    boundAs: lang === 'id' ? 'Perangkat terikat' : 'Device bound to',
+    pickBranch: lang === 'id' ? 'Pilih cabang' : 'Select a branch',
+    pickTerminal: lang === 'id' ? 'Pilih terminal' : 'Select a terminal',
+    pinTitle: lang === 'id' ? 'PIN terminal' : 'Terminal PIN',
+    pinPh: lang === 'id' ? 'PIN dari dashboard owner' : 'PIN from the owner dashboard',
+    pinShort: lang === 'id' ? 'Masukkan PIN terminal (min. 4 digit).' : 'Enter the terminal PIN (min. 4 digits).',
+    doBind: lang === 'id' ? 'Ikat Terminal' : 'Bind Terminal',
+    loading: lang === 'id' ? 'Memuat...' : 'Loading...',
+    noContract: lang === 'id'
+      ? 'Backend baru belum terjangkau (atau belum dikonfigurasi) — pakai klaim kode di bawah (server lama).'
+      : 'New backend unreachable (or not configured) — use the code claim below (legacy server).',
+    branchFail: lang === 'id'
+      ? 'Daftar cabang tak terjangkau — periksa koneksi atau pakai klaim kode di bawah.'
+      : 'Branch list unreachable — check the connection or use the code claim below.',
+    termFail: lang === 'id'
+      ? 'Daftar terminal tak terjangkau — coba lagi.'
+      : 'Terminal list unreachable — try again.',
+    termEmpty: lang === 'id'
+      ? 'Belum ada terminal di cabang ini — minta owner menambahkannya dulu.'
+      : 'No terminals in this branch yet — ask the owner to add one first.',
+    bindFail: lang === 'id'
+      ? 'Ikat gagal — PIN salah atau terminal ditolak server.'
+      : 'Bind failed — wrong PIN or the server rejected the terminal.',
+    kicked: lang === 'id'
+      ? 'Perangkat ini mengambil alih terminal — sesi perangkat sebelumnya telah digantikan (login baru menang).'
+      : 'This device took over the terminal — the previous device session was replaced (new login wins).',
+    legacyTitle: lang === 'id' ? 'Cara lama (server legacy)' : 'Legacy way (legacy server)',
+    noPinSet: lang === 'id' ? 'belum ada PIN' : 'no PIN yet',
+  };
+
+  const startBind = async () => {
+    if (busy) return;
+    setBindError(''); setKickNotice('');
+    if (!isContractConfigured()) { setBindError(L.noContract); return; }
+    setBusy(true);
+    try {
+      const r = await fetchBranches();
+      if (!r.ok || r.branches.length === 0) { setBindError(L.branchFail); return; }
+      setBranches(r.branches);
+      setShowBranches(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chooseBranch = async (b: BranchInfo) => {
+    if (busy) return;
+    setBindError('');
+    setSelBranch(b);
+    setShowBranches(false);
+    setBusy(true);
+    try {
+      const r = await fetchTerminals(b.id);
+      if (!r.ok) { setBindError(L.termFail); return; }
+      if (r.terminals.length === 0) { setBindError(L.termEmpty); return; }
+      setTerminals(r.terminals);
+      setShowTerminals(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chooseTerminal = (terminal: ContractTerminal) => {
+    setSelTerminal(terminal);
+    setTermPin('');
+    setBindError('');
+    setShowTerminals(false);
+    setShowPin(true);
+  };
+
+  const doBind = async () => {
+    if (busy || !selBranch || !selTerminal) return;
+    if (termPin.trim().length < 4) { setBindError(L.pinShort); return; }
+    setBusy(true); setBindError('');
+    try {
+      const deviceId = await getContractDeviceId();
+      const r = await bindTerminal(selTerminal.terminalId, termPin.trim(), deviceId);
+      if (!r.ok || !r.data?.bound) { setBindError(L.bindFail); return; }
+      const b: TerminalBinding = {
+        branchId: selBranch.id,
+        branchName: selBranch.name,
+        terminalId: selTerminal.terminalId,
+        terminalCode: selTerminal.terminalCode,
+        terminalName: selTerminal.name,
+        tag: parseDeviceRole(selTerminal.tag) ?? 'full_access',
+        deviceId,
+        boundAt: new Date().toISOString(),
+      };
+      await saveBinding(b);
+      // Cermin sesi (D3-01): login/guard/drawer baca store session —
+      // tanpa cermin, bind jalur legacy tak terlihat sesi. Tag selalu kanonis.
+      try {
+        saveSessionBinding({
+          terminalId: b.terminalId,
+          terminalCode: b.terminalCode,
+          branchId: b.branchId,
+          branchName: b.branchName,
+          merchantName: b.branchName,
+          tag: b.tag,
+          deviceId: b.deviceId,
+          boundAt: b.boundAt,
+        });
+      } catch { /* binding kontrak sudah tersimpan — sesi menyusul via bridge login */ }
+      try {
+        setDeviceRoleForTag(parseDeviceRole(b.tag) ?? 'full_access');
+      } catch { /* peran bertahan — home guard tetap fail-safe */ }
+      setBinding(b);
+      // Kompatibel jalur lama: header request + query lokal tetap baca ini.
+      setTerminal({
+        terminalCode: selTerminal.terminalCode,
+        branchId: selBranch.id,
+        branchName: selBranch.name,
+      });
+      try { await notifyTerminalVerification('verified'); } catch { /* best-effort */ }
+      setShowPin(false);
+      // Q13: beritahu perangkat BARU bila ada sesi lama yang digantikan.
+      if (r.data.kickedUserId) setKickNotice(L.kicked);
+      navigation?.navigate('InstallProgress', { branch: selBranch.name });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sheet = (
+    visible: boolean,
+    title: string,
+    onClose: () => void,
+    body: ReactNode,
+  ) => (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.overlay}>
+        <View style={styles.sheet}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          {body}
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.sheetCancel}>
+            <Text style={styles.sheetCancelT}>{t('c_cancel')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const claim = async () => {
-    if (checking) return; if (code.trim().length < 4) {
+    if (checking) return;
+    // Kanon Q7: normalisasi + REGEX dulu (server BE juga menegakkan unik/
+    // format ini) — kode warisan bertanda hubung tak bisa bound.
+    const canon = normalizeTerminalCode(code);
+    if (canon.length < 4) {
       setError(t('inst_code_short'));
       return;
     }
+    if (!TERMINAL_CODE_RE.test(canon)) {
+      setError(t('inst_code_format'));
+      return;
+    }
     setChecking(true); setError('');
-    try { const r = await validateTerminal(code.trim().toUpperCase()); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: code.trim().toUpperCase(), branchId: r.branchId, branchName: r.branchName, }); try { await notifyTerminalVerification('verified'); } catch { /* notify best-effort - klaim tetap lanjut */ } navigation?.navigate('SelectBranch');
+    try { const r = await validateTerminal(canon); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: canon, branchId: r.branchId, branchName: r.branchName, }); try { await notifyTerminalVerification('verified'); } catch { /* notify best-effort - klaim tetap lanjut */ } navigation?.navigate('SelectBranch');
   } catch { setError(t('inst_claim_invalid')); } finally { setChecking(false); } };
 
   return (
@@ -45,6 +248,39 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
       </Text>
       {posVer ? <Text style={[styles.desc, isTablet && styles.descBig]}>POS {posVer}</Text> : null}
 
+      {/* Identitas merchant-terminal + ikat/ikat-ulang (audit row 18, paket app-login). */}
+      {binding ? (
+        <View style={styles.bindCard}>
+          <Text style={styles.bindHead}>{L.boundAs}</Text>
+          <Text style={styles.bindMain}>
+            {binding.branchName || binding.branchId} · {binding.terminalCode}
+            {binding.tag ? ` (${binding.tag})` : ''}
+          </Text>
+          {kickNotice ? <Text style={styles.kick}>{kickNotice}</Text> : null}
+          <AppButton
+            size="sm"
+            variant="secondary"
+            title={busy ? L.loading : L.rebindBtn}
+            onPress={startBind}
+            disabled={busy}
+            style={styles.rebindBtn}
+          />
+        </View>
+      ) : (
+        <View style={styles.bindCard}>
+          <Text style={styles.bindHead}>{L.bindTitle}</Text>
+          <Text style={styles.bindDesc}>{L.bindDesc}</Text>
+          <AppButton
+            size="md"
+            title={busy ? L.loading : L.bindBtn}
+            onPress={startBind}
+            disabled={busy}
+            style={styles.primary}
+          />
+        </View>
+      )}
+      {bindError ? <Text style={styles.error}>{bindError}</Text> : null}
+
       <View style={styles.stepsCard}>
         {STEP_KEYS.map((k, i) => (
           <View key={i} style={styles.stepRow}>
@@ -56,12 +292,14 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
         ))}
       </View>
 
+      {/* LEGACY server lama — bukan PIN terminal kontrak (lihat komentar claim). */}
+      <Text style={styles.legacyHead}>{L.legacyTitle}</Text>
       <View style={styles.scanBox}>
         <Text style={styles.scanGlyph}>▣</Text>
         <Text style={[styles.scanText, isTablet && styles.scanTextBig]}>{t('inst_scan_frame')}</Text>
         <TouchableOpacity
           style={[styles.scanBtn, isTablet && styles.scanBtnBig]}
-          onPress={() => { setCode('GNF-PORIS-01'); setError(''); }}>
+          onPress={() => { setCode('PORIS01'); setError(''); }}>
           <Text style={styles.scanBtnT}>{t('inst_sim_scan')}</Text>
         </TouchableOpacity>
       </View>
@@ -106,6 +344,57 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
         </View>
       )}
     </ScrollView>
+    {sheet(showBranches, L.pickBranch, () => setShowBranches(false), (
+      <ScrollView style={styles.sheetList}>
+        {branches.map((b) => (
+          <TouchableOpacity key={b.id} style={styles.sheetRow} onPress={() => void chooseBranch(b)}>
+            <Text style={styles.sheetRowT}>{b.name || b.id}</Text>
+            <Text style={styles.sheetRowSub}>{b.id}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    ))}
+    {sheet(
+      showTerminals,
+      `${L.pickTerminal} — ${selBranch?.name ?? selBranch?.id ?? ''}`,
+      () => setShowTerminals(false),
+      (
+        <ScrollView style={styles.sheetList}>
+          {terminals.map((x) => (
+            <TouchableOpacity key={x.terminalId || x.terminalCode} style={styles.sheetRow} onPress={() => chooseTerminal(x)}>
+              <Text style={styles.sheetRowT}>
+                {x.name || x.terminalCode}
+                {x.tag ? ` · ${x.tag}` : ''}
+              </Text>
+              <Text style={styles.sheetRowSub}>
+                {x.terminalCode}
+                {x.pinSet ? '' : ` · ${L.noPinSet}`}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ),
+    )}
+    {sheet(showPin, `${L.pinTitle} — ${selTerminal?.terminalCode ?? ''}`, () => setShowPin(false), (
+      <View>
+        <TextInput
+          style={styles.pinInput}
+          value={termPin}
+          onChangeText={(v) => { setTermPin(v.replace(/[^0-9]/g, '')); setBindError(''); }}
+          placeholder={L.pinPh}
+          placeholderTextColor={GREY}
+          secureTextEntry
+          keyboardType="number-pad"
+        />
+        <AppButton
+          size="md"
+          title={busy ? L.loading : L.doBind}
+          onPress={doBind}
+          disabled={busy || termPin.trim().length < 4}
+          style={styles.primary}
+        />
+      </View>
+    ))}
     </ScreenRoot>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FFFFFF' },
@@ -161,4 +450,33 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = { navigate: (scr
     backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: colors.navy, borderRadius: 14,
     height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 12,
   },
-  webBtnT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },});
+  webBtnT: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  /** Kartu ikatan kontrak (paket app-login): identitas merchant-terminal + re-bind. */
+  bindCard: {
+    backgroundColor: '#F4F8FF', borderWidth: 1, borderColor: colors.navy,
+    borderRadius: 12, padding: 14, marginTop: 14, gap: 8,
+  },
+  bindHead: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  bindMain: { fontFamily: fonts.medium, fontSize: 13, color: '#2B2B2B', lineHeight: 19 },
+  bindDesc: { fontFamily: fonts.regular, fontSize: 13, color: GREY, lineHeight: 19 },
+  rebindBtn: { marginTop: 4 },
+  kick: { fontFamily: fonts.medium, fontSize: 12, color: '#B25E00', lineHeight: 18 },
+  legacyHead: { fontFamily: fonts.semibold, fontSize: 12, color: GREY, marginTop: 18 },
+  /** Sheet picker in-flow (navigation beku: tanpa rute baru). */
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  sheet: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, width: '100%', maxWidth: 480 },
+  sheetTitle: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy, marginBottom: 10 },
+  sheetList: { maxHeight: 320 },
+  sheetRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  sheetRowT: { fontFamily: fonts.semibold, fontSize: 14, color: '#2B2B2B' },
+  sheetRowSub: { fontFamily: fonts.regular, fontSize: 12, color: GREY, marginTop: 2 },
+  sheetCancel: { alignSelf: 'center', marginTop: 12, paddingVertical: 8, paddingHorizontal: 16 },
+  sheetCancelT: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
+  pinInput: {
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.line, borderRadius: 10,
+    paddingHorizontal: 16, height: 52, fontFamily: fonts.bold, fontSize: 16, color: '#2B2B2B',
+    letterSpacing: 4, textAlign: 'center', marginBottom: 4,
+  },});

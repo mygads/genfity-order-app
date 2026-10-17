@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { getGroupPaid, nextSalesNum } from '../../lib/sales';
+import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -64,11 +66,24 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
   // Kepala struk mengikuti order berjalan (meja/pelanggan/member/kasir/no
   // asli bila dioper pemanggil); tanpa params tampilkan '-' (jujur).
-  // Default resto = identitas cabang seed B001 (sama dengan ReceiptScreen).
+  // Identitas resto = cabang live (cermin AboutScreen), bukan seed.
   const metaTable = p.table ?? '-';
   const metaGuest = p.customer ?? p.memberId ?? '-';
-  const shopName = p.shopName ?? 'Genfity Cabang Poris';
-  const shopAddr = p.shopAddr ?? 'Jl. Poris Raya No. 8 · 021-555-0100';
+  // APP-R3: identitas cabang live (cermin AboutScreen); '-' jujur bila
+  // unbound — tanpa contoh seed Poris. Override params pemanggil tetap menang.
+  let liveBranchName = '';
+  let liveBranchId = '';
+  try { liveBranchId = getBranchId(); } catch { /* '-' jujur */ }
+  try {
+    const term = getTerminal();
+    liveBranchName = (term.branchName ?? '').trim();
+    if ((term.branchId ?? '').trim()) liveBranchId = term.branchId.trim();
+  } catch { /* '-' jujur */ }
+  const liveShop = liveBranchName
+    ? (liveBranchId ? `${liveBranchName} - ${liveBranchId}` : liveBranchName)
+    : (liveBranchId || '-');
+  const shopName = p.shopName ?? liveShop;
+  const shopAddr = p.shopAddr ?? '-';
   const metaCashier = p.cashier ?? '-';
   const metaNo = p.no ?? 'Pratinjau / Preview';
   const metaTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');
@@ -82,6 +97,53 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     Object.fromEntries(orderItems.map((it, i) => [itemKey(it), i % 3])),
   );
   const [nominals, setNominals] = useState<string[]>(['', '', '']);
+  // Nomor grup split: SATU salesNum untuk semua kunjungan bayar (alur grup
+  // Pay > appendGroupPayment). Dibangkitkan sekali lalu dipakai ulang agar
+  // kunjungan ke-2+ menempel ke head yang sama (stok/voucher/dapur sekali).
+  const groupNoRef = useRef<string>('');
+  // Kebenaran DB saat tombol split ditekan (getGroupPaid): banner jujur di
+  // bawah penghitung manual agar kasir tahu yang benar-benar tercatat.
+  const [dbPaid, setDbPaid] = useState<number | null>(null);
+
+  // Bayar satu split via alur grup: kunjungan pertama = saveSale penuh
+  // (grand = total order, stok/voucher/dapur sekali), berikut = append kaki.
+  // Total split sudah neto (termasuk diskon) + share proporsional
+  // service/pajak/pembulatan, tanpa diskon/voucher ganda.
+  const paySplit = (val: number, mode: Mode) => {
+    if (val <= 0 || !nominalGateOk(mode)) return;
+    void (async () => {
+      let g = groupNoRef.current;
+      let grouped = true;
+      if (!g) {
+        try {
+          g = await nextSalesNum();
+          groupNoRef.current = g;
+        } catch {
+          // Perangkat belum bound: nomor tak bisa terbit; lanjut tanpa grup
+          // (Pay menampilkan pesan klaim-terminal, tanpa tulis ganda karena
+          // saveSale menolak di perangkat unbound).
+          grouped = false;
+        }
+      }
+      if (grouped && g) {
+        try {
+          const gp = await getGroupPaid(g);
+          setDbPaid(gp.paidTotal);
+        } catch {
+          /* abaikan - banner tetap nilai lama */
+        }
+        navigation?.navigate('Pay', {
+          total: val, items: saleItems, discount: discountVal,
+          ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+          ...(voucherCode ? { voucherCode } : {}),
+          ...orderCtx, ...splitShareCtx(val),
+          splitGroup: true, salesNum: g, orderTotal: total,
+        });
+        return;
+      }
+      navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) });
+    })();
+  };
 
   const resetSplits = (n: number) => {
     setSplitsRaw(n);
@@ -242,6 +304,11 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <Text style={styles.paidBanner}>
             {t('bill_paid').replace('{p}', String(paidCount)).replace('{s}', String(splits))}
           </Text>
+          {dbPaid != null && groupNoRef.current ? (
+            <Text style={styles.paidBanner}>
+              {t('bill_dbpaid').replace('{p}', rp(dbPaid)).replace('{t}', rp(total))}
+            </Text>
+          ) : null}
 
           {mode === 'item' && (
             <>
@@ -301,10 +368,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
                   <AppButton
                     title={`${t('bill_pay')} ›`}
                     disabled={val <= 0 || !nominalGateOk(mode)}
-                    // Split parsial: total split sudah neto (termasuk diskon),
-                    // jadi teruskan konteks + share proporsional service/pajak/
-                    // pembulatan, tanpa diskon/voucher ganda.
-                    onPress={() => navigation?.navigate('Pay', { total: val, items: saleItems, ...orderCtx, ...splitShareCtx(val) })}
+                    onPress={() => paySplit(val, mode)}
                     fullWidth={false}
                     size="sm"
                     style={styles.payBtn}

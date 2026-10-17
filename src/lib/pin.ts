@@ -1,6 +1,20 @@
 /**
  * PIN kasir: hash KDF + penyimpanan aman.
  *
+ * CORONG TIGA PIN (AUDIT-ALIGNMENT-TERMINAL baris 5, paket app-model —
+ * dokumentasi saja, tak ada perubahan format penyimpanan):
+ * - PIN terminal = mengikat device↔terminal (sekali per device, bertahan
+ *   melewati logout); disimpan sebagai Binding (session.ts) + kontrak
+ *   terminalContract.ts — tak pernah plaintext.
+ * - PIN staff = login, absensi, buka/tutup shift. verifyAttendancePin di bawah
+ *   adalah BENIH corong ini (dipakai verifyLocalEscalation + alur absensi).
+ * - PIN owner = eskalasi void/cancel/kompliment via authorizeSupervisor
+ *   (lib/supervisor.ts -> supervisorApprove server); pemakaian tercatat/audit.
+ * Satu hash per user saat ini dipakai semua jalur lokal (PARTIAL yang
+ * diketahui); pemisahan kredensial penuh menunggu backend (paket be-terminal)
+ * + alur login (paket app-login). Format record {salt, iter, hash} di bawah
+ * TIDAK diubah paket ini.
+ *
  * Aturan:
  * - PIN plaintext TIDAK PERNAH disimpan di mana pun (bukan di state
  *   persisten, bukan di AsyncStorage, bukan di body log).
@@ -15,6 +29,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { initDb, query, queryFirst } from './db';
 import { getItem, removeItem, setItem } from './storage';
+import { randomHex as randomHexCsprng } from './uuidv7';
 
 export interface PinRecord {
   v: number;
@@ -129,11 +144,8 @@ function sha256Hex(input: string): string {
 const PIN_ITER = 2000;
 
 function randomHex(len: number): string {
-  let s = '';
-  for (let i = 0; i < len; i += 1) {
-    s += Math.floor(Math.random() * 16).toString(16);
-  }
-  return s;
+  // CSPRNG (Q7): salt PIN 64-bit tak boleh dari Math.random yang prediktabel.
+  return randomHexCsprng(len);
 }
 
 /** Turunkan record hash dari PIN (PIN asli tidak dikembalikan). */

@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
 /** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -14,7 +14,7 @@ import React, { useEffect, useState } from 'react';import {
   const { lang, t } = useLang();
   // Mulai NOL (bukan angka contoh): efek di bawah menimpa dengan hitungan
   // SQLite; tanpa shift/data = nol jujur, bukan Rp1.575.000 fiktif.
-  const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 0, penjualanTunai: 0, pengeluaran: 0, fromDb: false, });
+  const [summary, setSummary] = useState<ShiftSummary>({ openId: null, modalAwal: 0, penjualanTunai: 0, pengeluaran: 0, pemasukan: 0, fromDb: false, });
   const  [kasFisik, setKasFisik] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
@@ -25,7 +25,7 @@ import React, { useEffect, useState } from 'react';import {
   // Ringkasan dari shift berjalan (tr_shiftlog) + penjualan lunas + pengeluaran.
   useEffect(() => { let on = true; (async () => { try { await initDb(); const branchId = getTerminal().branchId || null; const open = await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null; }>(`SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status = 'open' AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1`, [branchId, branchId]); const latest = open ?? (await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null }>( 'SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status <> "absen" AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1', [branchId, branchId], )); if (!on || !latest) return; const since = latest.clockIn ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString();    // Kas tunai MURNI: jumlah pembayaran cash dari tr_salespayment yang
     // head-nya lunas - tanpa fallback ke semua metode (RIW-07).
-    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since, branchId, branchId], ); const tunai = num(cash?.total); const exp = await queryFirst<{ total: number }>( 'SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense WHERE expenseDate >= ? AND (branchId = ? OR ? IS NULL)', [since, branchId, branchId], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.total)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran } = summary; const kasSeharusnya = modalAwal + penjualanTunai - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
+    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since, branchId, branchId], ); const tunai = num(cash?.total); const exp = await queryFirst<{ keluar: number | null; masuk: number | null }>( 'SELECT COALESCE(-SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS keluar, COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS masuk FROM tr_branchexpense WHERE expenseDate >= ? AND (branchId = ? OR ? IS NULL)', [since, branchId, branchId], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.keluar)), pemasukan: Math.round(num(exp?.masuk)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran, pemasukan } = summary; const kasSeharusnya = modalAwal + penjualanTunai + pemasukan - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
   const touched = kasFisik.length > 0;
   const selisih = touched ? kasFisikNum - kasSeharusnya : 0;
 
@@ -45,17 +45,27 @@ import React, { useEffect, useState } from 'react';import {
   };
 
   const confirmClose = async () => {
-    // Tutup shift = aksi level supervisor (parity POSLite end_shift_confirm):
-    // verifikasi ke server dulu via authorizeSupervisor; offline/unconfigured
-    // lanjut ke eskalasi lokal yang mewajibkan PIN milik user BERHAK Owner
-    // (verifyLocalEscalation cek hak via requireAccess) - PIN kasir Staff yang
-    // dikenal sistem TETAP DITOLAK. Tanpa gerbang panjang-PIN lokal:
-    // authorizeSupervisor menilai 6 digit untuk jalur server, PIN 4-digit
-    // seed tetap bisa lewat fallback lokal saat offline (bila pemiliknya Owner).
+    // APP-SHIFT 2026-10-17 (Q17 CLOSED: tutup shift = PIN staff, ikut spec):
+    // server dulu via authorizeSupervisor; offline/unconfigured lanjut ke PIN
+    // kasir lokal (verifyAttendancePin, cermin ShiftScreen) - PIN staff mana
+    // pun yang dikenal sistem LOLOS. Owner-gate lama (verifyLocalEscalation
+    // 'settings.edit') dicabut. ok===null (DB belum siap) ditolak seperti PIN
+    // salah. Identitas penutup dicatat ke payload sync (closedBy); userId baris
+    // shift tetap milik pembuka (atribusi tak diubah).
+    let closedBy: string | null = null;
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
     const auth = await authorizeSupervisor(pin);
     if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') { setError(auth.message); return; }
-    if (!auth.ok) { const esc = await verifyLocalEscalation(pin, 'settings.edit'); if (!esc.ok) { setError(esc.message); return; } }
+    if (!auth.ok) {
+      const v = await verifyAttendancePin(pin);
+      if (v.ok !== true || !v.userId) {
+        setError(lang === 'id' ? (v.ok === false ? 'PIN salah' : 'PIN tak dikenal (offline)') : (v.ok === false ? 'Wrong PIN' : 'Unknown PIN (offline)'));
+        return;
+      }
+      closedBy = v.userId;
+    } else {
+      try { closedBy = getSession()?.userId || getSession()?.username || null; } catch { /* abaikan */ }
+    }
     // Tutup shift di SQLite + rincian per metode (tr_shiftlogdetail) + selisih,
 // lalu antre sync dan kembali ke layar Shift.
     const nowIso = new Date().toISOString(); const branchId = getTerminal().branchId || null; let shiftId: string | null = summary.openId;
@@ -64,7 +74,7 @@ import React, { useEffect, useState } from 'react';import {
     if (!shiftId) { setError(lang === 'id' ? 'Tidak ada shift terbuka - buka shift dulu sebelum menutup.' : 'No open shift - open a shift before closing.'); return; }
     try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); }
     // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16), dibatasi cabang aktif.
-    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
+    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
     setPin('');
     navigation?.navigate?.('Shift');
   };
@@ -102,6 +112,9 @@ import React, { useEffect, useState } from 'react';import {
           <Text style={s.cardTitle}>{t('end_summary')}</Text>
           <Row label={lang === 'id' ? 'Modal Awal (Kas Awal)' : 'Opening Float'} value={rp(modalAwal)} />
           <Row label={lang === 'id' ? 'Penjualan Tunai' : 'Cash Sales'} value={rp(penjualanTunai)} />
+          {pemasukan > 0 ? (
+            <Row label={lang === 'id' ? 'Pemasukan Kas' : 'Cash In'} value={'+ ' + rp(pemasukan)} />
+          ) : null}
           <Row label={t('title_expense')} value={'- ' + rp(pengeluaran)} negative />
           <View style={s.divider} />
           <View style={s.totalRow}>
@@ -109,7 +122,7 @@ import React, { useEffect, useState } from 'react';import {
             <Text style={s.totalValue}>{rp(kasSeharusnya)}</Text>
           </View>
           <Text style={s.formula}>
-            {lang === 'id' ? 'Modal awal + penjualan tunai - pengeluaran' : 'Opening float + cash sales - expenses'}
+            {lang === 'id' ? 'Modal awal + penjualan tunai + pemasukan - pengeluaran' : 'Opening float + cash sales + cash in - expenses'}
           </Text>
         </View>
 
@@ -221,8 +234,8 @@ import React, { useEffect, useState } from 'react';import {
       <Modal visible={pinVisible} transparent animationType="slide">
         <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
-            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>PIN Supervisor</Text>
-            <Text style={s.modalHint}>{lang === 'id' ? 'Diperlukan persetujuan supervisor' : 'Supervisor approval required'}</Text>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{lang === 'id' ? 'PIN Kasir' : 'Cashier PIN'}</Text>
+            <Text style={s.modalHint}>{lang === 'id' ? 'PIN kasir untuk menutup shift' : 'Cashier PIN to close shift'}</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />

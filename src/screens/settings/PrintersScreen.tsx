@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildReceiptBytes, toHex } from '../../lib/escpos';import { shareReceipt } from '../../lib/print';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -16,7 +16,16 @@ import { useEffect, useState } from 'react';import {
   cpl: 32 | 48;
   autocut: boolean;
   isDefault: boolean;
-  connected: boolean;}interface Bonded {
+  connected: boolean;
+  /**
+   * Binding terminal (APP-PRINTER, audit row 11): station = address book yang
+   * diikat ke terminalCode klaim device ini (+branchId). Tanpa binding =
+   * warisan global. 1 device = 1 terminal = 1 printer: printer aktif per
+   * terminal = station terikatnya (lihat scopeRank di lib/print.ts).
+   * Disimpan di cache JSON + ms_station; kolom khusus tak ditambah (tanpa migrasi).
+   */
+  terminalCode?: string;
+  branchId?: string;}interface Bonded {
   id: string;
   name: string;
   mac: string;
@@ -45,6 +54,10 @@ function rowToStation(r: StationRow): Station {
     isDefault: Number(r.flagDefault ?? 0) !== 0,
     connected: false,
   };
+}/** M14: peran UI -> printerType kanonis (sebelumnya persistStation menghardcode
+ * 'receipt' sehingga peran Dapur/Checker/Label hilang saat reload DB-first). */
+function roleToPrinterType(r: StationRole): string {
+  return r === 'Dapur' ? 'kitchen' : r === 'Checker' ? 'checker' : r === 'Label' ? 'label' : 'receipt';
 }function roleColor(r: StationRole) {
   if (r === 'Kasir') return colors.navy;
   if (r === 'Dapur') return colors.orange;
@@ -67,7 +80,9 @@ function previewText(s: Station, hint: string | null, L: { test: string; role: s
   ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. */function stationTarget(s: Station): PrinterTarget { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); return { transport: 'lan', host: (host ?? '').trim(), port: Number(portRaw ?? 9100) || 9100 };
 }
 
-if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } const addr = s.address.trim(); if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (mac) return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master. */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT OR REPLACE INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, 'receipt', ?, ?, 1, ?, NULL)`, [s.id, s.name, s.name, s.address, s.conn, s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
+if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return { transport: 'usb', vendorId: m ? Number(m[1]) : 0, productId: m ? Number(m[2]) : 0 }; } const addr = s.address.trim(); if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (mac) return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station agar konfigurasi perangkat ikut sync master.
+ * M14: peran dipetakan via roleToPrinterType + UPSERT kolom-terkelola (kolom
+ * server lain lestari; binding terminalCode/branchId tetap di cache JSON). */async function persistStation(s: Station): Promise<void> { try { await initDb(); await run( `INSERT INTO ms_station (id, stationName, printerName, printerPort, connection, printerType, charPerLine, flagDefault, flagActive, flagAutocut, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerPort = excluded.printerPort, connection = excluded.connection, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagAutocut = excluded.flagAutocut, syncDate = NULL`, [s.id, s.name, s.name, s.address, s.conn, roleToPrinterType(s.role), s.cpl, s.isDefault ? 1 : 0, s.autocut ? 1 : 0], ); await enqueueOutbox('ms_station', s.id, 'update'); } catch { /* abaikan: cache JSON di bawah tetap menyimpan */ }}export default function PrintersScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false);
@@ -88,6 +103,14 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
   // Modul native ada = jalan di dev-client/APK produksi; tidak ada = Expo Go/web.
   // Dipakai untuk menyembunyikan catatan dev-client bila sudah tidak relevan.
   const [nativeReady] = useState(hasNativePrinter);
+  // Terminal klaim device ini (APP-PRINTER): acuan binding station + printer aktif.
+  const [activeTerm] = useState(() => {
+    try {
+      return getTerminal();
+    } catch {
+      return { terminalCode: '', branchId: '' } as { terminalCode?: string; branchId?: string };
+    }
+  });
 
   /** Label peran station ikut bahasa aktif (nilai kanonis tetap ID di state). */
   const roleLabel = (r: StationRole) =>
@@ -95,9 +118,15 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
 
   // DB-first: printer terkonfigurasi (printerPort terisi) dari ms_station;
   // cache JSON hanya fallback bila DB kosong/belum siap.
+  // M14: hasil DB di-MERGE dengan cache (binding + station cache-only), bukan ditimpa.
   useEffect(() => {
     let alive = true;
     (async () => {
+      // M14: cache dibaca dulu agar binding bisa di-merge ke baris DB.
+      let cached: Station[] = [];
+      try {
+        cached = await getJSON<Station[]>(LS_STATIONS, []);
+      } catch { /* daftar kosong */ }
       try {
         await initDb();
         const rows = await query<StationRow>(
@@ -108,15 +137,26 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
              ORDER BY flagDefault DESC LIMIT 20`,
         );
         if (!alive) return;
-        if (rows.length > 0) {
-          const mapped = rows.filter((r) => r.id).map(rowToStation);
-          if (mapped.length > 0) { setStations(mapped); return; }
+        // M14: MERGE — binding (terminalCode/branchId, tanpa kolom DB) + station
+        // cache-only ditempel ke baris DB; menimpa mentah membunuh keduanya.
+        const bindOf = new Map(cached.filter((c) => c.id).map((c) => [c.id, c] as const));
+        const mapped = rows.filter((r) => r.id).map(rowToStation).map((m) => {
+          const c = bindOf.get(m.id);
+          if (!c) return m;
+          bindOf.delete(m.id);
+          return {
+            ...m,
+            ...(c.terminalCode ? { terminalCode: c.terminalCode } : {}),
+            ...(c.branchId ? { branchId: c.branchId } : {}),
+          };
+        });
+        for (const rest of bindOf.values()) mapped.push(rest);
+        if (mapped.length > 0) {
+          if (alive) setStations(mapped);
+          return;
         }
-      } catch { /* fallback cache di bawah */ }
-      try {
-        const cached = await getJSON<Station[]>(LS_STATIONS, []);
-        if (alive) setStations(cached);
-      } catch { /* daftar kosong */ }
+      } catch { /* DB belum siap — fallback cache di bawah */ }
+      if (alive) setStations(cached);
     })();
     return () => { alive = false; };
   }, []); useEffect(() => { void setJSON(LS_STATIONS, stations); }, [stations]);
@@ -126,6 +166,28 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
 
   const changed = next.find((x) => x.id === id); if (changed) void persistStation(changed); return next; }); }; const setDefault = (id: string) =>
     { setStations((ss) => { const next = ss.map((x) => ({ ...x, isDefault: x.id === id })); next.forEach((x) => { void persistStation(x); }); return next; }); };
+
+  /** Ikat station ke terminal klaim device ini (1 terminal = 1 printer aktif). */
+  const bindStation = (id: string) => {
+    const term = String(activeTerm.terminalCode ?? '').trim().toUpperCase();
+    const br = String(activeTerm.branchId ?? '').trim();
+    if (!term) {
+      setStatusMsg('Terminal belum diklaim - klaim terminal dulu sebelum mengikat printer.');
+      return;
+    }
+    setStations((ss) => {
+      const next = ss.map((x) => (x.id === id ? { ...x, terminalCode: term, branchId: br || undefined } : x));
+      const changed = next.find((x) => x.id === id);
+      if (changed) void persistStation(changed);
+      return next;
+    });
+    setStatusMsg(`Printer diikat ke terminal ${term}.`);
+  };
+  /** Lepas binding → station kembali jadi address book global (warisan). */
+  const unbindStation = (id: string) =>
+    { setStations((ss) => { const next = ss.map((x) => (x.id === id ? { ...x, terminalCode: undefined, branchId: undefined } : x));
+
+  const changed = next.find((x) => x.id === id); if (changed) void persistStation(changed); return next; }); };
 
   const removeStation = (id: string) =>
     setStations((ss) => {
@@ -311,6 +373,16 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
         </TouchableOpacity>
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+        {/* APP-PRINTER (audit row 11): 1 device = 1 terminal = 1 printer.
+            Printer aktif = station yang terikat terminal di bawah ini. */}
+        <View style={styles.stCard}>
+          <Text style={styles.stName}>
+            {String(activeTerm.terminalCode ?? '').trim() ? `Terminal: ${String(activeTerm.terminalCode).trim().toUpperCase()}` : 'Terminal: belum diklaim'}
+          </Text>
+          <Text style={styles.stMeta}>
+            {String(activeTerm.branchId ?? '').trim() ? `Cabang: ${String(activeTerm.branchId).trim()}` : 'Klaim terminal dulu sebelum mengikat printer'}
+          </Text>
+        </View>
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
         {/* WIRE REA-16: kunci prefs native printer (info status, best-effort) */}
         <View style={styles.stCard}>
@@ -332,6 +404,10 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
               <Text style={styles.stName}>{s.name}{s.isDefault ? ` - ${t('printers.main')}` : ''}</Text>
               <Text style={styles.stMeta}>
                 {s.conn}{s.address ? ` - ${s.address}` : ''} - {s.connected ? t('printers.connected') : t('printers.disconnected')}
+              </Text>
+              {/* APP-PRINTER: label binding terminal (tanpa kunci i18n baru). */}
+              <Text style={styles.stMeta}>
+                {s.terminalCode ? `Terminal: ${s.terminalCode}${s.branchId ? ` · ${s.branchId}` : ''}` : 'Belum terikat terminal (address book global)'}
               </Text>
             </View>
             <View style={[styles.roleBadge, { backgroundColor: roleColor(s.role) }]}>
@@ -372,6 +448,12 @@ if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); return
             <AppButton size="md" title={t('printers.disconnect')} onPress={() => patchStation(s.id, { connected: !s.connected })} variant="danger" style={styles.paleRedBlock} textStyle={styles.redText} />
           ) : (
             <AppButton size="md" title={t('printers.connect')} onPress={() => patchStation(s.id, { connected: !s.connected })} style={styles.greenBlock} />
+          )}
+          {/* APP-PRINTER: satu printer aktif per terminal klaim (literal netral, tanpa kunci baru). */}
+          {s.terminalCode ? (
+            <AppButton size="md" title="Lepas dari terminal ini" onPress={() => unbindStation(s.id)} variant="secondary" style={styles.blockGap} />
+          ) : (
+            <AppButton size="md" title="Pakai di terminal ini" onPress={() => bindStation(s.id)} style={styles.greenBlock} />
           )}
         </View>
       ))}

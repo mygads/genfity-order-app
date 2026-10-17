@@ -1,5 +1,5 @@
 import { getJSON, setJSON } from './storage';
-import { enqueueOutbox } from './sync';
+import { enqueueOutbox, enqueueSync } from './sync';
 
 /**
  * Status approve expense/petty cash lintas layar (F7).
@@ -33,13 +33,54 @@ export async function getApprovals(): Promise<Record<string, boolean>> {
   }
 }
 
-/** Tandai disetujui: tulis kanonis + outbox, lalu siarkan ke semua layar. */
-export async function markApproved(id: string): Promise<void> {
+/** Rincian audit approval (app-shift 2026-10-17, row-17 petty): siapa + kapan.
+ * Kunci boolean kanonis di atas tak berubah (kompatibel baca lawas
+ * PettyCash/Expense); identitas approver tercatat di kunci detail terpisah. */
+export interface ApprovalDetail {
+  by: string;
+  at: string;
+}
+const DETAIL_KEY = 'genfity.expense.approved.detail';
+
+/** Rincian approve satu expense; null bila belum pernah di-approve ber-PIN. */
+export async function getApprovalDetail(id: string): Promise<ApprovalDetail | null> {
+  try {
+    const all = await getJSON<Record<string, ApprovalDetail>>(DETAIL_KEY, {});
+    return all[id] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Tandai disetujui: tulis kanonis + outbox, lalu siarkan ke semua layar.
+ * approvedBy = userId pemilik PIN eskalasi (verifyLocalEscalation). Bila diisi
+ * (jalur ExpenseScreen ber-PIN): rincian audit by+at disimpan + satu item sync
+ * 'other' (op expense-approve) diantrekan agar identitas approver ikut
+ * terkirim. Tanpa approvedBy = jalur lawas (PettyCashScreen/Detail) yang
+ * perilakunya tak berubah. */
+export async function markApproved(id: string, approvedBy?: string): Promise<void> {
+  const at = new Date().toISOString();
   try {
     const cur = await getJSON<Record<string, boolean>>(APPROVAL_KEY, {});
     cur[id] = true;
     await setJSON(APPROVAL_KEY, cur);
+    if (approvedBy) {
+      try {
+        const det = await getJSON<Record<string, ApprovalDetail>>(DETAIL_KEY, {});
+        det[id] = { by: approvedBy, at };
+        await setJSON(DETAIL_KEY, det);
+      } catch {
+        /* abaikan: flag boolean di atas tetap sah */
+      }
+    }
     await enqueueOutbox('tr_branchexpense', id, 'update');
+    if (approvedBy) {
+      try {
+        enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'expense-approve', approvedBy, approvedAt: at });
+      } catch {
+        /* abaikan: outbox fisik di atas tetap jalan */
+      }
+    }
   } catch {
     /* abaikan: state optimistis pemanggil tetap jalan */
   }

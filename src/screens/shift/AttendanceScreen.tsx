@@ -31,10 +31,14 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     (async () => {
       try {
         await initDb();
-        const nm = getSession()?.name ?? 'Kasir';
+        // APP-SHIFT 2026-10-17 (titip-absen): restore diikat ke identitas stabil
+        // sesi - userId pakai id/username, cashierName pakai nama tampilan.
+        const sess0 = getSession();
+        const uid0 = sess0?.userId || sess0?.username || '';
+        const nm0 = sess0?.name || uid0 || 'Kasir';
         const row = await queryFirst<{ clockIn: string | null; clockOut: string | null }>(
           `SELECT clockIn, clockOut FROM tr_shiftlog WHERE status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`,
-          [nm, nm],
+          [uid0, nm0],
         );
         if (!alive || !row?.clockIn) return;
         const d = new Date(row.clockIn);
@@ -63,18 +67,41 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     else if (pin.length < 4) setPin(pin + k);
   };
 
+  /** Nama tampilan pemilik PIN: nama sesi bila PIN milik sesi aktif, sonst username/id stabil (anti-titip: clock tercatat atas pemilik PIN). */
+  const holderName = async (userId: string): Promise<string> => {
+    const sess = getSession();
+    if (userId === (sess?.userId || sess?.username)) return sess?.name || userId;
+    try {
+      await initDb();
+      const u = await queryFirst<{ username: string | null }>('SELECT username FROM ms_posuser WHERE id = ?', [userId]);
+      if (u?.username) return u.username;
+    } catch {
+      /* pakai userId */
+    }
+    return userId;
+  };
+
   // FIX2-3: baris absensi ditandai status 'absen' + shiftName 'Absensi' agar
   // TIDAK mencemari guard shift (ShiftScreen/EndShiftScreen/Recap hanya baca
   // status 'open'/'closed'); clock-out juga hanya menutup baris 'absen'.
-  /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out') => { const nowIso = new Date().toISOString(); const nm = getSession()?.name ?? s?.name ?? 'Kasir'; const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, nm, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [nm, nm], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', user: nm, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
-    if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try { const ok = (await verifyAttendancePin(pin)).ok; if (ok === false) { setError(t('att_pin_wrong')); return; }
-    await recordClock('in'); setInTime(fmtClock(new Date()).slice(0, 5));
+  // APP-SHIFT 2026-10-17 (titip-absen CONFIRMED-1): baris + payload diikat ke
+  // userId pemilik PIN terverifikasi (argumen), BUKAN nama sesi.
+  /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out', verifiedUserId: string, verifiedName: string) => { const nowIso = new Date().toISOString(); const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, verifiedUserId, verifiedName, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [verifiedUserId, verifiedName], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', userId: verifiedUserId, user: verifiedName, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
+    if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try {
+    // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
+    const vIn = await verifyAttendancePin(pin);
+    if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
+    await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClock(new Date()).slice(0, 5));
     setSyncNote(t('att_queued')); setPin('');
   } finally { setBusy(false); } };
 
   const clockOut = async () => {
     if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
-    setBusy(true); try { const ok = (await verifyAttendancePin(pin)).ok; if (ok === false) { setError(t('att_pin_wrong')); return; } await recordClock('out'); setOutTime(fmtClock(new Date()).slice(0, 5));
+    setBusy(true); try {
+    // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
+    const vOut = await verifyAttendancePin(pin);
+    if (vOut.ok !== true || !vOut.userId) { setError(vOut.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
+    await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClock(new Date()).slice(0, 5));
     setSyncNote(t('att_queued')); setPin('');
   } finally { setBusy(false); } };
 
@@ -87,7 +114,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     if (n.length < 4) { setPinMsg(t('att_new_short')); return; }
     if (n !== c) { setPinMsg(t('att_confirm_mismatch')); return; }
     if (o === n) { setPinMsg(t('att_same_pin')); return; }
-    const v = await verifyAttendancePin(o); if (v.ok === false) { setPinMsg(t('att_old_wrong')); return; } const userId = v.userId ?? getSession()?.username ?? 'kasir'; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; try { const r = await updatePinOnServer(userId, o, n); sent = r.ok; } catch { /* offline - antre di bawah */ } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : t('att_pin_saved_pending'));
+    const v = await verifyAttendancePin(o); if (v.ok !== true || !v.userId) { setPinMsg(v.ok === false ? t('att_old_wrong') : t('shf_pin_offline_unknown')); return; } const userId = v.userId; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; try { const r = await updatePinOnServer(userId, o, n); sent = r.ok; } catch { /* offline - antre di bawah */ } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : t('att_pin_saved_pending'));
     setOldPin('');
     setNewPin('');
     setConfirmPin('');

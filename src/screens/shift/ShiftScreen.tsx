@@ -56,6 +56,10 @@ const MAX_KAS_AWAL = 10000000;
     }
     openingRef.current = true;
     setError('');
+    // APP-SHIFT 2026-10-17: jalur PIN staff dinyatakan CLEAR - server dulu,
+    // fallback PIN lokal mana pun yang dikenal (tanpa gerbang owner, tanpa
+    // gerbang panjang-PIN); openerUserId mengikat shift ke pemilik PIN offline.
+    let openerUserId: string | null = null;
     try {
       await initDb();
       // (1) Cegah shift-ganda: tolak bila masih ada shift berstatus open, JANGAN insert.
@@ -79,12 +83,13 @@ const MAX_KAS_AWAL = 10000000;
       if (!auth.ok) {
         // Offline jujur: server tak terjangkau, cocokkan PIN lokal (lib/pin.ts).
         const local = await verifyAttendancePin(pin);
-        if (local.ok !== true) {
+        if (local.ok !== true || !local.userId) {
           setError(
             local.ok === false ? t('shf_pin_wrong') : t('shf_pin_offline_unknown'),
           );
           return;
         }
+        openerUserId = local.userId;
       }
       // Catat buka shift ke SQLite + antrean sync (offline-first).
       const nowIso = new Date().toISOString();
@@ -92,8 +97,10 @@ const MAX_KAS_AWAL = 10000000;
       const term = getTerminal();
       // Kolom userId WAJIB id user nyata (dipakai rekap/hak/eskalasi), BUKAN
       // nama tampilan; cashierName menyimpan nama untuk struk/rekap.
+      // APP-SHIFT: offline ikat ke pemilik PIN (cermin anti-titip Attendance);
+      // online ikut sesi (server tak mengembalikan userId).
       const sess = getSession();
-      const shiftUserId = sess?.userId || sess?.username || '';
+      const shiftUserId = openerUserId || sess?.userId || sess?.username || '';
       const shiftCashier = sess?.name || sess?.username || '';
       try {
         await run(

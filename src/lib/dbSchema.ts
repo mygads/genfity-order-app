@@ -184,12 +184,6 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_sales_seq (
     terminalCode TEXT NOT NULL, ymd TEXT NOT NULL, lastN INTEGER DEFAULT 0,
     PRIMARY KEY (terminalCode, ymd))`,
-  // Indeks client_id untuk upsert/pull-by-client (dibuat tiap initDb,
-  // jadi instalasi lama ikut dapat tanpa migrasi khusus). UNIQUE aman:
-  // SQLite mengizinkan banyak NULL, dan backfill di bawah mengisi nilai
-  // unik (salinan salesNum yang adalah PK) sebelum baris baru ber-UUID.
-  `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
   // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
   // logika drain diimplementasikan lane printer belakangan (jangan drain di
   // lane ini). status: 'antre' | 'cetak' | 'gagal' (kosakata = outbox).
@@ -231,4 +225,11 @@ export const MIGRATION_STATEMENTS: string[] = [
   // Backfill deterministik: baris lama client_id = salesNum (unik karena PK,
   // stabil lintas-retry). Baris baru selalu UUIDv7 dari saveSale.
   'UPDATE tr_saleshead SET client_id = salesNum WHERE client_id IS NULL',
+  // Indeks client_id untuk upsert/pull-by-client: di MIGRASI (best-effort),
+  // bukan skema — loop skema initDb tanpa try/catch, sehingga CREATE INDEX
+  // atas kolom yang belum ada di instalasi lama melempar dan mem-brick
+  // seluruh initDb. Di sini kolom sudah ADD + backfill; UNIQUE aman karena
+  // backfill menyalin salesNum (PK, unik). Gagal = sudah ada.
+  `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
 ];

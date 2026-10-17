@@ -263,6 +263,47 @@ export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
 }
 
 /**
+ * Slip antrean pelanggan (APP-PRINTER, audit row 11): nomor antrean + cabang
+ * + waktu (+ meja/mode opsional). SENGAJA tanpa harga/total/item — slip ini
+ * untuk panggilan antrean, bukan struk bayar. Dipakai view_queue + printer
+ * kasir saat mode antrean aktif.
+ */
+export interface EscQueueSlip {
+  queueNo: string;
+  branch: string;
+  /** Lebar kertas: 32 (58mm, default) atau 48 (80mm) kolom. */
+  cols?: 32 | 48;
+  time?: string;
+  table?: string;
+  mode?: string;
+  terminalCode?: string;
+}
+
+/** Byte ESC/POS slip antrean (tanpa harga, tetap potong kertas). */
+export function buildQueueSlipBytes(q: EscQueueSlip): Uint8Array {
+  const cols = q.cols === 48 ? ESC_COLS_WIDE : ESC_COLS;
+  const out: number[] = [];
+  push(out, ESC, 0x40);
+  push(out, ESC, 0x61, 1);
+  push(out, GS, 0x21, 0x11);
+  text(out, 'ANTREAN');
+  push(out, GS, 0x21, 0x00);
+  push(out, ESC, 0x45, 1);
+  text(out, q.queueNo);
+  push(out, ESC, 0x45, 0);
+  text(out, q.branch);
+  if (q.time) text(out, q.time);
+  if (q.table) text(out, `Meja: ${q.table}`);
+  if (q.mode) text(out, q.mode);
+  if (q.terminalCode) text(out, `Terminal: ${q.terminalCode}`);
+  push(out, ESC, 0x61, 1);
+  text(out, 'Mohon tunggu panggilan');
+  push(out, LF, LF, LF, LF);
+  push(out, GS, 0x56, 0x00);
+  return Uint8Array.from(out);
+}
+
+/**
  * Byte tendangan laci kas standar ESC/POS: INIT + `ESC p m t1 t2`
  * (pin konektor 0, on 50ms, off 200ms). Sama persis dengan
  * DRAWER_KICK di GenfityPrinterModule.java - satu sumber kebenaran

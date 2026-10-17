@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts } from '../theme';
-import { getSession, logout } from '../session';
+import { getSession, getBinding, logout, subscribeSession } from '../session';
 import { getBranchId } from '../config/server';
 import { useLang } from '../lib/i18n';
-import { getDeviceRole } from '../lib/deviceRole';
+import { allowedRoutesFor, getDeviceRole, normalizeTag, subscribeDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
 
 interface DrawerItem {
@@ -119,21 +119,58 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     { label: t('nav_petty'), sub: t('nav_petty_sub'), route: 'PettyCash', icon: require('../../assets/icons/nav_petty_cash.webp') },
     { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
   ];
-  // Kunci peran perangkat: DAPUR/DISPLAY hanya melihat layarnya + Pengaturan
-  // (agar peran bisa dikembalikan). KASIR (default) melihat semua seperti semula.
-  const role = getDeviceRole();
+  // Display-lock SPEC §10 (Wave1): drawer mengikuti tag terminal binding
+  // (session.getBinding), fallback ke tag perangkat. kasir/dapur/full_access =
+  // default-allow (menu penuh, nav-lock DAPUR/DISPLAY lama dicabut);
+  // view_pelanggan = HANYA CustomerDisplay (nama layar eksisting untuk
+  // CustomerView); view_queue = HANYA QueueView. Tanpa Settings/role-switch
+  // untuk kedua tag view; keluar hanya via aksi owner terautentikasi (Q14).
+  // Tag tak dikenal = daftar kosong (fail-closed).
+  const [, setTagTick] = useState(0);
+  useEffect(() => {
+    const un1 = subscribeSession(() => setTagTick((x) => x + 1));
+    const un2 = subscribeDeviceRole(() => setTagTick((x) => x + 1));
+    return () => {
+      un1();
+      un2();
+    };
+  }, []);
+  const boundTag = (() => {
+    try {
+      return normalizeTag(getBinding()?.tag);
+    } catch {
+      return null;
+    }
+  })();
+  const activeTag = boundTag ?? normalizeTag(getDeviceRole());
+  const allow = activeTag ? allowedRoutesFor(activeTag) : null;
+  /* APP-EVENTS: label antrean via kunci kamus (queue_title/queue_branch). */
+  const QUEUE_ONLY: DrawerItem[] = [
+    {
+      label: t('queue_title'),
+      sub: t('queue_branch'),
+      route: 'QueueView',
+      icon: require('../../assets/icons/nav_esb_order_dashboard.webp'),
+    },
+  ];
+  /* APP-EVENTS (SPEC §10): view_pelanggan = HANYA CustomerDisplay
+   * (kunci nav_display eksisting; ikon reuse dashboard). */
+  const CUSTOMER_ONLY: DrawerItem[] = [
+    {
+      label: t('nav_display'),
+      sub: t('nav_display_sub'),
+      route: 'CustomerDisplay',
+      icon: require('../../assets/icons/nav_esb_order_dashboard.webp'),
+    },
+  ];
   const VISIBLE: DrawerItem[] =
-    role === 'DAPUR'
-      ? [
-          { label: t('nav_kitchen'), sub: t('nav_kitchen_sub'), route: 'Kitchen', icon: require('../../assets/icons/nav_order.webp') },
-          { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
-        ]
-      : role === 'DISPLAY'
-        ? [
-            { label: t('nav_display'), sub: t('nav_display_sub'), route: 'CustomerDisplay', icon: require('../../assets/icons/nav_esb_order_dashboard.webp') },
-            { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings', icon: require('../../assets/icons/nav_setting.webp') },
-          ]
-        : ITEMS;
+    allow === null
+      ? ITEMS
+      : allow.has('QueueView')
+        ? QUEUE_ONLY
+        : allow.has('CustomerDisplay')
+          ? CUSTOMER_ONLY
+          : ITEMS.filter((m) => allow.has(m.route));
   const go = (route: string) => {
     // Gerbang kasir: shift tutup (status live dibaca tiap drawer dibuka) →
     // tutup drawer lalu arahkan buka shift dulu, bukan ke kasir.

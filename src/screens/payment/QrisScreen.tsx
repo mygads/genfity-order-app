@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Alert, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment } from '../../lib/sales';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, buildSaleQrPayload } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { publishDisplayOrder } from '../../lib/display';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
-  route?: { params?: { total?: number; orderNo?: string; salesNum?: string; splitGroup?: boolean; orderTotal?: number; splits?: { method?: string; amount?: number }[]; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string; };
+  route?: { params?: { total?: number; orderNo?: string; salesNum?: string; clientId?: string; splitGroup?: boolean; orderTotal?: number; splits?: { method?: string; amount?: number }[]; items?: SaleItemIn[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string; };
 };};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
@@ -26,6 +26,27 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
   }, [total]);
+  // M15: rantai client_id untuk QR (Pay→Qris via params; head bila dibuka dari
+  // riwayat; baru diterbitkan bila belum ada). Diselesaikan sekali agar QR yang
+  // tampil = kunci yang dipakai settlePaid (QR tak basi).
+  const [qrChainId, setQrChainId] = useState((route?.params?.clientId ?? '').trim());
+  useEffect(() => {
+    if (qrChainId) return;
+    let on = true;
+    void (async () => {
+      const sn = (route?.params?.salesNum ?? '').trim();
+      const head = sn ? await getSaleClientId(sn) : null;
+      if (on) setQrChainId(head ?? uuidv7());
+    })();
+    return () => { on = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // M15: QR MEMBAWA payload nyata (client_id rantai + salesNum + total) via
+  // buildSaleQrPayload — bukan pola dekoratif dari nominal. salesNum kosong =
+  // nomor baru diterbitkan saat settle; korelasi tetap via client_id yang sama
+  // dengan yang dibawa Success/Receipt.
+  const qrSalesNum = (route?.params?.salesNum ?? '').trim();
+  const qrPayload = buildSaleQrPayload(qrChainId, qrSalesNum, total);
   // WIRE REA-17: label acquirer deterministik dari QRIS_ACQUIRERS + key i18n
   // qris_acq_* (mock FauxQr tetap dipakai - hanya label yang dilengkapi).
   const acq = QRIS_ACQUIRERS[Math.abs(Math.floor(total)) % QRIS_ACQUIRERS.length] ?? 'qrisesb';
@@ -58,13 +79,42 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 
   /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja).
    * Nomor + kaki split terusan dari Pay dipakai ulang (sisa QRIS = kaki
-   * terakhir SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor. */
+   * terakhir SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor.
+   * APP-PRINTER-SALES (Q7): client_id dipakai ulang dari rantai Pay/head,
+   * baru terbitkan bila belum ada — QR tak basi. FauxQr tampil tetap
+   * dekoratif; payload QR nyata (buildSaleQrPayload) ikut clientId ini. */
   const settlePaid = async () => {
     if (settledRef.current) return;
     settledRef.current = true;
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
     const p = route?.params ?? {};
-    const orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    // M10 (cermin PayScreen goSuccess): nomor diterbitkan DI DALAM try; bila
+    // gagal (mis. terminal-unbound dari nextSalesNum), guard di-reset agar
+    // tombol Cek Status tetap hidup (sebelumnya throw di luar try =
+    // settledRef macet-true = retry-mati).
+    let orderNo: string;
+    try {
+      orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    } catch (e) {
+      settledRef.current = false;
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+      }
+      return;
+    }
+    // APP-PRINTER-SALES (Q7): SATU client_id per sale (rantai Pay → QR tampil → head → baru).
+    // uuidv7() melempar bila CSPRNG absen: guard di-reset agar Cek Status tetap
+    // hidup (cermin penjagaan nextSalesNum di atas).
+    let saleClientId: string;
+    try {
+      saleClientId = (p.clientId ?? '').trim() || qrChainId || (await getSaleClientId(orderNo)) || uuidv7();
+    } catch {
+      settledRef.current = false;
+      return;
+    }
     const fwdSplits = (p.splits ?? [])
       .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
       .filter((s) => s.amount > 0);
@@ -81,17 +131,66 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       const visitPay = [...fwdSplits, { method: 'qris', amount: total }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0 });
+          await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0, clientId: saleClientId, ...(memberId ? { memberId } : {}) });
         } else {
-          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
+          const gInput: SaleInput = { method: 'qris', salesNum: groupNo, clientId: saleClientId, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
           recordSale(gInput);
-          try { await saveSale(gInput); } catch { /* DB gagal - kasir tetap jalan */ }
+          try { await saveSale(gInput); } catch (e) {
+            // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
+            if ((e as { code?: string })?.code === 'terminal-unbound') {
+              Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+                { text: t('c_cancel'), style: 'cancel' },
+                { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+              ]);
+              // M10: guard di-reset agar retry hidup setelah klaim terminal.
+              settledRef.current = false;
+              return;
+            }
+            /* DB gagal - kasir tetap jalan */
+          }
         }
-      } catch { /* DB gagal - kasir tetap jalan */ }
-      navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
+      } catch (e) {
+        // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
+        // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
+        if ((e as { code?: string })?.code === 'terminal-unbound') {
+          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+            { text: t('c_cancel'), style: 'cancel' },
+            { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+          ]);
+          settledRef.current = false;
+          return;
+        }
+        /* DB gagal - kasir tetap jalan */
+      }
+      // APP-PRINTER-SALES: kunjungan grup QRIS ikut menyiarkan display
+      // (jalur append tak lewat saveSale sehingga tak auto-publish).
+      try {
+        publishDisplayOrder(
+          groupNo,
+          (items ?? []).map((it) => ({
+            name: String(it.name ?? ''),
+            qty: Math.max(1, Math.round(Number(it.qty) || 0)),
+            price: Math.round(Number(it.basePrice) || 0),
+          })),
+          orderTotalFull,
+        );
+      } catch { /* abaikan */ }
+      navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, clientId: saleClientId, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
       return;
     }
-    const input: SaleInput = { method: 'qris', salesNum: orderNo, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch { /* DB gagal - kasir tetap jalan */ } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+    const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch (e) {
+      // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+        // M10: guard di-reset agar retry hidup setelah klaim terminal.
+        settledRef.current = false;
+        return;
+      }
+      /* DB gagal - kasir tetap jalan */
+    } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(memberId ? { memberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
@@ -168,8 +267,13 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
               resizeMode="contain"
             />
             <View style={[styles.qrPlaceholder, isTablet && styles.qrPlaceholderTablet]}>
+              {/* APP-R3: FauxQr di atas pola dekoratif saja (bukan QRIS asli) —
+                  payload scannable yang jujur = teks qrPayload di bawah ini
+                  sampai dep renderer QR tersedia. */}
               <FauxQr seed={total} />
-
+              {/* M15: payload QR nyata (client_id rantai + salesNum + total) —
+                  bukan nominal-dekoratif; teks sampai renderer QR tersedia. */}
+              <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
               <Text style={styles.qrSub}>{t('qris_scan')}</Text>
             </View>
           </View>
@@ -289,6 +393,8 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   qrCellOn: { backgroundColor: colors.text },
 
   qrSub: { fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginTop: 6, textAlign: 'center' },
+  /** M15: payload QR nyata sebagai teks (tanpa renderer QR). */
+  qrPayload: { fontFamily: fonts.regular, fontSize: 10, color: colors.text, marginTop: 8, textAlign: 'center' },
   timerBadge: {
     marginTop: 16,
     backgroundColor: colors.navy,

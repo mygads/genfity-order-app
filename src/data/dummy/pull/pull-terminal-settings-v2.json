@@ -1,0 +1,23 @@
+{
+  "request": { "branchId": "B001", "terminalId": "T01", "lastSyncDate": "2026-10-01 00:00:00", "page": 1 },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "totalRecords": 6,
+      "pageCount": 1,
+      "page": 1,
+      "items": [
+        { "terminalId": "T01", "settingKey": "terminalTag", "settingValue": "kasir", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T01", "settingKey": "max_offline_grant_days", "settingValue": "7", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T01", "settingKey": "printerDefault", "settingValue": "ST-KASIR", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T01", "settingKey": "receiptFooter", "settingValue": "Terima kasih atas kunjungan Anda", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T01", "settingKey": "autoPrintKitchen", "settingValue": "1", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" },
+        { "terminalId": "T01", "settingKey": "deviceRole", "settingValue": "KASIR", "flag": 1, "lastSyncDate": "2026-10-16 08:00:00" }
+      ]
+    }
+  }
+}

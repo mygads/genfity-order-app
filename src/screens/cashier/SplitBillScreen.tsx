@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -271,6 +272,11 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     if (groupPaid.fullyPaid) return;
     // Mode nominal diblokir bila sisa != 0 (nominal belum pas dengan total).
     if (splitMode === 'nominal' && !nominalPas) return;
+    // Batas anti-bayar-ganda: jangan tagih melebihi sisa DB (kunjungan via
+    // tombol back lalu Bayar lagi tak boleh menggelembungkan paidAmount).
+    const remaining = Math.max(0, orderTotal - groupPaid.paidTotal);
+    if (remaining <= 0) return;
+    const charge = Math.min(val, remaining);
     // Kontrak grup: SELALU konteks penuh (semua item + diskon + voucher +
     // service/fee/pajak/ongkir) + SATU salesNum grup; kunjungan ini menagih
     // porsi `val` (di `total`), total order di `orderTotal`. Pay paham
@@ -280,7 +286,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     // Rounding tak diteruskan: tiap bill sudah bulat persis (pembulatan
     // pemanggil sudah dilipat ke ongkirEff via residual).
     navigation?.navigate('Pay', {
-      total: val,
+      total: charge,
       orderTotal,
       salesNum: groupNum,
       splitGroup: true,
@@ -302,7 +308,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   // Sinkron kebenaran DB tiap grup/bill berubah (termasuk kembali dari Pay):
   // cocokkan nominal kaki DB ke tiap bill (multiset) agar centang Lunas hanya
   // untuk bill yang benar dibayar; header Terbayar = angka DB, bukan tebakan.
-  useEffect(() => {
+  // refreshPaid dipakai ulang saat layar kembali fokus (tombol back dari
+  // Pay/Success): tanpa ini centang basi → Bayar dua kali untuk bill yang
+  // sudah tercatat (kaki ganda = pelanggan dicharge 2x).
+  const refreshPaid = useCallback(() => {
     if (!groupNum) return;
     let alive = true;
     void (async () => {
@@ -319,7 +328,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           rest.splice(k, 1);
           return true;
         });
-        setPaid(flags);
+        // Grup lunas-penuh = semua bill lunas menurut definisi (uang genap),
+        // walau atribusi kaki-per-bill tak cocok multiset (mis. satu bill
+        // dibayar 2 metode sehingga kakinya terpecah).
+        setPaid(g.fullyPaid ? flags.map(() => true) : flags);
       } catch {
         /* abaikan: centang lama bertahan, kasir tetap jalan */
       }
@@ -329,6 +341,20 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupNum, splits, splitMode, itemSplits, rataTotals, nominalNums, billTotals]);
+
+  useEffect(() => {
+    const off = refreshPaid();
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshPaid]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const off = refreshPaid();
+      return off;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [refreshPaid]),
+  );
 
   return (
     <View style={styles.root}>
@@ -548,11 +574,6 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                     textStyle={[styles.payT, isTablet && styles.payTBig]}
                   />
                 )}
-                <TouchableOpacity
-                  onPress={() => setPaid((p) => p.map((v, j) => (j === i ? !v : v)))}
-                  hitSlop={10}>
-                  <Text style={styles.lunasT}>{paid[i] ? t('sp_unmark') : t('sp_mark')}</Text>
-                </TouchableOpacity>
               </View>
             </View>
           );

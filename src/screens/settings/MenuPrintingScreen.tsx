@@ -14,9 +14,16 @@ showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OP
   { id: 'r2', group: 'Makanan Ringan', items: 12, station: 'dapur', printLabel: false },
   { id: 'r3', group: 'Minuman', items: 18, station: 'checker', printLabel: false },
   { id: 'r4', group: 'Dessert', items: 8, station: 'checker', printLabel: false },
-  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** Cabang routing: id cabang aktif (fallback B001 bila terminal belum diklaim,
- * selaras getBranchId + dummy pull + Stock/MenuManagement). */
+  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** M9: cabang routing = id cabang aktif; '' = unbound (tanpa fallback B001 —
+ * tulis per-cabang dilewati + banner unbound, tulis global tetap jalan). */
 
+/** APP-PRINTER (audit row 7/11, tag-consistent): routing MENU→STATION di sini
+ * adalah peta fisik (menu grup → printer kasir/dapur/checker/label), BUKAN
+ * feature gate. Tag terminal (kasir/dapur/full_access/view_*) mengatur ROUTING
+ * event/notifikasi di dispatcher, bukan memblokir fitur — kasir/dapur/full =
+ * fitur penuh. Station kanonis ST-KASIR/ST-DAPUR/ST-CHECKER/ST-LABEL di bawah
+ * adalah address book printer; SELEKSI aktif di-scope per terminal klaim
+ * (scopeRank di lib/print.ts), jadi routing ini tetap valid lintas terminal. */
 /** Pilihan station UI -> id station kanonis (kolom id ms_station, dibaca KitchenScreen). */
 const STATION_ID_OF: Record<StationId, string | null> = {
   kasir: 'ST-KASIR',
@@ -34,7 +41,9 @@ const STATION_ID_OF: Record<StationId, string | null> = {
 async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void> {
   try {
     await initDb();
-    const branchId = getBranchId();
+    // M9: '' = unbound — tulis per-cabang (ms_branchmenu) dilewati agar tak
+    // tercatat di bawah cabang fiktif; tulis global (ms_menu/ms_setting) jalan.
+    const branchId = (getBranchId() || '').trim();
     // 1. Pastikan definisi station kanonis ada; baris pull master menang bila
     // sudah ada (DO NOTHING) agar alamat printer dari server tidak tertimpa.
     const defs = [
@@ -62,19 +71,24 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
       for (const m of menus) {
         if (sid) {
           await run('UPDATE ms_menu SET stationId = ?, syncDate = NULL WHERE id = ?', [sid, m.id]);
-          await run(
-            'UPDATE ms_branchmenu SET stationId = ?, syncDate = NULL WHERE branchId = ? AND menuId = ?',
-            [sid, branchId, m.id],
-          );
+          if (branchId) {
+            await run(
+              'UPDATE ms_branchmenu SET stationId = ?, syncDate = NULL WHERE branchId = ? AND menuId = ?',
+              [sid, branchId, m.id],
+            );
+          }
         } else {
           await run('UPDATE ms_menu SET stationId = NULL, syncDate = NULL WHERE id = ?', [m.id]);
-          await run(
-            'UPDATE ms_branchmenu SET stationId = NULL, syncDate = NULL WHERE branchId = ? AND menuId = ?',
-            [branchId, m.id],
-          );
+          if (branchId) {
+            await run(
+              'UPDATE ms_branchmenu SET stationId = NULL, syncDate = NULL WHERE branchId = ? AND menuId = ?',
+              [branchId, m.id],
+            );
+          }
         }
         await enqueueOutbox('ms_menu', m.id, 'update');
-        await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'update');
+        // M9: outbox cabang hanya bila ter-bound.
+        if (branchId) await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'update');
       }
     }
     // 3. Peta routing grup + opsi tiket agar persisten dan ikut sync master.
@@ -93,7 +107,15 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
-  const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS); useEffect(() => { let alive = true; (async () => {
+  const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS);
+  // M9: '' = unbound — banner jujur (tulis per-cabang dilewati persistRoutes).
+  const unboundBranch = (() => {
+    try {
+      return !getBranchId();
+    } catch {
+      return true;
+    }
+  })(); useEffect(() => { let alive = true; (async () => {
   const [cachedRoutes, cachedOpts] = await Promise.all([ getJSON<MenuRoute[]>(LS_ROUTES, DEFAULT_ROUTES), getJSON<PrintOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; const base = cachedRoutes.length > 0 ? cachedRoutes : DEFAULT_ROUTES; if (cachedRoutes.length > 0) setRoutes(cachedRoutes); setOpts({ ...DEFAULT_OPTS, ...cachedOpts });
       // Hitungan item jujur dari ms_menu live per grup (bukan angka contoh
       // 24/12/18/8/6); grup merchant sendiri tetap dipertahankan.
@@ -186,6 +208,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
           <Switch value={opts.showSalesTime} onValueChange={(v) => setOpt('showSalesTime', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
       </View>
+      {unboundBranch ? <Text style={[styles.foot, { color: colors.red }]}>{t('terminal_unbound_hint')}</Text> : null}
       <Text style={styles.foot}>{t('mprint.saved')}</Text>
       </ScrollView>
     </View>

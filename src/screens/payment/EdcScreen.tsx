@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
@@ -7,7 +7,8 @@ import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { saveSale, nextSalesNum } from '../../lib/sales';
+import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getSaleClientId } from '../../lib/sales';
+import { uuidv7 } from '../../lib/uuidv7';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = {
@@ -16,7 +17,12 @@ type Props = {
     params?: {
       total?: number;
       salesNum?: string;
+      /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): dipakai ulang, bukan dibuat baru. */
+      clientId?: string;
       splits?: { method?: string; amount?: number }[];
+      /** Split grup: kunjungan bayar memakai SATU salesNum + tahu total penuh. */
+      splitGroup?: boolean;
+      orderTotal?: number;
       items?: SaleItemIn[];
       discount?: number;
       voucherCode?: string;
@@ -96,19 +102,140 @@ export default function EdcScreen({ navigation, route }: Props) {
     const p = route?.params ?? {};
     const method = `EDC ${bank}`;
     const cardLast4 = cardNo.slice(-4);
-    const orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    // M10 (cermin PayScreen goSuccess): nomor diterbitkan DI DALAM try; bila
+    // gagal, guard di-reset agar tombol Simpan tetap hidup (sebelumnya throw
+    // di luar try = savedRef macet-true = retry-mati).
+    let orderNo: string;
+    try {
+      orderNo = (p.salesNum ?? '').trim() || (await nextSalesNum());
+    } catch (e) {
+      savedRef.current = false;
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+      }
+      return;
+    }
+    // APP-PRINTER-SALES (Q7): SATU client_id per sale (rantai Pay → head → baru).
+    // uuidv7() melempar bila CSPRNG absen: guard di-reset agar tombol Simpan
+    // tetap hidup (cermin penjagaan nextSalesNum di atas).
+    let saleClientId: string;
+    try {
+      saleClientId = (p.clientId ?? '').trim() || (await getSaleClientId(orderNo)) || uuidv7();
+    } catch {
+      savedRef.current = false;
+      return;
+    }
     const fwdSplits = (p.splits ?? [])
       .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)) }))
       .filter((s) => s.amount > 0);
-    const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
-    const fullTotal = paidBefore + total;
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
+    const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
+    const fullTotal = paidBefore + total;
+    // Split grup (BillPreview/SplitBill via Pay): kunjungan EDC ikut SATU
+    // salesNum. Pertama = saveSale penuh (grand = total order, stok/voucher/
+    // dapur sekali); berikut = appendGroupPayment. Tanpa cabang ini kunjungan
+    // ke-2+ menabrak PRIMARY KEY head lalu gagal diam-diam.
+    const groupNo = p.splitGroup === true && (p.salesNum ?? '').trim()
+      && Math.max(0, Math.round(Number(p.orderTotal) || 0)) > 0
+      ? (p.salesNum ?? '').trim() : '';
+    if (groupNo) {
+      const orderTotalFull = Math.max(0, Math.round(Number(p.orderTotal) || 0));
+      const visitPay = [...fwdSplits, { method, amount: total, approvalCode: approval }];
+      try {
+        if (await saleHeadExists(groupNo)) {
+          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(p.memberId ? { memberId: p.memberId } : {}) });
+        } else {
+          const gInput: SaleInput = {
+            method,
+            salesNum: groupNo,
+            clientId: saleClientId,
+            grandTotal: orderTotalFull,
+            cash: orderTotalFull,
+            change: 0,
+            items: p.items,
+            payments: visitPay,
+            discountTotal: p.discount ?? 0,
+            ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
+            ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
+            ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+            ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
+            approvalCode: approval,
+            ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
+            ...(p.memberId ? { memberId: p.memberId } : {}),
+            ...(p.table ? { tableId: p.table } : {}),
+            ...(p.mode ? { mode: p.mode } : {}),
+            ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
+            ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
+            ...(p.customer ? { customer: p.customer } : {}),
+          };
+          recordSale(gInput);
+          try {
+            await saveSale(gInput);
+          } catch (e) {
+            // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
+            // APP-R3: guard di-reset agar retry hidup setelah klaim terminal
+            // (cermin outer catch + non-group path — sebelumnya macet-true di sini).
+            if ((e as { code?: string })?.code === 'terminal-unbound') {
+              Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+                { text: t('c_cancel'), style: 'cancel' },
+                { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+              ]);
+              savedRef.current = false;
+              return;
+            }
+            /* DB gagal - kasir tetap jalan */
+          }
+        }
+      } catch (e) {
+        // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
+        // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
+        if ((e as { code?: string })?.code === 'terminal-unbound') {
+          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+            { text: t('c_cancel'), style: 'cancel' },
+            { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+          ]);
+          savedRef.current = false;
+          return;
+        }
+        /* DB gagal - kasir tetap jalan */
+      }
+      navigation?.navigate('Success', {
+        total: orderTotalFull,
+        method,
+        cash: orderTotalFull,
+        change: 0,
+        orderNo: groupNo,
+        clientId: saleClientId,
+        approvalCode: approval,
+        ...(cardLast4 ? { cardLast4 } : {}),
+        bank,
+        terminal,
+        items: p.items,
+        discount: p.discount ?? 0,
+        splitPaid: { amount: fullTotal, method },
+        ...(serviceParam > 0 ? { service: serviceParam } : {}),
+        ...(taxParam > 0 ? { tax: taxParam } : {}),
+        ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
+        ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
+        ...(p.memberId ? { memberId: p.memberId } : {}),
+        ...(p.mode ? { mode: p.mode } : {}),
+        ...(p.table ? { table: p.table } : {}),
+        ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
+        ...(p.customer ? { customer: p.customer } : {}),
+      });
+      return;
+    }
     const input: SaleInput = {
       method,
       salesNum: orderNo,
+      clientId: saleClientId,
       grandTotal: fullTotal,
       cash: fullTotal,
       change: 0,
@@ -131,7 +258,17 @@ export default function EdcScreen({ navigation, route }: Props) {
     recordSale(input);
     try {
       await saveSale(input);
-    } catch {
+    } catch (e) {
+      // Gate bound (D3-03): unbound → pesan klaim-terminal + jalan ke Klaim, TANPA Success palsu.
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+        // M10: guard di-reset agar retry hidup setelah klaim terminal.
+        savedRef.current = false;
+        return;
+      }
       /* DB gagal - kasir tetap jalan */
     }
     navigation?.navigate('Success', {
@@ -140,6 +277,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       cash: fullTotal,
       change: 0,
       orderNo,
+      clientId: saleClientId,
       approvalCode: approval,
       ...(cardLast4 ? { cardLast4 } : {}),
       bank,
@@ -262,15 +400,24 @@ export default function EdcScreen({ navigation, route }: Props) {
           onPress={() => void save()}
           size="md"
         />
-        <TouchableOpacity style={styles.linkBtn} onPress={() => {
-          // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay.
+        <TouchableOpacity style={styles.linkBtn} onPress={() => void (async () => {
+          // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay:
+          // nomor + client_id + kaki split + grup ikut pulang (ganti metode
+          // bukan sale baru — rantai Q7 lestari).
           const p = route?.params ?? {};
+          const backSalesNum = (p.salesNum ?? '').trim();
+          const backClientId = (p.clientId ?? '').trim()
+            || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
+            || uuidv7();
           navigation?.navigate('Pay', {
             total,
             ...(p.items ? { items: p.items } : {}),
             ...(p.discount ? { discount: p.discount } : {}),
             ...(p.voucherCode ? { voucher: p.voucherCode } : {}),
             ...(p.service ? { service: p.service } : {}),
+            ...(p.feeESB ? { feeESB: p.feeESB } : {}),
+            ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
+            ...(p.ongkirCut ? { ongkirCut: p.ongkirCut } : {}),
             ...(p.tax ? { tax: p.tax } : {}),
             ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
             ...(p.mode ? { mode: p.mode } : {}),
@@ -278,8 +425,13 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.ongkir ? { ongkir: p.ongkir } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
             ...(p.memberId ? { memberId: p.memberId } : {}),
+            ...(backSalesNum ? { salesNum: backSalesNum } : {}),
+            clientId: backClientId,
+            ...(p.splits ? { splits: p.splits } : {}),
+            ...(p.splitGroup === true ? { splitGroup: true } : {}),
+            ...(p.orderTotal ? { orderTotal: p.orderTotal } : {}),
           });
-        }}>
+        })}>
           <Text style={styles.link}>{t('edc_change')} ›</Text>
         </TouchableOpacity>
       </View>

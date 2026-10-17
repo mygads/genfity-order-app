@@ -146,7 +146,8 @@ export default function RecapScreen({ navigation }: Props) {
           [bid, since, until],
         );
         const exp = await queryFirst<{ total: number }>(
-          `SELECT COALESCE(SUM(amount), 0) AS total FROM tr_branchexpense
+          // amount bertanda (negatif = keluar): rekap pengeluaran = magnitudo outflow.
+          `SELECT COALESCE(-SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS total FROM tr_branchexpense
            WHERE (branchId = ? OR branchId IS NULL OR branchId = '') AND expenseDate >= ? AND expenseDate < ?`,
           [bid, since, until],
         );

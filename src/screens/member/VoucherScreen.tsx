@@ -15,7 +15,7 @@ import { dbNowLocal, fmtDate } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
-import { initDb, query } from '../../lib/db';
+import { initDb, query, queryFirst, run } from '../../lib/db';
 import { useLang } from '../../lib/i18n';
 import type { Lang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -322,7 +322,45 @@ export default function VoucherScreen({ navigation }: Props) {
   };
 
   /** Satu action row untuk result, driven by result.source:
-   * local → kunci voucher lokal; online → klaim (REA-7); external → burn (REA-6). */
+   * local → kunci voucher lokal; online → klaim (REA-7); external → burn (REA-6).
+   * Klaim/burn yang sukses WAJIB menempel ke kasir (gap audit: sebelumnya hanya
+   * pesan — kuota server terbakar tapi kode tak bisa dipakai kasir karena
+   * backstop saveSale hanya kenal ms_voucher/ms_promotion). Karena itu kode
+   * online/eksternal dipersist sebagai baris sekali-pakai (kuota 1) agar rantai
+   * totals → backstop → burn → void-restore berjalan seragam; TANPA baris ini
+   * pemakaian tercatat 'rejected' padahal diskon terlanjur diberikan. */
+  const persistSingleUseVoucher = async (kode: string, amount: number): Promise<boolean> => {
+    try {
+      await initDb();
+      const dup = await queryFirst<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM ms_voucher WHERE UPPER(voucherCode) = UPPER(?)',
+        [kode],
+      );
+      // Baris lokal sudah ada (mis. hangus/kadaluwarsa) = JANGAN bangkitkan;
+      // pemanggil menampilkan arahan pakai jalur lokal.
+      if ((dup?.n ?? 0) > 0) return false;
+      await run(
+        `INSERT INTO ms_voucher (id, voucherCode, voucherName, amount, quota, status, syncDate)
+         VALUES (?, ?, ?, ?, 1, 'available', NULL)`,
+        [`VON-${kode}`, kode, kode, Math.max(0, Math.round(amount))],
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const attachClaimedToCashier = async (kode: string, amount: number): Promise<void> => {
+    const ok = await persistSingleUseVoucher(kode, amount);
+    if (!ok) {
+      setMsg(t('vou_local_exists'));
+      return;
+    }
+    navigation?.navigate('Cashier', {
+      voucher: { code: kode, amount: Math.max(0, Math.round(amount)), kind: 'Diskon (Rp)' },
+    });
+  };
+
   const claimResult = async () => {
     if (!result || lookupBusy) return;
     const kode = result.kode;
@@ -336,10 +374,20 @@ export default function VoucherScreen({ navigation }: Props) {
     try {
       if (result.source === 'online') {
         const r = await claimOnlineVoucher(kode, `TRX-${Date.now()}`);
-        setMsg(r.ok ? t('vou_online_claim_ok') : t('vou_unknown').replace('{k}', kode));
+        if (!r.ok) {
+          setMsg(t('vou_unknown').replace('{k}', kode));
+          return;
+        }
+        setMsg(t('vou_online_claim_ok'));
+        await attachClaimedToCashier(kode, result.amount);
       } else {
         const r = await externalVoucher('burn', kode);
-        setMsg(r.ok ? t('vou_ext_burn_ok') : t('vou_unknown').replace('{k}', kode));
+        if (!r.ok) {
+          setMsg(t('vou_unknown').replace('{k}', kode));
+          return;
+        }
+        setMsg(t('vou_ext_burn_ok'));
+        await attachClaimedToCashier(kode, result.amount);
       }
     } catch {
       setMsg(t('vou_unknown').replace('{k}', kode));

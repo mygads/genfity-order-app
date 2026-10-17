@@ -22,6 +22,8 @@ type Props = {
   route?: {
     params?: {
       total?: number; method?: string; cash?: number; change?: number; orderNo?: string;
+      /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): diteruskan ke Receipt untuk QR. */
+      clientId?: string;
       items?: SaleItemIn[]; discount?: number; ongkir?: number;
       mode?: string; table?: string; customer?: string;
       voucher?: string | { code: string; amount?: number; kind?: string };
@@ -192,6 +194,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
     ...(orderMode ? { mode: orderMode } : {}),
     ...(route?.params?.table ? { table: route.params.table } : {}),
     ...(route?.params?.customer ? { customer: route.params.customer } : {}),
+    // APP-PRINTER-SALES (Q7): client_id ikut ke Receipt agar QR struk membawa kunci upsert.
+    ...(route?.params?.clientId ? { clientId: route.params.clientId } : {}),
   };
   const DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];

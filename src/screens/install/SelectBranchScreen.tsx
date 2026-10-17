@@ -1,37 +1,93 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { checkBranch } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
+import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { setTerminal } from '../../config/server';import { clearBinding, clearGrant, getBinding, logout } from '../../session';import { fetchMyBranches, type BranchItem } from '../../lib/terminalApi';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
-  goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';const BRANCHES = [
-  { id: 'B001', name: 'Genfity Cabang Poris', addr: 'Jl. Poris Raya No. 8, Tangerang', device: 'Terminal 01 · Kasir' },
-  { id: 'B002', name: 'Genfity Cabang Ciputat', addr: 'Jl. Dewi Sartika No. 12, Tangsel', device: 'Terminal 02 · Kasir' },
-  { id: 'B003', name: 'Genfity Cabang Bintaro', addr: 'Jl. Bintaro Utama No. 5, Tangsel', device: 'Terminal 03 · Kasir' },];export default function SelectBranchScreen({ navigation }: { navigation?: Nav }) {
+  goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';/** Dev fallback berlabel jelas (B2): HANYA tampil bila BE tak terjangkau,
+ * selalu di bawah banner need_be + label mode_local. Bukan data nyata. */
+const DEV_BRANCHES: BranchItem[] = [
+  { id: 'B001', name: 'Genfity Cabang Poris' },
+  { id: 'B002', name: 'Genfity Cabang Ciputat' },
+  { id: 'B003', name: 'Genfity Cabang Bintaro' },];export default function SelectBranchScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
-  const [branchId, setBranchId] = useState(BRANCHES[0].id); const [query, setQuery] = useState('');
-  /** Asli: daftar cabang dimuat async (capture asli = spinner biru + CTA pucat). */
+  const { lang, t } = useLang();
+  const [branchId, setBranchId] = useState('');
+  /** B2 (SPEC B1): daftar dari BE via fetchMyBranches (E07); tanpa timer palsu. */
+  const [branches, setBranches] = useState<BranchItem[]>([]);
+  const [fromDummy, setFromDummy] = useState(false);
+  const [needBe, setNeedBe] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [boundTick, setBoundTick] = useState(0);
+  const binding = boundTick >= 0 ? getBinding() : null;
 
-  const [checking, setChecking] = useState(false); const [error, setError] = useState(''); useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 900);
-    return () => clearTimeout(timer);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const r = await fetchMyBranches();
+        if (!live) return;
+        if (r.ok) {
+          setBranches(r.data.branches);
+          setFromDummy(r.fromDummy);
+          setNeedBe(false);
+          if (r.data.branches.length > 0) setBranchId(r.data.branches[0].id);
+        } else {
+          setBranches([]);
+          setFromDummy(false);
+          setNeedBe(true);
+        }
+      } catch {
+        if (live) {
+          setBranches([]);
+          setFromDummy(false);
+          setNeedBe(true);
+        }
+      } finally {
+        if (live) setLoading(false);
+      }
+    })();
+    return () => { live = false; };
   }, []);
 
   const goBack = () => {
     if (navigation?.goBack) navigation.goBack();
   };
 
-  const branch = BRANCHES.find((b) => b.id === branchId)?.name ?? branchId;
-  // Status cabang dicek ke server lewat apiSource (Dummy Mode offline /
-  // backend asli bila env terisi); selain active tampilkan pesan blokir.
-  const goSelect = async () => { if (loading || checking) return; setChecking(true); setError(''); try { const r = await checkBranch(branchId); if (r.status !== 'active') { setError(t('inst_branch_blocked')); return; } navigation?.navigate('InstallProgress', { branch }); } catch { setError(t('inst_branch_blocked')); } finally { setChecking(false); } }; const list = BRANCHES.filter((b) =>
-    (b.name + ' ' + b.addr).toLowerCase().includes(query.trim().toLowerCase()),
+  /** Pilih cabang → TerminalPicker (B1); tak ada gate legacy checkBranch. */
+  const goSelect = () => {
+    if (loading || !branchId) return;
+    const picked =
+      branches.find((b) => b.id === branchId) ??
+      DEV_BRANCHES.find((b) => b.id === branchId);
+    navigation?.navigate('TerminalPicker', {
+      branchId,
+      branchName: picked?.name ?? branchId,
+    });
+  };
+
+  /** R1: keluar branch — konfirmasi dulu, lalu cabut binding + sesi. */
+  const exitBranch = () => {
+    const b = getBinding();
+    Alert.alert(t('exit_branch'), b ? `${b.branchName || b.branchId} · ${b.terminalCode}` : '', [
+      { text: t('c_cancel'), style: 'cancel' },
+      {
+        text: t('exit_branch'),
+        style: 'destructive',
+        onPress: () => {
+          try { logout(); } catch { /* abaikan */ }
+          try { clearGrant(); } catch { /* abaikan */ }
+          try { clearBinding(); } catch { /* abaikan */ }
+          try { setTerminal({ terminalCode: '', branchId: '', branchName: '' }); } catch { /* abaikan */ }
+          setBoundTick((x) => x + 1);
+        },
+      },
+    ]);
+  };
+
+  const list = (branches.length > 0 ? branches : DEV_BRANCHES).filter((b) =>
+    (b.name + ' ' + b.id).toLowerCase().includes(query.trim().toLowerCase()),
   );
-  // ID di luar daftar bawaan (tanpa endpoint daftar cabang di server):
-  // ketikan yang tak cocok ditawarkan sebagai ID kustom, tetap divalidasi
-  // checkBranch oleh goSelect. Tanpa kunci i18n baru.
-  const customId = query.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  const customOffer = customId.length >= 3 && list.length === 0 ? customId : '';
+  const showingDev = branches.length === 0;
 
   return (
     <ScreenRoot style={styles.root}>
@@ -43,7 +99,7 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
         <View style={styles.titleRow}>
-          <Text style={[styles.title, isTablet && styles.titleBig]}>{t('sel_title')}</Text>
+          <Text style={[styles.title, isTablet && styles.titleBig]}>{t('branch_pick_title')}</Text>
           <Image
             source={require('../../../assets/images/install_location_pin.webp')}
             style={styles.pinImg}
@@ -51,6 +107,28 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           />
         </View>
         <Text style={[styles.desc, isTablet && styles.descBig]}>{t('sel_desc')}</Text>
+        {binding ? (
+          <View style={styles.boundCard}>
+            <Text style={styles.boundMain}>
+              {binding.branchName || binding.branchId} · {binding.terminalCode}
+              {binding.tag ? ` (${binding.tag})` : ''}
+            </Text>
+            <TouchableOpacity onPress={exitBranch} hitSlop={8}>
+              <Text style={styles.exitLink}>{t('exit_branch')}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        {needBe ? (
+          <Text style={styles.offline}>{t('need_be')}</Text>
+        ) : null}
+        {fromDummy || showingDev ? (
+          <Text style={styles.offline}>
+            {t('mode_local')}
+            {lang === 'id'
+              ? ' — daftar cabang bawaan (dev).'
+              : ' — built-in branch list (dev).'}
+          </Text>
+        ) : null}
         {loading ? (
           <ActivityIndicator size="small" color="#1E88E5" style={styles.loader} />
         ) : (
@@ -69,49 +147,30 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
           <TouchableOpacity
             key={b.id}
             style={[styles.card, branchId === b.id && styles.cardOn]}
-            onPress={() => { setBranchId(b.id); setError(''); }}>
+            onPress={() => { setBranchId(b.id); }}>
             <View style={[styles.avatar, branchId === b.id && styles.avatarOn]}>
               <Text style={[styles.avatarT, branchId === b.id && styles.avatarTOn]}>C</Text>
             </View>
             <View style={styles.info}>
               <Text style={[styles.name, isTablet && styles.nameBig]}>{b.name}</Text>
-              <Text style={[styles.meta, isTablet && styles.metaBig]}>{b.addr}</Text>
-              <Text style={[styles.meta, isTablet && styles.metaBig]}>{b.device}</Text>
+              <Text style={[styles.meta, isTablet && styles.metaBig]}>{b.id}</Text>
             </View>
             <View style={[styles.radio, branchId === b.id && styles.radioOn]}>
               {branchId === b.id && <View style={styles.radioDot} />}
             </View>
           </TouchableOpacity>
         ))}
-        {customOffer ? (
-          <TouchableOpacity
-            key={customOffer}
-            style={[styles.card, branchId === customOffer && styles.cardOn]}
-            onPress={() => { setBranchId(customOffer); setError(''); }}>
-            <View style={[styles.avatar, branchId === customOffer && styles.avatarOn]}>
-              <Text style={[styles.avatarT, branchId === customOffer && styles.avatarTOn]}>C</Text>
-            </View>
-            <View style={styles.info}>
-              <Text style={[styles.name, isTablet && styles.nameBig]}>{customOffer}</Text>
-              <Text style={[styles.meta, isTablet && styles.metaBig]}>{t('sel_choose')}</Text>
-            </View>
-            <View style={[styles.radio, branchId === customOffer && styles.radioOn]}>
-              {branchId === customOffer && <View style={styles.radioDot} />}
-            </View>
-          </TouchableOpacity>
-        ) : null}
-        {list.length === 0 && !customOffer ? (
-          <Text style={styles.empty}>{t('sel_empty')}</Text>
-        ) : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}</>
+        {list.length === 0 ? (
+          <Text style={styles.empty}>{needBe ? t('need_be') : t('sel_empty')}</Text>
+        ) : null}</>
         )}
       </ScrollView>
       <View style={[styles.footer, isTablet && wideCenterSm]}>
         <AppButton
           size="lg"
-          title={checking ? t('inst_branch_checking') : t('sel_choose')}
+          title={binding ? t('rebind_button') : t('sel_choose')}
           onPress={goSelect}
-          disabled={loading || checking || (list.length === 0 && !customOffer)}
+          disabled={loading || !branchId}
           style={styles.primary}
         />
       </View>
@@ -158,7 +217,15 @@ import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   radioOn: { borderColor: colors.orange },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.orange },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: GREY, textAlign: 'center', marginTop: 24 },
-  error: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, textAlign: 'center', marginTop: 12 }, footer: { paddingHorizontal: 24, paddingBottom: 28, paddingTop: 8, backgroundColor: '#FFFFFF' },
+  /** Penanda status jujur B2: need_be (butuh BE) / mode_local (fallback dev). */
+  offline: { fontFamily: fonts.regular, fontSize: 12, color: GREY, marginTop: 6 }, footer: { paddingHorizontal: 24, paddingBottom: 28, paddingTop: 8, backgroundColor: '#FFFFFF' },
+  boundCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#F4F8FF', borderWidth: 1, borderColor: colors.navy,
+    borderRadius: 12, padding: 12, marginTop: 12,
+  },
+  boundMain: { flex: 1, fontFamily: fonts.medium, fontSize: 13, color: '#2B2B2B' },
+  exitLink: { fontFamily: fonts.semibold, fontSize: 13, color: '#D33A3F', marginLeft: 12 },
   primary: {
     backgroundColor: colors.orange, borderRadius: 22, height: 56,
     alignItems: 'center', justifyContent: 'center',

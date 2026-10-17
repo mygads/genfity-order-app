@@ -195,6 +195,31 @@ export async function resetSyncDate(table: string, id: string): Promise<number> 
   return markDirty(table, id);
 }
 
+/**
+ * Tandai baris sebagai SUDAH terkirim (syncDate = now) setelah push sukses.
+ * Cermin markDirty (whitelist PK sama, format id sama). Best-effort: 0 bila
+ * tabel tak dikenal / DB gagal. Tanpa ini badge dirty (syncDate NULL)
+ * menumpuk selamanya walau antrean fisik sudah terkuras.
+ */
+export async function markClean(table: string, id: string, at?: string): Promise<number> {
+  const pk = DIRTY_PK[table];
+  if (!pk) return 0;
+  const stamp = at ?? new Date().toISOString();
+  try {
+    if (Array.isArray(pk)) {
+      const parts = id.split(':');
+      if (parts.length !== pk.length) return 0;
+      const where = pk.map((c) => `"${c}" = ?`).join(' AND ');
+      const res = await run(`UPDATE "${table}" SET syncDate = ? WHERE ${where}`, [stamp, ...parts]);
+      return res.changes;
+    }
+    const res = await run(`UPDATE "${table}" SET syncDate = ? WHERE "${pk}" = ?`, [stamp, id]);
+    return res.changes;
+  } catch {
+    return 0;
+  }
+}
+
 /** Hitung baris kotor (syncDate NULL) pada satu tabel; 0 bila gagal. */
 export async function countDirty(table: string): Promise<number> {
   if (!DIRTY_PK[table]) return 0;

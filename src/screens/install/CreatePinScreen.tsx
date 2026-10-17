@@ -13,6 +13,11 @@ import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { sav
   const val = active === 'pin' ? pin : confirm;
   const setVal = active === 'pin' ? setPin : setConfirm;
 
+  // PIN LEGACY ALUR INSTALL (paket app-login, audit row 5): PIN yang dibuat
+  // di sini = PIN admin perangkat pertama (jalur server lama via apiSource),
+  // BUKAN PIN terminal kontrak (binding branch→terminal→PIN-terminal di
+  // InstallScreen via lib/terminalContract.ts) dan BUKAN PIN staff modal
+  // pasca-login (Q11 di LoginScreen). Tiga PIN terpisah; jangan disatukan.
   // PIN dikirim sekali ke server via apiSource (backend asli bila env
   // terisi; Local Mode langsung simpan hash lokal di bawah), lalu disimpan
   // sebagai HASH via SecureStore - PIN plaintext tidak pernah disimpan.

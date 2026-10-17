@@ -167,7 +167,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       return res;
     }).then((res) => {
       if (!res.ok) {
-        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} remaining)`);
+        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`);
         setVoidConfirming(false);
         return;
       }
@@ -612,7 +612,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               keyboardType="numeric"
               maxLength={6}
               secureTextEntry
-              placeholder="6-digit PIN"
+              placeholder={t('xp_pin_ph')}
             />
             {voidAuthMsg ? <Text style={[styles.modalLabel, { color: colors.red }]}>{voidAuthMsg}</Text> : null}
             <View style={styles.modalRow}>

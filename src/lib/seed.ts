@@ -26,7 +26,7 @@
  */
 import { initDb, queryFirst, run } from './db';
 import type { BindParams } from './db';
-import { loadPinRecord, savePinHash } from './pin';
+import { loadPinRecord, removePinHash, savePinHash } from './pin';
 import { saveSale } from './sales';
 import type { SaleInput } from './payments';
 
@@ -102,6 +102,9 @@ export async function ensureSeeded(): Promise<void> {
     ['DELETE FROM ms_voucher WHERE id IN (?, ?)', ['V003', 'V004']],
     ['DELETE FROM ms_member WHERE id = ?', ['M003']],
     ['DELETE FROM ms_posuser WHERE id IN (?, ?, ?)', ['U07', 'U08', 'U01']],
+    // Baris akses milik user dummy ikut disapu (tanpa ini sisa yatim;
+    // inert tapi mengotori ms_posuseraccess bila dihitung).
+    ['DELETE FROM ms_posuseraccess WHERE userId IN (?, ?, ?)', ['U07', 'U08', 'U01']],
     // Sapu bersidik-jari (ID + nama fixture dummy): ID generik (P001, ST-*,
     // COA001-005) bisa dipakai ulang server asli suatu hari — hapus HANYA
     // bila namanya cocok fixture dummy. Paparan nyata terverifikasi via
@@ -144,6 +147,16 @@ export async function ensureSeeded(): Promise<void> {
       await run(sql, params);
     } catch {
       /* baris tak ada / tabel lama belum ada — idempoten, dilengkapi jalan ulang */
+    }
+  }
+  // Rekam PIN milik user dummy ikut dibersihkan dari SecureStore/AsyncStorage
+  // (tanpa ini sisa yatim; login tetap gagal karena baris ms_posuser sudah
+  // disapu, tapi storage tak mengendap). Idempoten bila kunci tak ada.
+  for (const uid of ['U07', 'U08', 'U01']) {
+    try {
+      await removePinHash(uid);
+    } catch {
+      /* abaikan */
     }
   }
 
@@ -516,7 +529,13 @@ export async function ensureSeeded(): Promise<void> {
     const exp = await queryFirst<{ n: number }>(
       'SELECT COUNT(*) AS n FROM tr_branchexpense',
     );
-    if (Number(exp?.n ?? 0) === 0) {
+    // Sisip-sekali (anti-rebirth): hanya saat seed pertama (flag belum '1').
+    // COUNT==0 saja tak cukup — merchant yang menghapus SEMUA pengeluaran
+    // akan melihat demo EX-SEED-001 bangkit tiap restart.
+    const seedFlag = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
+    );
+    if (Number(exp?.n ?? 0) === 0 && seedFlag?.value1 !== '1') {
       const ed = new Date();
       ed.setDate(ed.getDate() - 1);
       const ep = (n: number): string => String(n).padStart(2, '0');
@@ -526,7 +545,7 @@ export async function ensureSeeded(): Promise<void> {
         `INSERT OR IGNORE INTO tr_branchexpense
            (id, branchId, coaId, coaName, amount, note, userId, expenseDate,
             photoPath, syncDate, createdAt)
-         VALUES ('EX-SEED-001', 'B001', 'coa-bahan-baku', 'Bahan Baku', 150000,
+         VALUES ('EX-SEED-001', 'B001', 'coa-bahan-baku', 'Bahan Baku', -150000,
             'Belanja bahan baku harian', 'u-kasir', ?, NULL, ?, ?)`,
         [expDate, nowSeed, expDate],
       );
@@ -581,8 +600,14 @@ export async function ensureSeeded(): Promise<void> {
 
   // Stok awal + relasi cabang B002 (Ciputat) dan B003 (Bintaro) agar kasir
   // di cabang mana pun langsung punya menu. Jus Alpukat sengaja 3 =
-  // demo peringatan restock di Dashboard. Baris yang qty-nya sudah diatur
-  // merchant (atau ditandai habis) TIDAK disentuh.
+  // demo peringatan restock di Dashboard. Syarat stationId KOSONG memastikan
+  // isi-ulang hanya untuk baris segar seed (INSERT di atas tak mengisi qty /
+  // station → qty default skema 0 + stationId NULL): baris yang sudah tersentuh
+  // merchant/kasir (stationId terisi, atau ditandai habis) TIDAK disentuh.
+  // Tanpa gate station ini, kombinasi qty=0 + flagSoldOut=0 yang sah
+  // (allowSellEmpty / online=true di layar Stok, atau buka-kembali item habis)
+  // akan bangkit ke stok seed tiap restart — juga menimpa stationId pilihan
+  // merchant. Setelah terisi sekali, stationId terkunci dari seed selamanya.
   const seedStock: Record<string, number> = {
     'm-nasi-goreng': 40,
     'm-ayam-geprek': 35,
@@ -603,7 +628,8 @@ export async function ensureSeeded(): Promise<void> {
     await run(
       `UPDATE ms_branchmenu SET qty = ?, stationId = ?, syncDate = ?
        WHERE branchId = 'B001' AND menuId = ?
-         AND (qty IS NULL OR qty = 0) AND flagSoldOut = 0`,
+         AND (qty IS NULL OR qty = 0) AND flagSoldOut = 0
+         AND (stationId IS NULL OR stationId = '')`,
       [stock, station, nowSeed, m.id],
     );
     for (const branchId of ['B002', 'B003']) {

@@ -38,3 +38,56 @@ Web  LOG  Running application "main" with appParams:
 Development-level warnings: ON.
 Performance optimizations: OFF.
 Web Bundled 12ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundling failed 24632ms index.ts (1 module)
+ ERROR  Error: src\lib\terminalApi.ts:Invalid call at line 136: require(p)
+    at transformJS (C:\Yoga\Programming\containers\genfity-order\genfity-order-app\node_modules\expo\node_modules\@expo\metro-config\build\transform-worker\metro-transform-worker.js:335:23)
+Web Bundled 1502ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 53ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundled 51ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 115ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundled 50ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 14ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundled 45ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 15ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web  WARN  [server] getBranchId: terminal unbound (branchId kosong) — klaim terminal dulu.
+Web  WARN  [server] getBranchId: terminal unbound (branchId kosong) — klaim terminal dulu.
+Web Bundled 3905ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 116ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundled 280ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 17ms node_modules\expo-sqlite\web\worker.ts (1 module)

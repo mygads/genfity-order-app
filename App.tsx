@@ -8,7 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { seedIfEmpty } from './src/lib/seed';
@@ -16,11 +16,13 @@ import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
-import { allowedRoutesFor, getDeviceRole, homeRouteFor, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
+import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
 import SelectBranchScreen from './src/screens/install/SelectBranchScreen';
+import TerminalPickerScreen from './src/screens/install/TerminalPickerScreen';
+import TerminalPinScreen from './src/screens/install/TerminalPinScreen';
 import InstallProgressScreen from './src/screens/install/InstallProgressScreen';
 import CreatePinScreen from './src/screens/install/CreatePinScreen';
 import ForgotPinScreen from './src/screens/install/ForgotPinScreen';
@@ -54,6 +56,7 @@ import KitchenScreen from './src/screens/history/KitchenScreen';
 import PrintersScreen from './src/screens/settings/PrintersScreen';
 import SettingsScreen from './src/screens/settings/SettingsScreen';
 import CustomerDisplayScreen from './src/screens/display/CustomerDisplayScreen';
+import QueueViewScreen from './src/screens/display/QueueViewScreen';
 import WebViewScreen from './src/screens/misc/WebViewScreen';
 import SplitBillScreen from './src/screens/cashier/SplitBillScreen';
 import MoveItemsScreen from './src/screens/cashier/MoveItemsScreen';
@@ -80,7 +83,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /** Rute cabang tamu - dipakai jaring pengaman logout (di luarnya = stale authed). */
 const GUEST_ROUTES = new Set([
-  'Intro', 'Install', 'SelectBranch', 'InstallProgress', 'CreatePin',
+  'Intro', 'Install', 'SelectBranch', 'BranchPicker', 'TerminalPicker', 'TerminalPin',
+  'InstallProgress', 'CreatePin',
   'ForgotPin', 'Login', 'QrHow', 'WebView',
 ]);
 
@@ -93,8 +97,10 @@ const screenOptions = {
   animation: 'default' as const,
 };
 
-/** Guard navigator: belum login hanya bisa buka alur intro/install/Login. */
-function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
+/** Guard navigator: belum login hanya bisa buka alur intro/install/Login.
+ * B2 (SPEC B1/R1): tamu yang belum ter-bound mulai di BindFlow
+ * (BranchPicker), yang ter-bound mulai di Login. */
+function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean }) {
   const { t } = useLang();
   const nav = useNavigation();
   /** Konsumsi rute pasca-login sekali-pakai (mis. QrScan dari kartu QR):
@@ -116,10 +122,18 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
    * CustomerDisplay, dan rute di luar peran di-reset paksa ke beranda. */
   const [deviceRole, setDeviceRoleState] = useState<DeviceRole>(() => getDeviceRole());
   useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);
-  const home: 'Dashboard' | 'Shift' | 'Kitchen' | 'CustomerDisplay' =
-    deviceRole === 'KASIR'
-      ? (shiftClosed ? 'Shift' : 'Dashboard')
-      : (homeRouteFor(deviceRole) as 'Kitchen' | 'CustomerDisplay');
+  /** Kunci peran perangkat (D3-04, E2 APP-FIXUP): gerbang shift berlaku untuk
+   * semua tag fitur-penuh (kasir/dapur/full_access), bukan hanya 'kasir' —
+   * perbandingan literal 'KASIR' huruf-kapital mati karena setDeviceRole selalu
+   * menormalisasi ke tag kanonis lowercase. Legacy 'KASIR' tetap tercakup
+   * karena normalizeTag memetakan alias legacy ke tag kanonis. Basis per-tag
+   * dipertahankan via homeRouteFor (dapur → Kitchen); shiftClosed menimpa ke
+   * Shift. view_queue mendarat di QueueView (terdaftar di stack authed). */
+  // APP-FIXUP(E2): cek tag-aware via FULL_FEATURE_TAGS, bukan literal 'KASIR'.
+  const deviceTag = normalizeTag(deviceRole);
+  const homeBase = homeRouteFor(deviceRole) as 'Dashboard' | 'Shift' | 'Kitchen' | 'CustomerDisplay' | 'QueueView';
+  const home: 'Dashboard' | 'Shift' | 'Kitchen' | 'CustomerDisplay' | 'QueueView' =
+    (deviceTag !== null && FULL_FEATURE_TAGS.includes(deviceTag) && shiftClosed) ? 'Shift' : homeBase;
   useEffect(() => {
     if (!loggedIn) {
       setShiftClosed(false);
@@ -233,10 +247,15 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
     return (
       // key eksplisit: tanpa ini React me-reuse state navigator tamu saat
       // bertukar ke stack authed (initialRoute diabaikan, terjebak di Login).
-      <Stack.Navigator key="guest" initialRouteName="Intro" screenOptions={screenOptions}>
+      // Sufiks bound: bind/unbind (R1 exit_branch) me-remount ke rute awal
+      // yang benar (BindFlow vs Login).
+      <Stack.Navigator key={`guest-${bound ? 'bound' : 'unbound'}`} initialRouteName={bound ? 'Login' : 'BranchPicker'} screenOptions={screenOptions}>
         <Stack.Screen name="Intro" component={IntroScreen} options={{ title: t('title_welcome'), headerShown: false }} />
         <Stack.Screen name="Install" component={InstallScreen} options={{ title: t('title_claim') }} />
         <Stack.Screen name="SelectBranch" component={SelectBranchScreen} options={{ title: t('title_branch'), headerShown: false }} />
+        <Stack.Screen name="BranchPicker" component={SelectBranchScreen} options={{ title: t('title_branch'), headerShown: false }} />
+        <Stack.Screen name="TerminalPicker" component={TerminalPickerScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="TerminalPin" component={TerminalPinScreen} options={{ headerShown: false }} />
         <Stack.Screen name="InstallProgress" component={InstallProgressScreen} options={{ title: t('title_setup'), headerBackVisible: false }} />
         <Stack.Screen name="CreatePin" component={CreatePinScreen} options={{ title: t('title_create_pin'), headerBackVisible: false }} />
         <Stack.Screen name="ForgotPin" component={ForgotPinScreen} options={{ title: t('title_forgot_pin') }} />
@@ -292,6 +311,7 @@ function GuardedStacks({ loggedIn }: { loggedIn: boolean }) {
       <Stack.Screen name="Printers" component={PrintersScreen} options={{ title: t('title_printer'), headerShown: false }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('title_settings'), headerShown: false }} />
       <Stack.Screen name="CustomerDisplay" component={CustomerDisplayScreen} options={{ title: t('title_display'), headerShown: false }} />
+      <Stack.Screen name="QueueView" component={QueueViewScreen} options={{ title: t('queue_title'), headerShown: false }} />
       <Stack.Screen name="WebView" component={WebViewScreen} options={{ title: t('title_web'), headerShown: false }} />
       <Stack.Screen name="SplitBill" component={SplitBillScreen} options={{ title: t('title_split'), headerShown: false }} />
       <Stack.Screen name="MoveItems" component={MoveItemsScreen} options={{ title: t('title_move_items'), headerShown: false }} />
@@ -326,12 +346,53 @@ export default function App() {
     'HKGrotesk-Bold': require('./assets/fonts/HKGrotesk-Bold.ttf'),
   });
   const [loggedIn, setLoggedIn] = useState(() => getSession() !== null);
+  /** B2: status binding device (SPEC §2). Unbound → BindFlow, bound → Login/tag home. */
+  const [bound, setBound] = useState(() => getBinding() !== null);
+  const [booted, setBooted] = useState(false);
 
   useEffect(() => {
     if (loaded) void SplashScreen.hideAsync();
   }, [loaded]);
 
-  useEffect(() => subscribeSession(() => setLoggedIn(getSession() !== null)), []);
+  useEffect(() => subscribeSession(() => {
+    setLoggedIn(getSession() !== null);
+    try {
+      setBound(getBinding() !== null);
+    } catch {
+      /* binding tak terbaca — anggap unbound (fail-safe ke BindFlow) */
+    }
+  }), []);
+
+  /** Boot B2: muat binding+grant tersimpan SEBELUM memilih rute awal agar
+   * guard unbound→BindFlow / bound→Login tak menilai memori dingin
+   * pasca-restart; tag binding diterapkan ke peran device (tag home). */
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        await loadServerState();
+        const st = await hydrateTerminalState();
+        if (!live) return;
+        const b = st.binding;
+        setBound(!!(b && b.terminalId));
+        const tag = b?.tag ? parseDeviceRole(b.tag) : null;
+        if (tag) {
+          try {
+            setDeviceRoleForTag(tag);
+          } catch {
+            /* peran bertahan */
+          }
+        }
+      } catch {
+        /* offline-first lokal: rute dipilih dari memori apa adanya */
+      } finally {
+        if (live) setBooted(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     loadServerState().catch(() => {});
@@ -435,7 +496,7 @@ export default function App() {
     }
   }, [loggedIn]);
 
-  if (!loaded) {
+  if (!loaded || !booted) {
     return (
       <View style={styles.loader}>
         <ActivityIndicator size="large" color={colors.orange} />
@@ -480,7 +541,7 @@ export default function App() {
         };
       }}>
       <StatusBar style="light" />
-      <GuardedStacks loggedIn={loggedIn} />
+      <GuardedStacks loggedIn={loggedIn} bound={bound} />
       </NavigationContainer>
     </SafeAreaProvider>
   );

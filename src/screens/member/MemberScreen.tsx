@@ -574,7 +574,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       try {
         await initDb();
         const nowIso = new Date().toISOString();
-        const depId = `dep-${Date.now()}`;
+        const depId = `dep-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
         await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [n, mid]);
         await run(
           'INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, trxType, amount, balanceAfter, trxDate, syncDate) VALUES (?, ?, ?, ?, ?, ?, NULL)',

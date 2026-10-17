@@ -117,11 +117,16 @@ export async function loadHistory(limit = 300): Promise<Transaction[]> {
 /**
  * Void penuh: head → 'void' + satu baris tr_cancelmenu per item + outbox/sync
  * + POST server bila online. Tidak pernah melempar.
+ * approvedBy = userId penyetuju eskalasi (bila diketahui dari hasil
+ * verifyLocalEscalation); fallback = sesi kasir. Tanpa ini jejak audit selalu
+ * menuduh kasir padahal supervisor yang menyetujui.
  */
-export async function persistVoidDb(salesNum: string, reason: string): Promise<void> {
+export async function persistVoidDb(salesNum: string, reason: string, approvedBy?: string): Promise<void> {
   const now = new Date().toISOString();
   // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
-  const userId = (getSession()?.userId || getSession()?.username || '').trim();
+  // Utamakan penyetuju eskalasi yang diketahui, bukan sesi kasir.
+  const approver = String(approvedBy ?? '').trim();
+  const userId = approver || (getSession()?.userId || getSession()?.username || '').trim();
   try {
     await initDb();
     // Idempotensi + gerbang stok: void ganda (mis. CancelScreen lalu History)
@@ -172,6 +177,9 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     } catch {
       /* abaikan */
     }
+    // Idempotensi baris: void ganda tak boleh menulis tr_cancelmenu dua kali
+    // (head zeroing di atas idempoten, tapi INSERT baris tidak).
+    if (!alreadyVoid) {
     for (const it of items) {
       try {
         const cid = uuidv7();
@@ -193,6 +201,7 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
       } catch {
         /* abaikan */
       }
+    }
     }
     // Balikan void (bug G7: sebelumnya void hanya menandai head). Best-effort
     // per bagian: kegagalan satu bagian tak menggagalkan void.
@@ -356,12 +365,12 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
     /* abaikan */
   }
   try {
-    enqueueSync('order', { action: 'void', salesNum, no: salesNum, reason });
+    enqueueSync('order', { action: 'void', salesNum, no: salesNum, reason, ...(approver ? { approvedBy: approver } : {}) });
   } catch {
     /* abaikan */
   }
   try {
-    await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: salesNum, reason } });
+    await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: salesNum, reason, ...(approver ? { approvedBy: approver } : {}) } });
   } catch {
     /* offline - terkirim via push berikutnya */
   }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke,
-  applyAutoSyncPrefs,
+  applyAutoSyncPrefs, WARN_SYNC_DAYS, FORCE_SYNC_DAYS,
 
 type SyncItem } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
@@ -12,9 +12,10 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   { try
   { return new Date(iso).toLocaleString('id-ID',
   { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch
-  { return iso; }}/** Hari sejak sync sukses terakhir: level peringatan 3/7 hari. */function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
-  if (daysAgo > 7) return 'block7';
-  if (daysAgo > 3) return 'warn3';
+  { return iso; }}/** Hari sejak sync sukses terakhir: ambang dari lib/sync (satu sumber benar). */
+function warnLevel(daysAgo: number): 'ok' | 'warn3' | 'block7' {
+  if (daysAgo > FORCE_SYNC_DAYS) return 'block7';
+  if (daysAgo > WARN_SYNC_DAYS) return 'warn3';
   return 'ok';}export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -22,7 +23,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const [syncOnWifi, setSyncOnWifi] = useState(false);
   const [lastPush, setLastPush] = useState(() => getLastSync() || t('sync_never'));
   const [lastPull, setLastPull] = useState(t('sync_never'));
-  const [daysAgo, setDaysAgo] = useState(0);
+  const [daysAgo, setDaysAgo] = useState(() => (getLastSyncMs() > 0 ? 0 : Infinity));
   const [busy, setBusy] = useState<'push' | 'pull' | null>(null);
   const [msg, setMsg] = useState('');
   // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
@@ -81,29 +82,36 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [autoSync, syncOnWifi]);
   // Hitung umur sync nyata dari timestamp sukses terakhir agar banner E00043
   // (>3 hari) dan E00044 (>7 hari) mencerminkan kondisi sebenarnya.
-  useEffect(() => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); }, []); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
+  // pullMaster TIDAK menyentuh lastSyncMs (hanya pushAll) — umur dihitung
+  // ulang dari sumber yang sama agar banner tak berbohong pasca-pull.
+  // Belum pernah sync (ms<=0) = umur tak diketahui = block7, cermin
+  // syncWarnLevel kanonis di lib/sync (jangan render 'ok' buta).
+  const refreshDaysAgo = () => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); else setDaysAgo(Infinity); };
+  useEffect(() => { refreshDaysAgo(); }, []); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
       sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind }), createdAt: fmtTime(o.createdAt), status: o.status, })),
   [tick, lang], );
 
   const pending = pendingCount(); const doPush = async () => {
     if (busy) return;
     setBusy('push'); setMsg(t('sync_push_msg')); try {
-      const r = await pushAll(); setTick((x) => x + 1); const last = getLastSync(); if (last) setLastPush(last); setDaysAgo(0); setMsg(t('sync_push_done').replace('{s}', String(r.sent)).replace('{f}', String(r.failed))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_push_fail')} (${e.message})` : t('sync_push_fail')); } finally { setBusy(null); }
+      const r = await pushAll(); setTick((x) => x + 1); const last = getLastSync(); if (last) setLastPush(last); refreshDaysAgo(); setMsg(t('sync_push_done').replace('{s}', String(r.sent)).replace('{f}', String(r.failed))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_push_fail')} (${e.message})` : t('sync_push_fail')); } finally { setBusy(null); }
   };
 
   const doPull = async () => {
     if (busy) return;
     setBusy('pull'); setMsg(t('sync_pull_msg')); try {
       const r = await pullMaster(); setLastPull(new Date().toLocaleString('id-ID'));
-      setDaysAgo(0);
+      refreshDaysAgo();
       setMsg(t('sync_pull_done').replace('{t}', String(r.total)).replace('{m}', String(r.per.menu ?? 0)).replace('{tb}', String(r.per.table ?? 0)).replace('{mb}', String(r.per.member ?? 0)).replace('{v}', String(r.per.voucher ?? 0))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_pull_fail')} (${e.message})` : t('sync_pull_fail')); } finally { setBusy(null); }
   };
 
   const simulateOld = () => {
-    setDaysAgo(5);
-    const fiveAgo = fmtDate(new Date(Date.now() - 5 * 86400000), lang);
-    setLastPush(fiveAgo);
-    setLastPull(fiveAgo);
+    // Demo ke level warn: ambang + 2 hari (tak ada literal tanggal).
+    const demoDays = WARN_SYNC_DAYS + 2;
+    setDaysAgo(demoDays);
+    const demoAgo = fmtDate(new Date(Date.now() - demoDays * 86400000), lang);
+    setLastPush(demoAgo);
+    setLastPull(demoAgo);
     setMsg(t('sync_sim_msg'));
   };
 

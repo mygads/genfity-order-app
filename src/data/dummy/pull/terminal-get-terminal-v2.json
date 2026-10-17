@@ -1,0 +1,24 @@
+{
+  "request": { "terminalCode": "K01", "branchId": "B001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "terminalId": "T01",
+      "terminalCode": "K01",
+      "name": "Kasir 1",
+      "branchId": "B001",
+      "branchName": "ESB Cabang Poris",
+      "tag": "kasir",
+      "pinSet": true,
+      "pairedKasirId": null,
+      "pairedViewId": "T03",
+      "verified": true,
+      "deviceID": "a91f3c07d2e84b5a",
+      "claimed": true
+    }
+  }
+}

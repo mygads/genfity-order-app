@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { verifyLocalEscalation } from '../../lib/supervisor';
+import { uuidv7 } from '../../lib/uuidv7';
 import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
   id: string;
   nama: string;
@@ -15,6 +17,14 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   const [jumlah, setJumlah] = useState('');
   const [coa, setCoa] = useState(FALLBACK_COA[0]);
   const [photo, setPhoto] = useState<string | null>(null);
+
+  // APP-SHIFT 2026-10-17 (row-17 petty): approve = eskalasi PIN owner
+  // (verifyLocalEscalation 'settings.edit'); identitas approver tercatat via
+  // markApproved(id, approver) + timestamp + sync, bukan auto-approve.
+  const [pin, setPin] = useState('');
+  const [pinVisible, setPinVisible] = useState(false);
+  const [pinErr, setPinErr] = useState('');
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   // F7: muat ulang tiap layar jadi fokus agar approve dari daftar lain langsung
   // terlihat (focus-listener; aman: guard addListener + alive).
@@ -40,9 +50,9 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
   };
 
-  /** Simpan expense ke tr_branchexpense + dokumen foto, antrekan outbox. ID unik berbasis waktu. */ const tambah = async () => {
+  /** Simpan expense ke tr_branchexpense + dokumen foto, antrekan outbox. ID UUID-style (Q7): EX- + UUIDv7 agar unik lintas-device; prefix EX- dipertahankan agar filter daftar 'EX-%' tetap cocok. */ const tambah = async () => {
     if (!ready) return;
-    setSaving(true); const id = `EX-${Date.now().toString().slice(-8)}`; const now = new Date().toISOString(); const branchId = getBranchId(); const sess = getSession(); const kasir = sess?.userId || sess?.username || sess?.name || ''; const entry: Expense =
+    setSaving(true); const id = `EX-${uuidv7()}`; const now = new Date().toISOString(); const branchId = getBranchId(); const sess = getSession(); const kasir = sess?.userId || sess?.username || sess?.name || ''; const entry: Expense =
       {
         id,
         nama: nama.trim(),
@@ -51,15 +61,25 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
         jumlah: jumlahNum,
         disetujui: false,
         photo: photo ?? undefined,
-      }; setItems((l) => [entry, ...l]); try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, -jumlahNum, nama.trim(), kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [`doc-${Date.now()}`, id, photo], ); } await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: item tetap tampil dari state */ }
+      }; setItems((l) => [entry, ...l]); try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, -jumlahNum, nama.trim(), kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [`doc-${uuidv7()}`, id, photo], ); } await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: item tetap tampil dari state */ }
     setNama('');
     setJumlah('');
     setPhoto(null);
     setFormOpen(false);
   setSaving(false); };
 
-  const setujui = async (id: string) =>
-    { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); await markApproved(id); }; return (
+  /** Buka modal PIN owner untuk satu expense (audit trail, bukan auto-approve). */
+  const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
+  /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
+  const confirmApprove = async () => {
+    if (!pendingId) return;
+    const esc = await verifyLocalEscalation(pin, 'settings.edit');
+    if (!esc.ok) { setPinErr(esc.message); return; }
+    const id = pendingId;
+    setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e)));
+    await markApproved(id, esc.userId ?? '');
+    setPinVisible(false); setPin(''); setPendingId(null);
+  }; return (
     <View style={s.root}>
       <ScreenHeader title={t('expense.title')} left={
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
@@ -160,6 +180,38 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
         ))}
         </View>
       </ScrollView>
+      {/* APP-SHIFT 2026-10-17 (row-17 petty): modal PIN owner untuk approve. Judul/petunjuk literal netral ID/EN; tombol batal pakai key existing. */}
+      <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
+        <View style={s.modalBg}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
+            <Text style={s.modalTitle}>{lang === 'id' ? 'PIN Persetujuan' : 'Approval PIN'}</Text>
+            <Text style={s.modalHint}>{lang === 'id' ? 'Masukkan PIN owner untuk menyetujui' : 'Enter owner PIN to approve'}</Text>
+            <View style={s.pinDots}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />
+              ))}
+            </View>
+            {pinErr ? <Text style={s.pinErr}>{pinErr}</Text> : null}
+            <View style={s.pinPad}>
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'].map((k) => (
+                <TouchableOpacity
+                  key={k}
+                  style={s.pinKey}
+                  onPress={() => {
+                    if (k === 'C') setPin(pin.slice(0, -1));
+                    else if (k === 'OK') void confirmApprove();
+                    else if (pin.length < 6) setPin(pin + k);
+                  }}>
+                  <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => { setPinVisible(false); setPin(''); setPendingId(null); }}>
+              <Text style={s.cancelTxt}>{t('cm_cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );}const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
@@ -216,4 +268,18 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   okTxt: { fontFamily: fonts.semibold, color: colors.greenDark },
   waitTxt: { fontFamily: fonts.semibold, color: colors.amberDark },
   approveBtn: { marginTop: 8, alignSelf: 'flex-end' },
-  approveTxt: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },});
+  approveTxt: { fontFamily: fonts.bold, fontSize: 13, color: colors.greenDark },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, alignItems: 'center' },
+  modalCardTablet: { width: '100%', maxWidth: 520, alignSelf: 'center', borderRadius: 16 },
+  modalTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.text },
+  modalHint: { fontSize: 13, fontFamily: fonts.regular, color: colors.muted, marginTop: 8, textAlign: 'center' },
+  pinDots: { flexDirection: 'row', marginVertical: 18 },
+  dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: colors.navy, marginHorizontal: 6 },
+  dotFill: { backgroundColor: colors.navy },
+  pinPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  pinKey: { width: 72, height: 56, borderRadius: 10, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', margin: 5 },
+  pinKeyTxt: { fontSize: 20, fontFamily: fonts.bold, color: colors.navy },
+  pinErr: { fontSize: 13, fontFamily: fonts.medium, color: colors.red, textAlign: 'center', marginTop: 4 },
+  cancelBtn: { marginTop: 12, padding: 10 },
+  cancelTxt: { fontSize: 14, fontFamily: fonts.medium, color: colors.red },});

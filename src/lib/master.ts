@@ -145,22 +145,33 @@ const DOMAINS: Domain[] = [
   {
     key: 'sales',
     path: ApiPath.pullSales,    table: 'tr_saleshead',
-    cols: ['salesNum', 'branchId', 'terminalId', 'userId', 'salesDate', 'salesMode', 'tableNo',
+    cols: ['salesNum', 'client_id', 'branchId', 'terminalId', 'userId', 'salesDate', 'salesMode', 'tableNo',
       'customerName', 'subtotal', 'discount', 'tax', 'serviceCharge', 'voucherAmount', 'voucherCode',
       'platformFee', 'rounding', 'grandTotal', 'paidAmount', 'changeAmount', 'paymentMethod',
       'ongkir', 'status'],
-    map: (r) => [
-      str(r.salesNum) ?? '', str(r.branchId), str(r.terminalId), str(r.userId),
+    map: (r) => {
+      // client_id kosong dari server (riwayat lama/terminal lain/BE yang belum
+      // upsert-by-client) dinormalisasi ke salesNum — cermin backfill lokal di
+      // dbSchema. Tanpa ini semua baris tanpa client_id memetakan ke '' dan
+      // baris ke-2 dst lenyap diam-diam oleh UNIQUE(client_id)+OR IGNORE.
+      const no = str(r.salesNum) ?? '';
+      const cid = str(r.client_id ?? r.clientId) ?? '';
+      return [
+      no, cid || no, str(r.branchId), str(r.terminalId), str(r.userId),
       str(r.salesDate), str(r.salesMode), str(r.tableNo), str(r.customerName),
       num(r.subtotal), num(r.discount), num(r.tax), num(r.serviceCharge),
       num(r.voucherAmount), str(r.voucherCode), num(r.platformFee), num(r.rounding),
       num(r.grandTotal), num(r.paidAmount), num(r.changeAmount), str(r.paymentMethod),
       num(r.ongkir), str(r.status) ?? 'paid',
-    ],
+      ];
+    },
     requireFirst: true,
-    // INSERT OR IGNORE: nomor lokal TRX-YYYYMMDD-NNN bisa tabrakan dengan
-    // nomor server; baris lokal (terutama yang syncDate NULL / belum push)
-    // tidak boleh tertimpa riwayat pull.
+    // INSERT OR IGNORE: nomor lokal bisa tabrakan dengan nomor server;
+    // baris lokal (terutama yang syncDate NULL / belum push) tidak boleh
+    // tertimpa riwayat pull. client_id ikut tersimpan (Q7, upsert-by-client
+    // sisi server); penomoran-ulang display_no oleh server ditangani saat
+    // kontrak BE upsert-by-client_id + 409 final — sampai saat itu mode
+    // transisi terima-dua-format.
     ignoreExisting: true,
     after: async (r, now) => {
       const salesNum = str(r.salesNum) ?? '';

@@ -1,32 +1,70 @@
 /**
- * Peran perangkat (device role): 1 perangkat = 1 peran.
+ * Tag terminal (SPEC-TERMINAL-SESSION §1 + AUDIT §11.1): 1 perangkat = 1 tag.
  *
- * - KASIR: alur penuh (kasir, meja, bayar, riwayat, pengaturan).
- * - DAPUR: hanya layar dapur + pengaturan (terima tiket push, auto-print).
- * - DISPLAY: hanya layar pelanggan + pengaturan (terima event push).
+ * Kanonis (lowercase, selalu terisi satu dari lima nilai):
+ * - kasir / dapur / full_access: drawer penuh (default-allow); tag hanya
+ *   memilih notifikasi/event yang diterima, bukan mengunci fitur (Q5 CLOSED).
+ * - view_pelanggan: sidebar HANYA halaman customer view (default-deny).
+ * - view_queue: sidebar HANYA halaman antrean (default-deny).
  *
- * Kunci peran ini murni sisi aplikasi (nav/drawer lock). Nilai default
- * KASIR agar perangkat lama tanpa setting tetap jalan penuh (mundur-kompatibel).
- * Server boleh menetapkan peran via setting per terminal `deviceRole`
- * (diterapkan syncTerminalSettings, server menang).
+ * DeviceRole = gabungan 5 tag kanonis + 3 alias legacy huruf-kapital era
+ * 3-peran ('KASIR'|'DAPUR'|'DISPLAY'). Alias legacy dipertahankan HANYA di tipe
+ * agar pembanding di layar milik task lain (App.tsx, DrawerMenu,
+ * SettingsScreen, KitchenScreen) tetap kompilasi; setiap nilai yang masuk
+ * selalu dinormalisasi ke tag kanonis sebelum disimpan
+ * (alias 'DISPLAY' → 'view_pelanggan'). Parse ketat untuk nilai asing/server
+ * tetap mengembalikan null (fail-closed, tanpa default diam-diam).
  */
 import { getItem, setItem } from './storage';
 
-export type DeviceRole = 'KASIR' | 'DAPUR' | 'DISPLAY';
+/** Lima tag terminal eksplisit backend (Q1 CLOSED 2026-10-17). */
+export type TerminalTag =
+  | 'kasir'
+  | 'dapur'
+  | 'view_pelanggan'
+  | 'view_queue'
+  | 'full_access';
+
+/** @deprecated Alias legacy era 3-peran — jangan dipakai di kode baru. */
+export type LegacyDeviceRole = 'KASIR' | 'DAPUR' | 'DISPLAY';
+
+export type DeviceRole = TerminalTag | LegacyDeviceRole;
 
 const LS_ROLE = 'genfity.device.role';
 
-const VALID: DeviceRole[] = ['KASIR', 'DAPUR', 'DISPLAY'];
+export const TERMINAL_TAGS: TerminalTag[] = [
+  'kasir',
+  'dapur',
+  'view_pelanggan',
+  'view_queue',
+  'full_access',
+];
 
-let role: DeviceRole = 'KASIR';
+/** Tag dengan fitur PENUH (kasir/dapur/full sama; beda notifikasi saja, Q5). */
+export const FULL_FEATURE_TAGS: TerminalTag[] = ['kasir', 'dapur', 'full_access'];
+
+/** Tag view terkunci satu halaman (sidebar hanya halamannya). */
+export const VIEW_TAGS: TerminalTag[] = ['view_pelanggan', 'view_queue'];
+
+/** Migrasi penyimpanan lama → tag kanonis (bukan validasi server). */
+const LEGACY_MAP: Record<string, TerminalTag> = {
+  KASIR: 'kasir',
+  DAPUR: 'dapur',
+  DISPLAY: 'view_pelanggan',
+};
+
+/** Default perangkat tanpa setting/server-tag: akses penuh (perilaku
+ * terbuka eksisting; selaras fallback "legacy tanpa tag = full_access"). */
+let role: TerminalTag = 'full_access';
 let hydrated = false;
 
 const listeners = new Set<(r: DeviceRole) => void>();
 
 function restore(): void {
   void getItem(LS_ROLE).then((v) => {
-    if (v && (VALID as string[]).includes(v)) {
-      role = v as DeviceRole;
+    const next = normalizeTag(v);
+    if (next) {
+      role = next;
       listeners.forEach((cb) => {
         try {
           cb(role);
@@ -44,23 +82,72 @@ function hydrate(): void {
   restore();
 }
 
-/** Peran perangkat aktif (sinkron, default KASIR bila belum diset). */
+/** Normalisasi nilai lokal/persisted ke tag kanonis (termasuk alias legacy).
+ * null bila tak dikenal — pemanggil wajib fail-closed, bukan default diam-diam. */
+export function normalizeTag(v: unknown): TerminalTag | null {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  if ((TERMINAL_TAGS as string[]).includes(lower)) return lower as TerminalTag;
+  return LEGACY_MAP[s.toUpperCase()] ?? null;
+}
+
+/** Tag perangkat aktif (sinkron, default full_access bila belum diset). */
 export function getDeviceRole(): DeviceRole {
   hydrate();
   return role;
 }
 
-/** Validasi string asing (mis. dari server) menjadi DeviceRole; null bila tak dikenal. */
-export function parseDeviceRole(v: unknown): DeviceRole | null {
-  const s = String(v ?? '').trim().toUpperCase();
-  return (VALID as string[]).includes(s) ? (s as DeviceRole) : null;
+/**
+ * Validasi string asing (mis. tag dari backend) menjadi TerminalTag.
+ * Case-insensitive, unknown → null, tanpa silent default. 'DISPLAY' legacy
+ * BUKAN tag kanonis sehingga mengembalikan null (migrasi penyimpanan lama
+ * lewat normalizeTag, bukan lewat parse).
+ */
+export function parseDeviceRole(v: unknown): TerminalTag | null {
+  const s = String(v ?? '').trim().toLowerCase();
+  return (TERMINAL_TAGS as string[]).includes(s) ? (s as TerminalTag) : null;
 }
 
-/** Simpan peran perangkat (tak pernah melempar). */
+/** Alias parseDeviceRole (nama paket app-model). */
+export function parseTerminalTag(v: unknown): TerminalTag | null {
+  return parseDeviceRole(v);
+}
+
+/**
+ * Legacy untagged / tak dikenal => 'full_access' (usulan audit:
+ * terminal lama tanpa tag berjalan penuh, bukan dibuang diam-diam).
+ * Helper eksplisit-default — parse* ketat tetap mengembalikan null.
+ */
+export function resolveTerminalTag(v: unknown): TerminalTag {
+  return parseTerminalTag(v) ?? 'full_access';
+}
+
+/**
+ * Tag => peran nav: kasir/dapur/full_access = fitur penuh,
+ * view_pelanggan/view_queue = satu halaman terkunci.
+ * Dikembalikan sebagai tag kanonis.
+ */
+export function deviceRoleForTag(tag: TerminalTag): TerminalTag {
+  return (VIEW_TAGS as TerminalTag[]).includes(tag) ? 'view_pelanggan' : 'full_access';
+}
+
+/** Terapkan tag terminal ke kunci nav (server menang); kembalikan tag kanonis. */
+export function setDeviceRoleForTag(tag: TerminalTag): TerminalTag {
+  setDeviceRole(tag);
+  return normalizeTag(tag) ?? 'full_access';
+}
+
+/** Simpan tag perangkat (tak pernah melempar; alias legacy dinormalisasi). */
 export function setDeviceRole(next: DeviceRole): void {
   hydrate();
-  role = next;
-  void setItem(LS_ROLE, next);
+  const tag = normalizeTag(next);
+  if (!tag) {
+    console.warn('[deviceRole] setDeviceRole: nilai tak dikenal, diabaikan.');
+    return;
+  }
+  role = tag;
+  void setItem(LS_ROLE, tag);
   listeners.forEach((cb) => {
     try {
       cb(role);
@@ -70,7 +157,7 @@ export function setDeviceRole(next: DeviceRole): void {
   });
 }
 
-/** Langganan perubahan peran (untuk kunci navigasi reaktif). Langsung
+/** Langganan perubahan tag (untuk kunci navigasi reaktif). Langsung
  * dipanggil sekali dengan nilai saat ini agar tak kehilangan restore yang
  * selesai sebelum subscribe (AsyncStorage web resolve dalam microtask). */
 export function subscribeDeviceRole(cb: (r: DeviceRole) => void): () => void {
@@ -86,24 +173,31 @@ export function subscribeDeviceRole(cb: (r: DeviceRole) => void): () => void {
   };
 }
 
-/** Rute beranda per peran. */
+/** Rute beranda per tag (SPEC §10). 'CustomerDisplay' adalah nama layar
+ * eksisting (belum diganti 'CustomerView'); 'QueueView' mendarat di task Fase 2. */
 export function homeRouteFor(roleName: DeviceRole): string {
-  if (roleName === 'DAPUR') return 'Kitchen';
-  if (roleName === 'DISPLAY') return 'CustomerDisplay';
+  const tag = normalizeTag(roleName);
+  if (tag === 'dapur') return 'Kitchen';
+  if (tag === 'view_pelanggan') return 'CustomerDisplay';
+  if (tag === 'view_queue') return 'QueueView';
   return 'Dashboard';
 }
 
-/** Rute yang boleh dibuka tiap peran terkunci; KASIR = semua (tanpa batas).
- * Utilitas (QrScan klaim, Sync, Log, About, Help) selalu lolos agar perangkat
- * terkunci tetap bisa diklaim/didiagnosis; transaksi tetap dikunci. */
-const UTIL_ROUTES = ['Login', 'Settings', 'QrScan', 'Sync', 'Log', 'About', 'Help'];
-
+/** Allowlist rute per tag (SPEC §10): kasir/dapur/full_access = null
+ * (default-allow, drawer penuh — nav-lock DAPUR/DISPLAY lama dicabut);
+ * dua tag view = default-deny single-page. Tanpa Settings/role-switch/
+ * cashier-entry di profil view; keluar hanya via aksi owner terautentikasi
+ * (task Fase 2). Tag tak dikenal → himpunan kosong (fail-closed). */
 export function allowedRoutesFor(roleName: DeviceRole): Set<string> | null {
-  if (roleName === 'DAPUR') {
-    return new Set([...UTIL_ROUTES, 'Kitchen', 'Printers', 'Receipt']);
+  const tag = normalizeTag(roleName);
+  if (!tag) return new Set<string>();
+  if (tag === 'view_pelanggan') {
+    // APP-FIXUP(E6): 'CustomerView' tak pernah terdaftar di Stack — kembalikan
+    // hanya 'CustomerDisplay' yang terdaftar (App.tsx).
+    return new Set(['CustomerDisplay']);
   }
-  if (roleName === 'DISPLAY') {
-    return new Set([...UTIL_ROUTES, 'CustomerDisplay', 'Idle']);
+  if (tag === 'view_queue') {
+    return new Set(['QueueView']);
   }
   return null;
 }

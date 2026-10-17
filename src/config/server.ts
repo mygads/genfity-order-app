@@ -129,12 +129,59 @@ export const ApiPath = {
   memberErpBalance: 'erp/member/balance-deposit',
   memberErpDeposit: 'erp/member/deposit',
   memberErpSales: 'erp/member/sales',
+  // ---- E01-E28: endpoint kontrak sesi terminal (SPEC-TERMINAL-SESSION §11,
+  // tabel final; BE Go pemilik kebenaran — sebagian BELUM ADA: klien wajib
+  // fallback jujur offline/unconfigured, fail-closed untuk terminal-access,
+  // verifikasi PIN, dan login pertama). '{id}'/'{viewId}' diganti caller.
+  staffLogin: 'api/v1/auth/staff-login', // E01 POST login 2-tahap
+  terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
+  terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
+  terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding
+  terminalOccupant: 'api/v1/terminals/{id}/occupant', // E05 GET sesi aktif terminal
+  authLogout: 'api/v1/auth/logout', // E06 POST revoke session
+  branches: 'api/v1/branches', // E07 GET branch milik user
+  createBranch: 'api/v1/branches', // E08 POST owner bikin branch
+  branchTerminals: 'api/v1/branches/{id}/terminals', // E09 GET terminal picker
+  createTerminal: 'api/v1/branches/{id}/terminals', // E10 POST owner create {name,tag}
+  patchTerminal: 'api/v1/terminals/{id}', // E11 PATCH {name,tag}
+  deleteTerminal: 'api/v1/terminals/{id}', // E12 DELETE hapus/revoke
+  setTerminalTag: 'api/v1/terminals/{id}/tag', // E13 PATCH 1 dari 5 tag
+  setTerminalPin: 'api/v1/terminals/{id}/set-pin', // E14 POST owner set/rotate PIN
+  pairView: 'api/v1/terminals/{viewId}/pair', // E15 POST pair view→kasir (E422 bila ganda)
+  unpairView: 'api/v1/terminals/{viewId}/pair', // E16 DELETE lepas pairing
+  createStaff: 'api/v1/staff', // E17 POST {username,password,branchIds[]}
+  listStaff: 'api/v1/staff', // E18 GET list staff owner
+  patchStaff: 'api/v1/staff/{id}', // E19 PATCH {branchIds[]}/reset password/PIN
+  deleteStaff: 'api/v1/staff/{id}', // E20 DELETE nonaktifkan staff
+  staffBranches: 'api/v1/staff/{id}/branches', // E21 GET branch satu staff
+  branchStaff: 'api/v1/branches/{id}/staff', // E22 GET staff satu branch
+  approvals: 'api/v1/approvals', // E23 POST {action:void|cancel|compliment, ownerPin, refId}
+  ownerAudit: 'api/v1/audit/owner-actions', // E24 GET rekap pemakaian PIN owner
+  terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2)
+  terminalEvents: 'api/v1/terminals/{id}/events', // E26 GET SSE feed per terminal
+  queueEvents: 'api/v1/branches/{id}/queue-events', // E27 GET SSE antrean per branch
+  // E28: tanpa endpoint — policy max_offline_grant_days via pull-terminal-settings
+  // (lihat offlineGrantPolicyKey di bawah).
 } as const;
+
+/** E28: kunci policy grant offline (server-wins via terminal-settings, default 7 hari). */
+export const offlineGrantPolicyKey = 'max_offline_grant_days';
 
 export interface TerminalInfo {
   terminalCode: string;
   branchId: string;
   branchName: string;
+  /** Tag terminal model-5 (SPEC §1): kasir|dapur|view_pelanggan|view_queue|full_access.
+   * Opsional agar konstruktor lama tetap kompilasi; undefined = belum sync dari BE. */
+  tag?: string;
+  /** true bila owner sudah set PIN terminal (E09 terminal picker, E14 set-pin). */
+  pinSet?: boolean;
+  /** Pasangan 1:1 view_pelanggan → kasir (E09/E15; BE menolak view ke-2, E422). */
+  pairedKasirId?: string;
+  /** Cermin sisi kasir: id view yang terpasang padanya. */
+  pairedViewId?: string;
+  /** Status verifikasi terminal dari BE (E09 respons terminal). */
+  verified?: boolean;
 }
 
 const LS_ENV = 'genfity.server.env';
@@ -248,14 +295,21 @@ export function setTerminal(next: TerminalInfo): void {
 
 /**
  * ID cabang aktif untuk query lokal (ms_branchmenu dsb).
- * TODO(M9-7): fallback 'B001' hanya untuk mode dummy / terminal belum
- * diklaim (selaras kontrak §3-§4 dan dummy pull). Bila alur install sudah
- * mewajibkan klaim, ganti fallback ini menjadi string kosong + guard pemanggil.
+ *
+ * FAIL-CLOSED (SPEC-TERMINAL-SESSION, menutup termreg-branch-fallback):
+ * device belum ter-bound (unbound) mengembalikan string kosong — fallback
+ * diam-diam 'B001' DIHAPUS. Tipe kembali tetap string sehingga pemanggil lama
+ * tetap kompilasi, tetapi pemanggil WAJIB menganggap '' = unbound dan memaksa
+ * (re)claim sebelum transaksi; dilarang mencatat penjualan/shift di bawah
+ * branch kosong maupun cabang fiktif.
  */
 export function getBranchId(): string {
   hydrate();
   const b = (terminal.branchId ?? '').trim();
-  return b || 'B001';
+  if (!b) {
+    console.warn('[server] getBranchId: terminal unbound (branchId kosong) — klaim terminal dulu.');
+  }
+  return b;
 }
 
 /** GET dengan query branch + paging inkremental (§0 kontrak).

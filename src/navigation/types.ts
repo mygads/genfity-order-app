@@ -15,6 +15,10 @@ export type RootStackParamList = {
   Intro: undefined;
   Install: undefined;
   SelectBranch: undefined;
+  /** B2 BindFlow (SPEC B1): branch → terminal → PIN, sebelum Login. */
+  BranchPicker: { branchId?: string } | undefined;
+  TerminalPicker: { branchId: string; branchName?: string } | undefined;
+  TerminalPin: { branchId: string; branchName?: string; terminalId: string; terminalCode: string; terminalName?: string; tag?: string } | undefined;
   InstallProgress: { branch?: string } | undefined;
   CreatePin: { branch?: string; userId?: string } | undefined;
   ForgotPin: undefined;
@@ -45,10 +49,10 @@ export type RootStackParamList = {
   Member: { memberId?: string; nama?: string; saldoBaru?: number; topupNominal?: number; total?: number; items?: unknown; method?: string; mode?: string; table?: string; ongkir?: number; customer?: string; voucher?: string | NavVoucher | number; voucherCode?: string; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number } | undefined;
   Voucher: undefined;
   QrScan: undefined;
-  Pay: { total?: number; method?: string; voucher?: string | { code: string; amount: number; kind?: string } | number; voucherCode?: string; discount?: number; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[] } | undefined;
-  Qris: { total?: number; orderNo?: string; mode?: string; table?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string } | undefined;
-  Edc: { total?: number; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string } | undefined;
-  Success: { total?: number; method?: string; cash?: number; change?: number; orderNo?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucher?: string | { code: string; amount?: number; kind?: string }; voucherCode?: string; ongkir?: number; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; customer?: string; memberId?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string } | undefined;
+  Pay: { total?: number; method?: string; voucher?: string | { code: string; amount: number; kind?: string } | number; voucherCode?: string; discount?: number; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; salesNum?: string; clientId?: string; splits?: { method?: string; amount?: number }[]; splitGroup?: boolean; orderTotal?: number } | undefined;
+  Qris: { total?: number; orderNo?: string; salesNum?: string; clientId?: string; splits?: { method?: string; amount?: number }[]; splitGroup?: boolean; orderTotal?: number; mode?: string; table?: string; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string } | undefined;
+  Edc: { total?: number; salesNum?: string; clientId?: string; splits?: { method?: string; amount?: number }[]; splitGroup?: boolean; orderTotal?: number; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucherCode?: string; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; ongkir?: number; ongkirCut?: number; customer?: string; memberId?: string } | undefined;
+  Success: { total?: number; method?: string; cash?: number; change?: number; orderNo?: string; clientId?: string; splitPaid?: { amount?: number; method?: string }; items?: { id: string; name: string; basePrice: number; qty: number; modifiers?: { name: string; price: number }[]; discount?: number; note?: string }[]; discount?: number; voucher?: string | { code: string; amount?: number; kind?: string }; voucherCode?: string; ongkir?: number; service?: number; tax?: number; feeESB?: number; rounding?: number; mode?: string; table?: string; customer?: string; memberId?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string } | undefined;
   Attendance: undefined;
   Shift: undefined;
   Recap: undefined;
@@ -59,6 +63,8 @@ export type RootStackParamList = {
   Printers: undefined;
   Settings: undefined;
   CustomerDisplay: undefined;
+  /** B2 QueueView (tag view_queue): papan antrean branch-scoped terkunci. */
+  QueueView: undefined;
   WebView: { url: string; title?: string } | undefined;
   SplitBill: { items?: unknown; total?: number } | undefined;
   MoveItems: { from?: string } | undefined;

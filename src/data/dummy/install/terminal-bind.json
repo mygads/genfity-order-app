@@ -1,0 +1,25 @@
+{
+  "request": { "pin": "4821", "deviceId": "a91f3c07d2e84b5a" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "bound": true,
+      "binding": {
+        "terminalId": "T01",
+        "terminalCode": "K01",
+        "branchId": "B001",
+        "branchName": "ESB Cabang Poris",
+        "merchantName": "ESB Poris",
+        "tag": "kasir",
+        "pairedKasirId": null,
+        "pairedViewId": "T03",
+        "boundAt": "2026-10-17 09:00:00"
+      },
+      "kickedUserId": null
+    }
+  }
+}

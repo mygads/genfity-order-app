@@ -214,9 +214,12 @@ export function totals(input: TotalsInput): TotalsResult {
     ? 0
     : useOngkirCut
       ? 0
-      : isPercentVoucher
-        ? Math.min(cappedPct, dasarBelanja)
-        : Math.min(cappedFlat, dasarBelanja);
+      : isOngkirVoucher
+        ? 0 // Voucher ongkir MURNI potong ongkir saja: tanpa ongkir (dine-in/
+          // takeaway) nilainya 0, bukan berubah jadi diskon belanja.
+        : isPercentVoucher
+          ? Math.min(cappedPct, dasarBelanja)
+          : Math.min(cappedFlat, dasarBelanja);
   const subtotal = Math.max(0, gross - discount - voucherAmt);
   const service = Math.round(subtotal * FEE_DEFAULTS.serviceRate);
   /** Pajak inclusive info-only (kontrak §10.3: default 11 -> round(net * 11/111), setting-driven via ms_setting Tax/PPN). */

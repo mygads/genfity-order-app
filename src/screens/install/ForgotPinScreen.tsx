@@ -6,29 +6,107 @@ import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import { useLang } from '../../lib/i18n';
 import { getApiMode } from '../../lib/apiSource';
+import { loadBinding, requestPinReset } from '../../lib/terminalContract';
+// APP-FIXUP (fix-app-contract D1): merchantId (scope body pin-reset server)
+// diambil dari binding/sesi — perangkat tak menyimpan merchant id terpisah.
+import {
+  getBinding as getSessionBinding,
+  getSession,
+  hydrateTerminalState,
+} from '../../session';
 
 type Nav = { goBack: () => void };
 
 export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [username, setUsername] = useState('');
-  const [sent, setSent] = useState(false);
+  // APP-FIXUP (fix-app-contract D1): kontrak fix-be butuh PIN baru langsung
+  // di body {merchantId, pin, username?/userId?} — bukan alur tautan email.
+  // PIN hanya hidup di state komponen (tak pernah disimpan) + dibersihkan
+  // tiap sukses. Label literal ID/EN netral, tanpa kunci i18n baru (lane beku).
+  const [pin, setPin] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [sent, setSent] = useState<'no' | 'ok' | 'offline'>('no');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   // Jujur offline-first: tanpa server (local/dummy) tak ada "instruksi"
   // yang bisa dikirim — tunjukkan arahan reset via owner, bukan klaim palsu.
   const offline = getApiMode() !== 'real';
+
+  // Fix CONFIRMED-3 (audit row 16, paket app-login) + D1 (fix-app-contract):
+  // call NYATA ke POST /api/v1/staff/{id}/pin-reset (owner-only) dengan body
+  // {merchantId, pin, username}. ok → sent 'ok'; kontrak tak terjangkau →
+  // sent 'offline' (arahan owner, jujur); server menolak → pesan galat
+  // (BUKAN sukses palsu).
+  const send = async () => {
+    const u = username.trim();
+    if (!u || busy) return;
+    // Konvensi PIN staff perangkat: numerik, minimal 4 digit (ala keypad
+    // CreatePin 4-dot + seed 1234/1111/2222); kebijakan atas milik server.
+    if (!/^\d{4,}$/.test(pin)) {
+      setErr(
+        lang === 'id'
+          ? 'PIN minimal 4 digit angka.'
+          : 'PIN must be at least 4 digits.',
+      );
+      return;
+    }
+    if (pin !== confirm) {
+      setErr(
+        lang === 'id'
+          ? 'PIN baru dan konfirmasi tidak sama.'
+          : 'New PIN and confirmation do not match.',
+      );
+      return;
+    }
+    setBusy(true); setErr('');
+    try {
+      // Scope merchant = branch binding (sesi diutamakan, kontrak fallback):
+      // perangkat tak menyimpan merchant id terpisah (model cabang tunggal).
+      await hydrateTerminalState().catch(() => {});
+      const b = await loadBinding().catch(() => null);
+      const merchantId = (
+        getSessionBinding()?.branchId ??
+        b?.branchId ??
+        getSession()?.branchId ??
+        ''
+      ).trim();
+      if (!merchantId) {
+        setErr(
+          lang === 'id'
+            ? 'Perangkat belum terikat terminal — minta owner mengikat dulu atau atur ulang PIN lewat Manajemen User.'
+            : 'Device is not bound to a terminal — ask the owner to bind it first or reset the PIN via User Management.',
+        );
+        return;
+      }
+      const r = await requestPinReset({ userIdOrUsername: u, merchantId, newPin: pin });
+      if (r.ok) { setSent('ok'); setPin(''); setConfirm(''); return; }
+      if (r.offline) { setSent('offline'); return; }
+      setErr(
+        lang === 'id'
+          ? 'Reset ditolak server — periksa username atau hubungi owner outlet.'
+          : 'Server rejected the reset — check the username or contact the outlet owner.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <ScreenRoot style={styles.root}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Image source={require('../../../assets/images/forget_pin.webp')} style={[styles.hero, isTablet && styles.heroBig]} resizeMode="contain" />
       <Text style={[styles.title, isTablet && styles.titleBig]}>{t('g_forgot_title')}</Text>
-      {sent ? (
+      {sent !== 'no' ? (
         <>
           <Text style={[styles.desc, isTablet && styles.descBig]}>
-            {offline ? t('g_forgot_offline') : (
-              <>{t('g_forgot_sent_pre')} <Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{' '}{t('g_forgot_sent_post')}</>
+            {/* APP-FIXUP (fix-app-contract D1): salinan sukses jujur untuk
+                reset langsung — alur lama mengklaim "tautan dikirim ke email
+                supervisor" padahal body baru menyetel PIN langsung. */}
+            {sent === 'offline' || offline ? t('g_forgot_offline') : (
+              <>{lang === 'id' ? 'PIN untuk ' : 'PIN for '}<Text style={styles.bold}>{username || t('g_forgot_cashier_fb')}</Text>{lang === 'id' ? ' berhasil direset. Masuk dengan PIN baru Anda.' : ' has been reset. Sign in with your new PIN.'}</>
             )}
           </Text>
           <AppButton
@@ -54,13 +132,42 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
               autoCapitalize="none"
             />
           </View>
+          {/* APP-FIXUP (fix-app-contract D1): PIN baru + konfirmasi untuk body
+              {merchantId, pin, username}. Literal netral, tanpa kunci baru. */}
+          <Text style={styles.label}>{lang === 'id' ? 'PIN baru' : 'New PIN'}</Text>
+          <View style={styles.inputWrap}>
+            <AppInput
+              boxStyle={styles.input}
+              style={styles.inputText}
+              value={pin}
+              onChangeText={(v) => setPin(v.replace(/[^\d]/g, ''))}
+              placeholder={lang === 'id' ? 'Min. 4 digit angka' : 'Min. 4 digits'}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={12}
+            />
+          </View>
+          <Text style={styles.label}>{lang === 'id' ? 'Konfirmasi PIN baru' : 'Confirm new PIN'}</Text>
+          <View style={styles.inputWrap}>
+            <AppInput
+              boxStyle={styles.input}
+              style={styles.inputText}
+              value={confirm}
+              onChangeText={(v) => setConfirm(v.replace(/[^\d]/g, ''))}
+              placeholder={lang === 'id' ? 'Ulangi PIN baru' : 'Repeat new PIN'}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={12}
+            />
+          </View>
           <AppButton
             size="md"
-            title={t('g_forgot_send')}
-            onPress={() => setSent(true)}
-            disabled={!username.trim()}
+            title={busy ? (lang === 'id' ? 'Mengirim...' : 'Sending...') : t('g_forgot_send')}
+            onPress={send}
+            disabled={!username.trim() || !pin || !confirm || busy}
             style={styles.primary}
           />
+          {err ? <Text style={styles.error}>{err}</Text> : null}
         </>
       )}
     </ScrollView>
@@ -89,6 +196,8 @@ const styles = StyleSheet.create({
   /** Pembungkus AppInput agar selebar form di container tengah. */
   inputWrap: { width: '100%' },
   primary: { backgroundColor: colors.orange, borderRadius: 10, padding: 15, alignItems: 'center', marginTop: 16, width: '100%' },
+  /** Galat penolakan server (paket app-login; literal, tanpa kunci baru). */
+  error: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, textAlign: 'center', marginTop: 12 },
   disabled: { opacity: 0.5 },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: colors.white },
 });

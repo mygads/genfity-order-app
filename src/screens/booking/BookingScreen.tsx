@@ -37,7 +37,9 @@ const NEXT: Record<Status, Status | null> = { Terjadwal: 'Datang', Datang: 'Sele
 /** Daftar reservasi tersimpan di perangkat PER CABANG agar bertahan saat dibuka
  * ulang; kosong = empty-state (tanpa contoh). Kunci dicabang supaya reservasi
  * cabang A tak bocor ke cabang B. */
-const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || 'B001').trim() || 'B001'}`;
+/** M9: '' = unbound — segmen kunci 'unbound' (tanpa fallback B001 agar reservasi
+ * cabang A tak bocor/terbaca sebagai cabang lain). */
+const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || '').trim() || 'unbound'}`;
 
 /** Baris meja untuk chip + validasi kapasitas (kanonis fallback / live ms_table). */
 interface LiveTable { no: string; section: string; kap: number; }
@@ -73,8 +75,9 @@ export default function BookingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  // M9: '' = unbound (tanpa fallback B001); banner unbound di daftar bawah.
   const [branchId] = useState(() => {
-    try { return getBranchId(); } catch { return 'B001'; }
+    try { return getBranchId(); } catch { return ''; }
   });
   const bookKey = bookKeyFor(branchId);
   const shopLabel = (() => {
@@ -302,7 +305,8 @@ export default function BookingScreen({ navigation }: Props) {
 
   const reservasiList = (
     <>
-      <Text style={[styles.count, isTablet && styles.countBig]}>{shopLabel} · {shown.length} reservasi aktif</Text>
+      <Text style={[styles.count, isTablet && styles.countBig]}>{shopLabel || t('terminal_unbound_title')} · {shown.length} reservasi aktif</Text>
+      {!branchId ? <Text style={styles.warn}>{t('terminal_unbound_hint')}</Text> : null}
       <TouchableOpacity onPress={() => setOnlyToday((v) => !v)} style={styles.todayToggle}>
         <Text style={styles.todayToggleT}>{onlyToday ? '☑ Hari ini saja' : '☐ Hari ini saja'}</Text>
       </TouchableOpacity>

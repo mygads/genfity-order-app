@@ -16,6 +16,7 @@ import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from './sync';
 import { apiFetch } from './apiSource';
 import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
 import { uuidv7 } from './uuidv7';
+import * as DisplayBus from './display';
 
 const r = (n: number) => Math.round(n);
 
@@ -131,19 +132,16 @@ function terminalUnboundError(): Error {
 }
 
 /**
- * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}.
- * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq —
- * transaksional (ketuk-ganda tak bikin nomor ganda), tahan reinstall
- * (bukan AsyncStorage), init dari MAX suffix lokal yang tahan 4 format lama.
- * padStart(4), overflow >9999 lanjut 5 digit alami (UNIQUE server atas
- * string penuh; pecahan split -A/-B di atas satu NNN induk, T3-opsi-a).
- * ymd = kalender lokal; sale lewat tengah malam ikut ymd baru dengan
- * shiftId lama tetap menempel (T2-opsi-a).
+ * Nomor display tersegmen Q7 (SPEC §12, inti dari nextSalesNum): menerbitkan
+ * `TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}` untuk branch+terminal eksplisit.
+ * Melempar terminalUnboundError bila salah satunya kosong/invalid — tanpa
+ * fallback B001. Counter harian per (terminalCode, tanggal) di tr_sales_seq,
+ * transaksional, init dari MAX suffix lokal (format baru + adopsi format
+ * lama hari ini); NNNN 4-digit zero-padded, overflow lanjut 5 digit alami.
  */
-export async function nextSalesNum(): Promise<string> {
-  const t = getTerminal();
-  const term = normalizeTerminalCode(t.terminalCode);
-  const branch = String(t.branchId ?? '').trim().toUpperCase();
+export async function nextDisplayNumber(branchCode: unknown, terminalCode: unknown): Promise<string> {
+  const term = normalizeTerminalCode(terminalCode);
+  const branch = String(branchCode ?? '').trim().toUpperCase();
   if (!TERMINAL_CODE_RE.test(term) || !branch) throw terminalUnboundError();
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -188,6 +186,98 @@ export async function nextSalesNum(): Promise<string> {
   return `TRX-${branch}-${term}-${ymd}-${String(n).padStart(4, '0')}`;
 }
 
+/**
+ * Backfill client_id untuk baris lama yang masih NULL (satu UUIDv7 per baris,
+ * salesNum TIDAK diubah). Normalnya tak ada kerja: migrasi skema sudah
+ * mengisi client_id = salesNum untuk instalasi lama. Best-effort, tak pernah
+ * melempar; mengembalikan jumlah baris yang diisi.
+ */
+export async function backfillSaleClientIds(): Promise<number> {
+  try {
+    await initDb();
+    const rows = await query<{ salesNum: string | null }>(
+      'SELECT salesNum FROM tr_saleshead WHERE client_id IS NULL',
+    );
+    let n = 0;
+    for (const row of rows) {
+      const no = String(row?.salesNum ?? '').trim();
+      if (!no) continue;
+      try {
+        await run(
+          'UPDATE tr_saleshead SET client_id = ? WHERE salesNum = ? AND client_id IS NULL',
+          [uuidv7(), no],
+        );
+        n += 1;
+      } catch {
+        /* baris bentrok - lanjut */
+      }
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Payload QR pembayaran (APP-PRINTER-SALES, audit row 12-parsial/Q7): QR
+ * struk/display MEMBAWA client_id UUIDv7 (kunci upsert server) + nomor display
+ * + total. Bentuk JSON ringkas agar muat di QR kecil struk 58mm.
+ */
+export function buildSaleQrPayload(clientId: string, salesNum: string, total?: number): string {
+  const cid = String(clientId ?? '').trim();
+  const no = String(salesNum ?? '').trim();
+  return JSON.stringify({
+    client_id: cid,
+    salesNum: no,
+    ...(total === undefined ? {} : { total: Math.max(0, Math.round(Number(total) || 0)) }),
+  });
+}
+
+/**
+ * Ambil client_id head dari DB (APP-PRINTER-SALES: rantai Pay→Qris/Edc→
+ * Success→Receipt memakai ulang SATU client_id agar QR tak basi).
+ * Null bila head belum ada (belum saveSale pertama).
+ */
+export async function getSaleClientId(salesNum: string): Promise<string | null> {
+  const no = String(salesNum ?? '').trim();
+  if (!no) return null;
+  try {
+    await initDb();
+    const row = await queryFirst<{ client_id: string | null }>(
+      'SELECT client_id FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+      [no],
+    );
+    const cid = String(row?.client_id ?? '').trim();
+    return cid || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}.
+ * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq —
+ * transaksional (ketuk-ganda tak bikin nomor ganda), tahan reinstall
+ * (bukan AsyncStorage), init dari MAX suffix lokal yang tahan 4 format lama.
+ * padStart(4), overflow >9999 lanjut 5 digit alami (UNIQUE server atas
+ * string penuh; pecahan split -A/-B di atas satu NNN induk, T3-opsi-a).
+ * ymd = kalender lokal; sale lewat tengah malam ikut ymd baru dengan
+ * shiftId lama tetap menempel (T2-opsi-a).
+ */
+export async function nextSalesNum(): Promise<string> {
+  const t = getTerminal();
+  return nextDisplayNumber(t.branchId, t.terminalCode);
+}
+
+/**
+ * Nomor antrean display dari suffix NNNN salesNum (TRX-{BR}-{TM}-{YMD}-{NNNN}[-A|B]).
+ * Nomor non-segmen (SEED-xxx, TRX-{timestamp}) → null (display fallback).
+ */
+export function queueNoOf(salesNum: string): string | null {
+  const m = /-(\d+)(-[AB])?$/.exec(String(salesNum ?? '').trim());
+  return m ? m[1] : null;
+}
+
 /** Tulis head + item + pembayaran dari payload tier-penuh. */
 export async function saveSale(s: SaleInput): Promise<string> {
   // Gate bound (Q7): device belum ter-bound dilarang bikin sale. nextSalesNum
@@ -206,14 +296,16 @@ export async function saveSale(s: SaleInput): Promise<string> {
   const branchId = t.branchId || getBranchId();
   const items = s.items ?? [];
   const subtotal = s.subtotal ?? items.reduce((a, it) => a + lineSubtotal(it), 0);
-  const payments = s.payments?.length
+  let payments = s.payments?.length
     ? s.payments
     : [{ method: s.method, amount: s.grandTotal }];
-  const paid = payments.reduce((a, p) => a + p.amount, 0);
+  let paid = payments.reduce((a, p) => a + p.amount, 0);
   // Status lunas otomatis: bayar penuh (semua alur lama tak berubah) = 'paid';
   // bayar sebagian (cicilan split bill grup) = 'open' hingga appendGroupPayment
   // menggenapi. Grand 0 = lunas trivial.
-  const headStatus = r(s.grandTotal) > 0 && paid < r(s.grandTotal) ? 'open' : 'paid';
+  // `let`: backstop deposit over-saldo di dalam transaksi bisa meng-clamp kaki
+  // deposit lalu menghitung ulang keduanya agar ledger == head.
+  let headStatus: string = r(s.grandTotal) > 0 && paid < r(s.grandTotal) ? 'open' : 'paid';
   // Porsi voucher murni = diskon head - diskon per-item. Pemanggil Pay mengirim
   // gabungan keduanya di discountTotal; tanpa pemisah, nominal voucher di head
   // + usage ter-overstate sebesar diskon item (bug G5).
@@ -236,6 +328,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
   }
   const voucherAmt = headVoucherOk ? r(Math.max(0, (s.discountTotal ?? 0) - itemDiscSum)) : 0;
   await initDb();
+  // Q7: jaring pengaman baris lama ber-client_id NULL (migrasi skema sudah
+  // backfill client_id = salesNum; helper ini best-effort, tak melempar).
+  await backfillSaleClientIds();
   // Transaksi atomik (#22): head + item + payment + stok + voucher + deposit +
   // dapur + outbox fisik = semua-atau-tidak-sama-sekali. Kill tepat di tengah
   // tulis tak lagi menyisakan struk setengah (head tanpa item dsb).
@@ -245,6 +340,40 @@ export async function saveSale(s: SaleInput): Promise<string> {
   let committed = false;
   try {
   await withTransaction(async () => {
+  // Backstop deposit over-saldo: baca saldo DALAM transaksi lalu clamp total
+  // kaki deposit ke saldo saat simpan. UI Pay (onDepositLanjut) sudah cap di
+  // saldo live, tapi saldo bisa berubah di antara pilih dan simpan; tanpa
+  // clamp, kaki tercatat penuh sementara saldo hanya terdebit `take` ->
+  // paidAmount overstate + status 'paid' hantu. Sisa otomatis jadi 'open'
+  // untuk ditagih via appendGroupPayment. Blok debit di bawah memakai
+  // payments yang sudah di-clamp sehingga take == depUsed.
+  if (s.memberId) {
+    const isDep = (m: unknown): boolean => /deposit/i.test(String(m ?? ''));
+    const depSum = payments.reduce((a, p) => a + (isDep(p.method) ? r(p.amount) : 0), 0);
+    if (depSum > 0) {
+      try {
+        const cur = await queryFirst<{ depositBalance: number | null }>(
+          'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+          [s.memberId],
+        );
+        let take = Math.min(Math.max(0, Math.round(Number(cur?.depositBalance) || 0)), depSum);
+        for (let i = 0; i < payments.length; i += 1) {
+          if (!isDep(payments[i].method)) continue;
+          const amt = r(payments[i].amount);
+          const keep = Math.min(amt, take);
+          take -= keep;
+          if (keep !== amt) payments[i] = { ...payments[i], amount: keep };
+        }
+        // Buang kaki deposit yang jadi nol (kaki non-deposit nol tetap ditulis
+        // seperti perilaku lama).
+        payments = payments.filter((p) => !isDep(p.method) || r(p.amount) > 0);
+        paid = payments.reduce((a, p) => a + p.amount, 0);
+        headStatus = r(s.grandTotal) > 0 && paid < r(s.grandTotal) ? 'open' : 'paid';
+      } catch {
+        /* baca saldo gagal - biarkan apa adanya, blok debit best-effort */
+      }
+    }
+  }
   // Atribusi shift (#18): head.shiftId = shift terbuka cabang ini (bila ada).
   // Tanpa shift terbuka = NULL yang jujur (kasir mode bebas/demo).
   let shiftId: string | null = null;
@@ -260,14 +389,17 @@ export async function saveSale(s: SaleInput): Promise<string> {
   }
   // Mode/ongkir/customer + rincian pajak/service/voucher ikut tersimpan agar
   // struk ulang dan push server konsisten dengan rumus kasir kanonik.
+  // queueNumber ditulis saat lahir agar display antrean punya nomor pendek
+  // (sebelumnya kolom ada tapi tak pernah diisi → fallback salesNum penuh).
+  const queueNumber = (s.queueNumber ?? '').trim() || queueNoOf(salesNum);
   await run(
     `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
       salesMode, subtotal, discount, tax, serviceCharge, platformFee, rounding,
       voucherAmount, voucherCode,
       grandTotal, paidAmount, changeAmount,
       paymentMethod, memberId, tableNo, customerName, ongkir,
-      status, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, now,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
@@ -278,7 +410,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       r(s.grandTotal), r(paid),
       r(s.change ?? Math.max(0, paid - s.grandTotal)), normalizeMethod(payments[0]?.method ?? s.method),
       s.memberId ?? null, s.tableId ?? null, s.customer ?? null, r(s.ongkir ?? 0),
-      headStatus, cashier, now, now,
+      headStatus, queueNumber, cashier, now, now,
     ],
   );
   for (const it of items) {
@@ -286,21 +418,21 @@ export async function saveSale(s: SaleInput): Promise<string> {
     // menemukan addon-nya (sebelumnya extras menunjuk id cart -> orphan).
     const smId = uid('sm');
     await run(
-      `INSERT INTO tr_salesmenu (id, salesNum, menuId, menuName, qty, price,
+      `INSERT INTO tr_salesmenu (id, salesNum, client_id, menuId, menuName, qty, price,
         discount, subtotal, note, status, syncDate, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'served', NULL, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'served', NULL, ?)`,
       [
-        smId, salesNum, it.id, it.name, it.qty, r(it.basePrice),
+        smId, salesNum, clientId, it.id, it.name, it.qty, r(it.basePrice),
         r(it.discount ?? 0), r(lineSubtotal(it)),
         it.note ?? null, now,
       ],
     );
     for (const m of it.modifiers ?? []) {
       await run(
-        `INSERT INTO tr_salesmenuextra (id, salesMenuId, salesNum, extraId,
+        `INSERT INTO tr_salesmenuextra (id, salesMenuId, salesNum, client_id, extraId,
           extraName, qty, price, subtotal, syncDate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-        [uid('se'), smId, salesNum, m.name, m.name, it.qty, r(m.price), r(m.price * it.qty)],
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        [uid('se'), smId, salesNum, clientId, m.name, m.name, it.qty, r(m.price), r(m.price * it.qty)],
       );
     }
     // Stok cabang ikut turun per item terjual (qty NULL = tak dilacak, tak
@@ -367,11 +499,11 @@ export async function saveSale(s: SaleInput): Promise<string> {
     const legV = String(p.voucherCode ?? '').trim();
     const legVKept = legV && !rejectedLegs.has(legV.toUpperCase()) ? legV : null;
     await run(
-      `INSERT INTO tr_salespayment (id, salesNum, paymentMethod, amount,
+      `INSERT INTO tr_salespayment (id, salesNum, client_id, paymentMethod, amount,
         tendered, changeAmount, refNo, syncDate, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       [
-        uid('sp'), salesNum, p.method, r(p.amount), legTendered,
+        uid('sp'), salesNum, clientId, p.method, r(p.amount), legTendered,
         legChange, p.approvalCode ?? legVKept, now,
       ],
     );
@@ -425,9 +557,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
   if (s.voucherCode) {
     if (headVoucherOk) {
       await run(
-        `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
-         VALUES (?, ?, ?, ?, 'burn', NULL)`,
-        [uid('sv'), salesNum, s.voucherCode, voucherAmt],
+        `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+         VALUES (?, ?, ?, ?, ?, 'burn', NULL)`,
+        [uid('sv'), salesNum, clientId, s.voucherCode, voucherAmt],
       );
       // Kuota lokal ikut turun agar voucher tak bisa dipakai ulang offline;
       // syncDate NULL menandai perubahan untuk push berikutnya.
@@ -447,9 +579,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
     } else {
       // Head tak-valid: catat penolakan untuk audit, kuota tak tersentuh.
       await run(
-        `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
-         VALUES (?, ?, ?, 0, 'rejected', NULL)`,
-        [uid('sv'), salesNum, s.voucherCode],
+        `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+         VALUES (?, ?, ?, ?, 0, 'rejected', NULL)`,
+        [uid('sv'), salesNum, clientId, s.voucherCode],
       );
     }
   }
@@ -457,9 +589,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
   // dicatat 'rejected' tanpa sentuh kuota.
   for (const b of burnedLegs) {
     await run(
-      `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
-       VALUES (?, ?, ?, ?, 'burn', NULL)`,
-      [uid('sv'), salesNum, b.code, b.amount],
+      `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+       VALUES (?, ?, ?, ?, ?, 'burn', NULL)`,
+      [uid('sv'), salesNum, clientId, b.code, b.amount],
     );
     await run(
       `UPDATE ms_voucher SET quota = quota - 1, syncDate = NULL
@@ -476,27 +608,30 @@ export async function saveSale(s: SaleInput): Promise<string> {
   for (const c of legCodes) {
     if (!rejectedLegs.has(c.toUpperCase())) continue;
     await run(
-      `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
-       VALUES (?, ?, ?, 0, 'rejected', NULL)`,
-      [uid('sv'), salesNum, c],
+      `INSERT INTO tr_salesvoucherusage (id, salesNum, client_id, voucherCode, voucherAmount, status, syncDate)
+       VALUES (?, ?, ?, ?, 0, 'rejected', NULL)`,
+      [uid('sv'), salesNum, clientId, c],
     );
   }
   // Tiket dapur lahir dari penjualan nyata: satu baris per order dengan status
   // awal 'Baru'. Id deterministik agar retry penyimpanan tak bikin ganda.
+  // Q7: kanonis-menang untuk identitas — baris cermin push (client_id NULL /
+  // sementara) dikoreksi ke client_id sale nyata; status tak disentuh agar
+  // advance dapur (Diproses) tak regresi ke 'Baru'.
   await run(
-    `INSERT INTO tr_kitchenticket (id, ticketNo, salesNum, status, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, 'Baru', ?, ?, NULL)
-     ON CONFLICT (id) DO NOTHING`,
-    [`kt-${salesNum}`, salesNum, salesNum, now, now],
+    `INSERT INTO tr_kitchenticket (id, ticketNo, salesNum, client_id, status, createdAt, updatedAt, syncDate)
+     VALUES (?, ?, ?, ?, 'Baru', ?, ?, NULL)
+     ON CONFLICT (id) DO UPDATE SET client_id = excluded.client_id`,
+    [`kt-${salesNum}`, salesNum, salesNum, clientId, now, now],
   );
   // Identitas penyetuju eskalasi (kompliment/non-penjualan) diaudit ke
   // tr_salesinfo; tanpa migrasi (tabel KV sudah ada). Ikut payload push via
   // buildSalePayload (approvedBy) agar server ikut mencatat.
   if (s.approvedBy) {
     await run(
-      `INSERT INTO tr_salesinfo (id, salesNum, infoKey, infoValue, syncDate)
-       VALUES (?, ?, 'approvedBy', ?, NULL)`,
-      [uid('si'), salesNum, s.approvedBy],
+      `INSERT INTO tr_salesinfo (id, salesNum, client_id, infoKey, infoValue, syncDate)
+       VALUES (?, ?, ?, 'approvedBy', ?, NULL)`,
+      [uid('si'), salesNum, clientId, s.approvedBy],
     );
   }
   // Porsi voucher atas ongkir (bruto = ongkir neto + cut). Kepala
@@ -504,9 +639,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
   // buildSalePayload agar server ikut mencatat.
   if (s.ongkirCut !== undefined && s.ongkirCut > 0) {
     await run(
-      `INSERT INTO tr_salesinfo (id, salesNum, infoKey, infoValue, syncDate)
-       VALUES (?, ?, 'ongkirCut', ?, NULL)`,
-      [uid('si'), salesNum, String(Math.round(s.ongkirCut))],
+      `INSERT INTO tr_salesinfo (id, salesNum, client_id, infoKey, infoValue, syncDate)
+       VALUES (?, ?, ?, 'ongkirCut', ?, NULL)`,
+      [uid('si'), salesNum, clientId, String(Math.round(s.ongkirCut))],
     );
   }
   committed = true;
@@ -515,6 +650,44 @@ export async function saveSale(s: SaleInput): Promise<string> {
     /* Gagal total + rollback: kasir tetap jalan via antrean ringan recordSale. */
   }
   if (committed) for (const fn of postCommit) { try { fn(); } catch { /* abaikan */ } }
+  if (committed) {
+    // Realtime lane (APP-PRINTER-SALES, audit row 12-parsial/SPEC §8): siarkan
+    // live-cart kasir→display via publishDisplayOrder (bus lokal + WS
+    // best-effort; SSE primer + polling fallback milik sisi view). Tak pernah
+    // melempar — penjualan tetap sah bila display belum siap.
+    try {
+      DisplayBus.publishDisplayOrder(
+        salesNum,
+        items.map((it) => ({
+          name: String(it.name ?? ''),
+          qty: Math.max(1, Math.round(Number(it.qty) || 0)),
+          price: Math.round(Number(it.basePrice) || 0),
+        })),
+        r(s.grandTotal),
+        headStatus,
+      );
+    } catch {
+      /* display belum siap - penjualan tetap sah */
+    }
+    // APP-EVENTS (same-device kasir→dapur/display, audit row 12): kipas sale
+    // ke bus sale lokal (client_id untuk korelasi QR); idempoten terhadap
+    // publishDisplayOrder di atas (konten sama, dedupe di sisi layar).
+    try {
+      DisplayBus.notifySaleSavedLocal({
+        salesNum,
+        clientId: String(clientId ?? ''),
+        total: r(s.grandTotal),
+        itemCount: items.reduce((a, it) => a + Math.max(1, Math.round(Number(it.qty) || 0)), 0),
+        items: items.map((it) => {
+          const qty = Math.max(1, Math.round(Number(it.qty) || 0));
+          const unit = Math.round(Number(it.basePrice) || 0);
+          return { name: String(it.name ?? ''), qty, subtotal: qty * unit };
+        }),
+      });
+    } catch {
+      /* bus lokal belum siap - penjualan tetap sah */
+    }
+  }
   return salesNum;
 }
 
@@ -580,11 +753,15 @@ export async function getGroupPaid(salesNum: string): Promise<GroupPaid> {
  */
 export async function appendGroupPayment(
   salesNum: string,
-  p: { payments: { method?: string; amount?: number; approvalCode?: string }[]; method: string; change?: number },
+  p: { payments: { method?: string; amount?: number; approvalCode?: string }[]; method: string; change?: number; clientId?: string; memberId?: string },
 ): Promise<void> {
+  // Gate bound (D3-03, cermin saveSale): device belum ter-bound dilarang
+  // memutasi state uang. Tanpa ini kunjungan grup ke-2+ menulis kaki + head
+  // diam-diam sementara saveSale/nextSalesNum melempar di device yang sama.
+  if (!isTerminalBound()) throw terminalUnboundError();
   const no = String(salesNum ?? '').trim();
   if (!no) throw new Error('salesNum kosong');
-  const legs = (p.payments ?? [])
+  let legs = (p.payments ?? [])
     .map((x) => ({
       method: String(x?.method ?? p.method ?? 'split'),
       amount: Math.max(0, Math.round(Number(x?.amount) || 0)),
@@ -593,19 +770,54 @@ export async function appendGroupPayment(
     .filter((x) => x.amount > 0);
   if (legs.length === 0) throw new Error('nominal kosong');
   await initDb();
-  const head = await queryFirst<{ grandTotal: number | null; paidAmount: number | null; changeAmount: number | null }>(
-    'SELECT grandTotal, paidAmount, changeAmount FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+  const head = await queryFirst<{ grandTotal: number | null; paidAmount: number | null; changeAmount: number | null; client_id: string | null; branchId: string | null }>(
+    'SELECT grandTotal, paidAmount, changeAmount, client_id, branchId FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
     [no],
   );
   if (!head) throw new Error(`Head ${no} tidak ada`);
+  // Deposit backstop (paritas saveSale bug G1): kaki deposit kunjungan ke-2+
+  // WAJIB memotong saldo member. Sebelumnya appendGroupPayment tak menyentuh
+  // ms_member sama sekali sehingga deposit bisa dipakai ulang tanpa batas
+  // lewat split grup. Clamp ke saldo hidup + catat withdraw, cermin saveSale.
+  const memberId = String(p.memberId ?? '').trim();
+  let depBefore = 0;
+  let depTake = 0;
+  const depWanted = legs
+    .filter((x) => /deposit/i.test(x.method ?? ''))
+    .reduce((a, x) => a + x.amount, 0);
+  if (depWanted > 0) {
+    if (!memberId) throw new Error('Deposit butuh member');
+    const cur = await queryFirst<{ depositBalance: number | null }>(
+      'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+      [memberId],
+    );
+    depBefore = Math.max(0, Math.round(Number(cur?.depositBalance) || 0));
+    let left = depBefore;
+    const capped: typeof legs = [];
+    for (const leg of legs) {
+      if (!/deposit/i.test(leg.method ?? '')) {
+        capped.push(leg);
+        continue;
+      }
+      const takeLeg = Math.min(left, leg.amount);
+      left -= takeLeg;
+      if (takeLeg > 0) capped.push({ ...leg, amount: takeLeg });
+    }
+    legs = capped;
+    if (legs.length === 0) throw new Error('nominal kosong');
+    depTake = Math.max(0, depBefore - left);
+  }
+  // APP-PRINTER-SALES: kaki grup ikut client_id head (merge-safe + payload
+  // group-payment stabil untuk upsert server).
+  const groupClientId = String(p.clientId ?? head.client_id ?? '').trim() || null;
   const now = new Date().toISOString();
   const add = legs.reduce((a, x) => a + x.amount, 0);
   for (const leg of legs) {
     await run(
-      `INSERT INTO tr_salespayment (id, salesNum, paymentMethod, amount,
+      `INSERT INTO tr_salespayment (id, salesNum, client_id, paymentMethod, amount,
         tendered, changeAmount, refNo, syncDate, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-      [uid('sp'), no, leg.method, r(leg.amount), r(leg.amount), 0, leg.approvalCode ?? null, now],
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      [uid('sp'), no, groupClientId, leg.method, r(leg.amount), r(leg.amount), 0, leg.approvalCode ?? null, now],
     );
   }
   const grand = r(head.grandTotal ?? 0);
@@ -617,10 +829,44 @@ export async function appendGroupPayment(
        status = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?`,
     [newPaid, newChange, normalizeMethod(p.method), fullyPaid ? 'paid' : 'open', now, no],
   );
+  // Potong saldo + ledger withdraw (paritas saveSale): best-effort, kaki
+  // bayar di atas tetap sah bila bagian ini gagal (selisih terlihat di Member).
+  if (depTake > 0 && memberId) {
+    try {
+      const after = Math.max(0, depBefore - depTake);
+      await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, memberId]);
+      try {
+        await enqueueOutboxPhysical('ms_member', memberId, 'update');
+      } catch {
+        /* abaikan */
+      }
+      const depId = uid('dep');
+      const cashierId = (getSession()?.userId ?? '').trim() || null;
+      await run(
+        `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
+         VALUES (?, ?, ?, 'withdraw', ?, ?, ?, ?, NULL)`,
+        [depId, memberId, head.branchId ?? null, depTake, after, cashierId, now],
+      );
+      try {
+        await enqueueOutboxPhysical('tr_memberdeposit', depId, 'insert');
+        enqueueSync('other', { table: 'tr_memberdeposit', rowId: depId, op: 'insert' });
+      } catch {
+        /* abaikan */
+      }
+      try {
+        enqueueSync('other', { kind: 'deposit-withdraw', memberId, nominal: depTake });
+      } catch {
+        /* abaikan */
+      }
+    } catch {
+      /* saldo gagal turun - pembayaran tetap sah, selisih terlihat di Member */
+    }
+  }
   try {
     enqueueSync('order', {
       op: 'group-payment',
       salesNum: no,
+      ...(groupClientId ? { clientId: groupClientId, client_id: groupClientId } : {}),
       payments: legs,
       method: p.method,
       paidTotal: newPaid,
@@ -772,12 +1018,12 @@ export async function moveSaleItems(args: {
     // yang ada tetap by salesNum selama transisi terima-dua-format.
     await run(
       `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
-        salesMode, tableNo, customerName, subtotal, discount, tax, serviceCharge,
+        salesMode, tableNo, customerName, queueNumber, subtotal, discount, tax, serviceCharge,
         grandTotal, status, cashierName, createdAt, updatedAt, syncDate)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'open', ?, ?, ?, NULL)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'open', ?, ?, ?, NULL)`,
       [
         destNum, uuidv7(), src.branchId, src.terminalId, src.userId, src.shiftId, now,
-        src.salesMode ?? 'DINE_IN', toTableNo, src.customerName,
+        src.salesMode ?? 'DINE_IN', toTableNo, src.customerName, queueNoOf(destNum),
         src.cashierName ?? src.userId ?? '', now, now,
       ],
     );
@@ -795,6 +1041,25 @@ export async function moveSaleItems(args: {
     ]);
   }
 
+  // Q7: baris pindahan memakai client_id HEAD TUJUAN (kunci upsert server =
+  // head, join lokal tetap by salesNum). Head lama tanpa client_id di-backfill
+  // dulu agar tak lahirkan baris anak NULL.
+  let destCid = String(
+    (
+      await queryFirst<{ client_id: string | null }>(
+        'SELECT client_id FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+        [destNum],
+      )
+    )?.client_id ?? '',
+  ).trim();
+  if (!destCid) {
+    destCid = uuidv7();
+    await run(
+      'UPDATE tr_saleshead SET client_id = ?, syncDate = NULL WHERE salesNum = ? AND client_id IS NULL',
+      [destCid, destNum],
+    );
+  }
+
   // Pindahkan baris fisik.
   const movedIds: string[] = [];
   let movedSubtotal = 0;
@@ -804,8 +1069,8 @@ export async function moveSaleItems(args: {
     const want = Math.min(n(m.qty), n(row.qty));
     if (want <= 0) continue;
     if (want >= n(row.qty)) {
-      await run('UPDATE tr_salesmenu SET salesNum = ?, syncDate = NULL WHERE id = ?', [destNum, row.id]);
-      await run('UPDATE tr_salesmenuextra SET salesNum = ?, syncDate = NULL WHERE salesMenuId = ?', [destNum, row.id]);
+      await run('UPDATE tr_salesmenu SET salesNum = ?, client_id = ?, syncDate = NULL WHERE id = ?', [destNum, destCid, row.id]);
+      await run('UPDATE tr_salesmenuextra SET salesNum = ?, client_id = ?, syncDate = NULL WHERE salesMenuId = ?', [destNum, destCid, row.id]);
       movedIds.push(row.id);
       movedSubtotal += n(row.subtotal);
     } else {
@@ -820,11 +1085,11 @@ export async function moveSaleItems(args: {
       ]);
       const destMenuId = uid('sm');
       await run(
-        `INSERT INTO tr_salesmenu (id, salesNum, menuId, menuName, qty, price,
+        `INSERT INTO tr_salesmenu (id, salesNum, client_id, menuId, menuName, qty, price,
           discount, subtotal, note, stationId, status, syncDate, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         [
-          destMenuId, destNum, row.menuId, row.menuName, want, r(n(row.price)),
+          destMenuId, destNum, destCid, row.menuId, row.menuName, want, r(n(row.price)),
           moveDisc, moveSub, row.note, row.stationId, row.status ?? 'open', now,
         ],
       );
@@ -833,10 +1098,10 @@ export async function moveSaleItems(args: {
         const moveQty = Math.min(n(ex.qty), Math.max(n(ex.qty) >= 1 ? 1 : 0, Math.round(n(ex.qty) * ratio)));
         if (moveQty > 0) {
           await run(
-            `INSERT INTO tr_salesmenuextra (id, salesMenuId, salesNum, extraId,
+            `INSERT INTO tr_salesmenuextra (id, salesMenuId, salesNum, client_id, extraId,
               extraName, qty, price, subtotal, syncDate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-            [uid('se'), destMenuId, destNum, ex.extraId, ex.extraName, moveQty, r(n(ex.price)), r(n(ex.price) * moveQty)],
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+            [uid('se'), destMenuId, destNum, destCid, ex.extraId, ex.extraName, moveQty, r(n(ex.price)), r(n(ex.price) * moveQty)],
           );
         }
         const leftQty = r(n(ex.qty) - moveQty);
@@ -877,9 +1142,12 @@ export async function moveSaleItems(args: {
   // ongkir — bill asal mempertahankannya, bill tujuan memakai ongkirnya
   // sendiri (0 untuk bill baru). Sebelumnya grand dihitung tanpa ongkir.
   const srcGrand = srcAgg.subtotal - srcAgg.discount + srcTax + srcSvc - n(src.voucherAmount) + srcFee + srcRound + n(src.ongkir);
+  // Grand tak boleh negatif: prorata pajak/service dari sumber bersubtotal
+  // nol (diskon 100%) bisa mengecilkan sisi asal di bawah nol. Clamp 0 yang
+  // jujur (selisih sen akibat pembulatan prorata tetap terlihat di rekap).
   await run(
     'UPDATE tr_saleshead SET subtotal = ?, discount = ?, tax = ?, serviceCharge = ?, platformFee = ?, rounding = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?',
-    [srcAgg.subtotal, srcAgg.discount, srcTax, srcSvc, srcFee, srcRound, r(srcGrand), now, fromSalesNum],
+    [srcAgg.subtotal, srcAgg.discount, srcTax, srcSvc, srcFee, srcRound, Math.max(0, r(srcGrand)), now, fromSalesNum],
   );
   const destAgg = await headTotals(destNum);
   const destGrand = destAgg.subtotal - destAgg.discount + dTax + dSvc + dFee + dRound + n(dest?.ongkir ?? 0);
@@ -898,15 +1166,22 @@ export async function moveSaleItems(args: {
     /* abaikan */
   }
   try {
+    // M11: payload move-items membawa client_id head TUJUAN (kunci upsert
+    // server untuk baris pindahan) — tanpa ini pushLightItem mengisi id
+    // antrean sebagai clientId dan server tak bisa mengkorelasikan move
+    // dengan sale-nya. Baris DB pindahan sendiri sudah memakai destCid
+    // (UPDATE/INSERT client_id di atas).
     enqueueSync('other', {
       op: 'move-items', fromSalesNum, toSalesNum: destNum, toTableNo,
-      itemIds: movedIds, at: now,
+      itemIds: movedIds, clientId: destCid, client_id: destCid, at: now,
     });
   } catch {
     /* abaikan */
   }
   try {
-    await apiFetch(ApiPath.moveItems, { body: { fromSalesNum, toTableNo, itemIds: movedIds } });
+    // M11 touchup: live apiFetch membawa kunci dest yang sama dengan payload
+    // antre (toSalesNum + client_id) agar server bisa korelasikan tanpa push.
+    await apiFetch(ApiPath.moveItems, { body: { fromSalesNum, toSalesNum: destNum, toTableNo, itemIds: movedIds, client_id: destCid } });
   } catch {
     /* offline - terkirim via push berikutnya */
   }

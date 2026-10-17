@@ -9,7 +9,7 @@
  * memakai lib/storage.ts agar work di web + native.
  */
 import { ApiPath, apiPost, getServerEnv, getTerminal } from '../config/server';
-import { all, markDirty, queryFirst, run } from './db';
+import { all, markClean, markDirty, queryFirst, run } from './db';
 import { tr } from './i18n';
 import { getItem, setItem } from './storage';
 import { uuidv7 } from './uuidv7';
@@ -55,22 +55,77 @@ function mergeStored(items: SyncItem[]): void {
   }
 }
 
-function restore(): void {
-  void getItem(LS_OUTBOX).then((raw) => {
-    if (!raw) return;
+/** M13: janji restore boot. pushAll menunggu ini sebelum drain (re-drive)
+ * agar item tersimpan tak terlewat balapan-hydrasi. */
+let restorePromise: Promise<void> | null = null;
+
+/**
+ * Bersihkan SELURUH baris satu sale (head + kaki) saat payload ringannya
+ * terbukti sampai ke server (2xx) atau server mengaku sudah punya (409).
+ * Tanpa ini hanya tr_saleshead yang bersih (markClean di bawah) sedangkan
+ * menu/extra/payment/voucherusage/info/platformfee/kitchen tetap
+ * syncDate NULL selamanya → badge dirty SyncScreen tumbuh tanpa batas
+ * (+8..15/sale) walau server sudah lengkap. Payload ringan memang membawa
+ * semua data itu (buildSalePayload: items, payments, voucherCode,
+ * approvedBy, ongkirCut, platformFee), jadi aman dibersihkan sekaligus.
+ * Baris yang berubah SESUDAH push (advance dapur, void, leg grup baru)
+ * mengotori dirinya sendiri lagi via syncDate=NULL + enqueue jalurnya
+ * masing-masing, jadi tak ikut tersapu.
+ */
+const SALE_CLEAN_TABLES = [
+  'tr_saleshead',
+  'tr_salesmenu',
+  'tr_salesmenuextra',
+  'tr_salespayment',
+  'tr_salesvoucherusage',
+  'tr_salesinfo',
+  'tr_platformfee',
+  'tr_kitchenticket',
+] as const;
+
+async function markCleanSale(salesNum: string): Promise<void> {
+  const no = String(salesNum ?? '').trim();
+  if (!no) return;
+  const stamp = new Date().toISOString();
+  for (const t of SALE_CLEAN_TABLES) {
     try {
-      mergeStored(JSON.parse(raw) as SyncItem[]);
+      // Nama tabel dari daftar statis (bukan input user) — aman.
+      await run(`UPDATE "${t}" SET syncDate = ? WHERE salesNum = ? AND syncDate IS NULL`, [stamp, no]);
     } catch {
-      /* abaikan - pakai memori */
+      /* tabel/kolom belum ada di instalasi lama — abaikan */
     }
-  });
-  void getItem(LS_LAST).then((v) => {
-    if (v && !lastSync) lastSync = v;
-  });
-  void getItem(LS_LAST_MS).then((v) => {
-    const n = Number(v);
-    if (v && !lastSyncMs && Number.isFinite(n)) lastSyncMs = n;
-  });
+  }
+}
+
+function restore(): void {
+  if (restorePromise) return;
+  restorePromise = (async () => {
+    try {
+      const raw = await getItem(LS_OUTBOX);
+      if (raw) {
+        try {
+          mergeStored(JSON.parse(raw) as SyncItem[]);
+        } catch {
+          /* abaikan - pakai memori */
+        }
+      }
+    } catch {
+      /* storage gagal - pakai memori */
+    }
+    try {
+      const v = await getItem(LS_LAST);
+      if (v && !lastSync) lastSync = v;
+    } catch {
+      /* abaikan */
+    }
+    try {
+      const v = await getItem(LS_LAST_MS);
+      const n = Number(v);
+      if (v && !lastSyncMs && Number.isFinite(n)) lastSyncMs = n;
+    } catch {
+      /* abaikan */
+    }
+  })();
 }
 
 function hydrate(): void {
@@ -297,9 +352,37 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
       { ...body, table, rowId: row.orderID, op: row.op, clientId: row.id, ...identityFields(row.id) },
       { idempotencyKey: row.id },
     );
+    if (res.status === 409) {
+      // BE menegakkan UNIQUE(client_id): 409 = server SUDAH punya baris ini
+      // (timeout sesudah commit / kirim-ganda / enqueue ganda). Anggap
+      // terkirim (duplicate-acked) agar tak antre-selamanya + watermark jalan.
+      try {
+        await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await markClean(table, String(row.orderID ?? ''));
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await setWatermark(table, { push: new Date().toISOString() });
+      } catch {
+        /* abaikan */
+      }
+      return 'sent';
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     try {
       await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    // Baris sumber ikut bersih (syncDate) agar badge dirty tak menumpuk
+    // selamanya; tanpa ini antrean terkuras tapi semua baris tetap "kotor".
+    try {
+      await markClean(table, String(row.orderID ?? ''));
     } catch {
       /* abaikan */
     }
@@ -346,6 +429,21 @@ export async function pushAll(): Promise<PushResult> {
   hydrate();
   if (getServerEnv() !== 'custom') {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
+  }
+  // M13 re-drive kepala-kotor: tunggu restore boot selesai sebelum drain.
+  // Tanpa ini pushAll pertama setelah boot bisa menguras SEBELUM item
+  // tersimpan masuk memori (balapan-hydrasi) → badge antrean bohong.
+  // Jendela rugi SISA (terdokumentasi, bukan ditutup): crash tepat di antara
+  // enqueueSync (memori) dan tulis AsyncStorage persist() = item ringan itu
+  // hilang; baris fisik + flag kotor DB (syncDate NULL) tetap selamat karena
+  // ditulis sinkron via SQLite. persist() tetap fire-and-forget karena
+  // pemanggilnya sinkron (initializer useState layar).
+  if (restorePromise) {
+    try {
+      await restorePromise;
+    } catch {
+      /* restore best-effort - drain memori tetap jalan */
+    }
   }
   let sent = 0;
   let failed = 0;
@@ -409,6 +507,18 @@ export async function pushAll(): Promise<PushResult> {
         touchSuccess();
       } else if (outcome === 'failed') {
         failed += 1;
+      } else if (String(e.row.tableName ?? '').startsWith('ms_')) {
+        // Cermin master (server-wins §5/M9-3, tanpa endpoint push): hapus dari
+        // antrean fisik agar tak menumpuk selamanya, menggelembungkan badge
+        // Sync, dan menutupi baris tr_* di balik jendela LIMIT 200 (starvasi
+        // drain permanen — baris skip tak pernah keluar jendela). Mutasi DB-nya
+        // tetap kotor (syncDate NULL) + pull server tetap menang via REPLACE.
+        // Tabel non-ms_ tanpa endpoint dibiarkan antre (kontrak BE menyusul).
+        try {
+          await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [e.row.id]);
+        } catch {
+          /* abaikan */
+        }
       }
       continue;
     }
@@ -457,14 +567,64 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
     return 'skipped';
   }
   try {
+    // C1: client_id sale JANGAN PERNAH ditimpa id antrean. buildSalePayload
+    // (payments.ts) membawa kunci upsert server (clientId/client_id UUIDv7
+    // rantai Pay→Qris/Edc); menimpanya dengan id outbox memutus rekonsiliasi
+    // + membuat retry melahirkan sale ganda di server. Hanya isi bila payload
+    // belum punya; id antrean dibawa terpisah sebagai outboxId (idempotency
+    // key header tetap = item.id, tak berubah).
+    const rawPayload = (item.payload ?? {}) as Record<string, unknown>;
+    const saleCid = String(rawPayload.client_id ?? rawPayload.clientId ?? '').trim();
+    const sender = identityFields(saleCid || item.id);
+    const body: Record<string, unknown> = saleCid
+      // Touchup: normalisasi kunci campuran — BOTH clientId + client_id = saleCid
+      // (uuid = saleCid tetap) agar server/campur-casing baca kunci yang sama.
+      ? { ...rawPayload, ...sender, clientId: saleCid, client_id: saleCid, uuid: saleCid, outboxId: item.id }
+      : { ...rawPayload, clientId: item.id, ...sender, outboxId: item.id };
     const res = await apiPost(
       path,
-      { ...item.payload, clientId: item.id, ...identityFields(item.id) },
+      body,
       { idempotencyKey: item.id },
     );
+    if (res.status === 409) {
+      // 409 = server SUDAH punya item ini (UNIQUE client_id). Anggap terkirim
+      // (duplicate-acked, terlihat di note) agar tak antre-selamanya.
+      item.status = 'terkirim';
+      item.note = tr('sync.duplicateAcked');
+      try {
+        // Server punya datanya → kaki sale ikut bersih (paritas 2xx).
+        const p = (item.payload ?? {}) as { op?: unknown; salesNum?: unknown };
+        const sNo = String(p.salesNum ?? '').trim();
+        if (sNo && (item.kind === 'order' || String(p.op ?? '') === 'group-payment')) {
+          await markCleanSale(sNo);
+        }
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+      } catch {
+        /* abaikan */
+      }
+      return 'sent';
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Sukses 2xx = tandai terkirim agar tak dikirim ulang tiap pushAll
+    // (sebelumnya hanya 409 yang menandai → kirim-ganda ke server).
     item.status = 'terkirim';
     item.note = '';
+    // Head sale ikut bersih bila payload-nya audited order/group-payment;
+    // kaki fisik (bila ada) dibersihkan jalurnya sendiri per baris.
+    try {
+      const p = (item.payload ?? {}) as { op?: unknown; salesNum?: unknown };
+      const sNo = String(p.salesNum ?? '').trim();
+      if (sNo && (item.kind === 'order' || String(p.op ?? '') === 'group-payment')) {
+        // Seluruh kaki sale (bukan cuma head) — lihat markCleanSale.
+        await markCleanSale(sNo);
+      }
+    } catch {
+      /* abaikan */
+    }
     try {
       await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
     } catch {

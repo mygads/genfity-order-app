@@ -1,0 +1,20 @@
+{
+  "request": { "branchId": "B001" },
+  "response": {
+    "name": "OK",
+    "message": "Berhasil",
+    "code": 0,
+    "status": 200,
+    "success": true,
+    "data": {
+      "branchId": "B001",
+      "terminals": [
+        { "terminalId": "T01", "terminalCode": "K01", "name": "Kasir 1", "tag": "kasir", "pinSet": true, "pairedKasirId": null, "pairedViewId": "T03", "verified": true },
+        { "terminalId": "T02", "terminalCode": "D01", "name": "Dapur 1", "tag": "dapur", "pinSet": true, "pairedKasirId": null, "pairedViewId": null, "verified": true },
+        { "terminalId": "T03", "terminalCode": "C01", "name": "Display Pelanggan 1", "tag": "view_pelanggan", "pinSet": true, "pairedKasirId": "T01", "pairedViewId": null, "verified": true },
+        { "terminalId": "T04", "terminalCode": "Q01", "name": "Layar Antrean", "tag": "view_queue", "pinSet": false, "pairedKasirId": null, "pairedViewId": null, "verified": false },
+        { "terminalId": "T05", "terminalCode": "F01", "name": "Kasir + Dapur", "tag": "full_access", "pinSet": true, "pairedKasirId": null, "pairedViewId": null, "verified": true }
+      ]
+    }
+  }
+}

@@ -8,9 +8,12 @@ async function applyVoidLocal(
   orderId: string,
   lines: { id: string; qty: number }[],
   reason: string,
+  approvedBy?: string,
 ): Promise<void> {
   const now = new Date().toISOString();
-  const userId = getSession()?.userId || getSession()?.username || '';
+  // Jejak audit: utamakan penyetuju eskalasi bila diketahui, bukan sesi kasir.
+  const approver = String(approvedBy ?? '').trim();
+  const userId = approver || getSession()?.userId || getSession()?.username || '';
   await initDb();
   // Head asal (grand/voucher/member/cabang): void sebagian = grand dikurangi
   // nilai item yang dibatalkan (diskon/fee/pajak TETAP seperti semula — tanpa
@@ -44,8 +47,8 @@ async function applyVoidLocal(
   for (const ln of lines) {
     const want = Math.max(0, Math.round(Number(ln.qty) || 0));
     if (!ln.id || want <= 0) continue;
-    const rows = await query<{ id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null }>(
-      'SELECT id, menuId, menuName, qty, price FROM tr_salesmenu WHERE salesNum = ? AND (menuId = ? OR id = ?) ORDER BY rowid',
+    const rows = await query<{ id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; subtotal: number | null; discount: number | null }>(
+      'SELECT id, menuId, menuName, qty, price, subtotal, discount FROM tr_salesmenu WHERE salesNum = ? AND (menuId = ? OR id = ?) ORDER BY rowid',
       [orderId, ln.id, ln.id],
     );
     let left = want;
@@ -57,17 +60,35 @@ async function applyVoidLocal(
       menuName = menuName ?? r.menuName;
       const cut = Math.min(have, left);
       const price = Math.max(0, Math.round(Number(r.price) || 0));
-      await run('UPDATE tr_salesmenu SET qty = ?, subtotal = ?, syncDate = NULL WHERE id = ?', [
+      // Prorata subtotal/diskon baris (bukan price×sisa): subtotal tersimpan
+      // memuat modifier + diskon per-baris; tulis-ulang price×qty menghapus
+      // keduanya dari sisa bill.
+      const ratio = (have - cut) / have;
+      const oldSub = Math.max(0, Math.round(Number(r.subtotal ?? price * have) || 0));
+      const oldDisc = Math.max(0, Math.round(Number(r.discount) || 0));
+      const newSub = Math.round(oldSub * ratio);
+      const newDisc = Math.round(oldDisc * ratio);
+      await run('UPDATE tr_salesmenu SET qty = ?, discount = ?, subtotal = ?, syncDate = NULL WHERE id = ?', [
         have - cut,
-        price * (have - cut),
+        newDisc,
+        newSub,
         r.id,
       ]);
+      // Addon/extras ikut mengecil sebaris induk (qty + subtotal), bukan utuh.
+      try {
+        await run(
+          'UPDATE tr_salesmenuextra SET qty = ?, subtotal = ROUND(price * ?), syncDate = NULL WHERE salesMenuId = ?',
+          [have - cut, have - cut, r.id],
+        );
+      } catch {
+        /* abaikan */
+      }
       try {
         await enqueueOutbox('tr_salesmenu', r.id, 'update');
       } catch {
         /* abaikan */
       }
-      voidedGross += price * cut;
+      voidedGross += oldSub - newSub;
       // Stok kembali per qty yang dibatalkan (parsial maupun penuh seragam) —
       // hanya bila bill pernah bayar (saveSale memotong stok; bill open tanpa
       // kaki bayar tak memotong). Buka flag habis bila pulih. Best-effort.
@@ -110,12 +131,18 @@ async function applyVoidLocal(
     }
   }
   // Hitung ulang head: sisa qty > 0 = open + grand baru; nol = void penuh.
-  const rest = await query<{ qty: number | null; price: number | null }>(
-    'SELECT qty, price FROM tr_salesmenu WHERE salesNum = ?',
+  // restGross dari subtotal TERSIMPAN (memuat modifier), bukan price×qty.
+  const rest = await query<{ qty: number | null; subtotal: number | null; price: number | null }>(
+    'SELECT qty, subtotal, price FROM tr_salesmenu WHERE salesNum = ?',
     [orderId],
   );
   let restGross = 0;
-  for (const r of rest) restGross += Math.max(0, Math.round(Number(r.qty) || 0)) * Math.max(0, Math.round(Number(r.price) || 0));
+  for (const r of rest) {
+    const q = Math.max(0, Math.round(Number(r.qty) || 0));
+    restGross += r.subtotal != null
+      ? Math.max(0, Math.round(Number(r.subtotal) || 0))
+      : q * Math.max(0, Math.round(Number(r.price) || 0));
+  }
   const oldGrand = Math.max(0, Math.round(Number(head?.grandTotal) || 0));
   const newGrand = Math.max(0, oldGrand - voidedGross);
   const fullVoid = restGross <= 0 || newGrand <= 0;
@@ -230,6 +257,9 @@ async function applyVoidLocal(
   // Lebih bayar (sudah dibayar > grand baru, mis. void setelah lunas) = baris
   // Refund negatif agar SUM payment = grand baru; head paidAmount ikut neto.
   // Void parsial atas deposit: deposit yang sudah tender tak diutak-atik.
+  // Status lunas-dipertahankan: bill yang tetap genap (paid >= grand baru,
+  // mis. void parsial setelah lunas penuh) kembali 'paid' agar tak keluar
+  // dari rekap kas yang memfilter status lunas; yang kurang bayar tetap 'open'.
   try {
     const prow = await queryFirst<{ s: number | null }>(
       'SELECT COALESCE(SUM(amount), 0) AS s FROM tr_salespayment WHERE salesNum = ?',
@@ -248,6 +278,9 @@ async function applyVoidLocal(
       );
       await run('UPDATE tr_saleshead SET paidAmount = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', [target, now, orderId]);
     }
+    if (!fullVoid && paidTotal >= target) {
+      await run('UPDATE tr_saleshead SET status = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['paid', now, orderId]);
+    }
   } catch {
     /* abaikan */
   }
@@ -257,12 +290,12 @@ async function applyVoidLocal(
     /* abaikan */
   }
 }
-async function persistVoid( orderId: string, voidLines: { id: string; qty: number }[], reason: string,): Promise<void> {
+async function persistVoid( orderId: string, voidLines: { id: string; qty: number }[], reason: string, approvedBy?: string,): Promise<void> {
   try {
-    await applyVoidLocal(orderId, voidLines, reason);
+    await applyVoidLocal(orderId, voidLines, reason, approvedBy);
   } catch {
     /* tulis lokal gagal - outbox di bawah tetap jalan */
-  } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
+  } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason, ...(approvedBy ? { approvedBy } : {}) }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason, ...(approvedBy ? { approvedBy } : {}) } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const orderId = (route?.params?.orderId ?? '').trim();
@@ -301,7 +334,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         return res; }).then((res) => { if (!res.ok) {
         // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
         setAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setConfirming(false); return;
-   } const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason).finally(() => { setConfirming(false); setDone(true);
+   } const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason, (res as { userId?: string }).userId).finally(() => { setConfirming(false); setDone(true);
  }); }); };
 
   /** Empty-state: DB nol-baris / tanpa orderId — tanpa ITEMS/SPLITS/TRX-047 mock.

@@ -19,8 +19,8 @@ import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { dbNowLocal } from '../../lib/datefmt';
-import { getSession } from '../../session';
-import { requireAccess } from '../../lib/access';
+import { getBinding, getSession } from '../../session';
+import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
@@ -101,8 +101,8 @@ const PRODUCTS: Product[] = [
 
 const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
 
-/** Cabang aktif: terminal yang diklaim, default B001 (selaras dummy pull + Stock). */
-const CASHIER_BRANCH_FALLBACK = 'B001';
+/** M9: cabang aktif = terminal yang diklaim; '' = unbound (fail-closed — tanpa
+ * fallback diam-diam 'B001'; query di bawah + banner unbound menanganinya). */
 
 /** Petakan categoryId master (C01.. / nama grup lokal) ke chip kategori kasir.
  * TODO: bangun chip kategori dinamis dari ms_category bila backend menambah grup baru. */
@@ -223,11 +223,60 @@ export default function CashierScreen({ navigation, route }: Props) {
    * Local Mode (tanpa server untuk sync): banner TIDAK tampil - tak ada
    * server yang bisa di-sync, dan kasir harus tetap bisa dipakai. */
   const syncBlocked = syncWarnLevel() === 'block7' && getApiMode() !== 'local';
+  /** Gerbang grant terminal E00045 (Q6): grant ADA tapi tak valid
+   * (kedaluwarsa/mismatch) = layar blokir + tombol Masuk Ulang. TANPA grant
+   * sama sekali ('no-grant', pra-grant) = lolos (kompatibilitas + instalasi
+   * fresh), gate login yang menerbitkan grant saat online. Tak pernah
+   * memblokir karena gate gagal dibaca (fail-open, login yang memutuskan). */
+  const [grantDenied, setGrantDenied] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // restore() session/binding async fire-and-forget: cold start bisa baca
+    // null di mount pertama lalu early-return selamanya (deps []). Coba ulang
+    // s.d. 3x agar blokir E00045 tetap muncul walau restore belum selesai.
+    const check = async (left: number) => {
+      try {
+        const uid = (getSession()?.userId ?? '').trim();
+        const tid = (getBinding()?.terminalId ?? '').trim();
+        if ((!uid || !tid) && left > 0) {
+          timer = setTimeout(() => {
+            if (alive) void check(left - 1);
+          }, 1500);
+          return;
+        }
+        if (!uid || !tid) return;
+        const r = await requireTerminalAccess(uid, tid);
+        if (alive) setGrantDenied(!r.ok && r.reason !== 'no-grant');
+      } catch {
+        /* gate tak terbaca - fail-open, login gate yang memutuskan */
+      }
+    };
+    void check(3);
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
   const renderSyncBlock = () =>
     syncBlocked ? (
       <TouchableOpacity style={styles.modeNote} onPress={() => navigation?.navigate('Sync')}>
         <Text style={styles.modeNoteT}>{t('sync.blocked')} - {t('sync.openSync')} ›</Text>
       </TouchableOpacity>
+    ) : null;
+  /** M9: '' = unbound — banner jujur di bawah header (tanpa fallback B001). */
+  const branchUnbound = (() => {
+    try {
+      return !(getTerminal().branchId ?? '').trim();
+    } catch {
+      return true;
+    }
+  })();
+  const renderUnboundNotice = () =>
+    branchUnbound ? (
+      <View style={styles.modeNote}>
+        <Text style={styles.modeNoteT}>{t('terminal_unbound_hint')}</Text>
+      </View>
     ) : null;
   useEffect(() => {
     let alive = true;
@@ -271,7 +320,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     (async () => {
       try {
         await initDb();
-        const branchId = getTerminal().branchId || CASHIER_BRANCH_FALLBACK;
+        // M9: '' = unbound (tanpa fallback B001) — peta sold-out kosong, jujur.
+        const branchId = (getTerminal().branchId ?? '').trim();
         let rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
           'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
         );
@@ -313,11 +363,14 @@ export default function CashierScreen({ navigation, route }: Props) {
             for (const it of itemsB) {
               const menuId = String(it.menuId ?? '').trim();
               if (!menuId) continue;
+              // M9: tanpa konteks cabang (unbound) jangan seed baris cabang fiktif.
+              const seedBranch = String(it.branchId ?? branchId).trim();
+              if (!seedBranch) continue;
               const qty = Number(it.qty);
               await run(
                 'INSERT OR REPLACE INTO ms_branchmenu (branchId, menuId, stationId, qty, flagSoldOut, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 [
-                  String(it.branchId ?? branchId),
+                  seedBranch,
                   menuId,
                   it.stationId === undefined || it.stationId === null ? null : String(it.stationId),
                   Number.isFinite(qty) ? Math.round(qty) : 0,
@@ -415,7 +468,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     (async () => {
       try {
         await initDb();
-        const branchId = getTerminal().branchId || CASHIER_BRANCH_FALLBACK;
+        // M9: '' = unbound (tanpa fallback B001) — status shift tak terisi.
+        const branchId = (getTerminal().branchId ?? '').trim();
         const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
           'SELECT clockOut, status FROM tr_shiftlog WHERE branchId = ? AND (status IS NULL OR status <> \'absen\') ORDER BY clockIn DESC LIMIT 1',
           [branchId],
@@ -650,11 +704,11 @@ export default function CashierScreen({ navigation, route }: Props) {
         applyVoid(id, wantVoid);
         return;
       }
-      setVoidAuthMsg(`Akses ditolak / Access denied — perlu PIN supervisor (${gate.reason})`);
+      setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
     } catch {
       // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
       // terapkan void tanpa otorisasi.
-      setVoidAuthMsg('Izin tak dapat diperiksa / Access check failed — void ditolak');
+      setVoidAuthMsg(t('void_check_fail'));
       return;
     }
     setVoidPin('');
@@ -681,7 +735,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       return res;
     }).then((res) => {
       if (!res.ok) {
-        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} remaining)`);
+        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`);
         setVoidConfirming(false);
         return;
       }
@@ -813,7 +867,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.dialogOverlay}>
         <View style={styles.dialogCard}>
           <Text style={styles.dialogTitle}>Supervisor PIN</Text>
-          <Text style={styles.dialogSub}>Perlu persetujuan supervisor / Supervisor approval required</Text>
+          <Text style={styles.dialogSub}>{t('void_dialog_sub')}</Text>
           <AppInput
             boxStyle={styles.dialogInput}
             style={styles.fieldText}
@@ -822,14 +876,14 @@ export default function CashierScreen({ navigation, route }: Props) {
             keyboardType="numeric"
             maxLength={6}
             secureTextEntry
-            placeholder="6-digit PIN"
+            placeholder={t('xp_pin_ph')}
           />
           {voidAuthMsg ? <Text style={[styles.dialogSub, { color: colors.red }]}>{voidAuthMsg}</Text> : null}
           <View style={styles.dialogRow}>
             <AppButton
               size="sm"
               variant="secondary"
-              title="Batal / Cancel"
+              title={t('c_cancel')}
               onPress={() => { setVoidTarget(null); setVoidPin(''); setVoidAuthMsg(''); }}
               disabled={voidConfirming}
               fullWidth={false}
@@ -838,7 +892,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             />
             <AppButton
               size="sm"
-              title={voidConfirming ? '...' : 'Setujui / Approve'}
+              title={voidConfirming ? '...' : t('xp_approve')}
               onPress={confirmVoidPin}
               disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
               fullWidth={false}
@@ -1020,7 +1074,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           <AppInput
             boxStyle={styles.customerBox}
             style={styles.customerInput}
-            placeholder="Info tambahan / nama customer"
+            placeholder={t('cust_name_ph')}
             value={customer}
             onChangeText={setCustomer}
           />
@@ -1228,7 +1282,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                 onPress={() => (editingId === inCart.id ? setEditingId(null) : openEditor(inCart))}
                 style={styles.rowEditBtn}>
                 <Text style={styles.rowEditT}>
-                  {editingId === inCart.id ? 'Tutup editor ▴' : `✎ ${t('editNoteDisc')} ▾`}
+                  {editingId === inCart.id ? t('cartEditEditor') : `✎ ${t('editNoteDisc')} ▾`}
                 </Text>
               </TouchableOpacity>
             )}
@@ -1312,7 +1366,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   <TouchableOpacity
                     onPress={() => (editingId === item.id ? setEditingId(null) : openEditor(item))}>
                     <Text style={styles.cartEditLink}>
-                      {editingId === item.id ? 'Tutup ▴' : `✎ ${t('editNoteDisc')}`}
+                      {editingId === item.id ? t('cartEditClose') : `✎ ${t('editNoteDisc')}`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1435,6 +1489,29 @@ export default function CashierScreen({ navigation, route }: Props) {
     </View>
   );
 
+  /** Jaring pengaman grant terminal E00045: cermin shiftBlocked — grant
+   *  kedaluwarsa/tak cocok → layar blokir + Masuk Ulang (re-auth online),
+   *  bukan grid kasir. Tanpa grant (pra-grant) lolos ke shiftBlocked biasa. */
+  if (grantDenied) {
+    return (
+      <View style={styles.root}>
+        {renderHeader()}
+        <DrawerMenu
+          visible={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          navigate={(r) => navigation?.navigate(r)}
+          outlet={outletName}
+          user={shiftLabel}
+        />
+        <View style={styles.blockedWrap}>
+          <Text style={styles.blockedTitle}>{t('grant_blocked')}</Text>
+          <Text style={styles.blockedSub}>{`${t('grant_code_block')}: ${t('grant_blocked_msg')}`}</Text>
+          <AppButton title={t('grant_open_login')} onPress={() => navigation?.navigate('Login')} />
+        </View>
+      </View>
+    );
+  }
+
   /** Jaring pengaman lintas-entry: lolos gerbang (mis. denah Tables) dengan shift tutup
    *  → tampilkan layar blokir + tombol Buka Shift, bukan grid kasir. Instalasi fresh
    *  (tanpa riwayat) dan DB belum siap tetap bebas agar demo/screenshot jalan. */
@@ -1464,6 +1541,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.root}>
         {renderHeader()}
         {renderSyncBlock()}
+        {renderUnboundNotice()}
         <DrawerMenu
           visible={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1523,6 +1601,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     <View style={styles.root}>
       {renderHeader()}
       {renderSyncBlock()}
+      {renderUnboundNotice()}
       <DrawerMenu
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}

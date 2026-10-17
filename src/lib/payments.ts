@@ -80,6 +80,10 @@ export interface SaleInput {
   ongkirCut?: number;
   /** Nama pelanggan (delivery / pencatatan kasir). */
   customer?: string;
+  /** Nomor antrean display (QS-014 gaya): bila kosong saveSale menurunkan
+   * dari suffix NNNN salesNum agar CustomerDisplay/QueueView tak selalu
+   * fallback ke salesNum penuh. */
+  queueNumber?: string;
 }
 
 const METHOD_MAP: Record<string, string> = {
@@ -157,8 +161,9 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.salesNum ? { salesNum: s.salesNum } : {}),
     // Kunci stabil QR + rekonsiliasi (Q7). Bentuk camelCase menyamai
     // clientId outbox fisik (sync.ts drainPhysicalQueue) — satu kunci di
-    // semua payload; BE terima-dua-format selama transisi.
-    ...(s.clientId ? { clientId: s.clientId } : {}),
+    // semua payload; BE terima-dua-format selama transisi. Bentuk snake_case
+    // client_id dikirim juga (APP-PRINTER-SALES): server upsert by client_id.
+    ...(s.clientId ? { clientId: s.clientId, client_id: s.clientId } : {}),
     total: r(s.grandTotal),
     subtotal: r(subtotal),
     discountTotal: r(s.discountTotal ?? 0),

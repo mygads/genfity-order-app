@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
   const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false);
   // Identitas live: cabang + terminal dari klaim terminal, printer dari
   // ms_station aktif; '-' jujur bila belum ada (tanpa contoh Poris/TRM-001).
-  let branchId = 'B001';
+  // M9: '' = unbound (tanpa fallback B001); label unbound di bawah.
+  let branchId = '';
   let branchName = '';
   let terminalCode = '';
   let serverEnv = '';
@@ -17,7 +18,7 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
     if ((term.branchId ?? '').trim()) branchId = term.branchId.trim();
   } catch { /* default */ }
   try { serverEnv = getServerEnv(); } catch { /* label i18n */ }
-  const branchLabel = branchName ? `${branchName} - ${branchId}` : branchId;
+  const branchLabel = branchName ? `${branchName} - ${branchId}` : (branchId || t('terminal_unbound_title'));
   const [printerLabel, setPrinterLabel] = useState('-');
   useEffect(() => {
     let on = true;

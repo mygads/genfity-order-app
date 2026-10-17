@@ -6,3 +6,5 @@ Development-level warnings: ON.
 Performance optimizations: OFF. @ http://localhost:8907/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
 [  117503ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8907/:0
 [  121018ms] [WARNING] Expo CLI and the web client are out of sync. Reload to reconnect. @ http://localhost:8907/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:2104
+[10581834ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:8907/:0
+[10586096ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:8907/:0

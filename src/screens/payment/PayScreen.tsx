@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -16,7 +17,9 @@ import { useLang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment } from '../../lib/sales';
+import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId } from '../../lib/sales';
+import { uuidv7 } from '../../lib/uuidv7';
+import { publishDisplayOrder } from '../../lib/display';
 import { validateVoucherCode } from '../../lib/apiSource';
 import { syncWarnLevel } from '../../lib/sync';
 import { initDb, query as queryDb } from '../../lib/db';
@@ -95,6 +98,9 @@ type Props = {
       feeESB?: number;
       /** Nomor struk bawaan (dari Simpan/LoadOrder via kasir) - pakai ulang bila ada. */
       salesNum?: string;
+      /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): diterbitkan
+       * sekali per sale, dipakai ulang Qris/Edc/Success/Receipt agar QR tak basi. */
+      clientId?: string;
       /** Split grup (dari SplitBill): kunjungan bayar memakai SATU salesNum. */
       splitGroup?: boolean;
       /** Total PENUH order grup (tagihan kunjungan ini tetap di `total`). */
@@ -236,6 +242,10 @@ export default function PayScreen({ navigation, route }: Props) {
         : `${t('ok_voucher')} ${orderVoucher.code}`;
 
   const [splits, setSplits] = useState<Split[]>([]);
+  // Pemilik deposit untuk TERUSAN Pay→Qris/Edc (cermin saleMemberId goSuccess):
+  // Pay bisa dibuka tanpa memberId params sementara kaki deposit parsial sudah
+  // membawa memberId; tanpa fallback ini withdraw di daun dilewati (G1).
+  const fwdMemberId = memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
   /** Guard ketuk-ganda goSuccess (dideklarasi di sini agar di atas goSuccess). */
   const goRef = useRef(false);
 
@@ -391,6 +401,17 @@ export default function PayScreen({ navigation, route }: Props) {
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
 
   /**
+   * APP-PRINTER-SALES (Q7): SATU client_id per sale untuk SELURUH rantai.
+   * Diselesaikan sekali di Pay (params → head → terbitkan baru) lalu
+   * diteruskan WAJIB ke Qris/Edc/Success — Qris/Edc memakai ulang, tak
+   * menerbitkan sendiri, agar QR tak basi dan upsert server satu kunci.
+   */
+  const resolveChainClientId = async (): Promise<string> =>
+    (route?.params?.clientId ?? '').trim() ||
+    (paramSalesNum ? (await getSaleClientId(paramSalesNum)) ?? '' : '') ||
+    uuidv7();
+
+  /**
    * Selesaikan pembayaran dengan SATU nomor struk: nomor TRX diterbitkan dulu,
    * dipakai saveSale + push + Success + Receipt (sebelumnya Success/Receipt
    * memakai L-timestamp yang beda dari yang tersimpan di DB).
@@ -401,7 +422,27 @@ export default function PayScreen({ navigation, route }: Props) {
     if (goRef.current) return;
     goRef.current = true;
     try {
-    const orderNo = paramSalesNum || (await nextSalesNum());
+    // nextSalesNum melempar 'terminal-unbound' saat device belum klaim (cermin
+    // QrisScreen/EdcScreen M10): tangkap di sini agar tap Bayar tunai selalu
+    // memberi umpan balik (sebelumnya unhandled rejection = tombol tampak mati).
+    let orderNo: string;
+    let saleClientId: string;
+    try {
+      orderNo = paramSalesNum || (await nextSalesNum());
+      // APP-PRINTER-SALES (Q7): SATU client_id per sale — diselesaikan sekali
+      // di Pay via resolveChainClientId; saveSale memakai apa adanya agar QR tak basi.
+      saleClientId = await resolveChainClientId();
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+      } else {
+        Alert.alert(t('pay_issue_fail'));
+      }
+      return;
+    }
     // memberId kaki deposit parsial ikut menentukan pemilik (tanpa ini gate
     // withdraw saveSale tak jalan bila Pay dibuka tanpa memberId params).
     const saleMemberId = detail?.memberId ?? memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
@@ -418,11 +459,12 @@ export default function PayScreen({ navigation, route }: Props) {
       ];
       try {
         if (await saleHeadExists(paramSalesNum)) {
-          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change });
+          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change, clientId: saleClientId, ...(saleMemberId ? { memberId: saleMemberId } : {}) });
         } else {
           const gInput: SaleInput = {
             method,
             salesNum: paramSalesNum,
+            clientId: saleClientId,
             grandTotal: orderTotalFull,
             discountTotal: effDiscount,
             ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
@@ -445,11 +487,38 @@ export default function PayScreen({ navigation, route }: Props) {
           recordSale(gInput);
           await saveSale(gInput);
         }
-      } catch {
+      } catch (e) {
+        // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
+        // TANPA Success palsu. DB gagal lain = kasir tetap jalan via antrean.
+        if ((e as { code?: string })?.code === 'terminal-unbound') {
+          // Unbound = belum klaim: beri jalan keluar ke Klaim Terminal
+          // (bukan pesan buntu), TANPA Success palsu.
+          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+            { text: t('c_cancel'), style: 'cancel' },
+            { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+          ]);
+          return;
+        }
         /* DB gagal - kasir tetap jalan, push via antrean */
+      }
+      // APP-PRINTER-SALES: kunjungan grup ikut menyiarkan display (jalur
+      // appendGroupPayment tak lewat saveSale sehingga tak auto-publish).
+      try {
+        publishDisplayOrder(
+          paramSalesNum,
+          (route?.params?.items ?? []).map((it) => ({
+            name: String(it.name ?? ''),
+            qty: Math.max(1, Math.round(Number(it.qty) || 0)),
+            price: Math.round(Number(it.basePrice) || 0),
+          })),
+          orderTotalFull,
+        );
+      } catch {
+        /* abaikan */
       }
       navigation?.navigate('Success', {
         total: orderTotalFull, method, cash, change, orderNo: paramSalesNum,
+        ...(saleClientId ? { clientId: saleClientId } : {}),
         items: route?.params?.items, discount: effDiscount,
         splitPaid: { amount: payable, method },
         ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
@@ -469,6 +538,7 @@ export default function PayScreen({ navigation, route }: Props) {
     const input: SaleInput = {
       method,
       salesNum: orderNo,
+      clientId: saleClientId,
       grandTotal: payable,
       discountTotal: effDiscount,
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
@@ -495,12 +565,22 @@ export default function PayScreen({ navigation, route }: Props) {
     recordSale(input);
     try {
       await saveSale(input);
-    } catch {
+    } catch (e) {
+      // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
+      // TANPA Success palsu. DB gagal lain = kasir tetap jalan via antrean.
+      if ((e as { code?: string })?.code === 'terminal-unbound') {
+        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          { text: t('c_cancel'), style: 'cancel' },
+          { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
+        ]);
+        return;
+      }
       /* DB gagal - kasir tetap jalan, push via antrean */
     }
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
+      ...(saleClientId ? { clientId: saleClientId } : {}),
       ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
       ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
@@ -552,7 +632,12 @@ export default function PayScreen({ navigation, route }: Props) {
   const onOnlineLanjut = () => {
     if (!wallet || payable <= 0 || !ovoPhoneOk) return;
     if (wallet === 'qris') {
-      navigation?.navigate('Qris', {
+      // client_id diselesaikan dulu (async) agar Qris SELALU menerima kunci
+      // rantai — tak ada penerbitan baru di daun (QR tak basi).
+      void (async () => {
+        try {
+        const chainClientId = await resolveChainClientId();
+        navigation?.navigate('Qris', {
         total: remaining > 0 ? remaining : payable,
         items: route?.params?.items,
         discount: effDiscount,
@@ -566,15 +651,23 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(ongkir > 0 ? { ongkir } : {}),
         ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
         ...(customerName ? { customer: customerName } : {}),
-        ...(memberIdParam ? { memberId: memberIdParam } : {}),
+        ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
+        // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke QRIS.
+        clientId: chainClientId,
         // Rantai grup ke QRIS: kunjungan QRIS ikut SATU salesNum + tahu total penuh.
         ...(route?.params?.splitGroup === true ? { splitGroup: true } : {}),
         ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
         // Kaki split yang sudah dibayar diteruskan agar QRIS/EDC mencatat
         // SATU bill utuh (bukan hanya sisa): nomor + kaki lama dipakai ulang.
         ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
-      });
+        });
+        } catch {
+          // resolveChainClientId melempar hanya bila CSPRNG absen (uuidv7
+          // melempar sesuai kontrak): tombol tak boleh mati diam-diam.
+          Alert.alert(t('pay_issue_fail'));
+        }
+      })();
       return;
     }
     const grand = paid + (remaining > 0 ? remaining : payable);
@@ -996,7 +1089,11 @@ export default function PayScreen({ navigation, route }: Props) {
       )}
       <TouchableOpacity
         style={styles.edcLink}
-        onPress={() => navigation?.navigate('Edc', {
+        onPress={() => void (async () => {
+          try {
+          // client_id rantai SELALU dibawa ke EDC (tak diterbitkan di daun).
+          const chainClientId = await resolveChainClientId();
+          navigation?.navigate('Edc', {
           total: remaining > 0 ? remaining : payable,
           items: route?.params?.items,
           discount: effDiscount,
@@ -1010,9 +1107,20 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(ongkir > 0 ? { ongkir } : {}),
           ...(cutToRecord > 0 ? { ongkirCut: cutToRecord } : {}),
           ...(customerName ? { customer: customerName } : {}),
-          ...(memberIdParam ? { memberId: memberIdParam } : {}),
+          ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
+          // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke EDC.
+          clientId: chainClientId,
+          // Rantai grup ke EDC (cermin QRIS): kunjungan EDC ikut SATU salesNum
+          // + tahu total penuh; tanpa ini kunjungan ke-2+ menabrak PRIMARY KEY
+          // head lalu gagal diam-diam (Success palsu, setoran tak tercatat).
+          ...(route?.params?.splitGroup === true ? { splitGroup: true } : {}),
+          ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
           ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount })) } : {}),
+          });
+          } catch {
+            Alert.alert(t('pay_issue_fail'));
+          }
         })}>
         <Text style={styles.edcLinkText}>{t('pay_edc_guide')} ›</Text>
       </TouchableOpacity>

@@ -3,8 +3,23 @@
  * WS/event `updateCustomerDisplaySalesMenu`, bukan kabel serial).
  * Implementasi orisinal best-effort: pelanggan lokal selalu sinkron antar
  * layar; dorong WS dicoba bila URL WS terkonfigurasi, gagal diam-diam.
+ *
+ * APP-EVENTS (TRANSPORT CLOSED 2026-10-17, audit row 8/12-partial):
+ * - Primer SSE per-terminal (E26, tag-filtered server-side) via lib/sse.ts —
+ *   satu arah untuk view; view_pelanggan memakai scope kasir pasangan
+ *   (pairedKasirId) bila ada.
+ * - Sekunder WS dua-arah (socket eksisting di bawah) untuk kasir/dapur.
+ * - Fallback poll SQLite tetap milik layar (berpenanda stale di layar).
+ * - Same-device tanpa roundtrip server: saveSale memanggil
+ *   notifySaleSavedLocal() (lihat lib/sales.ts) agar CustomerDisplay +
+ *   KitchenScreen se-device tampil instan saat offline.
  */
-import { getServerEnv, getTerminal, getWsUrl } from '../config/server';
+import { apiUrl, getTerminal, getWsUrl } from '../config/server';
+import { getApiMode } from './apiSource';
+import { normalizeTag } from './deviceRole';
+// APP-R3 touchup: impor statis aman — sse.ts hanya bergantung pada
+// config/server + apiSource (tak mengimpor display, tanpa siklus).
+import { isSseConfigured, subscribeSseStatus, subscribeTerminalEvents } from './sse';
 
 export type DisplayOrderItem = { name: string; qty: number; price: number };
 
@@ -23,6 +38,9 @@ let retry = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let beat: ReturnType<typeof setInterval> | null = null;
 
+/** Waktu event display terakhir (ms epoch) — dasar banner umur-data layar. */
+let lastDisplayAt = 0;
+
 /** Heartbeat + backoff ala realtime.ts agar bridge tak putus diam-diam. */
 const HEARTBEAT_MS = 30000;
 
@@ -38,6 +56,7 @@ function stopBeat(): void {
 /** Jadwalkan sambung ulang dengan backoff; diam bila tak ada konsumen. */
 function scheduleReconnect(): void {
   stopBeat();
+  setWsLive(false);
   socket = null;
   if (retryTimer) return;
   if (listeners.size === 0) return;
@@ -51,12 +70,21 @@ function scheduleReconnect(): void {
 export function subscribeDisplay(fn: Listener): () => void {
   listeners.add(fn);
   ensureSocket();
+  ensureSse();
   return () => {
     listeners.delete(fn);
+    if (listeners.size === 0) {
+      teardownSse();
+    }
   };
 }
 
 function emitLocal(e: DisplayEvent): void {
+  try {
+    lastDisplayAt = Date.now();
+  } catch {
+    /* jam tak tersedia — event tetap disebar */
+  }
   listeners.forEach((l) => {
     try {
       l(e);
@@ -84,15 +112,16 @@ function toOrderItems(raw: unknown): DisplayOrderItem[] {
 
 function ensureSocket(): void {
   try {
-    // Hanya ke server milik sendiri (env Custom). Env bawaan menunjuk
-    // infrastruktur pihak ketiga - jangan dial tanpa kredensial merchant.
-    if (getServerEnv() !== 'custom') return;
+    // Hanya ke server milik sendiri (Real Mode = EXPO_PUBLIC_API_BASE_URL).
+    // Local/dummy offline-first: tanpa dial; non-custom: infra pihak ketiga.
+    if (getApiMode() !== 'real') return;
     if (socket) return;
     const url = getWsUrl();
     if (!url) return;
     const ws = new WebSocket(url);
     ws.onopen = () => {
       retry = 0;
+      setWsLive(true);
       stopBeat();
       beat = setInterval(() => {
         try {
@@ -142,6 +171,7 @@ function ensureSocket(): void {
       }
     };
     ws.onclose = () => {
+      setWsLive(false);
       scheduleReconnect();
     };
     ws.onerror = () => {
@@ -187,4 +217,346 @@ export function publishDisplayOrder(
     ...(total === undefined ? {} : { total }),
     ...(status === undefined ? {} : { status }),
   });
+}
+
+/** Waktu event display terakhir (ms epoch; 0 = belum ada event). */
+export function getLastDisplayAt(): number {
+  return lastDisplayAt;
+}
+
+// ---------------------------------------------------------------------------
+// Umur data (SPEC §8: poll fallback "berpenanda stale" + banner umur data).
+// Kunci 'offline_stale' dirender layar via t()/useTranslation — modul ini
+// hanya memakai string kuncinya (OFFLINE_STALE_KEY), tanpa menambah kamus.
+// ---------------------------------------------------------------------------
+
+/** Kunci i18n banner data basi (dirender layar, bukan modul ini). */
+export const OFFLINE_STALE_KEY = 'offline_stale';
+
+/** Ambang basi tampilan display (diselaraskan heartbeat 30 dtk). */
+export const DISPLAY_STALE_MS = 30000;
+
+/** Umur data (ms) dari timestamp; -1 bila tak diketahui (tanpa klaim). */
+export function dataAgeMs(ts: number | string | null | undefined, nowMs = Date.now()): number {
+  try {
+    const ms = typeof ts === 'number' ? ts : Date.parse(String(ts ?? ''));
+    if (!Number.isFinite(ms) || ms <= 0) return -1;
+    return Math.max(0, Math.floor(nowMs - ms));
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Label banner umur-data: t('offline_stale') bila basi, '' bila segar/tak
+ * diketahui. `t` diinjeksikan layar (dari useTranslation/useLang) karena hook
+ * tak boleh dipakai di modul lib; default fallback mengembalikan kuncinya.
+ */
+export function dataAgeLabel(
+  ts: number | string | null | undefined,
+  t: (key: string) => string = (k) => k,
+  nowMs = Date.now(),
+): string {
+  const age = dataAgeMs(ts, nowMs);
+  if (age < 0) return '';
+  return age > DISPLAY_STALE_MS ? t(OFFLINE_STALE_KEY) : '';
+}
+
+// ---------------------------------------------------------------------------
+// APP-EVENTS: SSE primer + status live + bus sale lokal same-device.
+// ---------------------------------------------------------------------------
+
+type LiveListener = (live: boolean) => void;
+const liveListeners = new Set<LiveListener>();
+let wsLive = false;
+let sseLiveFlag = false;
+let sseUnsub: (() => void) | null = null;
+let sseForId = '';
+
+function emitLive(): void {
+  const live = wsLive || sseLiveFlag;
+  liveListeners.forEach((cb) => {
+    try {
+      cb(live);
+    } catch {
+      /* abaikan */
+    }
+  });
+}
+
+/** True bila minimal satu kaki realtime (SSE/WS) sedang live. */
+export function isDisplayLive(): boolean {
+  return wsLive || sseLiveFlag;
+}
+
+/** Langganan status live display (SSE primer, WS sekunder). */
+export function subscribeDisplayLive(cb: LiveListener): () => void {
+  liveListeners.add(cb);
+  try {
+    cb(isDisplayLive());
+  } catch {
+    /* abaikan */
+  }
+  return () => {
+    liveListeners.delete(cb);
+  };
+}
+
+function setWsLive(v: boolean): void {
+  if (wsLive === v) return;
+  wsLive = v;
+  emitLive();
+}
+
+function setSseLive(v: boolean): void {
+  if (sseLiveFlag === v) return;
+  sseLiveFlag = v;
+  emitLive();
+}
+
+/**
+ * TerminalId untuk feed SSE: view_pelanggan memakai kasir pasangan
+ * (aturan 1:1, scope cart-view milik kasir); sisanya terminal sendiri.
+ * '' = belum ter-bound / kontrak absen => SSE dilewati (poll fallback).
+ * APP-FIXUP (fix-sse2 M5): diekspor agar view memakai resolusi terminal SSE
+ * yang SAMA dengan bus (pairedKasirId untuk view_pelanggan, SPEC §11.4).
+ */
+export function resolveDisplaySseTerminalId(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sess = require('../session') as typeof import('../session');
+    const b = sess.getBinding?.();
+    const tag = normalizeTag(b?.tag);
+    if (tag === 'view_pelanggan') {
+      const paired = String(b?.pairedKasirId ?? '').trim();
+      if (paired) return paired;
+    }
+    const tid = String(b?.terminalId ?? b?.terminalCode ?? '').trim();
+    if (tid) return tid;
+  } catch {
+    /* abaikan — fallback klaim lama di bawah */
+  }
+  try {
+    return String(getTerminal().terminalCode ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function strList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const x of v) {
+    const s = String(x ?? '').trim();
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+/** Petakan satu event SSE (E26) menjadi 0..N DisplayEvent lokal. */
+function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
+  const t = String(type ?? '').toLowerCase();
+  const d = (data ?? {}) as Record<string, unknown>;
+  const ticket = String(d.ticket ?? d.code ?? d.no ?? d.salesNum ?? '').trim();
+  if (/^(call)$/.test(t)) {
+    return ticket ? [{ type: 'call', ticket }] : [];
+  }
+  if (/^(ready)$/.test(t)) {
+    return ticket ? [{ type: 'ready', ticket }] : [];
+  }
+  // Snapshot antrean (queue-update / preparing+ready): kipas menjadi
+  // call/ready individual (dedupe milik layar, max 6 per kaki).
+  const preparing = strList(d.preparing ?? d.tickets);
+  const ready = strList(d.ready);
+  if (/queue/.test(t) && (preparing.length > 0 || ready.length > 0)) {
+    const out: DisplayEvent[] = [];
+    for (const tk of preparing.slice(0, 6)) out.push({ type: 'order', ticket: tk, items: [] });
+    for (const tk of ready.slice(0, 6)) out.push({ type: 'ready', ticket: tk });
+    return out;
+  }
+  const items = toOrderItems(d.items);
+  if (ticket && (/display|order|cart|payment|qr/.test(t) || items.length > 0)) {
+    if (items.length === 0 && !/display|order|cart|payment|qr/.test(t)) return [];
+    return [
+      {
+        type: 'order',
+        ticket,
+        items,
+        ...(typeof d.total === 'number' ? { total: d.total } : {}),
+        ...(typeof d.status === 'string' ? { status: d.status } : {}),
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * APP-FIXUP (fix-sse2 M5): SATU keputusan TRANSPORT backend untuk feed SSE.
+ * Menyatukan cek ganda yang dulu tersebar (isSseConfigured ala lib/sse.ts vs
+ * terminalEventsUrl ala lib/terminalContract.ts) — kedua modul pemilik BUKAN
+ * lane paket ini (sse READ-ONLY, kontrak milik task BE), jadi unifikasi
+ * tinggal di sini: Real Mode + env custom + base terisi (SSE) DAN url events
+ * kontrak per terminalId non-kosong. Tak pernah melempar.
+ */
+export function isBackendConfigured(terminalId: string): boolean {
+  try {
+    if (!isSseConfigured()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tc = require('./terminalContract') as typeof import('./terminalContract');
+    if (!tc.terminalEventsUrl(String(terminalId ?? '').trim())) return false;
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** Nyalakan SSE primer bila ada konsumen + terminal + kontrak. Idempoten. */
+function ensureSse(): void {
+  if (listeners.size === 0) return;
+  // APP-FIXUP (fix-sse2 M5): satu keputusan TRANSPORT via isBackendConfigured
+  // (dulu dua cek tersebar: getApiMode + terminalEventsUrl). Fail-closed
+  // offline bila tak terkonfigurasi (WS dua-arah + poll SQLite fallback milik
+  // layar tetap jalan; isDisplayLive memantulkan WS saja).
+  const id = resolveDisplaySseTerminalId();
+  if (!id || !isBackendConfigured(id)) {
+    setSseLive(false);
+    return;
+  }
+  if (sseUnsub && sseForId === id) return;
+  teardownSse();
+  try {
+    sseForId = id;
+    const unsubStatus = subscribeSseStatus((live) => setSseLive(live));
+    const unsubFeed = subscribeTerminalEvents(id, (e) => {
+      try {
+        const mapped = mapSseToDisplay(e.type, e.data);
+        for (const m of mapped) emitLocal(m);
+      } catch {
+        /* abaikan payload asing */
+      }
+    });
+    sseUnsub = () => {
+      try {
+        unsubFeed();
+      } catch {
+        /* abaikan */
+      }
+      try {
+        unsubStatus();
+      } catch {
+        /* abaikan */
+      }
+    };
+  } catch {
+    sseUnsub = null;
+    sseForId = '';
+    setSseLive(false);
+  }
+}
+
+function teardownSse(): void {
+  try {
+    sseUnsub?.();
+  } catch {
+    /* abaikan */
+  }
+  sseUnsub = null;
+  sseForId = '';
+  setSseLive(false);
+}
+
+/** Paksa re-resolve SSE (dipanggil setelah (re)bind terminal). */
+export function refreshDisplayTransport(): void {
+  if (listeners.size === 0) return;
+  sseForId = '';
+  ensureSse();
+}
+
+// ---------------------------------------------------------------------------
+// Bus sale lokal same-device (audit row 12: kasir→dapur satu device tanpa
+// roundtrip server). Dipanggil saveSale via notifySaleSavedLocal; dapur +
+// display layar yang sama tampil instan saat offline.
+// ---------------------------------------------------------------------------
+
+export interface LocalSaleItem {
+  name: string;
+  qty: number;
+  subtotal: number;
+}
+
+export interface LocalSaleInfo {
+  salesNum: string;
+  clientId: string;
+  total: number;
+  itemCount: number;
+  items: LocalSaleItem[];
+}
+
+type LocalSaleListener = (s: LocalSaleInfo) => void;
+const localSaleListeners = new Set<LocalSaleListener>();
+
+/** Langganan sale lokal same-device (KitchenScreen refresh tiket offline). */
+export function subscribeLocalSale(fn: LocalSaleListener): () => void {
+  localSaleListeners.add(fn);
+  return () => {
+    localSaleListeners.delete(fn);
+  };
+}
+
+/**
+ * Dipanggil saveSale setelah COMMIT (kontrak lib/sales.ts). Tak pernah
+ * melempar; penjualan tetap sah walau display lane gagal.
+ */
+export function notifySaleSavedLocal(info: {
+  salesNum: string;
+  clientId: string;
+  total: number;
+  itemCount: number;
+  items: LocalSaleItem[];
+}): void {
+  try {
+    const salesNum = String(info?.salesNum ?? '').trim();
+    if (!salesNum) return;
+    const items: DisplayOrderItem[] = [];
+    for (const raw of info?.items ?? []) {
+      const name = String(raw?.name ?? '').trim();
+      if (!name) continue;
+      const qty = Math.max(1, Math.round(Number(raw?.qty) || 1));
+      const sub = Math.max(0, Math.round(Number(raw?.subtotal) || 0));
+      items.push({ name, qty, price: qty > 0 ? Math.round(sub / qty) : 0 });
+    }
+    if (items.length > 0) {
+      emitLocal({
+        type: 'order',
+        ticket: salesNum,
+        items,
+        total: Math.round(Number(info?.total) || 0),
+        status: 'open',
+      });
+    }
+    const payload: LocalSaleInfo = {
+      salesNum,
+      clientId: String(info?.clientId ?? ''),
+      total: Math.round(Number(info?.total) || 0),
+      itemCount: Math.max(0, Math.round(Number(info?.itemCount) || 0)),
+      items: items.map((it) => ({
+        name: it.name,
+        qty: it.qty,
+        subtotal: it.qty * it.price,
+      })),
+    };
+    localSaleListeners.forEach((cb) => {
+      try {
+        cb(payload);
+      } catch {
+        /* listener tak boleh menggagalkan sale */
+      }
+    });
+  } catch {
+    /* display lane belum siap — penjualan tetap sah */
+  }
 }
