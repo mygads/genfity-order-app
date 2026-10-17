@@ -175,6 +175,7 @@ jobs:
           sha256sum --check genfity-order.apk.sha256
           NOTES=$(node -e "const m=require('./release.json');console.log('APK SHA-256: '+m.apkSha256+'\nSigning cert SHA-256: '+m.signingCertificateSha256+'\nCommit: '+m.commit)")
           gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
             Genfity-Order-*.apk genfity-order.apk genfity-order.apk.sha256 release.json \
             --title "${{ github.ref_name }}" \
             --notes "$NOTES"
