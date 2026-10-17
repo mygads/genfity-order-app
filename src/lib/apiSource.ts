@@ -544,8 +544,6 @@ export interface EmployeeSession {
 interface LocalPosUserRow {
   id: string;
   username: string | null;
-  pinHash: string | null;
-  password: string | null;
   authKey: string | null;
   branchId: string | null;
   role: string | null;
@@ -553,8 +551,8 @@ interface LocalPosUserRow {
 
 /**
  * Cek kredensial ke SQLite lokal (ms_posuser by username COLLATE NOCASE +
- * hash PIN via lib/pin, fallback perbandingan legacy pinHash/password
- * untuk baris hasil pull yang belum punya record).
+ * hash PIN via lib/pin — R34: kolom legacy pinHash/password selalu NULL dan
+ * TIDAK dibaca lagi).
  * - Cocok → EmployeeSession ok:true (bentuk SAMA seperti jalur online).
  * - Username ada tapi PIN salah → EmployeeSession ok:false (JANGAN throw:
  *   pemanggil LoginScreen.submit tidak try/catch, hanya cek s.ok/userId).
@@ -568,7 +566,7 @@ async function validateEmployeeLocal(
   const uname = (username ?? '').trim();
   await initDb();
   const row = await queryFirst<LocalPosUserRow>(
-    'SELECT id, username, pinHash, password, authKey, branchId, role FROM ms_posuser WHERE username = ? COLLATE NOCASE LIMIT 1',
+    'SELECT id, username, authKey, branchId, role FROM ms_posuser WHERE username = ? COLLATE NOCASE LIMIT 1',
     [uname],
   );
   if (!row) return null;
@@ -577,9 +575,8 @@ async function validateEmployeeLocal(
     const rec = await loadPinRecord(row.id);
     if (rec && verifyPinHash(pin, rec)) match = true;
   } catch {
-    /* lanjut ke fallback legacy di bawah */
+    /* hash rusak/tak terbaca = tak cocok */
   }
-  if (!match && (row.pinHash === pin || row.password === pin)) match = true;
   if (!match) {
     return {
       ok: false,

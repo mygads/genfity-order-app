@@ -201,7 +201,7 @@ export async function pendingPrintCount(): Promise<number> {
  * Kuras antrean FIFO (`createdAt ASC`, maks 50 baris per drain — meniru batas
  * 200 baris `sync.ts` dengan nilai lebih kecil karena byte cetak berat).
  * Wiring saat ini (terverifikasi grep): HANYA piggyback tiap cetak sukses
- * (`lib/print.ts`:331,:380,:425). Belum ada wiring drain saat sukses
+ * (`lib/print.ts`:393,:443,:488). Belum ada wiring drain saat sukses
  * test-print `PrintersScreen.testPrintStation` (langsung `printBytes`,
  * tanpa drain) dan belum ada drain saat worker reconnect (milik lane
  * realtime). `pendingPrintCount` sudah diekspor dan DITAMPILKAN di

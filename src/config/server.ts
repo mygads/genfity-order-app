@@ -134,7 +134,7 @@ export const ApiPath = {
   // tabel final; BE Go pemilik kebenaran — sebagian BELUM ADA: klien wajib
   // fallback jujur offline/unconfigured, fail-closed untuk terminal-access,
   // verifikasi PIN, dan login pertama). '{id}'/'{viewId}' diganti caller.
-  staffLogin: 'api/v1/auth/terminal-login', // E01 POST login 2-tahap {username,password,staffPin?,terminalCode,deviceId} (SPEC §4)
+  staffLogin: 'api/v1/auth/terminal-login', // E01 POST login single-stage {username,password,terminalCode,deviceId} (SPEC §4)
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
   terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding

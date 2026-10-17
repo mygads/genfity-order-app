@@ -9,7 +9,7 @@
  * bersidik-jari ID + nama-fixture untuk ID generik yang dipakai ulang
  * seed seperti V001/V002, agar edit merchant via CRUD tak pernah ditimpa).
  *
- * Data uji offline-first (cabang/resto, owner+kasir, member, voucher/promo,
+ * Data uji offline-first (cabang/resto, admin+kasir, member, voucher/promo,
  * shift terbuka, 4 order contoh via saveSale/direct-insert - 1 dimundurkan
  * ke kemarin agar
  * History/Dashboard/Rekap ada baseline) disisip TANPA gate flag — sama
@@ -25,7 +25,7 @@
  * Nama kolom diambil verbatim dari SCHEMA di lib/db.ts (ms_posuser tidak
  * punya kolom nama/flagActive; ms_setting memakai value1/value2).
  */
-import { initDb, queryFirst, run } from './db';
+import { initDb, query, queryFirst, run } from './db';
 import type { BindParams } from './db';
 import { loadPinRecord, removePinHash, savePinHash } from './pin';
 import { assertVoucherUsable, isTerminalBound, queueNoOf, saveSale } from './sales';
@@ -139,7 +139,6 @@ function seedCanon(spec: SeedOrderSpec): TotalsResult {
 
 /** SaleInput saveSale untuk jalur bound (angka = hasil totals() kanonis). */
 function seedSaleInput(spec: SeedOrderSpec, canon: TotalsResult): SaleInput {
-  const r = (x: number) => Math.round(x);
   return {
     method: spec.method,
     salesNum: spec.salesNum,
@@ -285,6 +284,66 @@ async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed:
   );
 }
 
+/**
+ * R34 CLOSED (2026-10-17): migrasi satu-kali kolom legacy pinHash/password
+ * ms_posuser → record hash SecureStore (lib/pin.ts hashPin/verifyPinHash;
+ * algoritma TIDAK diubah). Dijalankan tiap startup TANPA gate flag seed
+ * (DB lama yang flag seed-nya sudah '1' ikut termigrasi), idempoten via flag
+ * ms_setting ('Security','PinMigrationV1') = '1'.
+ *
+ * Per baris dengan pinHash/password NOT NULL: simpan savePinHash(id,
+ * pinHash ?? password) DULU (kolom legacy berisi PIN pembanding plaintext);
+ * HANYA setelah SecureStore sukses, NULL-kan kedua kolom. Bila tulis
+ * SecureStore gagal untuk suatu baris, baris itu DIPERTAHANKAN (fail-open —
+ * login lama tetap jalan) dan flag TIDAK diset sehingga startup berikut
+ * mencoba lagi. Kolom DB dibiarkan ada (deprecated, tak pernah dibaca lagi —
+ * lihat komentar skema di lib/dbSchema.ts oleh pemiliknya).
+ */
+async function migrateLegacyPinColumns(): Promise<void> {
+  try {
+    const done = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Security' AND key2 = 'PinMigrationV1' LIMIT 1`,
+    );
+    if (done?.value1 === '1') return;
+    let rows: Array<{ id: string; pinHash: string | null; password: string | null }>;
+    try {
+      rows = await query<{ id: string; pinHash: string | null; password: string | null }>(
+        `SELECT id, pinHash, password FROM ms_posuser WHERE pinHash IS NOT NULL OR password IS NOT NULL`,
+      );
+    } catch {
+      // Tabel/kolom belum ada — coba lagi saat startup berikut.
+      return;
+    }
+    let failed = 0;
+    for (const r of rows) {
+      try {
+        const existing = await loadPinRecord(r.id);
+        if (!existing) {
+          const plain = r.pinHash ?? r.password ?? '';
+          if (!plain) {
+            await run(`UPDATE ms_posuser SET pinHash = NULL, password = NULL WHERE id = ?`, [r.id]);
+            continue;
+          }
+          await savePinHash(r.id, plain);
+        }
+        await run(`UPDATE ms_posuser SET pinHash = NULL, password = NULL WHERE id = ?`, [r.id]);
+      } catch (e) {
+        failed += 1;
+        console.warn(`[seed] migrasi PIN legacy ${r.id} gagal, baris dipertahankan: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    if (failed > 0) return;
+    await run(
+      `INSERT OR IGNORE INTO ms_setting (key1, key2, value1) VALUES ('Security', 'PinMigrationV1', '1')`,
+    );
+    await run(
+      `UPDATE ms_setting SET value1 = '1' WHERE key1 = 'Security' AND key2 = 'PinMigrationV1'`,
+    );
+  } catch (e) {
+    console.warn(`[seed] migrateLegacyPinColumns dilewati: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 export async function ensureSeeded(): Promise<void> {
   await initDb();
   const nowSeed = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -391,6 +450,10 @@ export async function ensureSeeded(): Promise<void> {
     }
   }
 
+  // R34: migrasi kolom legacy pinHash/password → hash SecureStore. Ungated
+  // (DB lama ikut), idempoten via flag sendiri, fail-open per baris.
+  await migrateLegacyPinColumns();
+
   // 6 CoA expense default (ms_coa: id, coaName, coaType, flagActive,
   // syncDate). SENGAJA tanpa gate flag seed agar DB lama yang sudah
   // ter-seed tetap dapat CoA; INSERT OR IGNORE = idempoten, aman jalan
@@ -472,7 +535,8 @@ export async function ensureSeeded(): Promise<void> {
   // user tetap ada. INSERT OR IGNORE + seed PIN hanya bila record belum ada
   // (PIN yang diganti belakangan via Lupa PIN dihormati, tidak ditimpa).
   // ms_posuser: id, username, pinHash, password, authKey, branchId, role.
-  // PIN disimpan sebagai hash via SecureStore/AsyncStorage, bukan kolom DB.
+  // PIN disimpan sebagai hash via SecureStore/AsyncStorage, bukan kolom DB
+  // (kolom pinHash/password legacy selalu NULL pasca-migrasi R34).
   await run(
     `INSERT OR IGNORE INTO ms_posuser (id, username, branchId, role)
      VALUES ('u-admin', 'admin', 'B001', 'Merchant Owner')`,
@@ -481,7 +545,7 @@ export async function ensureSeeded(): Promise<void> {
     const rec = await loadPinRecord('u-admin');
     if (!rec) await savePinHash('u-admin', '1234');
   } catch {
-    /* seed PIN gagal — login masih coba fallback legacy */
+    /* seed PIN gagal — migrasi/startup berikut mencoba lagi */
   }
 
   // --- Data uji offline-first (tanpa server): identitas cabang/resto,
@@ -545,7 +609,7 @@ export async function ensureSeeded(): Promise<void> {
       const rec = await loadPinRecord(id);
       if (!rec) await savePinHash(id, testPins[id]);
     } catch {
-      /* abaikan — fallback legacy di apiSource */
+      /* abaikan — verifikasi hanya via hash SecureStore (R34) */
     }
   }
   // Kasir uji SENGAJA tanpa baris per user agar jatuh ke template peran

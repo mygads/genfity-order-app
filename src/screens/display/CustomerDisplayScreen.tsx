@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { rp as formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { getBranchCurrency, initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
@@ -79,6 +79,8 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   const [prep, setPrep] = useState<string[]>(EMPTY_TICKETS);
   const [liveItems, setLiveItems] = useState<LiveItem[]>(EMPTY_ITEMS);
   const [promo, setPromo] = useState<LivePromo | null>(null);
+  /** Mata uang cabang (ms_setting Branch/Currency); '' = fallback IDR via formatCurrency. */
+  const [currency, setCurrency] = useState('');
   /** Nama cabang live dari klaim terminal; fallback label generik. */
   const shopName = (() => {
     try {
@@ -124,6 +126,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       // Event order dari server (DISPLAY_ORDER): antrean + rincian berjalan.
       setPrep((p) => (p.includes(e.ticket) ? p : [...p, e.ticket].slice(0, 6)));
       if (e.items.length > 0) setLiveItems(e.items);
+      // D6: client_id SSE (wired, aktif saat BE menyertakan client_id).
+      const sseCid = String(e.clientId ?? '').trim();
+      if (sseCid) {
+        setLiveClientId(sseCid);
+        setOpenTag(e.ticket);
+      }
     }
   }), []);
 
@@ -225,6 +233,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         const code = (r0?.promoCode ?? '').trim();
         setPromo(code ? { code, name: (r0?.promoName ?? '').trim() || code, value: Math.round(Number(r0?.value) || 0) } : null);
       } catch { /* promo opsional - banner disembunyikan */ }
+      try {
+        const bc = await getBranchCurrency();
+        if (!alive) return;
+        if (bc.code) setCurrency(bc.code);
+      } catch { /* tanpa setting = fallback IDR */ }
     };
     void load();
     return () => { alive = false; };
@@ -318,7 +331,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      {needBind ? (
+      {/* Q3 ORPHAN-DISPLAY-JADI-PROMO: pasangan dihapus = status disconnected netral; bukan prompt ikat/PIN. */}
+      {isUnpairedView ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>Disconnected</Text>
+        </View>
+      ) : null}
+      {needBind && !isUnpairedView ? (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>{t('terminal_unbound_hint')}</Text>
         </View>
@@ -330,6 +349,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       ) : null}
       {showStaleBanner ? (
         <Text style={styles.staleText}>{staleAgeLabel ? `${t('disp_stale')} · ${staleAgeLabel}` : t('disp_stale')}</Text>
+      ) : null}
+      {/* Q3 ORPHAN-DISPLAY-JADI-PROMO: promo dominan saat unpaired (mode order tak punya blok promo). */}
+      {isUnpairedView && promo ? (
+        <View style={styles.promo}>
+          <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${promo.code} · ${promo.name} (${formatCurrency(promo.value, currency)})${t('disp_promo_post')}`} </Text>
+        </View>
       ) : null}
       <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>{isLockedView ? null : (<View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
@@ -369,7 +394,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           </View>
           {promo ? (
             <View style={styles.promo}>
-              <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${promo.code} · ${promo.name} (${formatCurrency(promo.value)})${t('disp_promo_post')}`} </Text>
+              <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${promo.code} · ${promo.name} (${formatCurrency(promo.value, currency)})${t('disp_promo_post')}`} </Text>
             </View>
           ) : null}
           {isLockedView ? null : (
@@ -392,13 +417,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           {liveItems.map((it, i) => (
             <View key={`${it.name}#${i}`} style={styles.itemRow}>
               <Text style={styles.itemName}>{it.qty}x {it.name}</Text>
-              <Text style={styles.itemPrice}>{formatCurrency(it.qty * it.price)}</Text>
+              <Text style={styles.itemPrice}>{formatCurrency(it.qty * it.price, currency)}</Text>
             </View>
           ))}
           <View style={styles.divider} />
           <View style={styles.itemRow}>
             <Text style={styles.totalLabel}>{t('disp_total')}</Text>
-            <Text style={[styles.totalVal, isTablet && styles.totalValBig]}>{formatCurrency(runningTotal)}</Text>
+            <Text style={[styles.totalVal, isTablet && styles.totalValBig]}>{formatCurrency(runningTotal, currency)}</Text>
           </View>
           <View style={styles.qrisBox}>
             <Text style={styles.qrisTitle}>{t('disp_qris_title')}</Text>
@@ -408,7 +433,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
             ) : (
               <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
             )}
-            <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${formatCurrency(runningTotal)}`}</Text>
+            <Text style={styles.qrisSub}>{`${t('disp_qris_pre')}${formatCurrency(runningTotal, currency)}`}</Text>
           </View>
           {isLockedView ? null : (
           <AppButton size="md" title={t('disp_sim_pay')} onPress={() => setMode('success')} disabled={online === false} />
@@ -420,7 +445,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         <View style={styles.successCard}>
           <Text style={styles.successIcon}>✓</Text>
           <Text style={[styles.successTitle, isTablet && styles.successTitleBig]}>{t('disp_pay_ok')}</Text>
-          <Text style={[styles.successTotal, isTablet && styles.successTotalBig]}>{formatCurrency(runningTotal)}</Text>
+          <Text style={[styles.successTotal, isTablet && styles.successTotalBig]}>{formatCurrency(runningTotal, currency)}</Text>
           <Text style={styles.successSub}>{t('disp_cash_line')}</Text>
           <Text style={styles.successSub}>{t('disp_thanks')}</Text>
           <AppButton size="md" title={t('disp_back_queue')} onPress={() => setMode('queue')} />

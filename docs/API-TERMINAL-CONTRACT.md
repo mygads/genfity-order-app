@@ -16,7 +16,7 @@ spesifik terminal di sini.
 > [`AUDIT-TERMINAL-RBAC.md`](AUDIT-TERMINAL-RBAC.md) §7–§12). Bila ada
 > bagian §0–§7 di bawah yang bertentangan dengan SPEC (mis. `deviceRole`
 > 3-nilai vs 5 tag, nav-lock DAPUR/DISPLAY), **SPEC yang menang**; §8–§10
-> dokumen ini merangkum nilai finalnya. Status 2026-10-17 (terverifikasi grep `src/`): login 2-tahap + takeover-confirm E01b (`tookOver{kickedUserId}`) SUDAH wired app-side (`LoginScreen.tsx:221-246,707-738,1146-1192`; fixture `staff-login.json`, `terminal-bind.json` ada) — yang BE-pending adalah endpoint + fan-out WS/SSE sisi server (rincian per endpoint di §10). Fixture dummy §10 tetap acuan sampai BE siap.
+> dokumen ini merangkum nilai finalnya. Status 2026-10-17 (terverifikasi grep `src/` + probe BE live): E01 = terminal-login **SINGLE-STAGE** (sesi penuh langsung; arah 2-tahap `credentialOk/requiresPin` + `staffPin` tahap-2 DICABUT 2026-10-17 — riwayat salah arah di SPEC §14). SUDAH wired app-side: `LoginScreen` mengunci sesi dari respons pertama + gerbang PIN **lokal** (`passesLocalWorkforcePin`; `staffPin` tak pernah dikirim — server abaikan field tak dikenal) + notice `kicked_msg` untuk `tookOver{kickedUserId}` ke user baru; fixture `terminal-login.json`, `terminal-bind.json` ada. Kick: TAK ADA frame `SESSION_KICKED` push sisi server — device lama deteksi via event `takeover` SSE terminal + pencocokan pola kick/takeover sisi-klien (401 = gagal auth final → re-login, BUKAN bukti kick; koreksi 2026-10-17 atas arah 401-guard yang salah). Yang BE-pending: fan-out WS/SSE sisi server (rincian per endpoint di §10). Fixture dummy §10 tetap acuan sampai BE siap.
 
 Legenda: **[FAKTA]** = path/event sudah ada di aplikasi. **[KONTRAK]** =
 ditetapkan dokumen ini, implementasikan persis.
@@ -58,7 +58,7 @@ Setelah klaim berhasil, aplikasi memanggil `syncTerminalSettings()`
 auto-print dapur, footer struk, dan peran mengikuti server tanpa setting
 manual per tablet.
 
-> Status klaim 2026-10-17 (terverifikasi grep `src/`): WIRED app-side = `validateTerminal` (`apiSource.ts:317`, dipanggil `InstallScreen.tsx:244`), `verification-notify` (`apiSource.ts:807-812`, dipanggil InstallScreen/SyncScreen/SettingsScreen), dan flow bind B1 baru (`fetchBranches`/`fetchTerminals`/`bindTerminal` — InstallScreen + TerminalPinScreen + TerminalPickerScreen). PLANNED/UNWIRED = `pos/install`, `terminal/get-terminal`, `terminal/update` (hanya registrasi dummy `apiSource.ts:111,138-139`, nol pemanggil), helper `checkBranch`/`claimTerminal`/`terminalLogin` (definisi tanpa pemanggil layar). Jangan tambah konsumen baru ke jalur legacy.
+> Status klaim 2026-10-17 (terverifikasi grep `src/`): WIRED app-side = `validateTerminal` (`apiSource.ts`, dipanggil `InstallScreen`), `verification-notify` (`apiSource.ts`, dipanggil InstallScreen/SyncScreen/SettingsScreen), dan flow bind B1 baru (`fetchBranches`/`fetchTerminals`/`bindTerminal` — InstallScreen + TerminalPinScreen + TerminalPickerScreen). PLANNED/UNWIRED = `pos/install`, `terminal/get-terminal`, `terminal/update` (hanya registrasi dummy `apiSource.ts`, nol pemanggil), helper `checkBranch`/`claimTerminal`/`terminalLogin` (definisi tanpa pemanggil layar). Jangan tambah konsumen baru ke jalur legacy.
 
 ---
 
@@ -271,13 +271,15 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
   **fail-closed**, tanpa fallback diam-diam. **Dilarang** menulis store
   binding manual / menyuntik binding dummy — binding hanya lahir dari
   `E03` sukses.
-- **L1 — Login di device ter-bound (per sesi)**: form
-  username+password → `E01 terminal-login` tahap 1
-  (`{username,password,terminalCode,deviceId}` → `{credentialOk,
-  requiresPin:true}`) → modal PIN staff → `E01` tahap 2
-  (`{username,password,staffPin,terminalCode,deviceId}` — verify + cek
-  RBAC + cek okupansi) → session. **Login pertama wajib online**
-  (tanpa grant bawaan).
+- **L1 — Login di device ter-bound (per sesi, SINGLE-STAGE — koreksi
+  2026-10-17)**: form username+password → `E01 terminal-login`
+  (`{username,password,terminalCode,deviceId}` → LANGSUNG sesi penuh:
+  session + JWT pair + tag + branches + terminals + grant + `tookOver?`)
+  → modal PIN staff (**VERIFIKASI LOKAL** — server tak pernah memverifikasi
+  PIN staff; `staffPin` bukan bagian kontrak, E02 validate-pin = PIN
+  terminal) → session. Arah lama 2-tahap (`credentialOk/requiresPin` tahap-1
+  + `staffPin` tahap-2 yang "diverifikasi server") DICABUT — riwayat di
+  SPEC §14. **Login pertama wajib online** (tanpa grant bawaan).
   Offline: lewati `E01`, cek grant cache (triple user+terminal+device
   cocok, belum expiry) + cocokkan PIN staff ke hash → session lokal
   `offline:true`. PIN terminal **tidak** dipakai saat login.
@@ -289,18 +291,32 @@ simpan lowercase). Label "Full Access" untuk `full_access`.
   lama dihapus, session aktif di-logout-dulu, lanjut picker B1 (branch
   boleh beda). Unbind+bind lewat endpoint (atomik per langkah);
   **dilarang** mengedit store binding manual.
-- **K1 — Kick (baru menang)**: login sukses di terminal terisi →
-  server revoke sesi lama (`reason:takeover`) + audit log + push
-  `SESSION_KICKED` ke device lama (bila offline → antre, disampaikan
-  saat reconnect; device offline belajar saat reconnect → paksa logout
-  + pesan, bukan form login polos). App tampilkan notifikasi takeover
-  ke **user baru**. Konflik sesi offline diselesaikan server saat
+- **K1 — Kick (baru menang; koreksi 2026-10-17 — TAK ADA frame
+  `SESSION_KICKED` push sisi server)**: login sukses di terminal terisi →
+  server revoke sesi lama (`reason:takeover`) + audit log + `tookOver
+  {kickedUserId}` ke **device baru** (takeover terminal event). Device LAMA
+  belajar via event `takeover` pada feed SSE terminalnya (tipe mengandung
+  `takeover` dengan user/device event ≠ sesi/binding sendiri → notice
+  `kicked_msg` + logout via watcher sesi `startTakeoverWatch` di `App.tsx`;
+  401 BUKAN bukti kick — 401 = gagal auth final → re-login, karena grant
+  terminal tak dibaca middleware auth dan kick tak merevoke user_sessions
+  sehingga device lama tak menerima 401), dan (b) pencocokan pola
+  kick/takeover sisi-klien pada pesan WS yang masuk (future-proof). Klaim lama "push
+  `SESSION_KICKED` ke device lama (bila offline → antre)" DICABUT — tak ada
+  frame itu sisi server. App tampilkan notifikasi takeover ke **user baru**
+  (notice `kicked_msg`; jalur refetch defensif: modal konfirmasi takeover
+  confirm-before-session). Konflik sesi offline diselesaikan server saat
   reconnect (baru menang). Status app-side 2026-10-17: notifikasi user
-  BARU wired (modal takeover confirm-before-session,
-  `LoginScreen.tsx:727-734,1146-1192`); listener device LAMA
-  wiring-in-progress (`revokeKickedSession` di `session.ts:805` tanpa
-  pemanggil, belum ada handler `SESSION_KICKED` di `onWsMessage`) —
-  hingga wiring mendarat, perangkat lama hanya belajar saat login berikut.
+  BARU wired (respons pertama + modal takeover di `LoginScreen`);
+  deteksi device LAMA WIRED dua lapis — (1) watcher sesi `startTakeoverWatch`
+  di `App.tsx` atas event `takeover` SSE terminal (notice + cabut sesi+grant
+  lokal); (2) `realtime.ts` `emit()` + handler `onWsMessage` di `App.tsx`
+  menangani pesan kick/takeover yang cocok pola sisi-klien (logout lokal +
+  Alert `kicked_msg`, semua tag; `revokeKickedSession` helper `session.ts` +
+  notice + notifikasi lokal). Koreksi 2026-10-17: lapis 401-guard
+  (`reportBoundTerminal401` di semua fetcher `terminalApi.ts`) DIHAPUS —
+  salah diagnosis (401 kedaluwarsa token dikira kick) dan tak pernah
+  menembak kick nyata.
 - **O1 — Logout**: `E06` revoke server-side (anti zombie-sync); gagal
   jaringan → tandai `pendingRevoke`, coba lagi saat online. Binding +
   grant cache tetap (grant sampai expiry alami agar login ulang offline
@@ -321,53 +337,58 @@ Tabel final E01–E28 ada di **SPEC §11** (satu-satunya acuan; tidak
 didobel di sini agar tidak divergen). Ringkas status + bentuk:
 
 - **E01** `POST /api/v1/auth/terminal-login` `{username, password,
-  staffPin?, terminalCode, deviceId}` — **`terminalCode`+`deviceId` wajib
-  di tahap 1 maupun tahap 2**; 2 tahap UI, 1 endpoint (tahap 1 tanpa pin →
-  `{credentialOk, requiresPin:true}`; tahap 2 dengan pin → `{session,
-  branches[], terminal{tag, pairing}, terminalAccess, grant, policy,
-  tookOver}`). Bentuk lama `staff-login` tanpa identitas terminal
-  **DINYATAKAN DIGANTI** (bukan alternatif). Fail-closed (RBAC
-  terminal-access, PIN verify, login pertama). Status: kontrak dikunci ke
-  `terminal-login`; penyelarasan pemanggil + fixture dikerjakan paket F
-  (acuan: SPEC §11 E01); isi respons penuh BE-pending.
-- **E02–E06**: validate-pin (helper `validateTerminalPin` ganda
-  `terminalContract.ts:367`/`terminalApi.ts:206`, nol pemanggil layar → PLANNED/UNWIRED) → bind atomik
+  terminalCode, deviceId}` — **SINGLE-STAGE** (koreksi 2026-10-17, RoE live):
+  satu panggilan → LANGSUNG `{session, branches[], terminals[],
+  terminal{tag, pairing}, terminalAccess, grant, policy, authKey/JWT pair,
+  tookOver?}`. `staffPin` BUKAN bagian kontrak (server abaikan field tak
+  dikenal); gate PIN staff = verifikasi lokal app. Arah lama 2-tahap
+  (`{credentialOk, requiresPin:true}` tahap-1 + `staffPin` tahap-2 yang
+  "diverifikasi server") dan bentuk lama `staff-login` tanpa identitas
+  terminal **DINYATAKAN DICABUT** (bukan alternatif; riwayat salah arah di
+  SPEC §14). Fail-closed (RBAC terminal-access, login pertama). Status:
+  kontrak dikunci ke `terminal-login` single-stage; pemanggil
+  (`LoginScreen.callStaffLogin`, tanpa `staffPin`) + fixture
+  (`terminal-login.json` = bentuk sukses single-stage) selaras; isi respons
+  penuh mengikuti BE live.
+- **E02–E06**: validate-pin E02 WIRED — helper `validateTerminalPin`
+  (`terminalContract.ts`/`terminalApi.ts`) dipakai sebagai pre-check tanpa
+  efek di `TerminalPinScreen` sebelum `bindTerminal` → bind atomik
   `{pin,deviceId}` (WIRED via `bindTerminal`, dipanggil
-  `InstallScreen.tsx:156` + `TerminalPinScreen.tsx:76`; kick-notice
-  device baru `InstallScreen.tsx:204`; fixture `terminal-bind.json`
+  `InstallScreen` + `TerminalPinScreen`; kick-notice
+  device baru di `InstallScreen`; fixture `terminal-bind.json`
   bawa `kickedUserId`) → unbind owner E04 (WIRED app-side —
-  inline `terminalUnbind` via `apiFetch` di `SelectBranchScreen.tsx:90-93`
+  inline `apiFetch(ApiPath.terminalUnbind)` di `SelectBranchScreen`
   dalam `exitBranch`, best-effort sebelum local clear) → occupant E05
-  (PLANNED/UNWIRED — `fetchOccupant` di `terminalApi.ts:290` tanpa
+  (PLANNED/UNWIRED — `fetchOccupant` di `terminalApi.ts` tanpa
   pemanggil) → logout revoke E06 (WIRED app-side — `logoutRevoke`
-  fire-and-forget di `DrawerMenu.tsx:242` + `flushPendingRevokes`
-  via E06 di `sync.ts:1088`, dipanggil akhir `pushAll` sukses
-  (`sync.ts:832`) + login sukses (`LoginScreen.tsx:607`) +
-  boot (`App.tsx:402`); store `pendingRevoke` wired
-  di `session.ts`/`sync.ts`/`SyncScreen.tsx:63`).
+  fire-and-forget di `DrawerMenu` + `flushPendingRevokes`
+  via E06 di `sync.ts`, dipanggil akhir `pushAll` sukses
+  + login sukses (`LoginScreen`) +
+  boot (`App.tsx`); store `pendingRevoke` wired
+  di `session.ts`/`sync.ts`/`SyncScreen`).
 - **E07–E22**: branches / terminals CRUD + `tag` + `set-pin` +
   pair/unpair view→kasir (BE tolak view ke-2 dengan E422) + staff CRUD
   + pemetaan staff↔branch. Status: WIRED app-side = E07
-  `fetchBranches` (dipanggil `InstallScreen.tsx:116`) + E09
+  `fetchBranches` (dipanggil `InstallScreen`) + E09
   `fetchTerminals`/`fetchBranchTerminals` (dipanggil
-  `InstallScreen.tsx:132` + `TerminalPickerScreen.tsx:11`; fixture
+  `InstallScreen` + `TerminalPickerScreen`; fixture
   `branch-terminals.json`). PLANNED/UNWIRED = E08, E10–E14, E15/E16
   pair-unpair, E17–E22 staff-CRUD (hanya konstanta path di
   `server.ts`, nol pemanggil).
 - **E23–E25**: approvals `{action:void|cancel|compliment, ownerPin,
   refId}` → audit owner-actions → login-qr (TBD, Q2).
-  (PLANNED/UNWIRED — hanya konstanta path di `server.ts:158-160`,
+  (PLANNED/UNWIRED — hanya konstanta path di `server.ts`,
   nol pemanggil; pengecualian: `pin-reset` di luar tabel dipakai
-  `ForgotPinScreen.tsx:84` via `terminalContract.ts:433`.)
+  `ForgotPinScreen` via `terminalContract.ts`.)
 - **E26–E27**: SSE per terminal (`cart-view`/`payment-qr` scope kasir
   pasangan) + SSE antrean per branch (`queue-update`/`call`/`ready`,
   berversi). (Subscriber WIRED app-side: `subscribeTerminalEvents`
-  dipanggil `display.ts:443`, `subscribeQueueEvents` dipanggil
-  `QueueViewScreen.tsx:129`, fixture `queue-events.json`; transport
+  dipanggil `display.ts`, `subscribeQueueEvents` dipanggil
+  `QueueViewScreen`, fixture `queue-events.json`; transport
   live + auth BE-pending.)
 - **E28**: policy `max_offline_grant_days` via terminal-settings
   (server-wins). (Reader WIRED app-side: `offlineGrantPolicyKey` di
-  `server.ts:168`, dibaca `session.ts:426` + `LoginScreen.tsx:347`;
+  `server.ts`, dibaca `session.ts` + `LoginScreen`;
   fixture `pull-terminal-settings-v2.json`; nilai server-pending.)
 
 **Q7 — identitas sale (CLOSED, nilai final, SPEC §12)**: PK =
@@ -386,7 +407,7 @@ tidak ditulis ulang; BE terima dua format selama transisi).
 
 **Q6 — grant offline (CLOSED, nilai final, SPEC §12.2)**: TTL **7 hari
 sliding** sejak otorisasi BE terakhir — sliding **hanya** diperpanjang
-saat otorisasi online (login online sukses / `E01` tahap-2 sukses
+saat otorisasi online (login online sukses via `E01` single-stage
 memperpanjang `expiresAt`); login offline (cek grant cache) **tidak**
 memperpanjang, sehingga grant yang tak pernah online lagi kedaluwarsa
 alami. Grant terikat `(user, terminal, device)`; PIN staff
@@ -401,7 +422,7 @@ bisa dipakai di device offline.
 
 | Endpoint | Fixture |
 |---|---|
-| E01 terminal-login (user+branches+tag+pairing+grant+policy) | `src/data/dummy/install/staff-login.json` (acuan bentuk sukses tahap-2 + varian tahap-1 `{credentialOk, requiresPin:true}` + `{tookOver:{kickedUserId}}`; rename fixture menyusul paket F) |
+| E01 terminal-login single-stage (user+branches+tag+pairing+grant+policy+tookOver) | `src/data/dummy/install/terminal-login.json` (bentuk sukses single-stage: sesi penuh + `tookOver:null`) |
 | E03 bind atomik (binding+tag+pairing) | `src/data/dummy/install/terminal-bind.json` (`kickedUserId:null`; varian takeover menyusul) |
 | E09 daftar terminal branch (5 tag + `pairedKasirId`) | `src/data/dummy/pull/branch-terminals.json` |
 | E27 feed antrean branch (versi per event) | `src/data/dummy/pull/queue-events.json` (sampel `queue-update`/`call`/`ready`; transport SSE live menyusul Fase 4) |

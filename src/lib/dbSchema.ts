@@ -14,6 +14,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS ms_posuser (
     id TEXT PRIMARY KEY, username TEXT, pinHash TEXT, password TEXT, authKey TEXT,
     branchId TEXT, role TEXT, syncDate TEXT)`,
+  // R34 DEPRECATED: pinHash/password always NULL — PIN verification is SecureStore-only (lib/pin.ts).
   `CREATE TABLE IF NOT EXISTS ms_terminalsetting (
     terminalId TEXT NOT NULL, settingKey TEXT NOT NULL, settingValue TEXT,
     flag INTEGER DEFAULT 0, syncDate TEXT,

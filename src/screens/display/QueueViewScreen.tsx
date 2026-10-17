@@ -236,6 +236,7 @@ export default function QueueViewScreen() {
    * hanya dari kaki live (poll menulis lastPollAt, bukan lastDataAt). */
   const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);
   const showStaleBanner = !sseLive || liveAgeMs < 0 || liveAgeMs > DISPLAY_STALE_MS;
+  const isUnboundView = !branchId.trim();
   const isEmpty = prep.length === 0 && ready.length === 0;
   const rows: QueueTicket[] = [
     ...ready.map((ticket) => ({ ticket, done: true })),
@@ -263,6 +264,12 @@ export default function QueueViewScreen() {
       {online === false ? (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>{t('disp_offline_banner')}</Text>
+        </View>
+      ) : null}
+      {/* Q3 ORPHAN-DISPLAY-JADI-PROMO (setara queue): tak ter-bound = status disconnected netral; tanpa PIN/aksi. */}
+      {isUnboundView ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>Disconnected</Text>
         </View>
       ) : null}
       {showStaleBanner ? (

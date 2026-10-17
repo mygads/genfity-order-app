@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -38,9 +39,12 @@ export default function SettingsScreen({ navigation }: Props) {
   const toggleAutoCut = (v: boolean) => { setAutoCut(v); void setJSON(AUTOCUT_KEY, v); };
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
-  // F4 readout klaim: dibaca segar tiap render (ditulis HANYA oleh alur bind
-  // terverifikasi PIN via BranchPicker — tanpa input manual di layar ini).
-  const terminal = getTerminal();
+  // F4 readout klaim: ditulis HANYA oleh alur bind terverifikasi PIN via
+  // BranchPicker (tanpa input manual di layar ini); dibaca ulang tiap fokus —
+  // back-navigate setelah re-bind tak remount sehingga getTerminal() per
+  // render bisa basi tanpa render ulang.
+  const [terminal, setTerminal] = useState(() => getTerminal());
+  useFocusEffect(useCallback(() => { setTerminal(getTerminal()); }, []));
   // Kunci peran perangkat: 1 perangkat = 1 peran (Kasir penuh, Dapur, Display).
   const [deviceRole, setDeviceRoleState] = useState(() => getDeviceRole());
   useEffect(() => subscribeDeviceRole((r) => setDeviceRoleState(r)), []);

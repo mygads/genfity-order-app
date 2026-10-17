@@ -18,19 +18,19 @@ import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, 
   const kasir = p.kasir ?? getSession()?.name ?? getSession()?.username ?? '';
   const photo = p.photo ?? null;
   // WIRE-APPROVAL: default fail-closed (tanpa param = belum disetujui) +
-  // approve HANYA via eskalasi PIN owner (verifyLocalEscalation
-  // 'settings.edit'); identitas approver tercatat via markApproved(id,
+  // approve via eskalasi PIN staff/owner Q18 (verifyLocalEscalation
+  // 'petty.approve' — kunci khusus tanpa deny Staff); identitas approver tercatat via markApproved(id,
   // approver) + rincian by/at + sync. Tanpa PIN = tak approve.
   const [disetujui, setDisetujui] = useState(p.disetujui ?? false);
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
   const [pinErr, setPinErr] = useState('');
 
-  /** Buka modal PIN owner (audit trail, bukan auto-approve). */
+  /** Buka modal PIN staff/owner (audit trail, bukan auto-approve). */
   const setujui = () => { setPin(''); setPinErr(''); setPinVisible(true); };
-  /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
+  /** Konfirmasi approve: PIN staff/owner via eskalasi lokal, catat approver + timestamp + sync. */
   const confirmApprove = async () => {
-    const esc = await verifyLocalEscalation(pin, 'settings.edit');
+    const esc = await verifyLocalEscalation(pin, 'petty.approve');
     if (!esc.ok) { setPinErr(esc.message); return; }
     const approver = (esc.userId ?? '').trim();
     if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
@@ -79,7 +79,7 @@ import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, 
             <Text style={s.primaryT}>{t('petty.approveTxn')}</Text>
           </TouchableOpacity>
         )}
-        {/* WIRE-APPROVAL: modal PIN owner untuk approve. Judul/petunjuk literal netral ID/EN. */}
+        {/* WIRE-APPROVAL: modal PIN staff/owner untuk approve. Judul/petunjuk literal netral ID/EN. */}
         <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
           <View style={s.modalBg}>
             <View style={[s.modalCard, isTablet && s.modalCardTablet]}>

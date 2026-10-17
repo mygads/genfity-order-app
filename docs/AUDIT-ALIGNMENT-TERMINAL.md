@@ -168,3 +168,25 @@ RESIDUAL LOW (higiene, tak blokir): **R-sse-token-order** — `sse.ts:65` pakai 
 2. **PRN-DRAIN-VISIBILITY CLOSED-penuh** — `SyncScreen.tsx` kini impor `pendingPrintCount` dari `lib/printqueue` (tanpa siklus: printqueue hanya → db/escpos/native-printer/uuidv7), state `printPending` di-refresh bersama backlog lain (`:85-90`), tampil sebagai baris identifier `tr_printqueue` + masuk total header antrean + gerbang empty-state (`:206`); komentar `printqueue.ts` diselaraskan. Label memakai `t('sync.pending')` existing — tanpa kunci i18n baru, tanpa sentuh frozen lane.
 
 Sisa non-blokir yang BELUM dikerjakan di repo (butuh keputusan/aksi user): **i18n-scope-creep** (butuh audit diff, bukan read-only), **R-push-esb-sisa** (adaptor BE / finalize-sekali), Q2/Q3/Q4/Q8/Q9/Q10/Q14/Q15/**Q16**/Q18/Q19, dan seluruh §7.4 (tsc + go build + goose + e2e fisik).
+
+### 7.6 Keputusan produk final 2026-10-17 — 13 Q CLOSED
+
+> Catatan: §7.6 ini MENGGANTIKAN daftar TERBUKA di §4, §6, dan §7.4 untuk Q2/Q3/Q4/Q8/Q9/Q10/Q14/Q15/Q16/Q18/Q19 + Real-Mode + Terminal-code. Baris TERBUKA lama di §4/§6/§7.4 DIBIARKAN apa adanya sebagai arsip dan TIDAK diubah.
+
+| # | Q | Keputusan final |
+|---|---|---|
+| 1 | Q2 (PIN-via-QR) | QR-login DIHIDE untuk saat ini. Future: scan-QR login TANPA username-password-PIN-terminal di perangkat; sesi web auto-login, lalu PIN staff/owner sesuai role. |
+| 2 | Q3 (pair-unpair + display yatim) | Pair/unpair dilakukan DI WEB oleh owner ATAU staff-settings. Display yatim (orphan) tampil `disconnected-unpaired` + layar promosi TANPA PIN. |
+| 3 | Q4 (shift-gate dapur/display) | Kedua view (view_pelanggan, view_queue) BEBAS-shift. Dapur IKUT shift (seperti kasir). |
+| 4 | Q8 (print-job BE + slip antrean) | Cetak LOKAL = primer. PRINT-event BE = peningkatan (bukan wajib). Slip antrean dicetak DARI KASIR. |
+| 5 | Q9 (stale-vs-blank display) | Interim STALE-BERPENANDA disahkan (bukan blank): tampilkan banner stale/offline + BLOKIR aksi sensitif. |
+| 6 | Q10 (1 HP 2 peran) | Bebas GANTI AKUN di perangkat yang sama. Ganti terminal = RELEASE + BIND ULANG. |
+| 7 | Q14 (otorisasi re-bind) | PIN terminal CUKUP untuk re-bind; binding lama AUTO-CABUT + NOTIF ke perangkat terdampak. |
+| 8 | Q15 (retensi audit PIN owner) | AUDIT semua pemakaian PIN + takeover; retensi 90 hari–1 tahun; akses audit OWNER-ONLY. |
+| 9 | Q16 (kredensial staff) | Saat ini: email + username BISA (interim aditif, username = email-atau-nama). Target: username + password SAJA untuk staff tanpa email. E01 TERIMA KEDUANYA. |
+| 10 | Q18 (petty approval) | Staff BOLEH approve petty (tidak harus owner-level). |
+| 11 | Q19 (pemilik server supervisor PIN) | PIN supervisor PER-MERCHANT, di-set oleh owner; outlet IKUT merchant. |
+| 12 | Real-Mode | Real-Mode = Go-services. ESB = FALLBACK transisi (sampai adaptor kompatibel selesai, §7.3 R-push-esb-sisa). |
+| 13 | Terminal-code | Kode BARU untuk terminal baru (format ketat `^[A-Z0-9]{1,8}$` UPPER). Kode lama (mis. `GNF-xxx`) READ-ONLY transisi (tak ditolak, tak diterbitkan ulang). |
+
+**BE follow-up (milik tim backend, non-blokir app):** (i) E15–E16 dilonggarkan dari owner-only menjadi owner-ATAU-staff-settings (agar konsisten dengan Q3); (ii) endpoint QR-login future (agar Q2 bisa dihidupkan kembali); (iii) retensi audit PIN/takeover DIKONFIGURASI (agar Q15 90hr–1thn bisa disetel per merchant).

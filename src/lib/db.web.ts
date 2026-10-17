@@ -285,3 +285,39 @@ export async function getRoundingSetting(): Promise<RoundingSetting> {
     return fallback;
   }
 }
+
+export interface BranchCurrency {
+  /** Kode mata uang cabang ternormalisasi: 'IDR' | 'AUD', '' bila tak ada/tak dikenal. */
+  code: string;
+  /** Locale dari value2 (mis. 'id-ID'/'en-AU'), '' bila tak ada. */
+  locale: string;
+}
+
+let warnedBranchCurrency = false;
+
+/**
+ * Baca mata uang cabang dari ms_setting (key1='Branch', key2='Currency',
+ * value1='IDR'|'AUD', value2=locale). (Logika sama dengan db.ts.)
+ */
+export async function getBranchCurrency(): Promise<BranchCurrency> {
+  const fallback: BranchCurrency = { code: '', locale: '' };
+  try {
+    const row = await queryFirst<{ value1: string | null; value2: string | null }>(
+      `SELECT value1, value2 FROM ms_setting WHERE key1 = 'Branch' AND key2 = 'Currency' LIMIT 1`,
+    );
+    if (!row) return fallback;
+    const raw = (row.value1 ?? '').trim().toUpperCase();
+    const code = raw === 'IDR' || raw === 'AUD' ? raw : '';
+    if (raw && !code && !warnedBranchCurrency) {
+      warnedBranchCurrency = true;
+      try {
+        console.warn(`[currency] unknown Branch/Currency value1 "${row.value1}", fallback IDR`);
+      } catch {
+        /* abaikan */
+      }
+    }
+    return { code, locale: (row.value2 ?? '').trim() };
+  } catch {
+    return fallback;
+  }
+}

@@ -173,9 +173,10 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
           ? CUSTOMER_ONLY
           : ITEMS.filter((m) => allow.has(m.route));
   const go = (route: string) => {
-    // Gerbang kasir: shift tutup (status live dibaca tiap drawer dibuka) →
-    // tutup drawer lalu arahkan buka shift dulu, bukan ke kasir.
-    if (route === 'Cashier' && shiftOpen === false) {
+    // Gerbang kasir + dapur (Q4: view bebas-shift, dapur WAJIB shift terbuka):
+    // shift tutup (status live dibaca tiap drawer dibuka) → tutup drawer
+    // lalu arahkan buka shift dulu, bukan ke kasir/dapur.
+    if ((route === 'Cashier' || route === 'Kitchen') && shiftOpen === false) {
       onClose();
       navigate('Shift');
       return;

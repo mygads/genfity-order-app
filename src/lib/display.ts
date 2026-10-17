@@ -28,7 +28,7 @@ export type DisplayEvent =
   | { type: 'ready'; ticket: string }
   /** Order berjalan dari server (DISPLAY_ORDER, kontrak terminal §5):
    * antrean + rincian item + total ikut kasir. */
-  | { type: 'order'; ticket: string; items: DisplayOrderItem[]; total?: number; status?: string };
+  | { type: 'order'; ticket: string; items: DisplayOrderItem[]; total?: number; status?: string; clientId?: string };
 
 type Listener = (e: DisplayEvent) => void;
 
@@ -410,11 +410,11 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
     d = ((d.data ?? {}) as Record<string, unknown>);
   }
   const ticket = String(d.ticket ?? d.code ?? d.no ?? d.salesNum ?? '').trim();
-  // D6: UNFIXABLE-client-side: needs E26 client_id — payload E26/E27
-  // (kontrak API-TERMINAL-CONTRACT §4.2 + fixture queue-events.json) tak
-  // membawa client_id; QR live tetap dari kaki lokal (notifySaleSavedLocal)
-  // + kolom SQLite client_id. Bila BE menambahkannya, petakan ke event
-  // order di sini lalu teruskan ke liveClientId layar.
+  // D6: wired, activates when BE includes client_id — payload E26/E27
+  // (kontrak API-TERMINAL-CONTRACT §4.2 + fixture queue-events.json) kini
+  // dipetakan ke event order (clientId) di sini lalu diteruskan ke
+  // openTag/liveClientId layar bila hadir; aman no-op bila absen (QR live
+  // tetap dari kaki lokal notifySaleSavedLocal + kolom SQLite client_id).
   if (/^(call)$/.test(t)) {
     return ticket ? [{ type: 'call', ticket }] : [];
   }
@@ -434,11 +434,15 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
   const items = toOrderItems(d.items);
   if (ticket && (/display|order|cart|payment|qr/.test(t) || items.length > 0)) {
     if (items.length === 0 && !/display|order|cart|payment|qr/.test(t)) return [];
+    // D6: client_id SSE (snake_case BE maupun camelCase) — wired, aktif
+    // saat BE menyertakannya; absen = field dilepas (no-op).
+    const sseClientId = String(d.client_id ?? d.clientId ?? '').trim();
     return [
       {
         type: 'order',
         ticket,
         items,
+        ...(sseClientId ? { clientId: sseClientId } : {}),
         ...(typeof d.total === 'number' ? { total: d.total } : {}),
         ...(typeof d.status === 'string' ? { status: d.status } : {}),
       },

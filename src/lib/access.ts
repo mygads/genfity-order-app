@@ -18,7 +18,10 @@
  *
  * Model peran hanya ada 2: Merchant Owner (akses penuh) dan Merchant Staff
  * (dibatasi: deny order.void/order.cancel/sale.refund/settings.edit, lalu
- * eskalasi PIN Owner). Nilai peran legacy (admin/supervisor/kasir/...) dari
+ * eskalasi PIN Owner). PENGECUALIAN Q18 (STAFF-BISA-APPROVE-PETTY):
+ * 'petty.approve' SENGAJA tanpa deny Staff — PIN Staff valid lolos (fail-open
+ * default-allow), sedangkan void/cancel/kompliment (order.void/order.cancel/
+ * sale.refund) TETAP owner-only. Nilai peran legacy (admin/supervisor/kasir/...) dari
  * server dipetakan ke kanonis via normalizeRole agar template terbaca.
  *
  * Fail-open juga berlaku saat DB belum siap (catch -> allow, reason
@@ -78,6 +81,10 @@ export const ACCESS_KEYS = [
   'order.cancel',
   'sale.refund',
   'settings.edit',
+  // Q18 STAFF-BISA-APPROVE-PETTY: kunci khusus approve petty/kasbon — Staff
+  // dan Owner lolos (tanpa deny Staff di seed; fail-open default-allow).
+  // Void/cancel/kompliment TETAP lewat 4 kunci owner-only di atas.
+  'petty.approve',
 ] as const;
 
 export type AccessKey = (typeof ACCESS_KEYS)[number] | string;
@@ -88,6 +95,9 @@ export const ACCESS_KEY_DESCRIPTIONS: Record<string, string> = {
   'order.cancel': 'Batalkan pesanan (perlu Owner bila Staff di-deny)',
   'sale.refund': 'Refund penjualan (perlu Owner bila Staff di-deny)',
   'settings.edit': 'Ubah pengaturan (khusus Owner)',
+  // Q18: approve petty/kasbon boleh Staff maupun Owner (PIN siapa pun yang
+  // dikenal sistem lolos; Staff TIDAK di-deny untuk kunci ini).
+  'petty.approve': 'Setujui petty cash/kasbon (Staff maupun Owner)',
 };
 
 /** Daftar kunci akses yang dikenal (wildcard '*' tidak termasuk). */
@@ -266,7 +276,9 @@ export async function requireAccess(
 
 /**
  * Gerbang eskalasi persetujuan (void/cancel/kompliment butuh PIN Owner,
- * SPEC Q-kunci + D3-05): BINDING-gated, approver-aware, TANPA gerbang grant
+ * SPEC Q-kunci + D3-05; PENGECUALIAN Q18: 'petty.approve' boleh PIN Staff —
+ * kunci itu tanpa deny Staff sehingga hirarki di bawah meloloskan Staff via
+ * default-allow, Owner via role-wildcard-allow): BINDING-gated, approver-aware, TANPA gerbang grant
  * sesi kasir. Alasan: PIN Owner dimasukkan approver yang BELUM tentu memegang
  * sesi/grant login kasir — menuntut grant milik approver menolak eskalasi sah
  * (deny arah-1), sedangkan melewatkan grant kasir meloloskan sesi basi (allow
@@ -304,8 +316,8 @@ export async function requireEscalationAccess(
 // SENGAJA berlawanan dengan requireAccess di atas (fail-open untuk 4 kunci
 // aksi dalam-app): gerbang ini MENOLAK bila tanpa grant cache valid, bila
 // identitas kosong, atau bila pengecekan gagal. Tidak pernah melempar.
-// BE E01 staff-login BELUM ADA: satu-satunya otoritas kini adalah grant
-// cache (dibuat saat auth online sukses; lihat buildGrant/saveGrant di
+// E01 terminal-login single-stage LIVE (2026-10-17): satu-satunya otoritas
+// kini adalah grant cache (dibuat saat auth online sukses; lihat buildGrant/saveGrant di
 // session.ts). Alasan deny dipetakan ke status UI eksplisit ("needs BE /
 // mode lokal") — dipakai alur L1, bukan bypass diam:
 // - 'no-grant'         → login pertama wajib online (butuh BE).

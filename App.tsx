@@ -14,6 +14,8 @@ import { initDb, queryFirst, run } from './src/lib/db';
 import { seedIfEmpty } from './src/lib/seed';
 import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
+import { subscribeTerminalEvents } from './src/lib/sse';
+import { getApiMode } from './src/lib/apiSource';
 import { flushPendingRevokes } from './src/lib/sync';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
@@ -79,6 +81,92 @@ import PettyCashDetailScreen from './src/screens/cash/PettyCashDetailScreen';
 import ExpenseScreen from './src/screens/cash/ExpenseScreen';
 
 void SplashScreen.preventAutoHideAsync();
+
+// ---------------------------------------------------------------------------
+// K1 — deteksi kick via event `takeover` SSE terminal (kebenaran BE
+// terverifikasi 2026-10-17): kick = last-writer-wins — login baru menerima
+// `tookOver` di respons terminal-login + event `takeover` di-fan-out pada
+// feed SSE terminal; grant lama direvoke server-side TANPA menegakkan pada
+// panggilan API device lama (jadi device lama TIDAK menerima 401 — 401 =
+// gagal auth final → re-login, BUKAN bukti kick).
+// SATU-SATUNYA langganan kick tingkat sesi: dipasang/dilepas oleh efek
+// loggedIn/bound di bawah (cleanup tiap ganti binding → tak ada duplikat).
+// Langganan SSE di display.ts (ensureSse) murni transport display dan tak
+// menangani kick. Mode offline/lokal: no-op (butuh Real Mode + sesi +
+// terminal ter-bound; SseClient pun fail-closed tanpa BE terkonfigurasi).
+// Tak pernah melempar.
+// ---------------------------------------------------------------------------
+
+/** true bila event takeover SSE ini mengusir sesi aktif perangkat ini. */
+function isTakeoverForMe(data: unknown): { forMe: boolean; kickedUserId: string } {
+  try {
+    const me = getSession();
+    if (!me) return { forMe: false, kickedUserId: '' };
+    const d = (data ?? {}) as Record<string, unknown>;
+    // Bukan terminal kami → abaikan (feed sudah per-terminal; jaga-jaga bila
+    // payload membawa identitas terminal lain).
+    const evTerm = String(d.terminalId ?? d.terminalCode ?? '').trim();
+    const b = getBinding();
+    const myTermId = String(b?.terminalId ?? me.terminalId ?? '').trim();
+    const myTermCode = String(b?.terminalCode ?? '').trim();
+    if (evTerm && myTermId && evTerm !== myTermId && evTerm !== myTermCode) {
+      return { forMe: false, kickedUserId: '' };
+    }
+    const myUserId = String(me.userId ?? '').trim();
+    const myName = String(me.username ?? '').trim();
+    const myDevice = String(b?.deviceId ?? me.deviceId ?? '').trim();
+    // Bila event menyebut user yang ditendang: hanya kami yang bereaksi.
+    const evKicked = String(d.kickedUserId ?? '').trim();
+    if (evKicked) {
+      const mine =
+        (myUserId !== '' && evKicked === myUserId) ||
+        (myName !== '' && evKicked === myName);
+      return { forMe: mine, kickedUserId: evKicked };
+    }
+    // Tanpa kickedUserId eksplisit: user/device event ≠ milik sesi/binding
+    // kami pada terminal ini = sesi kami digantikan login lain.
+    const evUser = String(d.userId ?? d.username ?? '').trim();
+    const evDevice = String(d.deviceId ?? '').trim();
+    const userDiffers = evUser !== '' && evUser !== myUserId && evUser !== myName;
+    const deviceDiffers = evDevice !== '' && myDevice !== '' && evDevice !== myDevice;
+    return { forMe: userDiffers || deviceDiffers, kickedUserId: '' };
+  } catch {
+    return { forMe: false, kickedUserId: '' };
+  }
+}
+
+/**
+ * Pasang watcher takeover SSE untuk sesi aktif; kembalikan stop-fn (no-op
+ * bila prasyarat tak terpenuhi). Event `takeover` untuk sesi kami →
+ * notice kicked_msg + cabut sesi+grant lokal (revokeKickedSession).
+ */
+function startTakeoverWatch(): () => void {
+  const noop = () => {};
+  try {
+    if (getApiMode() !== 'real') return noop;
+    const me = getSession();
+    const terminalId = String(getBinding()?.terminalId ?? me?.terminalId ?? '').trim();
+    if (!me || !terminalId) return noop;
+    return subscribeTerminalEvents(terminalId, (e) => {
+      try {
+        if (!/takeover/.test(String(e?.type ?? ''))) return;
+        const { forMe, kickedUserId } = isTakeoverForMe(e?.data);
+        if (!forMe) return;
+        if (revokeKickedSession(kickedUserId || undefined)) {
+          try {
+            setKickNotice(tr('kicked_msg'));
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* handler tak boleh mematikan klien SSE */
+      }
+    });
+  } catch {
+    return noop;
+  }
+}
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -514,7 +602,10 @@ export default function App() {
       // SPEC §7/Q13 KICK-NO-LOCAL-REVOKE + kick-no-live-notify: sesi perangkat
       // ini digantikan login lain → cabut sesi + grant lokal agar sesi basi tak
       // bisa dipakai lagi, lalu notif kick langsung (perangkat BARU sudah
-      // dikabari via tookOver/kickedUserId di alur login/bind). Tanpa identitas
+      // dikabari via tookOver/kickedUserId di alur login/bind). Pencocokan
+      // pola kick/takeover/revoke/logout di sini MURNI sisi-klien
+      // (future-proof — server TAK PERNAH push frame SESSION_KICKED; deteksi
+      // utama = event `takeover` SSE via startTakeoverWatch). Tanpa identitas
       // yang cocok dengan sesi aktif = abaikan (bukan untuk kami).
       if (/session|kick|takeover|revoke|logout/i.test(String(msg.type ?? ''))) {
         const p = msg.payload as {
@@ -558,10 +649,21 @@ export default function App() {
       startRealtime();
       const s = getSession();
       if (s) void registerPushToken(s.username, getTerminal().terminalCode);
+      // K1: watcher takeover sesi (SATU-SATUNYA langganan kick sesi; display.ts
+      // hanya transport display). Lihat startTakeoverWatch di bawah.
+      const stopTakeover = startTakeoverWatch();
+      return () => {
+        try {
+          stopTakeover?.();
+        } catch {
+          /* abaikan */
+        }
+      };
     } else {
       stopRealtime();
     }
-  }, [loggedIn]);
+    return undefined;
+  }, [loggedIn, bound]);
 
   if (!loaded || !booted) {
     return (
@@ -598,8 +700,10 @@ export default function App() {
               boundNow = false;
             }
             if (!boundNow) {
+              // Dev-hook only: arahkan ke awal alur klaim B2 (BranchPicker,
+              // selaras BIND_FLOW_ROUTE). No-op bila rute tak ada di stack aktif.
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (navRef as any).navigate('Install' as never);
+              (navRef as any).navigate('BranchPicker' as never);
               return;
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

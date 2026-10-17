@@ -34,7 +34,7 @@ export interface Session {
   terminalId?: string;
   /** Id device sesi (1 device = 1 terminal, SPEC-TERMINAL-SESSION §7.1). */
   deviceId?: string;
-  /** Token sesi server dari E01 staff-login (endpoint belum ada; saat mendarat
+  /** Token sesi server dari E01 terminal-login single-stage (live 2026-10-17;
    *  pindahkan ke SecureStore ala lib/pin.ts, jangan plaintext di storage). */
   authToken?: string;
   /** Waktu login ISO (dibuat saat loginEmployee/saveSession). */
@@ -88,9 +88,8 @@ export interface Grant {
 
 /**
  * Revoke sesi yang masih terutang ke server (SPEC-TERMINAL-SESSION §7/O1):
- * logout lokal langsung berlaku di device; revoke E06/E07 server-side
- * menyusul. Selama endpoint BE belum ada, setiap logout meninggalkan flag
- * ini (jujur, bukan bypass) untuk di-flush worker sync saat E06/E07 mendarat.
+ * logout lokal langsung berlaku di device; revoke E06 server-side menyusul
+ * (jujur, bukan bypass) untuk di-flush worker sync (flushPendingRevokes).
  */
 export interface PendingRevoke {
   sessionId?: string;
@@ -444,8 +443,8 @@ export function getGrant(): Grant | null {
 }
 
 /**
- * Simpan grant dari hasil auth online (E01 staff-login; endpoint belum ada —
- * kini dipanggil manual/seeding sampai E01 mendarat). Menolak plaintext
+ * Simpan grant dari hasil auth online (E01 terminal-login single-stage, live
+ * 2026-10-17). Menolak plaintext
  * PIN/password bila ikut terbawa di objek (fail-fast, bukan bypass diam).
  */
 export function saveGrant(g: Grant): Grant {

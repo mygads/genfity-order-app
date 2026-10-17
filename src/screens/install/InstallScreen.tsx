@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { adoptTerminalBinding } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
+import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { getTerminal, setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { adoptTerminalBinding, getBinding, hydrateTerminalState } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
   bindTerminal,
   fetchBranches,
   fetchTerminals,
@@ -249,6 +249,21 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
       return;
     }
     setChecking(true); setError('');
+    // Q10: ganti terminal wajib re-bind penuh (pilih ulang + PIN terminal) —
+    // klaim kode legacy tak boleh menimpa ikatan yang sudah ada (tanpa PIN,
+    // tanpa logout/clearGrant). Perangkat terikat → tolak fail-closed; pakai
+    // tombol ikat-ulang di kartu atas (aliran E03 ber-PIN). Tanpa kunci i18n
+    // baru: pesan memakai L.rebindBtn yang sudah ada.
+    try { await hydrateTerminalState(); } catch { /* memori apa adanya */ }
+    let alreadyBound = false;
+    try {
+      const b = getBinding();
+      const t0 = getTerminal();
+      alreadyBound =
+        !!(b && (b.terminalId || '').trim()) ||
+        !!((t0.terminalCode || '').trim() && (t0.branchId || '').trim());
+    } catch { alreadyBound = false; }
+    if (alreadyBound) { setChecking(false); setError(L.rebindBtn); return; }
     try { const r = await validateTerminal(canon); if (!r.valid || !r.branchId) { setError(t('inst_claim_invalid')); return; } setTerminal({ terminalCode: canon, branchId: r.branchId, branchName: r.branchName, }); try { await notifyTerminalVerification('verified'); } catch { /* notify best-effort - klaim tetap lanjut */ } navigation?.navigate('SelectBranch');
   } catch { setError(t('inst_claim_invalid')); } finally { setChecking(false); } };
 

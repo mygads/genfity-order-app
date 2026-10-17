@@ -1,8 +1,29 @@
 /**
  * Klien kontrak terminal backend Go + binding device & grant offline sisi app.
  *
- * KONTRAK TERKUNCI (kedua sisi implementasi; app degrade gracefully saat
- * backend belum ada — Fase 0 backend, audit row 1/4):
+ * KONTRAK LIVE (koreksi 2026-10-17 atas arah 2-tahap yang SALAH — RoE
+ * single-stage, bukan credentialOk/requiresPin lalu +staffPin):
+ * - POST /api/v1/auth/terminal-login {username,password,terminalCode,deviceId}
+ *   → LANGSUNG sesi penuh (session + JWT pair + terminal tag + branches +
+ *   terminals + grant triple 7-hari + tookOver{kickedUserId} bila eviksi).
+ *   `staffPin` BUKAN bagian endpoint (server abaikan field tak dikenal);
+ *   gate PIN staff = VERIFIKASI LOKAL (passesLocalWorkforcePin di LoginScreen
+ *   vs workforce-PIN record), bukan panggilan server kedua.
+ * - Kick (kebenaran BE terverifikasi 2026-10-17): TAK ADA frame
+ *   SESSION_KICKED push sisi server — kick = last-writer-wins: login baru
+ *   menerima `tookOver` di respons terminal-login + event `takeover`
+ *   di-fan-out pada feed SSE terminal; grant lama direvoke server-side
+ *   (tak ditegakkan pada panggilan API device lama, jadi device lama TIDAK
+ *   menerima 401 — 401 = gagal auth final → re-login, BUKAN bukti kick).
+ *   Device lama deteksi via event `takeover` SSE terminal (user/device event
+ *   ≠ sesi/binding sendiri → notice kicked_msg + logout; watcher sesi di
+ *   App.tsx) + pencocokan pola kick/takeover sisi-klien pada pesan WS
+ *   (future-proof).
+ * - E02 validate-pin = PIN TERMINAL (binding); bila route belum ada sisi
+ *   server, pemanggil bertahan defensif (fail-closed): hanya jawaban BE asli
+ *   yang dipercaya, offline/dummy tak pernah valid.
+ *
+ * Daftar endpoint (bentuk request, bukan status BE):
  * - POST /api/v1/auth/terminal-login {username,password,terminalCode,deviceId}
  * - GET  /api/v1/branches
  * - GET  /api/v1/branches/{id}/terminals
@@ -25,7 +46,9 @@
  *
  * Tiga PIN terpisah (audit row 5): PIN terminal (binding, tak disimpan —
  * diverifikasi per-bind via validate-pin/bind) ≠ PIN staff (login/absensi/
- * shift, hash lokal via lib/pin.ts) ≠ PIN owner (eskalasi, supervisor.ts).
+ * shift — hash lokal via lib/pin.ts; server TAK PERNAH memverifikasi PIN
+ * staff saat login, gate-nya passesLocalWorkforcePin di LoginScreen) ≠
+ * PIN owner (eskalasi, supervisor.ts).
  *
  * Grant offline (audit row 19, Q6 CLOSED): cache 7-hari sliding terikat
  * rangkap-tiga (userId + terminalCode + deviceId). Login PERTAMA wajib
@@ -278,6 +301,9 @@ export async function getContractDeviceId(): Promise<string> {
 // Endpoint kontrak.
 // ---------------------------------------------------------------------------
 
+/** Hasil terminal-login single-stage (DEAD CODE 2026-10-17: nol pemanggil —
+ * jalur hidup = callStaffLogin di LoginScreen; dipertahankan sebagai acuan
+ * bentuk + diperbaiki ke RoE live: sesi penuh langsung + tookOver). */
 export interface TerminalLoginSuccess {
   userId: string;
   role: string;
@@ -286,6 +312,12 @@ export interface TerminalLoginSuccess {
   tag: TerminalTag | '';
   authKey: string;
   grantExpiresAt: string;
+  /** Id sesi server (bila BE mengirim). */
+  sessionId: string;
+  /** JWT sesi (authToken/token, fallback authKey). */
+  authToken: string;
+  /** Eviksi: user yang ditendang login ini ('' bila tidak ada). */
+  tookOverKickedUserId: string;
 }
 
 export async function terminalLogin(input: {
@@ -318,6 +350,8 @@ export async function terminalLogin(input: {
     : [];
   const rawTag = str(d.tag);
   const grant = (d.grant ?? {}) as Record<string, unknown>;
+  const tookOver = (d.tookOver ?? {}) as Record<string, unknown>;
+  const authKey = str(d.authKey);
   return {
     ok: true,
     status: r.status,
@@ -328,8 +362,11 @@ export async function terminalLogin(input: {
       branches,
       terminals,
       tag: isTerminalTag(rawTag) ? rawTag : ('' as const),
-      authKey: str(d.authKey),
+      authKey,
       grantExpiresAt: str(grant.expiresAt),
+      sessionId: str(d.sessionId ?? d.session_id),
+      authToken: str(d.authToken ?? d.token ?? authKey),
+      tookOverKickedUserId: str(tookOver.kickedUserId ?? d.kickedUserId),
     },
   };
 }

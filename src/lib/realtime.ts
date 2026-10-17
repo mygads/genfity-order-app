@@ -11,7 +11,8 @@
  * - kitchen-incoming / order-accepted → dapur, full_access
  * - cart-view / payment-qr (scope pasangan kasir) → view_pelanggan
  * - queue-update / call / ready (scope branch) → view_queue
- * - SESSION_KICKED / targeted → selalu diteruskan (per perishable session)
+ * - pola kick/takeover sisi-klien (future-proof, bukan frame server) +
+ *   `tookOver` di respons login → selalu diteruskan (per perishable session)
  * - tak dikenal (generic) → hanya tag full-feature (fail-closed untuk view)
  * Layar view memakai SSE primer (lib/sse.ts); WS di sini sekunder untuk
  * kasir/dapur + fallback. Tak pernah melempar.
@@ -84,8 +85,10 @@ export function onWsMessage(fn: WsHandler): () => void {
 }
 
 function emit(msg: WsMessage): void {
-  // K1: SESSION_KICKED / takeover — sesi digantikan login lain: cabut sesi
-  // lokal + beri tahu kasir (kunci kicked_msg), apa pun tag-nya.
+  // K1: pola kick/takeover sisi-klien (future-proof — server TAK PERNAH push
+  // frame SESSION_KICKED; deteksi utama = event `takeover` SSE via
+  // startTakeoverWatch di App.tsx): tipe cocok pola → cabut sesi lokal +
+  // beri tahu kasir (kunci kicked_msg), apa pun tag-nya.
   try {
     if (/kick|takeover/.test(String(msg?.type ?? '').toLowerCase())) {
       handleSessionKicked();

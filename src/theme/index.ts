@@ -35,7 +35,26 @@ export const fonts = {
 };
 export const rp = (n: number) => 'Rp ' + rpNum(n);
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
+/** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 export const rpNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+/** Angka grouping ala Australia tanpa prefix - pasangan rpNum utk AUD. */
+export const audNum = (n: number) =>
+  Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+let warnedCurrencyFallback = false;
+/** Format mata uang cabang: 'AUD' → 'A$ ' + grouping en-AU; default/''/tak dikenal → rp(n) (fallback IDR, tak pernah blank). */
+export const formatCurrency = (n: number, currency?: string) => {
+  const code = (currency ?? '').trim().toUpperCase();
+  if (code === 'AUD') return 'A$ ' + audNum(n);
+  if (code && code !== 'IDR' && !warnedCurrencyFallback) {
+    warnedCurrencyFallback = true;
+    try {
+      console.warn(`[currency] unknown code "${currency}", fallback IDR`);
+    } catch {
+      /* abaikan */
+    }
+  }
+  return rp(n);
+};
 
 export { TABLET_BP, useIsWide, wideCenter, wideCenterLg, wideCenterSm } from './responsive';

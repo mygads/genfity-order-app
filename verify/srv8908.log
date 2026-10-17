@@ -91,3 +91,31 @@ Web  LOG  Running application "main" with appParams:
 Development-level warnings: ON.
 Performance optimizations: OFF.
 Web Bundled 17ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web Bundled 17390ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 1579ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web  WARN  [seed] order SEED-002 dilewati: Error: Error finalizing statement
+Web  WARN  [seed] order SEED-003 dilewati: Error: Error finalizing statement
+Web  WARN  [seed] order SEED-004 dilewati: Error: Error finalizing statement
+Web Bundled 161ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 213ms node_modules\expo-sqlite\web\worker.ts (1 module)
+Web  WARN  [seed] order SEED-001 dilewati: Error: Error finalizing statement
+Web Bundled 135ms index.ts (1 module)
+Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+Web  WARN  [expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.
+Web  LOG  Running application "main" with appParams:
+ {"hydrate": undefined, "rootTag": "#root"} 
+Development-level warnings: ON.
+Performance optimizations: OFF.
+Web Bundled 76ms node_modules\expo-sqlite\web\worker.ts (1 module)

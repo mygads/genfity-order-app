@@ -24,20 +24,22 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
     [items],
   );
 
-  // WIRE-APPROVAL (row-17 petty): approve = eskalasi PIN owner
-  // (verifyLocalEscalation 'settings.edit'); identitas approver tercatat via
+  // WIRE-APPROVAL (row-17 petty, Q18 STAFF-BISA-APPROVE-PETTY): approve =
+  // eskalasi PIN staff/owner (verifyLocalEscalation 'petty.approve' — kunci
+  // khusus tanpa deny Staff; void/cancel/kompliment TETAP owner-only);
+  // identitas approver tercatat via
   // markApproved(id, approver) + rincian by/at + sync. Tanpa PIN = tak approve.
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
   const [pinErr, setPinErr] = useState('');
   const [pendingId, setPendingId] = useState<string | null>(null);
 
-  /** Buka modal PIN owner untuk satu transaksi (audit trail, bukan auto-approve). */
+  /** Buka modal PIN staff/owner untuk satu transaksi (audit trail, bukan auto-approve). */
   const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
-  /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
+  /** Konfirmasi approve: PIN staff/owner via eskalasi lokal, catat approver + timestamp + sync. */
   const confirmApprove = async () => {
     if (!pendingId) return;
-    const esc = await verifyLocalEscalation(pin, 'settings.edit');
+    const esc = await verifyLocalEscalation(pin, 'petty.approve');
     if (!esc.ok) { setPinErr(esc.message); return; }
     const approver = (esc.userId ?? '').trim();
     if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
@@ -111,7 +113,7 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
         )}
       </ScrollView>
 
-      {/* WIRE-APPROVAL: modal PIN owner untuk approve. Judul/petunjuk literal netral ID/EN; tombol batal pakai key existing. */}
+      {/* WIRE-APPROVAL: modal PIN staff/owner untuk approve. Judul/petunjuk literal netral ID/EN; tombol batal pakai key existing. */}
       <Modal visible={pinVisible} transparent animationType="slide" onRequestClose={() => setPinVisible(false)}>
         <View style={s.modalBg}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>

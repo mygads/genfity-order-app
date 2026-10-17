@@ -121,6 +121,19 @@ function QrTabletArt() {
  */
 const BIND_FLOW_ROUTE = 'BranchPicker';
 
+/**
+ * APP-FIXUP(Q2) HIDE-QR: entry login-QR DIHIDE dulu (QR_LOGIN_VISIBLE=false).
+ * handleQrData/loginByQrCode/parseQrLoginPayload SENGAJA dipertahankan
+ * (bukti H1 + dipakai future) — yang disembunyikan hanya entry UI-nya
+ * (card mode qr, qrHero, tombol openQrScanner, infoItem login_info_qr).
+ * Future design (catat saja, JANGAN implementasi di sini): backend
+ * genfity-order akan mendukung login via QR di terminal — scan QR langsung
+ * login tanpa username/password/PIN-terminal; user yang sedang login di web
+ * genfity-order otomatis login di terminal, lalu hanya diminta PIN
+ * staff/owner sesuai role-nya.
+ */
+const QR_LOGIN_VISIBLE = false;
+
 /** Ambil string aman dari payload kontrak. */
 function str(v: unknown, fb = ''): string {
   if (typeof v === 'string') return v;
@@ -219,13 +232,16 @@ async function resolveTermCtx(): Promise<TermCtx | null> {
   return null;
 }
 
-/** E01 staff-login (SPEC §4/§11 E01): dua tahap via satu endpoint.
- * {username,password,terminalCode,deviceId} → {credentialOk, requiresPin};
- * +{staffPin} → sesi. Payload SELALU bawa terminalCode+deviceId (okupansi
- * tunggal per terminal).
+/** E01 terminal-login SINGLE-STAGE (SPEC §4/§11 E01; koreksi 2026-10-17 atas
+ * arah 2-tahap yang SALAH): POST /api/v1/auth/terminal-login
+ * {username,password,terminalCode,deviceId} → LANGSUNG sesi penuh (session +
+ * JWT pair + terminal tag + branches + terminals + grant triple 7-hari +
+ * tookOver{kickedUserId} bila eviksi). `staffPin` BUKAN bagian endpoint ini
+ * (server mengabaikan field JSON tak dikenal) — PIN staff TAK PERNAH dikirim
+ * ke server; gate PIN murni VERIFIKASI LOKAL (passesLocalWorkforcePin).
+ * Payload SELALU bawa terminalCode+deviceId (okupansi tunggal per terminal).
  * Tak pernah melempar: {reached:false} = offline/unconfigured (mode 'local'
- * = tanpa server; BE E01 mayoritas BELUM ADA — pemanggil wajib lewat gate
- * grant, fail-closed). */
+ * = tanpa server — pemanggil wajib lewat gate grant, fail-closed). */
 interface StaffLoginCall {
   reached: boolean;
   status: number;
@@ -249,7 +265,11 @@ async function callStaffLogin(body: Record<string, string>): Promise<StaffLoginC
   }
 }
 
-/** Penolakan eksplisit server (kredensial salah) vs tak-terjangkau. */
+/** Penolakan eksplisit server (kredensial salah) vs tak-terjangkau.
+ * 401 di SINI (pra-sesi, tanpa sesi aktif) = kredensial ditolak, BUKAN kick:
+ * 401 = gagal auth final → re-login, tak pernah bukti kick (koreksi K1
+ * 2026-10-17). Deteksi kick = event `takeover` SSE terminal (watcher sesi di
+ * App.tsx) + pencocokan pola kick/takeover sisi-klien pada pesan WS. */
 function isExplicitReject(call: StaffLoginCall): boolean {
   if (!call.reached) return false;
   if (call.status === 401 || call.status === 403 || call.status === 422) return true;
@@ -257,14 +277,22 @@ function isExplicitReject(call: StaffLoginCall): boolean {
   return false;
 }
 
-function isStage1Ok(call: StaffLoginCall): boolean {
+/** Respons pertama SUDAH membawa sesi penuh (single-stage live): userId ada.
+ * BUKAN undangan tahap-2 — sesi dikunci setelah gerbang PIN LOKAL, tanpa
+ * panggilan server kedua. */
+function hasSessionMaterial(call: StaffLoginCall): boolean {
   if (!call.reached || call.status < 200 || call.status >= 300) return false;
+  return str(call.body.userId ?? call.body.user_id) !== '';
+}
+
+/** DEFENSIF: server menjawab kredensial-ok TANPA materi sesi (requiresPin /
+ * credentialOk tanpa userId — tak pernah terjadi di BE live single-stage).
+ * Pemanggil boleh refetch jujur TANPA staffPin; PIN tetap gerbang lokal. */
+function isCredentialOnly(call: StaffLoginCall): boolean {
+  if (!call.reached || call.status < 200 || call.status >= 300) return false;
+  if (hasSessionMaterial(call)) return false;
   const b = call.body;
-  return (
-    b.credentialOk === true ||
-    b.requiresPin === true ||
-    str(b.userId ?? b.user_id) !== ''
-  );
+  return b.credentialOk === true || b.requiresPin === true;
 }
 
 interface NormBranch {
@@ -308,8 +336,40 @@ async function ensureLocalPinHash(userId: string, pin: string): Promise<void> {
 }
 
 /**
- * Kunci sesi online pasca-E01b (alur L1): saveSession + saveGrant 7-hari
- * sliding (Q6; server-wins bila BE mengirim policy max_offline_grant_days/E28).
+ * GERBANG PIN LOKAL (koreksi 2026-10-17): server TIDAK PERNAH memverifikasi
+ * PIN staff — tak ada endpoint verify-PIN-staff (E02 validate-pin = PIN
+ * TERMINAL untuk binding, bukan PIN staff; pin-reset owner-only tak dipakai
+ * saat login). Maka modal PIN staff pasca-terminal-login adalah VERIFIKASI
+ * LOKAL terhadap workforce-PIN record (lib/pin — store yang sama dibaca
+ * layar absensi/shift via loadPinRecord):
+ * - record ada → PIN wajib cocok (verifyPinHash), salah = tolak;
+ * - record belum ada (login pertama) → seed sekali (savePinHash) agar grant
+ *   offline + login berikut punya acuan. Jujur: ini MENGINGAT PIN yang
+ *   dipakai saat sesi dinyatakan lolos BE, bukan verifikasi ke server.
+ * Tak pernah melempar (gagal baca = false, fail-closed).
+ */
+async function passesLocalWorkforcePin(userId: string, pin: string): Promise<boolean> {
+  const uid = userId.trim();
+  const clean = String(pin ?? '');
+  if (!uid || !clean) return false;
+  try {
+    const rec = await loadPinRecord(uid);
+    if (!rec) {
+      await savePinHash(uid, clean);
+      return true;
+    }
+    return verifyPinHash(clean, rec);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kunci sesi online pasca-terminal-login single-stage (alur L1): saveSession
+ * + saveGrant 7-hari sliding (Q6; server-wins bila BE mengirim policy
+ * max_offline_grant_days/E28). Materi sesi dari respons terminal-login
+ * (pertama, atau refetch defensif TANPA staffPin) — PIN argumen dipakai
+ * HANYA untuk grant hash + seed workforce-PIN lokal, bukan verifikasi server.
  */
 async function completeOnline(
   payload: Record<string, unknown>,
@@ -423,11 +483,21 @@ export default function LoginScreen({ navigation }: Props) {
   const [staffPin, setStaffPin] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
   const [pinError, setPinError] = useState('');
-  /** online = E01a lolos, PIN menyusul via E01b; offline = grant valid, PIN vs
-   * hash grant. Tak ada jalur legacy: unbound diblokir eksplisit di langkah 1
-   * (semua build termasuk DEV — login pertama wajib device terikat + BE). */
+  /** online = respons terminal-login SUDAH bawa sesi (single-stage) + payload
+   * tersimpan; PIN = gerbang VERIFIKASI LOKAL (passesLocalWorkforcePin),
+   * tanpa panggilan server kedua. online-refetch = defensif (kredensial-ok
+   * tanpa materi sesi; refetch jujur TANPA staffPin). offline = grant valid,
+   * PIN vs hash grant. Tak ada jalur legacy: unbound diblokir eksplisit di
+   * langkah 1 (semua build termasuk DEV — login pertama wajib device
+   * terikat + BE). */
   const [candidate, setCandidate] = useState<null | {
     kind: 'online';
+    username: string;
+    password: string;
+    /** Materi sesi dari respons terminal-login pertama (single-stage). */
+    payload: Record<string, unknown>;
+  } | {
+    kind: 'online-refetch';
     username: string;
     password: string;
   } | {
@@ -435,12 +505,14 @@ export default function LoginScreen({ navigation }: Props) {
     username: string;
     userId: string;
   }>(null);
-  /** Banner info pasca-E01a (mis. sesi lama ditendang di tempat lain). */
+  /** Banner info pasca-terminal-login (mis. sesi lama ditendang di tempat lain). */
   const [notice, setNotice] = useState('');
   /** Layar blokir eksplisit (fail-closed): grant kedaluwarsa / belum diikat. */
   const [blocked, setBlocked] = useState<null | { kind: 'grant-expired' | 'unbound' }>(null);
-  /** Takeover (SPEC §4/K1): E01b menang atas sesi lama — user BARU wajib
-   * dikabari + konfirmasi sebelum sesi dibuat. */
+  /** Takeover (SPEC §4/K1, jalur refetch defensif): terminal-login menang atas
+   * sesi lama — user BARU wajib dikabari + konfirmasi sebelum sesi dibuat.
+   * Jalur utama single-stage mengabari via notice kicked_msg (tanpa modal
+   * blokir — server sudah merevoke sesi lama). */
   const [takeover, setTakeover] = useState<null | {
     kickedUserId: string;
     payload: Record<string, unknown>;
@@ -609,13 +681,15 @@ export default function LoginScreen({ navigation }: Props) {
   };
 
   /**
-   * Login B1 (SPEC §4/L1): username + password DULU (E01a), lalu MODAL PIN
-   * staff (E01b) — berurutan, bukan 3 faktor sekaligus.
-   * - Terikat + online: POST E01 staff-login → modal PIN staff (server yang
-   *   memverifikasi + cek RBAC + cek okupansi) → saveSession + saveGrant.
-   * - Terikat + offline/unconfigured (E01 BELUM ADA di BE): gate grant jujur
-   *   (isGrantValid + PIN vs hash); tanpa grant valid → tolak (login pertama
-   *   wajib online, Q6). grant kedaluwarsa → layar blokir grant_expired.
+   * Login B1 (SPEC §4/L1, single-stage — koreksi 2026-10-17): username +
+   * password DULU, lalu MODAL PIN staff — berurutan, bukan 3 faktor sekaligus.
+   * - Terikat + online: POST E01 terminal-login {username,password,
+   *   terminalCode,deviceId} → LANGSUNG sesi penuh → modal PIN staff
+   *   (VERIFIKASI LOKAL via passesLocalWorkforcePin — server tak pernah
+   *   memverifikasi PIN staff) → saveSession + saveGrant.
+   * - Terikat + offline/unconfigured: gate grant jujur (isGrantValid + PIN
+   *   vs hash); tanpa grant valid → tolak (login pertama wajib online, Q6).
+   *   grant kedaluwarsa → layar blokir grant_expired.
    * - Tanpa ikatan: BLOKIR eksplisit 'unbound' + tautan bind di SEMUA build
    *   (tak ada jalur seed lokal/admin-1234 — dihapus, fail-closed Q6).
    *   Tanpa fallback diam-diam B001.
@@ -639,22 +713,39 @@ export default function LoginScreen({ navigation }: Props) {
         const ctx = await resolveTermCtx();
         if (!ctx) {
           // Unbound = BLOKIR eksplisit (model final, SEMUA build termasuk DEV):
-          // login pertama wajib lewat device terikat + BE (E01a/E01b) atau
-          // grant offline yang valid. Tak ada lagi jalur seed lokal tanpa
-          // binding - fail-closed, bukan fallback diam-diam.
+          // login pertama wajib lewat device terikat + BE (terminal-login
+          // single-stage) atau grant offline yang valid. Tak ada lagi jalur
+          // seed lokal tanpa binding - fail-closed, bukan fallback diam-diam.
           setServerError(unboundText());
           setBlocked({ kind: 'unbound' });
           return;
         }
         const deviceId = ctx.deviceId || (await getContractDeviceId());
-        // B1 langkah 1: E01a — username+password dulu, tanpa staffPin.
-        // Payload SELALU bawa terminalCode+deviceId (kontrak E01).
+        // B1 langkah 1: E01 single-stage — username+password dulu, TANPA
+        // staffPin (server mengabaikan field tak dikenal). Payload SELALU
+        // bawa terminalCode+deviceId (kontrak E01).
         const first = await callStaffLogin({ username: uname, password, terminalCode: ctx.terminalCode, deviceId });
-        if (isStage1Ok(first)) {
-          if (first.body.wasKicked === true || first.body.kicked === true) {
+        if (hasSessionMaterial(first)) {
+          // Single-stage: sesi SUDAH ada di respons pertama — disimpan sebagai
+          // kandidat, dikunci setelah gerbang PIN LOKAL (tanpa call kedua).
+          const tookOver = first.body.tookOver as Record<string, unknown> | undefined;
+          const kickedUserId = str(tookOver?.kickedUserId ?? first.body.kickedUserId);
+          if (kickedUserId || first.body.wasKicked === true || first.body.kicked === true) {
+            // K1: user BARU dikabari via kunci kicked_msg (tak ada frame
+            // SESSION_KICKED push sisi server — kick = revoke grant +
+            // takeover event ke device baru).
             setNotice(t('kicked_msg'));
           }
-          setCandidate({ kind: 'online', username: uname, password });
+          setCandidate({ kind: 'online', username: uname, password, payload: first.body });
+          setStaffPin('');
+          setPinError('');
+          setPinOpen(true);
+          return;
+        }
+        if (isCredentialOnly(first)) {
+          // Defensif (BE live tak mengirim ini): kredensial-ok tanpa materi
+          // sesi — refetch jujur TANPA staffPin di langkah 2, PIN tetap lokal.
+          setCandidate({ kind: 'online-refetch', username: uname, password });
           setStaffPin('');
           setPinError('');
           setPinOpen(true);
@@ -691,9 +782,14 @@ export default function LoginScreen({ navigation }: Props) {
     })();
   };
 
-  /** B1 langkah 2: verifikasi PIN staff, lalu kunci sesi + konteks terminal.
-   * online → E01b (server memverifikasi + cek RBAC + cek okupansi; takeover
-   * ditahan untuk modal konfirmasi); offline → PIN vs hash grant. */
+  /** B1 langkah 2: gerbang PIN staff LOKAL (koreksi 2026-10-17 — server tak
+   * pernah memverifikasi PIN staff; E02 validate-pin = PIN terminal), lalu
+   * kunci sesi + konteks terminal.
+   * online (payload tahap-1 tersimpan) → verifikasi lokal → completeOnline
+   * (sesi dari respons terminal-login PERTAMA, tanpa call kedua);
+   * online-refetch (defensif) → ambil materi sesi TANPA staffPin → gerbang
+   * lokal → completeOnline (takeover ditahan untuk modal konfirmasi);
+   * offline → PIN vs hash grant. */
   const submitStaffPin = () => {
     if (pinBusy || !candidate) return;
     if (staffPin.trim().length < 4) {
@@ -722,18 +818,39 @@ export default function LoginScreen({ navigation }: Props) {
           setPinOpen(false);
           return;
         }
-        // B1 langkah 2 online: E01b.
+        // B1 langkah 2 online single-stage: materi sesi dari respons PERTAMA;
+        // PIN = gerbang VERIFIKASI LOKAL (passesLocalWorkforcePin) — bukan
+        // verifikasi server, dan TANPA panggilan server kedua.
         const ctx = await resolveTermCtx();
         if (!ctx) {
           setPinError(needBeText());
           return;
         }
         const deviceId = ctx.deviceId || (await getContractDeviceId());
-        // B1 langkah 2 online: E01b — payload SELALU bawa terminalCode+deviceId.
+        if (candidate.kind === 'online') {
+          const userId = str(candidate.payload.userId ?? candidate.payload.user_id);
+          if (!userId) {
+            // Payload tanpa identitas = jangan buat sesi (fail-closed).
+            setPinError(pinWrongText());
+            return;
+          }
+          if (!(await passesLocalWorkforcePin(userId, pin))) {
+            setPinError(pinWrongText());
+            return;
+          }
+          await completeOnline(candidate.payload, pin, ctx, deviceId, candidate.username);
+          // F14-flush: login ONLINE sukses = momen kirim utang revoke.
+          try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
+          setPinOpen(false);
+          return;
+        }
+        // B1 langkah 2 defensif (online-refetch): ambil materi sesi TANPA
+        // staffPin — mengirim staffPin akan menyiratkan verifikasi server
+        // yang tak ada (server abaikan field tak dikenal). Payload SELALU
+        // bawa terminalCode+deviceId.
         const second = await callStaffLogin({
           username: candidate.username,
           password: candidate.password,
-          staffPin: pin,
           terminalCode: ctx.terminalCode,
           deviceId,
         });
@@ -742,6 +859,11 @@ export default function LoginScreen({ navigation }: Props) {
           const userId = str(p.userId ?? p.user_id);
           if (!userId) {
             // Respons sukses tanpa identitas = jangan buat sesi (fail-closed).
+            setPinError(pinWrongText());
+            return;
+          }
+          // PIN tetap gerbang lokal (server tak memverifikasi staff PIN).
+          if (!(await passesLocalWorkforcePin(userId, pin))) {
             setPinError(pinWrongText());
             return;
           }
@@ -1008,10 +1130,10 @@ export default function LoginScreen({ navigation }: Props) {
         ) : (<>
         <View style={styles.cards}>
           {card('email')}
-          {card('qr')}
+          {QR_LOGIN_VISIBLE && card('qr')}
         </View>
 
-        {mode === 'email' ? (
+        {(mode === 'email' || !QR_LOGIN_VISIBLE) ? (
           <View style={styles.form}>
             <Text style={styles.label}>
               {t('g_login_label_user')}<Text style={styles.star}>*</Text>
@@ -1131,16 +1253,22 @@ export default function LoginScreen({ navigation }: Props) {
       <QrTabletArt />
       <Text style={styles.infoTitle}>{t('login_info_title')}</Text>
       <Text style={styles.infoItem}>{t('login_info_user')}</Text>
-      <Text style={styles.infoItem}>{t('login_info_qr')}</Text>
+      {QR_LOGIN_VISIBLE && <Text style={styles.infoItem}>{t('login_info_qr')}</Text>}
       <Text style={styles.infoHelp}>{t('login_info_help')}</Text>
     </View>
   );
 
   /**
    * Modal PIN staff pasca-kredensial (B1/L1): muncul SETELAH username+password
-   * lolos langkah 1 — berurutan, bukan 3 faktor sekaligus. Judul + petunjuk
-   * via kunci kontrak login_pin_title/login_pin_hint; PIN staff ≠ PIN terminal
-   * (binding) ≠ PIN owner (eskalasi).
+   * lolos langkah 1 — berurutan, bukan 3 faktor sekaligus. KOREKSI 2026-10-17:
+   * ini GERBANG VERIFIKASI LOKAL (passesLocalWorkforcePin vs workforce-PIN
+   * record lib/pin — seed-sekali saat login pertama, wajib cocok sesudahnya)
+   * — server TAK PERNAH memverifikasi PIN staff (staffPin bukan bagian
+   * kontrak terminal-login; E02 validate-pin = PIN terminal untuk binding).
+   * Label ke user memakai kunci kontrak yang SUDAH ADA
+   * (login_pin_title/login_pin_hint/login_pin_for — "PIN Staff", jujur tanpa
+   * klaim verifikasi server; i18n.ts beku — tanpa kunci baru). PIN staff ≠
+   * PIN terminal (binding) ≠ PIN owner (eskalasi).
    */
   const pinModal = (
       <Modal visible={pinOpen} transparent animationType="fade" onRequestClose={() => setPinOpen(false)}>
@@ -1179,10 +1307,13 @@ export default function LoginScreen({ navigation }: Props) {
   );
 
   /**
-   * Modal takeover (SPEC §4/K1): server me-revoke sesi lama di terminal ini
-   * dan E01b mengembalikan tookOver{kickedUserId} — user BARU wajib
-   * dikonfirmasi (takeover_title/takeover_msg) SEBELUM sesi dibuat.
-   * Batal = tetap di modal PIN (tanpa sesi, tanpa bypass).
+   * Modal takeover (SPEC §4/K1, jalur refetch defensif): server me-revoke sesi
+   * lama di terminal ini dan terminal-login mengembalikan
+   * tookOver{kickedUserId} — user BARU wajib dikonfirmasi
+   * (takeover_title/takeover_msg) SEBELUM sesi dibuat. Jalur utama
+   * single-stage mengabari via notice kicked_msg (server sudah merevoke —
+   * tanpa konfirmasi pra-sesi). Batal = tetap di modal PIN (tanpa sesi,
+   * tanpa bypass).
    */
   const takeoverModal = (
       <Modal visible={!!takeover} transparent animationType="fade" onRequestClose={() => setTakeover(null)}>

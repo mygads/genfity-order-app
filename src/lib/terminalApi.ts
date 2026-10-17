@@ -1,7 +1,10 @@
 /**
  * Klien bind-flow B1/R1 (SPEC-TERMINAL-SESSION §3 + §5): branch picker,
- * terminal picker, PIN terminal, bind atomik, staff-login 2-tahap (stub
- * pemakaian L1), revoke logout, dan okupansi terminal.
+ * terminal picker, PIN terminal, bind atomik, terminal-login single-stage
+ * (koreksi 2026-10-17 — RoE live: sesi penuh langsung, tanpa tahap-2
+ * staffPin), revoke logout, okupansi terminal, dan deteksi kick via event
+ * `takeover` SSE terminal (koreksi 2026-10-17 — tak ada frame SESSION_KICKED
+ * push sisi server; 401 = gagal auth final → re-login, BUKAN bukti kick).
  *
  * Semua call mencoba BE Go lewat ApiPath (E01/E02/E03/E06 + E07/E09)
  * memakai apiFetch (Local/Dummy/Real Mode ala lib/apiSource.ts). Bila BE
@@ -9,7 +12,7 @@
  * 'offline'} yang jujur — layar menampilkan status eksplisit, bukan bypass
  * diam-diam. Daftar branch/terminal BOLEH memakai fixture dummy lokal
  * (fromDummy:true agar layar melabeli "mode lokal"); verifikasi PIN,
- * bind, dan staff-login WAJIB fail-closed (dummy tak pernah sukses:
+ * bind, dan login WAJIB fail-closed (dummy tak pernah sukses:
  * login pertama wajib online, SPEC §2 + Q6 CLOSED).
  */
 import { ApiPath } from '../config/server';
@@ -259,8 +262,13 @@ export async function bindTerminal(
 }
 
 /**
- * E01: staff-login 2-tahap (SPEC §4, POST /api/v1/auth/terminal-login —
- * body SELALU {username,password,staffPin?,terminalCode,deviceId}).
+ * E01: terminal-login SINGLE-STAGE (SPEC §4/§11 E01; koreksi 2026-10-17) —
+ * POST /api/v1/auth/terminal-login {username,password,terminalCode,deviceId}
+ * → sesi penuh (session + JWT pair + tag + branches + terminals + grant +
+ * tookOver?). `staffPin` SENGAJA TAK ADA di signature: server mengabaikan
+ * field JSON tak dikenal, jadi mengirimnya menyiratkan verifikasi server
+ * yang tak ada; gate PIN = verifikasi lokal (passesLocalWorkforcePin di
+ * LoginScreen).
  * Helper ber-signature kontrak penuh (nol pemanggil produksi saat ini;
  * LoginScreen memakai callStaffLogin sendiri): fail-closed — dummy/offline
  * selalu {ok:false} (login pertama wajib online, tanpa grant bawaan).
@@ -268,7 +276,6 @@ export async function bindTerminal(
 export async function staffLogin(input: {
   username: string;
   password: string;
-  staffPin?: string;
   terminalCode?: string;
   deviceId?: string;
 }): Promise<TerminalApiResult<Record<string, unknown>>> {
@@ -279,6 +286,21 @@ export async function staffLogin(input: {
   const { data } = unwrap<Record<string, unknown>>(r.data);
   return { ok: true, data, fromDummy: false };
 }
+
+// ---------------------------------------------------------------------------
+// 401 vs kick (K1; koreksi 2026-10-17 atas arah 401-guard yang SALAH —
+// kebenaran BE terverifikasi: tabel grant terminal TAK PERNAH dibaca
+// middleware auth, kick TAK PERNAH merevoke user_sessions, dan server TAK
+// PERNAH push frame SESSION_KICKED. Perangkat yang ditendang TIDAK menerima
+// 401). Aturan jujur: 401 dari BE = gagal auth final (token buruk/kedaluwarsa;
+// app TAK PUNYA token-refresh, apiFetch di apiSource.ts TIDAK menangani 401
+// sama sekali — teruskan apa adanya) → re-login, BUKAN bukti kick.
+// Deteksi kick = event `takeover` SSE terminal (feed E26 milik terminal sesi;
+// tipe mengandung `takeover` dengan user/device event ≠ sesi/binding kami →
+// notice kicked_msg + logout; watcher sesi di App.tsx) + pencocokan pola
+// kick/takeover sisi-klien pada pesan WS (future-proof, realtime.ts/App.tsx).
+// Modul ini SENGAJA tanpa 401-guard: fetcher hanya teruskan {ok:false} jujur.
+// ---------------------------------------------------------------------------
 
 /**
  * E06: revoke sesi server-side (O1, SPEC §7). Gagal jaringan → {ok:false};

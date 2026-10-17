@@ -82,9 +82,11 @@ const DOMAINS: Domain[] = [
     cols: ['id', 'username', 'branchId', 'role'],
     map: (r) => [str(r.userId) ?? '', str(r.username), str(r.branchId), str(r.role)],
     requireFirst: true,
-    // Upsert parsial: JANGAN timpa pinHash/password/authKey lokal
-    // (dipakai fallback verifikasi PIN legacy di lib/pin.ts).
-    upsert: 'ON CONFLICT(id) DO UPDATE SET username = excluded.username, branchId = excluded.branchId, role = excluded.role, syncDate = excluded.syncDate',
+    // Upsert parsial: JANGAN timpa authKey lokal. R34: kolom legacy
+    // pinHash/password sengaja di-NULL-kan tiap pull (belt-and-suspenders
+    // bila server kelak menggemakan nilai lama) — verifikasi PIN murni via
+    // hash SecureStore (lib/pin.ts).
+    upsert: 'ON CONFLICT(id) DO UPDATE SET username = excluded.username, branchId = excluded.branchId, role = excluded.role, pinHash = NULL, password = NULL, syncDate = excluded.syncDate',
   },
   {
     // RBAC: hak akses per user dari server (kontrak clean-room
@@ -223,9 +225,11 @@ const DOMAINS: Domain[] = [
     // INSERT OR IGNORE: nomor lokal bisa tabrakan dengan nomor server;
     // baris lokal (terutama yang syncDate NULL / belum push) tidak boleh
     // tertimpa riwayat pull. client_id ikut tersimpan (Q7, upsert-by-client
-    // sisi server); penomoran-ulang display_no oleh server ditangani saat
-    // kontrak BE upsert-by-client_id + 409 final — sampai saat itu mode
-    // transisi terima-dua-format.
+    // sisi server); kontrak konflik: duplikat client_id kembali 200 "Order
+    // already synced" (jalur 2xx → terkirim), 409 HANYA SALE_DISPLAY_CONFLICT
+    // (display_no dipakai order lain — server tak punya baris kita; re-issue
+    // + kirim ulang di sync.ts, tak pernah terkirim diam-diam). Sampai BE
+    // final, mode transisi terima-dua-format.
     ignoreExisting: true,
     after: async (r, now) => {
       const salesNum = str(r.salesNum) ?? '';

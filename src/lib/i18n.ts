@@ -1250,6 +1250,8 @@ const STR: Record<string, Entry> = {
   'sync.localOnly': { id: 'Lokal - tak perlu push.', en: 'Local-only - no push needed.' },
   'sync.depositLocal': { id: 'Deposit tercatat lokal + outbox fisik.', en: 'Deposit recorded locally + physical outbox.' },
   'sync.duplicateAcked': { id: 'Duplikat (409) - sudah di server.', en: 'Duplicate (409) - already on server.' },
+  'sync.displayConflict': { id: '409 {code} — display_no bentrok / respons tak dikenal; tidak ditandai terkirim, perlu tindakan manual.', en: '409 {code} — display_no conflict / unrecognized response; not marked sent, needs manual action.' },
+  'sync.displayRenumberFailed': { id: '409 {code} — gagal menerbitkan nomor display baru ({err}); tidak ditandai terkirim, perlu tindakan manual.', en: '409 {code} — failed to issue a new display number ({err}); not marked sent, needs manual action.' },
 
   // ---- batch-4 susulan (BillPreview T5 + sweep CartDetail/Booking/TableTimer) ----
   bill_qr_after_pay: { id: 'QR struk tercetak setelah pembayaran.', en: 'The receipt QR prints only after payment.' },

@@ -6,6 +6,8 @@ import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import { useLang } from '../../lib/i18n';
 import { getApiMode } from '../../lib/apiSource';
+import { initDb, queryFirst } from '../../lib/db';
+import { removePinHash } from '../../lib/pin';
 import { loadBinding, requestPinReset } from '../../lib/terminalContract';
 // APP-FIXUP (fix-app-contract D1): merchantId (scope body pin-reset server)
 // diambil dari binding/sesi — perangkat tak menyimpan merchant id terpisah.
@@ -87,7 +89,29 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
         return;
       }
       const r = await requestPinReset({ userIdOrUsername: u, merchantId, newPin: pin });
-      if (r.ok) { setSent('ok'); setPin(''); setConfirm(''); return; }
+      if (r.ok) {
+        // R34: server kini sumber benar PIN baru — buang hash lokal basi agar
+        // login/absensi berikutnya memakai PIN baru, bukan hash lama.
+        // Best-effort: gagal resolve/hapus tak menggagalkan sukses server.
+        // Bila username tak ketemu di ms_posuser lokal (mis. user hanya ada di
+        // server / beda ejaan), hash lokal tak tersentuh — catat jujur.
+        try {
+          await initDb();
+          const row = await queryFirst<{ id: string }>(
+            'SELECT id FROM ms_posuser WHERE username = ? COLLATE NOCASE LIMIT 1',
+            [u],
+          );
+          const uid = (row?.id ?? '').trim();
+          if (uid) {
+            await removePinHash(uid);
+          } else {
+            console.warn(`[forgot-pin] reset ok tapi user lokal '${u}' tak ditemukan — hash lokal tak dibersihkan`);
+          }
+        } catch (e) {
+          console.warn(`[forgot-pin] bersih hash lokal gagal: ${e instanceof Error ? e.message : e}`);
+        }
+        setSent('ok'); setPin(''); setConfirm(''); return;
+      }
       if (r.offline) { setSent('offline'); return; }
       setErr(t('forgot_rejected'));
     } finally {

@@ -13,6 +13,7 @@ import { apiFetch } from './apiSource';
 import { all, markClean, markDirty, queryFirst, run } from './db';
 import { tr } from './i18n';
 import { notifyPushSyncSuccess } from './push';
+import { nextSalesNumRetry } from './sales';
 import { getItem, setItem } from './storage';
 import { logoutRevoke } from './terminalApi';
 import { uuidv7 } from './uuidv7';
@@ -70,7 +71,9 @@ let restorePromise: Promise<void> | null = null;
 
 /**
  * Bersihkan SELURUH baris satu sale (head + kaki) saat payload ringannya
- * terbukti sampai ke server (2xx) atau server mengaku sudah punya (409).
+ * terbukti sampai ke server (2xx — termasuk 200 "Order already synced" untuk
+ * retry client_id duplikat) atau server mengaku sudah punya baris kita
+ * (duplicate-ack setelah klasifikasi 409, bukan 409 mentah).
  * Tanpa ini hanya tr_saleshead yang bersih (markClean di bawah) sedangkan
  * menu/extra/payment/voucherusage/info/platformfee/kitchen tetap
  * syncDate NULL selamanya → badge dirty SyncScreen tumbuh tanpa batas
@@ -530,6 +533,111 @@ async function fetchPhysicalRows(): Promise<PhysicalQueueRow[]> {
 }
 
 /**
+ * Kontrak konflik push (ground truth, menggantikan anggapan lama "409 =
+ * UNIQUE(client_id) duplikat"): retry client_id duplikat kembali sebagai 200
+ * "Order already synced" (jalur 2xx biasa → terkirim). HTTP 409 HANYA untuk
+ * SALE_DISPLAY_CONFLICT (display_no sudah dipakai order lain) — server TIDAK
+ * punya baris kita, sehingga 409 mentah tak boleh dianggap terkirim (itu
+ * menghilangkan penjualan). Hanya bukti-duplikat yang boleh duplicate-ack.
+ */
+type Conflict409Kind = 'duplicate' | 'display' | 'unknown';
+
+interface Conflict409Info {
+  kind: Conflict409Kind;
+  /** Kode server apa adanya ('' bila tak ada) untuk catatan jujur. */
+  code: string;
+}
+
+/** Batas terbitkan-ulang display_no per item saat 409 display-conflict. */
+const MAX_DISPLAY_REISSUES = 2;
+
+/**
+ * Baca body respons 409. apiPost mengembalikan fetch Response mentah (status +
+ * ok saja, tanpa body terparse), jadi kupas di sini: objek JSON bila bisa,
+ * teks mentah bila bukan JSON, null bila kosong/tak terbaca. Body hanya bisa
+ * dibaca sekali — panggil sekali per respons.
+ */
+async function readConflictBody(res: Response): Promise<unknown> {
+  try {
+    const text = await res.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ambil field string dari body dengan beberapa ejaan umum (snake/camel +
+ * envelope {data}/{error}); body string mentah dipakai apa adanya.
+ */
+function conflictField(body: unknown, ...names: string[]): string {
+  const pick = (o: unknown): string => {
+    if (!o || typeof o !== 'object') return '';
+    const r = o as Record<string, unknown>;
+    for (const n of names) {
+      const v = r[n];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    }
+    return '';
+  };
+  if (typeof body === 'string') return body.trim();
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  return (
+    pick(body) ||
+    pick(r.data) ||
+    pick(r.error) ||
+    pick((r.error as Record<string, unknown> | undefined)?.data)
+  );
+}
+
+/**
+ * Klasifikasikan body 409 terhadap client_id yang kita kirim.
+ * - 'duplicate': bukti server sudah punya baris KITA (existingOrderId cocok
+ *   dengan client_id kita, atau pesan sudah-ada/sudah-sync/UNIQUE client).
+ * - 'display': SALE_DISPLAY_CONFLICT / bukti display_no — server TAK punya
+ *   baris kita → terbitkan display_no baru + kirim ulang (bukan terkirim).
+ * - 'unknown': tak ada bukti → 'gagal' jujur dengan kode, bukan terkirim.
+ */
+function classify409(body: unknown, ourClientId: string): Conflict409Info {
+  const code = conflictField(body, 'code', 'errorCode', 'error_code', 'name');
+  const message = conflictField(body, 'message', 'msg', 'errorMessage', 'error_message', 'detail');
+  const existingId = conflictField(
+    body,
+    'existingOrderId',
+    'existing_order_id',
+    'existingClientId',
+    'existing_client_id',
+    'orderId',
+    'order_id',
+  );
+  const cid = String(ourClientId ?? '').trim();
+  // 1. Kode eksplisit backend untuk display_no yang dipakai order lain.
+  if (/^sale_display_conflict$/i.test(code)) return { kind: 'display', code };
+  // 2. Server menunjuk order yang sudah ada = baris KITA (client_id sama).
+  if (cid && existingId && existingId === cid) return { kind: 'duplicate', code };
+  const hay = `${code} ${message}`;
+  // 3. Bukti display_no (ejaan apa pun) — server tak punya baris kita.
+  if (/sale_display_conflict|display[\s_-]?no/i.test(hay)) return { kind: 'display', code };
+  // 4. Bukti duplikat (sudah-ada / sudah-sync / UNIQUE client_id).
+  if (/already[\s_-]?(exist|sync)|sudah[\s_-]?ada|duplikat|duplicate|unique[\s_-]?.*client|client[\s_-]?.*unique|client[\s_-]?.*exist/i.test(hay)) {
+    return { kind: 'duplicate', code };
+  }
+  return { kind: 'unknown', code };
+}
+
+/** Label catatan jujur untuk 409 non-duplikat: "409 <KODE>" atau "409". */
+function conflictTag(code: string): string {
+  return code ? `409 ${code}` : '409';
+}
+
+/**
  * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
  * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
  * (ms_*, server-wins §4/M9-3) atau tanpa endpoint push — biarkan antre lokal,
@@ -574,15 +682,45 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
     // DELETE/markClean lokal di bawah. Non-deposit tak berubah (physCid=row.id).
     const depositKey = table === 'tr_memberdeposit' ? String(row.orderID ?? '').trim() : '';
     const physCid = depositKey || row.id;
+    // Kunci `_…` di payload = catatan lokal (mis. _conflict409 di bawah), bukan
+    // untuk server — kupas sebelum POST agar body wire tetap bersih.
+    const wireBody: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body)) {
+      if (!k.startsWith('_')) wireBody[k] = v;
+    }
     const res = await apiPost(
       path,
-      { ...body, table, rowId: row.orderID, op: row.op, clientId: physCid, ...identityFields(physCid) },
+      { ...wireBody, table, rowId: row.orderID, op: row.op, clientId: physCid, ...identityFields(physCid) },
       { idempotencyKey: physCid },
     );
     if (res.status === 409) {
-      // BE menegakkan UNIQUE(client_id): 409 = server SUDAH punya baris ini
-      // (timeout sesudah commit / kirim-ganda / enqueue ganda). Anggap
-      // terkirim (duplicate-acked) agar tak antre-selamanya + watermark jalan.
+      // 409 HANYA SALE_DISPLAY_CONFLICT (display_no dipakai order lain) —
+      // server TIDAK punya baris ini. Jangan pernah anggap terkirim (itu
+      // menghilangkan penjualan). Hanya bukti-duplikat (server sudah punya
+      // baris dengan client_id SAMA) yang boleh duplicate-ack.
+      const conflict = classify409(await readConflictBody(res), physCid);
+      if (conflict.kind !== 'duplicate') {
+        // Jujur gagal: server tak punya baris kita. Baris fisik tak punya
+        // kolom note, jadi kode disimpan di payload (_conflict409 — dikupas
+        // dari body POST pada retry berikutnya, bukan dikirim ke server).
+        // Catatan: jalur fisik tak membawa payload sale sehingga tak bisa
+        // terbitkan-ulang display_no di sini; twin ringan sale (bila ada)
+        // menanganinya di pushLightItem.
+        try {
+          await run('UPDATE tr_esoprocessqueue SET status = ?, payload = ? WHERE id = ?', [
+            'gagal',
+            JSON.stringify({ ...wireBody, _conflict409: conflictTag(conflict.code) }),
+            row.id,
+          ]);
+        } catch {
+          try {
+            await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+          } catch {
+            /* abaikan */
+          }
+        }
+        return 'failed';
+      }
       try {
         await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
       } catch {
@@ -918,36 +1056,85 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
       // (uuid = lightCid tetap) agar server/campur-casing baca kunci yang sama.
       ? { ...rawPayload, ...sender, clientId: lightCid, client_id: lightCid, uuid: lightCid, outboxId: item.id }
       : { ...rawPayload, clientId: item.id, ...sender, outboxId: item.id };
-    const res = await apiPost(
+    // Nomor display lokal (untuk pembersihan kaki sale + re-issue): payload
+    // tak pernah dimutasi — retry memakai salinan sendBody agar nomor lokal
+    // (struk/QR/DB) tetap, sedangkan yang dikirim ke server bisa baru.
+    const origSalesNum = String(
+      ((item.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '',
+    ).trim();
+    let sendBody = body;
+    let res = await apiPost(
       path,
-      body,
+      sendBody,
       { idempotencyKey: item.id },
     );
-    if (res.status === 409) {
-      // 409 = server SUDAH punya item ini (UNIQUE client_id). Anggap terkirim
-      // (duplicate-acked, terlihat di note) agar tak antre-selamanya.
-      item.status = 'terkirim';
-      item.note = tr('sync.duplicateAcked');
-      try {
-        // Server punya datanya → kaki sale ikut bersih (paritas 2xx).
-        const p = (item.payload ?? {}) as { op?: unknown; salesNum?: unknown };
-        const sNo = String(p.salesNum ?? '').trim();
-        if (sNo && (item.kind === 'order' || String(p.op ?? '') === 'group-payment')) {
-          await markCleanSale(sNo);
+    let reissues = 0;
+    let lastCode = '';
+    // 409 = display_no dipakai order lain (server TAK punya baris kita):
+    // terbitkan display_no segar via nextSalesNumRetry + kirim ulang dengan
+    // client_id YANG SAMA (maks MAX_DISPLAY_REISSUES re-issue; habis itu
+    // 'gagal' jujur — tak pernah 'terkirim'). Duplikat client_id tak sampai
+    // sini: backend menjawab 200 "Order already synced" (jalur 2xx di bawah).
+    // Re-issue hanya untuk payload sale (membawa salesNum/displayNo);
+    // non-sale (deposit/shift/voucher/…) tak punya display_no → langsung gagal
+    // jujur agar tak retry buta.
+    while (res.status === 409) {
+      const conflict = classify409(await readConflictBody(res), lightCid || item.id);
+      lastCode = conflict.code;
+      if (conflict.kind === 'duplicate') {
+        // Server SUDAH punya item ini (client_id sama). Anggap terkirim
+        // (duplicate-acked, terlihat di note) agar tak antre-selamanya.
+        item.status = 'terkirim';
+        item.note = tr('sync.duplicateAcked');
+        try {
+          // Server punya datanya → kaki sale ikut bersih (paritas 2xx).
+          if (origSalesNum && (item.kind === 'order' || String((item.payload as { op?: unknown } | null)?.op ?? '') === 'group-payment')) {
+            await markCleanSale(origSalesNum);
+          }
+        } catch {
+          /* abaikan */
         }
-      } catch {
-        /* abaikan */
+        try {
+          await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+        } catch {
+          /* abaikan */
+        }
+        return 'sent';
       }
+      const canReissue =
+        conflict.kind === 'display' &&
+        reissues < MAX_DISPLAY_REISSUES &&
+        ('salesNum' in sendBody || 'displayNo' in sendBody);
+      if (!canReissue) break;
+      let fresh: string;
       try {
-        await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
-      } catch {
-        /* abaikan */
+        fresh = await nextSalesNumRetry(2);
+      } catch (e) {
+        item.status = 'gagal';
+        item.note = tr('sync.displayRenumberFailed').replace('{code}', lastCode || '?').replace('{err}', e instanceof Error ? e.message : 'galat');
+        return 'failed';
       }
-      return 'sent';
+      reissues += 1;
+      sendBody = { ...sendBody, displayNo: fresh };
+      if ('salesNum' in sendBody) sendBody = { ...sendBody, salesNum: fresh };
+      res = await apiPost(
+        path,
+        sendBody,
+        { idempotencyKey: item.id },
+      );
+    }
+    if (res.status === 409) {
+      // Re-issue habis, 409 non-sale, atau kode tak dikenal: server tak punya
+      // baris kita → 'gagal' jujur dengan kode, tak pernah 'terkirim'.
+      item.status = 'gagal';
+      item.note = tr('sync.displayConflict').replace('{code}', lastCode || '?');
+      return 'failed';
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Sukses 2xx = tandai terkirim agar tak dikirim ulang tiap pushAll
     // (sebelumnya hanya 409 yang menandai → kirim-ganda ke server).
+    // Duplikat client_id tiba di sini sebagai 200 "Order already synced"
+    // (bukan 409) → ikut terkirim. Terverifikasi: tak perlu cabang khusus.
     item.status = 'terkirim';
     item.note = '';
     // Head sale ikut bersih bila payload-nya audited order/group-payment;

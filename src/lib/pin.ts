@@ -27,7 +27,7 @@
 
 // expo-secure-store terdaftar di package.json (native + web).
 import * as SecureStore from 'expo-secure-store';
-import { initDb, query, queryFirst } from './db';
+import { initDb, query } from './db';
 import { getItem, removeItem, setItem } from './storage';
 import { randomHex as randomHexCsprng } from './uuidv7';
 
@@ -274,9 +274,11 @@ export function pinAttemptsLeft(): number {
 
 /**
  * Verifikasi PIN absensi ke ms_posuser (RIW-05/17): cocokkan hash lokal
- * (SecureStore) dulu; fallback perbandingan legacy untuk baris hasil pull
- * yang belum punya record - bila cocok langsung upgrade ke hash dan TIDAK
- * menyimpan plaintext baru. Tidak pernah melempar (gagal DB → null).
+ * (SecureStore) untuk tiap user. R34 CLOSED (2026-10-17): cabang plaintext
+ * legacy + auto-upgrade DIHAPUS — kolom pinHash/password ms_posuser selalu
+ * NULL pasca-migrasi satu-kali (migrateLegacyPinColumns di lib/seed.ts, flag
+ * ms_setting Security/PinMigrationV1) dan pull tak lagi menuliskannya
+ * (master.ts). Tidak pernah melempar (gagal DB → null).
  */
 export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify> {
   const clean = pin.replace(/[^0-9]/g, '');
@@ -304,26 +306,11 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
         /* lanjut kandidat berikut */
       }
     }
-    // R34 DEFERRED (audit 2026-10-17, terverifikasi via grep): cabang
-    // plaintext di bawah DIPERTAHANKAN — kolom pembanding TIDAK selalu NULL
-    // (master.ts:83-85 sengaja melestarikan pinHash/password lokal sebagai
-    // "fallback verifikasi PIN legacy") dan ada pemanggil live yang
-    // membandingkan plaintext (apiSource.ts:540 validateEmployeeLocal).
-    // Penghapusan menunggu migrasi hash penuh + penghapusan fallback ganda.
-    const legacy = await queryFirst<{ id: string }>(
-      'SELECT id FROM ms_posuser WHERE pinHash = ? OR password = ? LIMIT 1',
-      [clean, clean],
-    );
-    if (legacy) {
-      try {
-        await savePinHash(legacy.id, clean);
-      } catch {
-        /* upgrade gagal - verifikasi tetap sah */
-      }
-      pinAttempts = 0;
-      pinLockedUntil = 0;
-      return { ok: true, userId: legacy.id };
-    }
+    // R34 CLOSED (2026-10-17): cabang plaintext legacy + auto-upgrade
+    // DIHAPUS. Kolom pembanding kini selalu NULL (migrasi satu-kali
+    // migrateLegacyPinColumns di lib/seed.ts + upsert master.ts yang
+    // me-NULL-kan kolom legacy tiap pull); verifikasi murni via hash
+    // SecureStore di atas.
     // PIN salah = tebakan → bakar 1 attempt; capai batas → kunci 60 detik.
     pinAttempts += 1;
     if (pinAttempts >= PIN_MAX_ATTEMPTS) pinLockedUntil = Date.now() + PIN_LOCK_MS;
