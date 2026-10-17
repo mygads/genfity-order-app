@@ -240,6 +240,9 @@ export default function CashierScreen({ navigation, route }: Props) {
   // draft atau order yang dibuka (loadItems/salesNum), bukan 3 item contoh.
   // DB kosong + tanpa draft = empty-state kasir yang jujur.
   const [cart, setCart] = useState<CartItem[]>([]);
+  /** Muat order saat keranjang terisi: tahan dulu, minta konfirmasi hapus keranjang. */
+  const [pendingLoad, setPendingLoad] = useState<CartItem[] | null>(null);
+  const appliedLoad = useRef('');
   // Editor catatan/diskon/void per item
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -485,17 +488,26 @@ export default function CashierScreen({ navigation, route }: Props) {
       setShowModes(false);
     }
     if (p.loadItems && p.loadItems.length > 0) {
-      setCart(
-        p.loadItems.map((c) => ({
-          id: c.id,
-          name: c.name,
-          basePrice: c.basePrice,
-          qty: Math.max(1, c.qty),
-          modifiers: c.modifiers ?? [],
-          discount: c.discount ?? 0,
-          note: c.note,
-        })),
-      );
+      const mapped = p.loadItems.map((c) => ({
+        id: c.id,
+        name: c.name,
+        basePrice: c.basePrice,
+        qty: Math.max(1, c.qty),
+        modifiers: c.modifiers ?? [],
+        discount: c.discount ?? 0,
+        note: c.note,
+      }));
+      const key = JSON.stringify(p.loadItems);
+      if (appliedLoad.current !== key) {
+        appliedLoad.current = key;
+        // Keranjang masih ada isinya = jangan timpa diam-diam: tahan + modal
+        // konfirmasi (batal = keranjang lama tetap, muat diabaikan).
+        if (cart.some((c) => !c.voided)) {
+          setPendingLoad(mapped);
+        } else {
+          setCart(mapped);
+        }
+      }
     }
     if (p.itemNote) {
       const { id, note } = p.itemNote;
@@ -786,6 +798,41 @@ export default function CashierScreen({ navigation, route }: Props) {
               title={voidConfirming ? '...' : 'Setujui / Approve'}
               onPress={confirmVoidPin}
               disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
+              fullWidth={false}
+              style={[styles.dialogPrimary, { marginTop: 0 }]}
+              textStyle={styles.dialogPrimaryT}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  /** Konfirmasi ganti keranjang terisi dengan order yang dimuat. */
+  const confirmPendingLoad = () => {
+    if (pendingLoad) setCart(pendingLoad);
+    setPendingLoad(null);
+  };
+  const renderLoadDialog = () => (
+    <Modal visible={pendingLoad !== null} transparent animationType="fade" onRequestClose={() => setPendingLoad(null)}>
+      <View style={styles.dialogOverlay}>
+        <View style={styles.dialogCard}>
+          <Text style={styles.dialogTitle}>{t('loadConfirmTitle')}</Text>
+          <Text style={styles.dialogSub}>{t('loadConfirmBody').replace('{n}', String(pendingLoad?.filter((c) => !c.voided).length ?? 0))}</Text>
+          <View style={styles.dialogRow}>
+            <AppButton
+              size="sm"
+              variant="secondary"
+              title={t('cancel')}
+              onPress={() => setPendingLoad(null)}
+              fullWidth={false}
+              style={[styles.dialogGhost, { marginTop: 0 }]}
+              textStyle={styles.dialogGhostT}
+            />
+            <AppButton
+              size="sm"
+              title={t('loadAction')}
+              onPress={confirmPendingLoad}
               fullWidth={false}
               style={[styles.dialogPrimary, { marginTop: 0 }]}
               textStyle={styles.dialogPrimaryT}
@@ -1419,6 +1466,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         </View>
         {renderOngkirDialog()}
         {renderVoidDialog()}
+        {renderLoadDialog()}
       </View>
     );
   }
@@ -1508,6 +1556,8 @@ export default function CashierScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
       {renderOngkirDialog()}
+      {renderVoidDialog()}
+      {renderLoadDialog()}
     </View>
   );
 }

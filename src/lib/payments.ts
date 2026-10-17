@@ -66,6 +66,8 @@ export interface SaleInput {
   tableId?: string;
   /** Konteks order dari kasir (dine-in/bawa-pulang/delivery, dst). */
   mode?: string;
+  /** Pembulatan struk (bisa negatif) - 0/absen = tidak ada. */
+  rounding?: number;
   /** Biaya antar - 0/absen = tidak ada. */
   ongkir?: number;
   /** Nama pelanggan (delivery / pencatatan kasir). */
@@ -151,6 +153,7 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.vatTotal !== undefined ? { vatTotal: r(s.vatTotal) } : {}),
     ...(s.serviceTotal !== undefined ? { serviceTotal: r(s.serviceTotal) } : {}),
     ...(s.feeESB !== undefined && s.feeESB > 0 ? { platformFee: r(s.feeESB) } : {}),
+    ...(s.rounding !== undefined && s.rounding !== 0 ? { rounding: r(s.rounding) } : {}),
     grandTotal: r(s.grandTotal),
     ...(items.length > 0 ? { items } : {}),
     payments,

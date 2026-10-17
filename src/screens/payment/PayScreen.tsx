@@ -341,11 +341,30 @@ export default function PayScreen({ navigation, route }: Props) {
       setBoxCode(code);
       setVoucherMsg('');
       setVoucherOpen(false);
+      // Payable turun -> split lama dijepit agar tak over-collect.
+      clampSplits(Math.max(0, total - Math.min(v.amount, total)));
     } catch {
       setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
     } finally {
       setVoucherBusy(false);
     }
+  };
+
+  /**
+   * Jepit split yang sudah ditambah SEBELUM voucher box dipasang: paid gabungan
+   * tak boleh melebihi payable baru (kelebihan menempel di split terakhir).
+   */
+  const clampSplits = (maxPayable: number) => {
+    setSplits((prev) => {
+      let acc = 0;
+      const out: Split[] = [];
+      for (const s of prev) {
+        if (acc >= maxPayable) break;
+        const keep = Math.min(s.amount, maxPayable - acc);
+        if (keep > 0) { out.push({ ...s, amount: keep }); acc += keep; }
+      }
+      return out;
+    });
   };
 
   const removeBoxVoucher = () => {
@@ -377,6 +396,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       cash,
       change,
       items: route?.params?.items,
@@ -571,6 +591,40 @@ export default function PayScreen({ navigation, route }: Props) {
     />
   );
 
+  /**
+   * Rincian tagihan terlihat: Total order (neto, sudah termasuk orderVoucher +
+   * orderDiscount), potongan voucher Pay yang dipasang di layar ini, dan
+   * Harus dibayar (= Sisa saat belum ada split). Sebelumnya voucher box tak
+   * muncul di penjumlahan mana pun sehingga terasa "tidak masuk hitungan".
+   */
+  const renderSummary = () => {
+    if (orderDiscount <= 0 && !boxVoucher) return null;
+    return (
+      <View style={styles.sumBox}>
+        <View style={styles.sumRow}>
+          <Text style={styles.sumLabel}>{t('c_total')}</Text>
+          <Text style={styles.sumValue}>{rp(total)}</Text>
+        </View>
+        {orderDiscount > 0 && (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>{t('pay_sum_incl')}</Text>
+            <Text style={styles.sumValue}>−{rp(orderDiscount)}</Text>
+          </View>
+        )}
+        {boxVoucher && (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>{`${t('ok_voucher')} ${boxVoucher.code}`}</Text>
+            <Text style={[styles.sumValue, styles.sumCut]}>−{rp(boxVoucher.amount)}</Text>
+          </View>
+        )}
+        <View style={[styles.sumRow, styles.sumDueRow]}>
+          <Text style={[styles.sumLabel, styles.sumDue]}>{t('pay_sum_due')}</Text>
+          <Text style={[styles.sumValue, styles.sumDue]}>{rp(payable)}</Text>
+        </View>
+      </View>
+    );
+  };
+
   const renderBanner = () => (
     <View style={isTablet ? styles.bannerRowTablet : styles.bannerRow}>
       {isTablet && (
@@ -635,6 +689,7 @@ export default function PayScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         )
       )}
+      {renderSummary()}
       {voucherOpen && !boxVoucher && !orderVoucher && (
         <View style={styles.voucherRow}>
           <View style={styles.voucherField}>
@@ -1180,6 +1235,13 @@ const styles = StyleSheet.create({
   voucherBarText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
   voucherBarTextActive: { color: colors.white },
   voucherRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  sumBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8 },
+  sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
+  sumLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
+  sumValue: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
+  sumCut: { color: colors.orangeDark },
+  sumDueRow: { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 4, paddingTop: 7 },
+  sumDue: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
   voucherField: { flex: 1 },
   voucherAction: { marginTop: 0 },
   footerBtn: { flex: 1, marginTop: 0 },

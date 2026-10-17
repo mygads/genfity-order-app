@@ -6,7 +6,7 @@ import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
-import { getRoundingSetting, type RoundingSetting } from '../../lib/db';
+import { getRoundingSetting, initDb, query, type RoundingSetting } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -75,6 +75,8 @@ export default function TableTimerScreen({ navigation }: Props) {
   const [autoExtend, setAutoExtend] = useState(DEFAULT_CFG.autoExtend);
   const [tables, setTables] = useState<TableTimer[]>([]);
   const [loaded, setLoaded] = useState(false);
+  /** Section live per nomor kanonis dari ms_table; null = fallback SECTION_OF. */
+  const [liveSections, setLiveSections] = useState<Record<string, string> | null>(null);
   // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
   const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
 
@@ -94,11 +96,33 @@ export default function TableTimerScreen({ navigation }: Props) {
       setStartMode(cfg.startMode === 'order' ? 'order' : 'duduk');
       setAutoExtend(!!cfg.autoExtend);
       setRounding(rnd);
+      // Validasi id timer terhadap denah live ms_table (fallback kanonis bila
+      // DB kosong) agar timer meja di luar set hardcode (mis. C3 seed) tak
+      // terbuang diam-diam.
+      let validIds: Set<string> | null = null;
+      try {
+        await initDb();
+        const rows = await query<{ tableNo: string | null; sectionId: string | null }>(
+          'SELECT tableNo, sectionId FROM ms_table LIMIT 60',
+        );
+        if (rows.length > 0) {
+          validIds = new Set<string>();
+          const secMap: Record<string, string> = {};
+          for (const r of rows) {
+            const no = canonTableNo(String(r.tableNo ?? ''));
+            if (!no) continue;
+            validIds.add(no);
+            secMap[no] = (r.sectionId ?? '').trim();
+          }
+          if (on) setLiveSections(secMap);
+        }
+      } catch { /* fallback kanonis */ }
       if (Array.isArray(tim) && tim.length > 0) {
         const seen = new Set<string>();
+        const valid = validIds ?? CANON_IDS;
         const migrated = tim
           .map((x) => ({ ...x, id: canonTableNo(x.id) }))
-          .filter((x) => CANON_IDS.has(x.id) && !seen.has(x.id) && (seen.add(x.id), true));
+          .filter((x) => valid.has(x.id) && !seen.has(x.id) && (seen.add(x.id), true));
         setTables(migrated);
       }
       setLoaded(true);
@@ -198,7 +222,7 @@ export default function TableTimerScreen({ navigation }: Props) {
           const over = enabled && remain < 0;
           const sisa = Math.max(0, Math.ceil(remain));
           const lewat = Math.max(1, Math.floor(-remain));
-          const secRaw = SECTION_OF[x.id] ?? '';
+          const secRaw = liveSections?.[x.id] ?? SECTION_OF[x.id] ?? '';
           const sec = secRaw === 'Dalam' ? t('tmr_sec_dalam') : secRaw === 'Teras' ? t('tmr_sec_teras') : secRaw === 'VIP' ? t('tmr_sec_vip') : secRaw;
           const units = { min: t('tmr_u_min'), sec: t('tmr_u_sec'), hour: t('tmr_u_hour') };
           return (

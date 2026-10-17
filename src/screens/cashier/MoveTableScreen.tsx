@@ -51,7 +51,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         await initDb();
         const heads = await query<{ tableNo: string; customerName: string | null; grandTotal: number | null }>(
           `SELECT tableNo, customerName, grandTotal FROM tr_saleshead
-           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
+           WHERE status NOT IN ('paid','void') AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
         if (!on) return;
         if (heads.length === 0) {
@@ -88,7 +88,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         const itemRows = await query<{ tableNo: string; n: number }>(
           `SELECT h.tableNo AS tableNo, COUNT(*) AS n FROM tr_salesmenu m
            INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
-           WHERE h.status <> 'paid' AND h.tableNo IS NOT NULL AND TRIM(h.tableNo)<> ''
+           WHERE h.status NOT IN ('paid','void') AND h.tableNo IS NOT NULL AND TRIM(h.tableNo)<> ''
            GROUP BY h.tableNo`,
         );
         const itemCount = new Map(itemRows.map((r) => [String(r.tableNo).trim(), Number(r.n) || 0]));
@@ -135,8 +135,9 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const destCode = to.replace(/\s*\(.*\)\s*$/, '').trim();
 
   const move = () => {
-    // Validasi meja tujuan ala POSLite: asal harus ada, tujuan tak boleh sama.
+    // Validasi meja tujuan ala POSLite: asal harus ada, tujuan wajib diisi + tak boleh sama.
     if (!src) { setWarn('Pilih meja asal yang terisi dulu.'); return; }
+    if (!destCode) { setWarn('Pilih meja tujuan dulu.'); return; }
     if (destCode === src.table) { setWarn(`Meja tujuan sama dengan asal (${src.table}) - pilih meja lain.`); return; }
     setWarn('');
     // Catat pindah meja ke antrean sync agar diteruskan ke server (offline-first).
@@ -154,13 +155,13 @@ export default function MoveTableScreen({ navigation, route }: Props) {
       try {
         await initDb();
         await run(
-          `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status <> 'paid'`,
+          `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status NOT IN ('paid','void')`,
           [destCode, src.table],
         );
         // Tandai bill pindahan kotor per salesNum agar ikut push berikutnya.
         try {
           const moved = await query<{ salesNum: string }>(
-            `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid'`,
+            `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status NOT IN ('paid','void')`,
             [destCode],
           );
           for (const m of moved) {

@@ -8,6 +8,8 @@ import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
+import { enqueueSync } from '../../lib/sync';
+import { nextSalesNum } from '../../lib/sales';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
 import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
@@ -32,6 +34,7 @@ type Props = {
       memberId?: string;
       ongkir?: number;
       subtotal?: number;
+      salesNum?: string;
     };
   };
 };
@@ -42,10 +45,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const { t } = useLang();
   const [items, setItems] = useState<CartItem[]>(route?.params?.items ?? []);
   const [voucher, setVoucher] = useState<Voucher | null>(route?.params?.voucher ?? null);
-  const [mode] = useState(route?.params?.mode ?? 'DINE IN');
-  const [table] = useState(route?.params?.table ?? '');
-  const [customer] = useState(route?.params?.customer ?? '');
-  const [memberId] = useState(route?.params?.memberId ?? '');
+  const [mode, setMode] = useState(route?.params?.mode ?? 'DINE IN');
+  const [table, setTable] = useState(route?.params?.table ?? '');
+  const [customer, setCustomer] = useState(route?.params?.customer ?? '');
+  const [memberId, setMemberId] = useState(route?.params?.memberId ?? '');
+  /** Nomor struk draft: dipakai ulang saat bayar + kunci hapus draft di Success. */
+  const [salesNum, setSalesNum] = useState(route?.params?.salesNum ?? '');
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   useEffect(() => {
@@ -61,11 +66,18 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [ongkir, setOngkir] = useState(route?.params?.ongkir ?? defaultOngkirForMode(route?.params?.mode));
   const [showOngkir, setShowOngkir] = useState(false);
   const [ongkirDraft, setOngkirDraft] = useState('');
-  /** Sinkron ulang saat kembali dari PromotionList (params di-merge ke rute yang sudah ada). */
+  /** Sinkron ulang saat kembali dari PromotionList/Voucher/Member/LoadOrder
+   * (params di-merge ke rute yang sudah ada): voucher/member/pelanggan/meja/
+   * nomor struk ikut diterapkan, bukan hanya voucher. */
   useEffect(() => {
     if (route?.params?.voucher) setVoucher(route.params.voucher);
     if (route?.params?.items && route.params.items.length > 0) setItems(route.params.items);
     if (route?.params?.ongkir !== undefined) setOngkir(Math.max(0, route.params.ongkir));
+    if (typeof route?.params?.mode === 'string' && route.params.mode) setMode(route.params.mode);
+    if (route?.params?.table !== undefined) setTable(route.params.table ?? '');
+    if (route?.params?.customer !== undefined) setCustomer(route.params.customer ?? '');
+    if (route?.params?.memberId !== undefined) setMemberId(route.params.memberId ?? '');
+    if (typeof route?.params?.salesNum === 'string' && route.params.salesNum.trim()) setSalesNum(route.params.salesNum.trim());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params]);
   const routeTotal = route?.params?.total;
@@ -200,6 +212,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     navigation?.navigate('Pay', {
       total,
       items: active,
+      // Nomor dibawa agar Pay pakai ulang (bukan nomor baru): draft yang
+      // dibayar bisa dihapus tepat sasaran di Success (anti hantu, bug G2).
+      ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
       discount: discountTotal + voucherAmt,
       ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
       mode,
@@ -217,24 +232,53 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const goSave = () => {
     setSavedTick(true);
     const title = `${modeLabel} · ${customer.trim() || t('guestFallback')}`;
-    const payload = JSON.stringify({
-      title,
-      mode,
-      ...(table ? { table } : {}),
-      items,
-      ongkir: ongkirNet,
-      total,
-      ts: Date.now(),
-    });
-    const id = `draft-${Date.now()}`;
     const now = new Date().toISOString();
     void (async () => {
+      // Nomor draft: pakai ulang bila ada, bangkitkan bila cart baru. Tanpa
+      // ini draft tak bisa dipetakan ke penjualan (hantu di Muat, bug G2).
+      let sn = salesNum.trim();
+      if (!sn) {
+        try {
+          sn = await nextSalesNum();
+        } catch {
+          sn = '';
+        }
+      }
+      // Simpan item aktif saja (baris voided sudah keluar dari bill) plus
+      // voucher/member/pelanggan/nomor agar utuh saat dimuat kembali (G3).
+      const payload = JSON.stringify({
+        title,
+        mode,
+        ...(table ? { table } : {}),
+        items: active,
+        ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+        ...(memberId ? { memberId } : {}),
+        ...(customer.trim() ? { customer: customer.trim() } : {}),
+        ...(sn ? { salesNum: sn } : {}),
+        ongkir: ongkirNet,
+        total,
+        ts: Date.now(),
+      });
+      const id = `draft-${Date.now()}`;
       try {
         await initDb();
         await run(
           'INSERT INTO tr_draftorder (id, payload, createdAt, updatedAt, syncDate) VALUES (?, ?, ?, ?, NULL)',
           [id, payload, now, now],
         );
+        // Draft menempati meja (cermin LoadOrderScreen): meja ikut 'terisi' + sync.
+        if (table) {
+          try {
+            await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', table.trim()]);
+            try {
+              enqueueSync('other', { op: 'table-occupy', table, at: now });
+            } catch {
+              /* abaikan */
+            }
+          } catch {
+            /* abaikan: status meja tetap ikut draft */
+          }
+        }
       } catch {
         /* offline-first: abaikan gagal tulis, daftar DB tetap tampil */
       }

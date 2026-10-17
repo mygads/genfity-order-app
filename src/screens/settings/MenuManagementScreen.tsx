@@ -386,8 +386,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
             placeholder={lang === 'en' ? 'Station (optional)' : 'Station (opsional)'}
           />
           <View style={styles.editorBtns}>
-            <AppButton title={t('common.cancel')} onPress={() => setShowAdd(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton title={t('common.save')} onPress={addMenu} fullWidth={false} style={styles.navyFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.cancel')} onPress={() => setShowAdd(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.save')} onPress={addMenu} fullWidth={false} style={styles.navyFlex} />
           </View>
         </View>
       ) : null}
@@ -430,8 +430,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
               />
               <AppInput label={t('menu.group')} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} />
               <View style={styles.editorBtns}>
-                <AppButton title={t('common.cancel')} onPress={() => setEditing(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-                <AppButton title={t('menu.saveChanges')} onPress={() => saveEditor(m.id)} fullWidth={false} style={styles.navyFlex} />
+                <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.cancel')} onPress={() => setEditing(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+                <AppButton size={isTablet ? 'md' : 'sm'} title={t('menu.saveChanges')} onPress={() => saveEditor(m.id)} fullWidth={false} style={styles.navyFlex} />
               </View>
             </View>
           ) : null}
@@ -439,8 +439,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
             {m.imageState !== 'ok' && m.imageState !== 'downloading' ? (
               <AppButton size="sm" title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             ) : null}
-            <AppButton title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton title={t('common.delete')} onPress={() => confirmDelete(m)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.delete')} onPress={() => confirmDelete(m)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             <View style={[styles.soldRow, isTablet && styles.soldRowTablet]}>
               <Text style={styles.rowLabel}>{t('menu.markSold')}</Text>
               <Switch value={m.soldOut} onValueChange={(v) => patch(m.id, { soldOut: v })} trackColor={{ true: colors.red, false: colors.stroke }} />

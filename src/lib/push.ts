@@ -140,7 +140,7 @@ export async function notifyLocal(title: string, body: string, data?: Record<str
       /* preferensi belum siap - bunyi default */
     }
     await Notifications.scheduleNotificationAsync({
-      content: { title, body, data: data ?? {}, ...(soundOn ? { sound: 'default' as const } : { sound: null }) },
+      content: { title, body, data: data ?? {}, ...(soundOn ? { sound: 'default' as const } : {}) },
       trigger: null,
     });
   } catch {

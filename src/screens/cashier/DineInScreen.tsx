@@ -6,6 +6,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals } from '../../lib/totals';
+import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -121,16 +122,32 @@ export default function DineInScreen({ navigation, route }: Props) {
       table, mode,
       ...(guest.trim() ? { customer: guest.trim() } : {}),
     });
-  const goSave = () =>
-    navigation?.navigate('LoadOrder', {
-      newOrder: {
-        title: `${mode} · ${t('table')} ${table} · ${guestName}`,
-        mode,
-        table,
-        items: active,
-        ongkir: ongkirNet,
-      },
-    });
+  const goSave = () => {
+    // Nomor dibangkitkan di sini agar draft selalu membawa salesNum (kunci
+    // hapus draft di Success + pakai ulang nomor saat bayar, anti hantu G2).
+    // Voucher/member/tamu ikut agar rantai draft utuh (G4).
+    void (async () => {
+      let num = '';
+      try {
+        num = await nextSalesNum();
+      } catch {
+        num = '';
+      }
+      navigation?.navigate('LoadOrder', {
+        newOrder: {
+          title: `${mode} · ${t('table')} ${table} · ${guestName}`,
+          mode,
+          table,
+          items: active,
+          ongkir: ongkirNet,
+          ...(num ? { salesNum: num } : {}),
+          ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}) } } : {}),
+          ...(memberId ? { memberId } : {}),
+          ...(guest.trim() ? { customer: guest.trim() } : {}),
+        },
+      });
+    })();
+  };
   /** Paket struk penuh ala POSLite: item + diskon + voucher + ongkir + meja + tamu. */
   const discountForChain = discountTotal + voucherAmt;
   const goPrint = () =>

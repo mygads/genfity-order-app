@@ -1,4 +1,5 @@
 import { initDb, queryFirst } from './db';
+import { getBranchId } from '../config/server';
 
 /** Status shift terakhir dari DB lokal (tr_shiftlog).
  * Cermin logika guard navigator di App.tsx: instalasi fresh (riwayat kosong)
@@ -26,7 +27,10 @@ export async function getShiftStatus(): Promise<ShiftStatus | null> {
       // Baris absensi (status 'absen') dikecualikan: clock-in/out kehadiran
       // BUKAN shift kasir; tanpa filter, absen-masuk setelah shift tutup
       // (clockOut NULL) terbaca "open" dan gerbang kasir bocor.
-      'SELECT clockIn, clockOut, status, cashInDrawer FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
+      // Lingkup cabang: shift open cabang LAIN tak boleh membuka kasir
+      // cabang ini (perangkat = 1 cabang; baris lama tanpa branchId = milik kami).
+      'SELECT clockIn, clockOut, status, cashInDrawer FROM tr_shiftlog WHERE (status IS NULL OR status <> \'absen\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1',
+      [getBranchId()],
     );
     if (row) {
       return {

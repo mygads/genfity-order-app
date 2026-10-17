@@ -130,10 +130,12 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     }
     if (tab === 'member') {
       if (found?.kind === 'member') return `${code.trim()} - ${found.label}`;
-      return t('scan_desc_member');
+      // Belum tervalidasi: tampilkan kode asli hasil pindaian, bukan contoh fiksi.
+      return code.trim() || '-';
     }
-    if (tab === 'esb') return t('scan_desc_esb');
-    return t('scan_desc_claim');
+    // esb/claim tanpa hasil validasi lokal: kode asli, bukan contoh fiksi.
+    if (tab === 'esb') return code.trim() || '-';
+    return code.trim() || '-';
   };
 
   return (

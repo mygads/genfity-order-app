@@ -87,6 +87,21 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const feeESB = route?.params?.feeESB ?? 0;
   // Ringkasan mini: hitung subtotal dari item agar rinciannya ikut tampil (bukan cuma total).
   const miniItems = route?.params?.items ?? [];
+  // Draft yang baru dibayar = hapus dari tr_draftorder agar tak jadi hantu di
+  // Muat Order (bug G2). Cocok via salesNum di payload; best-effort, tak blokir UI.
+  useEffect(() => {
+    const no = String(orderNo ?? '').trim();
+    if (!no) return;
+    void (async () => {
+      try {
+        await initDb();
+        await run('DELETE FROM tr_draftorder WHERE payload LIKE ?', [`%${no}%`]);
+      } catch {
+        /* abaikan */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Meja dibebaskan saat penjualan lunas: draft menandai 'terisi' sejak
   // disimpan (LoadOrderScreen) — sukses bayar = meja kosong kembali + sync.
   useEffect(() => {
@@ -112,8 +127,6 @@ export default function SuccessScreen({ navigation, route }: Props) {
     (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) -
     (it.discount ?? 0);
   const miniSubtotal = miniItems.reduce((s, it) => s + lineTotal(it), 0);
-  const miniShown = miniItems.slice(0, 4);
-  const miniHidden = miniItems.length - miniShown.length;
   const isCash = method === 'cash' || method.toLowerCase().includes('tunai');
   const doPrint = () => {
     // Cetak via layar struk (cetak nyata ESC/POS + tendang laci bila tunai),
@@ -168,21 +181,20 @@ export default function SuccessScreen({ navigation, route }: Props) {
     </>
   );
 
+  // Pratinjau struk: SATU scroll milik layar (tanpa ScrollView bersarang di
+  // dalam kartu), semua item tampil, urutan baris SELARAS ReceiptScreen
+  // (diskon → service → feeESB → tax → voucher → ongkir → rounding → TOTAL).
   const receipt = (
     <View style={styles.receipt}>
-      <ScrollView>
         <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
         <Text style={styles.shopSub}>Kasir {getSession()?.name ?? getSession()?.username ?? ''} • {[orderMode ?? 'Dine In', route?.params?.table, route?.params?.customer].filter(Boolean).join(' · ')}</Text>
         <View style={styles.divider} />
-        {miniShown.map((it) => (
+        {miniItems.map((it) => (
           <View key={it.id} style={styles.row}>
             <Text style={styles.label}>{it.qty}x {it.name}</Text>
             <Text style={styles.value}>{rp(lineTotal(it))}</Text>
           </View>
         ))}
-        {miniHidden > 0 && (
-          <Text style={styles.miniMore}>{t('ok_more_items').replace('{n}', String(miniHidden))}</Text>
-        )}
         {miniItems.length > 0 && (
           <View style={styles.row}>
             <Text style={styles.label}>{t('c_subtotal')}</Text>
@@ -193,18 +205,6 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('rc_discount')}</Text>
             <Text style={styles.value}>-{rp(discount)}</Text>
-          </View>
-        )}
-        {voucherCode ? (
-          <View style={styles.row}>
-            <Text style={styles.label}>{t('ok_voucher')}</Text>
-            <Text style={styles.value}>{voucherCode}</Text>
-          </View>
-        ) : null}
-        {tax > 0 && (
-          <View style={styles.row}>
-            <Text style={styles.label}>{t('ok_tax')}</Text>
-            <Text style={styles.value}>{rp(tax)}</Text>
           </View>
         )}
         {service > 0 && (
@@ -219,16 +219,35 @@ export default function SuccessScreen({ navigation, route }: Props) {
             <Text style={styles.value}>{rp(feeESB)}</Text>
           </View>
         )}
-        <View style={styles.row}>
-          <Text style={styles.label}>{t('c_total')}</Text>
-          <Text style={styles.value}>{rp(total)}</Text>
-        </View>
+        {tax > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('ok_tax')}</Text>
+            <Text style={styles.value}>{rp(tax)}</Text>
+          </View>
+        )}
+        {voucherCode ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('rc_voucher')}</Text>
+            <Text style={styles.value}>{voucherCode}</Text>
+          </View>
+        ) : null}
         {ongkir > 0 && (
           <View style={styles.row}>
             <Text style={styles.label}>{t('ongkir')}</Text>
             <Text style={styles.value}>{rp(ongkir)}</Text>
           </View>
         )}
+        {rounding !== 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('rounding')}</Text>
+            <Text style={styles.value}>{rp(rounding)}</Text>
+          </View>
+        )}
+        <View style={styles.divider} />
+        <View style={styles.row}>
+          <Text style={styles.totalLabel}>{t('c_total').toUpperCase()}</Text>
+          <Text style={styles.totalValue}>{rp(total)}</Text>
+        </View>
         <View style={styles.row}>
           <Text style={styles.label}>{t('ok_method')}</Text>
           <Text style={styles.value}>{METHOD_LABEL[method] ?? method}</Text>
@@ -259,7 +278,6 @@ export default function SuccessScreen({ navigation, route }: Props) {
         )}
         <View style={styles.divider} />
         <Text style={styles.thanks}>{t('ok_thanks')}</Text>
-      </ScrollView>
     </View>
   );
 
@@ -318,10 +336,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
         sub={orderNo}
         onBack={() => navigation?.navigate('Cashier')}
       />
-      <View style={styles.body}>
+      <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.body}>
         {status}
         {receipt}
-      </View>
+      </ScrollView>
 
       <View style={[styles.footer, styles.footerGrid]}>
         <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={styles.footGridBtn} />
@@ -336,7 +354,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  body: { flex: 1, alignItems: 'center', padding: 24 },
+  bodyScroll: { flex: 1 },
+  body: { alignItems: 'center', padding: 24, paddingBottom: 40 },
   split: { flex: 1, flexDirection: 'row', padding: 24, gap: 20, ...wideCenterLg },
   statusSide: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   receiptSide: { flex: 1.2, justifyContent: 'center' },
@@ -356,7 +375,6 @@ const styles = StyleSheet.create({
   receipt: {
     marginTop: 18,
     width: '100%',
-    maxHeight: 320,
     backgroundColor: colors.card,
     borderRadius: 10,
     borderWidth: 1,
@@ -368,6 +386,8 @@ const styles = StyleSheet.create({
   divider: { borderTopWidth: 1, borderTopColor: colors.line, borderStyle: 'dashed', marginVertical: 12 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   miniMore: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, marginBottom: 6 },
+  totalLabel: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
+  totalValue: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy },
   label: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted },
   value: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   changeValue: { fontFamily: fonts.bold, fontSize: 14, color: colors.green },

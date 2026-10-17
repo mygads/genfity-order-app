@@ -7,6 +7,7 @@ import { initDb, query, queryFirst } from '../../lib/db';
 import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
 import ScreenHeader from '../../components/ScreenHeader';
+import { PayDonut, WeekBars, type PaySlice, type WeekPoint } from '../../components/MiniCharts';
 import { useLang } from '../../lib/i18n';
 import { ensureShiftOpen, getShiftStatus } from '../../lib/shiftGuard';
 import { useConnectivity } from '../../hooks/useConnectivity';
@@ -57,7 +58,7 @@ function tableStyle(s: string) {
 
 export default function DashboardScreen({ navigation }: Props) {
   const s = getSession();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge koneksi REAL: hijau+Online bila jaringan & WS up, amber+Offline bila
   // jaringan mati, abu+Offline (mode lokal) bila jaringan up tapi WS putus
@@ -88,6 +89,9 @@ export default function DashboardScreen({ navigation }: Props) {
   // NAV-04/05: hitungan nyata; null/awal = DB kosong → tampil nol.
   const [esbNew, setEsbNew] = useState<number | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  // Rekap sekilas: omzet 7 hari + komposisi pembayaran hari ini (live SQLite).
+  const [week, setWeek] = useState<WeekPoint[]>([]);
+  const [payMix, setPayMix] = useState<PaySlice[]>([]);
 
   // Muat angka nyata dari SQLite (tr_saleshead hari ini, ms_table,
   // ms_branchmenu join ms_menu, tr_shiftlog terakhir). Gagal = tetap nol,
@@ -100,9 +104,13 @@ export default function DashboardScreen({ navigation }: Props) {
         const d = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
         const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        // Lingkup cabang: perangkat = 1 cabang (terminal.branchId); baris lama
+        // tanpa branchId dianggap milik cabang ini agar tak hilang.
+        const bid = getBranchId();
         const dayRow = await queryFirst<{ c: number; t: number }>(
-          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE substr(salesDate, 1, 10) = ?',
-          [day],
+          // Hanya yg lunas (selaras Recap): void/open tak dihitung omzet.
+          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE status = \'paid\' AND (branchId = ? OR branchId IS NULL OR branchId = \'\') AND substr(salesDate, 1, 10) = ?',
+          [bid, day],
         );
         if (alive && dayRow) {
           setSales({ total: Number(dayRow.t) || 0, trx: Number(dayRow.c) || 0 });
@@ -111,11 +119,53 @@ export default function DashboardScreen({ navigation }: Props) {
         const yd = new Date(d.getTime() - 86400000);
         const yday = `${yd.getFullYear()}-${pad(yd.getMonth() + 1)}-${pad(yd.getDate())}`;
         const yRow = await queryFirst<{ c: number; t: number }>(
-          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE substr(salesDate, 1, 10) = ?',
-          [yday],
+          'SELECT COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t FROM tr_saleshead WHERE status = \'paid\' AND (branchId = ? OR branchId IS NULL OR branchId = \'\') AND substr(salesDate, 1, 10) = ?',
+          [bid, yday],
         );
         if (alive && yRow) {
           setYest({ total: Number(yRow.t) || 0, trx: Number(yRow.c) || 0 });
+        }
+        // Rekap sekilas: 7 hari terakhir (hari kosong = nol, bukan hilang).
+        const wStartD = new Date(d.getTime() - 6 * 86400000);
+        const wStart = `${wStartD.getFullYear()}-${pad(wStartD.getMonth() + 1)}-${pad(wStartD.getDate())}`;
+        const wRows = await query<{ d: string; c: number; t: number }>(
+          `SELECT substr(salesDate, 1, 10) AS d, COUNT(*) AS c, COALESCE(SUM(grandTotal), 0) AS t
+           FROM tr_saleshead WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND substr(salesDate, 1, 10) >= ?
+           GROUP BY d ORDER BY d`,
+          [bid, wStart],
+        );
+        if (alive) {
+          const byDay = new Map(wRows.map((r) => [r.d, r]));
+          const pts: WeekPoint[] = [];
+          for (let i = 6; i >= 0; i--) {
+            const dd = new Date(d.getTime() - i * 86400000);
+            const key = `${dd.getFullYear()}-${pad(dd.getMonth() + 1)}-${pad(dd.getDate())}`;
+            const r = byDay.get(key);
+            pts.push({
+              d: key,
+              label: `${pad(dd.getDate())}/${pad(dd.getMonth() + 1)}`,
+              t: Number(r?.t) || 0,
+              c: Number(r?.c) || 0,
+              today: key === day,
+            });
+          }
+          setWeek(pts);
+        }
+        // Komposisi metode pembayaran hari ini (lunas saja, ikut Recap).
+        const pmRows = await query<{ m: string | null; n: number; t: number }>(
+          `SELECT paymentMethod AS m, COUNT(*) AS n, COALESCE(SUM(grandTotal), 0) AS t
+           FROM tr_saleshead WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND substr(salesDate, 1, 10) = ?
+           GROUP BY m ORDER BY t DESC`,
+          [bid, day],
+        );
+        if (alive) {
+          setPayMix(
+            pmRows.map((r) => ({
+              m: (r.m || t('sync_kind_other')).trim() || t('sync_kind_other'),
+              n: Number(r.n) || 0,
+              t: Number(r.t) || 0,
+            })),
+          );
         }
         const tRows = await query<{ id: string; tableNo: string | null; status: string | null }>(
           'SELECT id, tableNo, status FROM ms_table LIMIT 60',
@@ -137,7 +187,9 @@ export default function DashboardScreen({ navigation }: Props) {
           clockOut: string | null; status: string | null;
         }>(
           // Absensi (status 'absen') dikecualikan: clock-in kehadiran bukan shift kasir.
-          'SELECT shiftName, clockIn, cashInDrawer, clockOut, status FROM tr_shiftlog WHERE status IS NULL OR status <> \'absen\' ORDER BY clockIn DESC LIMIT 1',
+          // Lingkup cabang: shift cabang lain tak boleh tampil sebagai shift kami.
+          'SELECT shiftName, clockIn, cashInDrawer, clockOut, status FROM tr_shiftlog WHERE (status IS NULL OR status <> \'absen\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1',
+          [bid],
         );
         if (alive && shiftRow) {
           const hhmm = String(shiftRow.clockIn ?? '').slice(11, 16);
@@ -156,7 +208,8 @@ export default function DashboardScreen({ navigation }: Props) {
         // NAV-04: order online baru (belum diproses) + total member terdaftar.
         const esbRow = await queryFirst<{ c: number }>(
           `SELECT COUNT(*) AS c FROM tr_saleshead
-           WHERE onlineOrderId IS NOT NULL AND status = 'open'`,
+           WHERE onlineOrderId IS NOT NULL AND status = 'open' AND (branchId = ? OR branchId IS NULL OR branchId = '')`,
+          [bid],
         );
         if (alive && esbRow) setEsbNew(Number(esbRow.c) || 0);
         const memRow = await queryFirst<{ c: number }>(
@@ -188,6 +241,17 @@ export default function DashboardScreen({ navigation }: Props) {
   const deltaTxt = delta === null
     ? t('dash_vs_empty')
     : `${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}% ${t('dash_vs')}`;
+  // Angka ringkas utk label bar (1,2 jt / 350 rb), desimal ikut bahasa aktif.
+  const compact = (n: number): string => {
+    const dec = (v: number) => {
+      const r = Math.round(v * 10) / 10;
+      const s = String(r);
+      return lang === 'en' ? s : s.replace('.', ',');
+    };
+    if (n >= 1_000_000) return `${dec(n / 1_000_000)} ${t('unit_jt')}`;
+    if (n >= 1_000) return `${dec(n / 1_000)} ${t('unit_rb')}`;
+    return String(Math.round(n));
+  };
 
   const MENU: MenuItem[] = [
     { label: t('nav_order'), sub: `${t('nav_cashier')} · ${sales.trx} ${t('unit_trx')}`, route: 'Cashier' },
@@ -310,6 +374,26 @@ export default function DashboardScreen({ navigation }: Props) {
       }}>
         <Text style={[styles.ctaText, isTablet && styles.ctaTextBig]}>{t('dash_new_trx')}</Text>
       </TouchableOpacity>
+
+      {/* Rekap sekilas: agregasi live SQLite (lunas saja), bukan dummy. */}
+      <Text style={[styles.sectionTitle, isTablet && styles.sectionTitleBig]}>{t('dash_recap_snap')}</Text>
+      <View style={isTablet ? styles.chartRowTablet : undefined}>
+        <View style={[styles.chartCard, isTablet && styles.chartCardTablet]}>
+          <Text style={styles.chartTitle}>{t('dash_chart_week')}</Text>
+          <WeekBars data={week} emptyText={t('dash_chart_empty')} fmtCompact={compact} />
+        </View>
+        <View style={[styles.chartCard, isTablet && styles.chartCardTablet]}>
+          <Text style={styles.chartTitle}>{t('dash_chart_pay')}</Text>
+          <PayDonut
+            data={payMix}
+            surface={colors.card}
+            emptyText={t('dash_chart_empty')}
+            centerValue={compact(sales.total)}
+            centerSub={`${sales.trx} ${t('unit_trx')}`}
+            fmtAmt={rp}
+          />
+        </View>
+      </View>
 
       <Text style={[styles.sectionTitle, isTablet && styles.sectionTitleBig]}>{t('dash_main_menu')}</Text>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
@@ -444,6 +528,18 @@ const styles = StyleSheet.create({
   ctaText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
   sectionTitle: { fontFamily: fonts.bold, fontSize: 15, color: colors.text, marginTop: 16 },
   notice: { fontFamily: fonts.medium, fontSize: 12, color: colors.orangeDark, marginTop: 6 },
+  /* Rekap sekilas: kartu chart senada salesCard; tablet bersebelahan. */
+  chartRowTablet: { flexDirection: 'row', gap: 10 },
+  chartCard: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  chartCardTablet: { flex: 1 },
+  chartTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },
   menuGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   menuGridTablet: { gap: 10 },
   menuCell: { width: '48%', backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.line },

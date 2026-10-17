@@ -105,6 +105,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   );
   const [methods, setMethods] = useState<string[]>(['Tunai', 'QRIS']);
   const [paid, setPaid] = useState<boolean[]>([false, false]);
+  /** Klaim kode voucher sekali per order: split pertama yang dibayar membawa kode
+   * (kuota terbakar 1x di saveSale); split berikut melipat porsi voucher ke diskon. */
+  const [voucherClaimed, setVoucherClaimed] = useState(false);
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11) untuk rumus kanonik. */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   useEffect(() => {
@@ -120,6 +123,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const resetSplits = (n: number) => {
     setSplits(n);
     setPaid(Array(n).fill(false));
+    setVoucherClaimed(false);
     setNominals(Array(n).fill(''));
     setMethods(Array.from({ length: n }, (_, i) => METHODS[i % METHODS.length] as string));
     setAssign(Object.fromEntries(items.map((it, i) => [it.id, i % n])));
@@ -236,10 +240,16 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     const members = splitMode === 'perItem' ? items.filter((it) => (assign[it.id] ?? 0) === i) : items;
     // Kontrak Pay (PayScreen read-only): total + items/mode/table/ongkir/voucher/diskon
     // + rincian info-only (service/fee/pajak) agar Pay teruskan ke Success > Receipt.
-    // total = tagihan penuh split ini (selaras CartDetail yang kirim total penuh),
-    // voucher diteruskan sebagai OBJEK per-split agar Pay mencatat kode + nominal.
+    // total = tagihan penuh split ini (selaras CartDetail yang kirim total penuh).
+    // Kode voucher hanya dibawa split pertama yang dibayar (kuota terbakar 1x di
+    // saveSale); split berikut melipat porsi voucher ke diskon tercatat agar total
+    // struk tetap pas tanpa catat ganda.
     // Rounding tak diteruskan per split: tiap bill sudah bulat persis (pembulatan
     // pemanggil sudah dilipat ke ongkirEff via residual).
+    const vShare = (voucherShares[i] as number) || 0;
+    const dShare = (discountShares[i] as number) || 0;
+    const carryCode = !!voucherCode && !voucherClaimed;
+    const discountTotal = dShare + (carryCode ? 0 : vShare);
     navigation?.navigate('Pay', {
       total: val,
       method: methods[i],
@@ -249,12 +259,13 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
       ...((ongkirShares[i] as number) > 0 ? { ongkir: ongkirShares[i] } : {}),
-      ...(voucherCode ? { voucher: { code: voucherCode, amount: voucherShares[i] as number, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
-      ...((discountShares[i] as number) > 0 ? { discount: discountShares[i] } : {}),
+      ...(carryCode ? { voucher: { code: voucherCode, amount: vShare, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}),
+      ...(discountTotal > 0 ? { discount: discountTotal } : {}),
       ...((serviceShares[i] as number) > 0 ? { service: serviceShares[i] } : {}),
       ...((feeShares[i] as number) > 0 ? { feeESB: feeShares[i] } : {}),
       ...((taxShares[i] as number) > 0 ? { tax: taxShares[i] } : {}),
     });
+    if (carryCode) setVoucherClaimed(true);
     setPaid((p) => p.map((v, j) => (j === i ? true : v)));
   };
 

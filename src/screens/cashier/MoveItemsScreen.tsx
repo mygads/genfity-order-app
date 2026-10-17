@@ -49,7 +49,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         await initDb();
         const tables = await query<{ tableNo: string }>(
           `SELECT DISTINCT tableNo FROM tr_saleshead
-           WHERE status <> 'paid' AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
+           WHERE status NOT IN ('paid','void') AND tableNo IS NOT NULL AND TRIM(tableNo)<> ''`,
         );
         const names = tables.map((r) => r.tableNo.trim()).filter(Boolean);
         if (!on) return;
@@ -87,7 +87,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
             `SELECT m.menuId AS id, m.menuName AS name, SUM(m.qty) AS qty, m.price AS price,
                     m.note AS note, m.discount AS discount
              FROM tr_salesmenu m INNER JOIN tr_saleshead h ON h.salesNum = m.salesNum
-             WHERE h.status <> 'paid' AND h.tableNo = ?
+             WHERE h.status NOT IN ('paid','void') AND h.tableNo = ?
              GROUP BY m.menuId, m.menuName, m.price, m.note, m.discount`,
             [tb],
           );
@@ -212,13 +212,13 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
       try {
         await initDb();
         const heads = await query<{ salesNum: string }>(
-          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid' ORDER BY salesDate`,
+          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status NOT IN ('paid','void') ORDER BY salesDate`,
           [from],
         );
         if (heads.length === 0) throw new Error('no-head');
         const fromSalesNum = heads[0].salesNum;
         const destHeads = await query<{ salesNum: string }>(
-          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status <> 'paid' ORDER BY salesDate LIMIT 1`,
+          `SELECT salesNum FROM tr_saleshead WHERE tableNo = ? AND status NOT IN ('paid','void') ORDER BY salesDate LIMIT 1`,
           [toTable],
         );
         const moves: { id: string; qty: number }[] = [];

@@ -5,13 +5,13 @@
  * syncDate NULL (= kotor) agar ikut push berikutnya; pengiriman
  * server tetap lewat antrean ringan `recordSale` (src/lib/payments.ts).
  */
-import { getTerminal, ApiPath } from '../config/server';
+import { getBranchId, getTerminal, ApiPath } from '../config/server';
 import { getSession } from '../session';
 import { initDb, query, queryFirst, run } from './db';
 import { getItem, setItem } from './storage';
 import { enqueueOutbox, enqueueSync } from './sync';
 import { apiFetch } from './apiSource';
-import { lineSubtotal, normalizeSalesMode, type SaleInput } from './payments';
+import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
 
 const r = (n: number) => Math.round(n);
 
@@ -48,32 +48,41 @@ export async function saveSale(s: SaleInput): Promise<string> {
   const salesNum = s.salesNum ?? (await nextSalesNum());
   const now = new Date().toISOString();
   const t = getTerminal();
-  const cashier = getSession()?.name ?? '';
+  const sess = getSession();
+  const cashier = sess?.name ?? '';
+  const cashierId = (sess?.userId ?? '').trim();
+  const branchId = t.branchId || getBranchId();
   const items = s.items ?? [];
   const subtotal = s.subtotal ?? items.reduce((a, it) => a + lineSubtotal(it), 0);
   const payments = s.payments?.length
     ? s.payments
     : [{ method: s.method, amount: s.grandTotal }];
   const paid = payments.reduce((a, p) => a + p.amount, 0);
-  const voucherAmt = r(s.voucherCode ? (s.discountTotal ?? 0) : 0);
+  // Porsi voucher murni = diskon head - diskon per-item. Pemanggil Pay mengirim
+  // gabungan keduanya di discountTotal; tanpa pemisah, nominal voucher di head
+  // + usage ter-overstate sebesar diskon item (bug G5).
+  const itemDiscSum = r(items.reduce((a, it) => a + r(it.discount ?? 0), 0));
+  const voucherAmt = r(s.voucherCode ? Math.max(0, (s.discountTotal ?? 0) - itemDiscSum) : 0);
   await initDb();
   // Mode/ongkir/customer + rincian pajak/service/voucher ikut tersimpan agar
   // struk ulang dan push server konsisten dengan rumus kasir kanonik.
   await run(
     `INSERT INTO tr_saleshead (salesNum, branchId, terminalId, userId, salesDate,
-      salesMode, subtotal, discount, tax, serviceCharge, voucherAmount, voucherCode,
+      salesMode, subtotal, discount, tax, serviceCharge, platformFee, rounding,
+      voucherAmount, voucherCode,
       grandTotal, paidAmount, changeAmount,
       paymentMethod, memberId, tableNo, customerName, ongkir,
       status, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?, NULL)`,
     [
-      salesNum, t.branchId || null, t.terminalCode || null, cashier, now,
+      salesNum, branchId, t.terminalCode || null, cashierId || null, now,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
       r(subtotal), r(s.discountTotal ?? 0),
       r(s.vatTotal ?? 0), r(s.serviceTotal ?? 0),
+      r(s.feeESB ?? 0), Math.round(Number(s.rounding) || 0),
       voucherAmt, s.voucherCode ?? null,
       r(s.grandTotal), r(paid),
-      r(s.change ?? Math.max(0, paid - s.grandTotal)), payments[0]?.method ?? s.method,
+      r(s.change ?? Math.max(0, paid - s.grandTotal)), normalizeMethod(payments[0]?.method ?? s.method),
       s.memberId ?? null, s.tableId ?? null, s.customer ?? null, r(s.ongkir ?? 0),
       cashier, now, now,
     ],
@@ -106,7 +115,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
     // bisa membuka lagi dari layar Stok). Custom-menu (tanpa baris
     // branchmenu) tak kena apa-apa.
     try {
-      const branch = t.branchId || null;
+      const branch = branchId;
       const soldQty = Math.max(0, Math.round(Number(it.qty) || 0));
       if (branch && it.id && soldQty > 0) {
         await run(
@@ -141,6 +150,49 @@ export async function saveSale(s: SaleInput): Promise<string> {
       ],
     );
   }
+  // Bayar pakai deposit: saldo member ikut turun + ledger withdraw + outbox/
+  // sync. Tanpa ini saldo tak pernah berkurang dan deposit bisa dipakai ulang
+  // tanpa batas (bug G1). Best-effort: penjualan tetap sah bila gagal.
+  const depUsed = r(
+    payments
+      .filter((p) => /deposit/i.test(p.method ?? ''))
+      .reduce((a, p) => a + r(p.amount), 0),
+  );
+  if (depUsed > 0 && s.memberId) {
+    try {
+      const cur = await queryFirst<{ depositBalance: number | null }>(
+        'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+        [s.memberId],
+      );
+      const before = Math.max(0, Math.round(Number(cur?.depositBalance) || 0));
+      const take = Math.min(before, depUsed);
+      const after = before - take;
+      await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, s.memberId]);
+      try {
+        await enqueueOutbox('ms_member', s.memberId, 'update');
+      } catch {
+        /* abaikan */
+      }
+      const depId = uid('dep');
+      await run(
+        `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
+         VALUES (?, ?, ?, 'withdraw', ?, ?, ?, ?, NULL)`,
+        [depId, s.memberId, branchId || null, take, after, cashierId || null, now],
+      );
+      try {
+        await enqueueOutbox('tr_memberdeposit', depId, 'insert');
+      } catch {
+        /* abaikan */
+      }
+      try {
+        enqueueSync('other', { kind: 'deposit-withdraw', memberId: s.memberId, nominal: take });
+      } catch {
+        /* abaikan */
+      }
+    } catch {
+      /* saldo gagal turun - penjualan tetap sah, selisih terlihat di Member */
+    }
+  }
   if (s.voucherCode) {
     await run(
       `INSERT INTO tr_salesvoucherusage (id, salesNum, voucherCode, voucherAmount, status, syncDate)
@@ -152,6 +204,14 @@ export async function saveSale(s: SaleInput): Promise<string> {
     await run(
       `UPDATE ms_voucher SET quota = quota - 1, syncDate = NULL
         WHERE UPPER(voucherCode) = UPPER(?) AND quota > 0`,
+      [s.voucherCode],
+    );
+    // Kuota tembus 0 = hangus/ludes: tandai used agar tak bisa dipakai ulang
+    // offline (daftar voucher menyembunyikan yang terpakai).
+    await run(
+      `UPDATE ms_voucher SET status = 'used', syncDate = NULL
+        WHERE UPPER(voucherCode) = UPPER(?) AND quota IS NOT NULL AND quota <= 0
+          AND (status IS NULL OR status = 'available')`,
       [s.voucherCode],
     );
   }

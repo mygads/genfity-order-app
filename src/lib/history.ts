@@ -152,6 +152,114 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
         /* abaikan */
       }
     }
+    // Balikan void (bug G7: sebelumnya void hanya menandai head). Best-effort
+    // per bagian: kegagalan satu bagian tak menggagalkan void.
+    let vHead: { branchId: string | null; memberId: string | null; voucherCode: string | null } | null = null;
+    try {
+      vHead = await queryFirst<{ branchId: string | null; memberId: string | null; voucherCode: string | null }>(
+        'SELECT branchId, memberId, voucherCode FROM tr_saleshead WHERE salesNum = ?',
+        [salesNum],
+      );
+    } catch {
+      /* abaikan */
+    }
+    // 1) Stok kembali + buka flag habis bila qty pulih.
+    for (const it of items) {
+      try {
+        const branch = vHead?.branchId;
+        const backQty = Math.max(0, Math.round(Number(it.qty) || 0));
+        if (branch && it.menuId && backQty > 0) {
+          await run(
+            'UPDATE ms_branchmenu SET qty = qty + ?, syncDate = NULL WHERE branchId = ? AND menuId = ? AND qty IS NOT NULL',
+            [backQty, branch, it.menuId],
+          );
+          await run(
+            'UPDATE ms_branchmenu SET flagSoldOut = 0, syncDate = NULL WHERE branchId = ? AND menuId = ? AND qty IS NOT NULL AND qty > 0 AND flagSoldOut = 1',
+            [branch, it.menuId],
+          );
+          try {
+            await enqueueOutbox('ms_branchmenu', `${branch}:${it.menuId}`, 'update');
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* abaikan */
+      }
+    }
+    // 2) Kuota voucher kembali + status available lagi.
+    if (vHead?.voucherCode) {
+      try {
+        await run(
+          `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
+            WHERE UPPER(voucherCode) = UPPER(?)`,
+          [vHead.voucherCode],
+        );
+        try {
+          await enqueueOutbox('ms_voucher', vHead.voucherCode.toUpperCase(), 'update');
+        } catch {
+          /* abaikan */
+        }
+      } catch {
+        /* abaikan */
+      }
+    }
+    // 3) Deposit kembali ke saldo member + ledger refund.
+    try {
+      if (vHead?.memberId) {
+        const pays = await query<{ paymentMethod: string | null; amount: number | null }>(
+          'SELECT paymentMethod, amount FROM tr_salespayment WHERE salesNum = ?',
+          [salesNum],
+        );
+        const depBack = Math.round(
+          pays
+            .filter((p) => /deposit/i.test(p.paymentMethod ?? ''))
+            .reduce((a, p) => a + Math.max(0, Number(p.amount) || 0), 0),
+        );
+        if (depBack > 0) {
+          const cur = await queryFirst<{ depositBalance: number | null }>(
+            'SELECT depositBalance FROM ms_member WHERE id = ? LIMIT 1',
+            [vHead.memberId],
+          );
+          const after = Math.max(0, Math.round(Number(cur?.depositBalance) || 0)) + depBack;
+          await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, vHead.memberId]);
+          try {
+            await enqueueOutbox('ms_member', vHead.memberId, 'update');
+          } catch {
+            /* abaikan */
+          }
+          const rid = `dep-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+          await run(
+            `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate)
+             VALUES (?, ?, ?, 'refund', ?, ?, ?, ?, NULL)`,
+            [rid, vHead.memberId, vHead.branchId ?? null, depBack, after, user || null, now],
+          );
+          try {
+            await enqueueOutbox('tr_memberdeposit', rid, 'insert');
+          } catch {
+            /* abaikan */
+          }
+          try {
+            enqueueSync('other', { kind: 'deposit-refund', memberId: vHead.memberId, nominal: depBack });
+          } catch {
+            /* abaikan */
+          }
+        }
+      }
+    } catch {
+      /* abaikan */
+    }
+    // 4) Tiket dapur disembunyikan (loader Kitchen melewati status Batal).
+    try {
+      await run(`UPDATE tr_kitchenticket SET status = 'Batal', updatedAt = ?, syncDate = NULL WHERE salesNum = ?`, [now, salesNum]);
+      try {
+        await enqueueOutbox('tr_kitchenticket', `kt-${salesNum}`, 'update');
+      } catch {
+        /* abaikan */
+      }
+    } catch {
+      /* abaikan */
+    }
   } catch {
     /* DB gagal - antrean di bawah tetap jalan */
   }
@@ -174,9 +282,20 @@ export async function persistVoidDb(salesNum: string, reason: string): Promise<v
 
 /** Ganti metode bayar: payment + head ikut terupdate + outbox/sync/server. */
 export async function persistPayChangeDb(salesNum: string, method: string): Promise<void> {
+  // Bill split (multi-baris tr_salespayment): jangan timpa rincian split
+  // menjadi satu metode (bug G6) — cukup head yang ikut metode terakhir.
   try {
     await initDb();
-    await run('UPDATE tr_salespayment SET paymentMethod = ?, syncDate = NULL WHERE salesNum = ?', [method, salesNum]);
+    let rows = 0;
+    try {
+      const c = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_salespayment WHERE salesNum = ?', [salesNum]);
+      rows = Number(c?.c) || 0;
+    } catch {
+      /* abaikan: anggap baris tunggal */
+    }
+    if (rows <= 1) {
+      await run('UPDATE tr_salespayment SET paymentMethod = ?, syncDate = NULL WHERE salesNum = ?', [method, salesNum]);
+    }
     await run('UPDATE tr_saleshead SET paymentMethod = ?, syncDate = NULL WHERE salesNum = ?', [method, salesNum]);
   } catch {
     /* abaikan */

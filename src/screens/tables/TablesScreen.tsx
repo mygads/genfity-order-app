@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -17,7 +17,7 @@ import React, { useEffect, useState } from 'react';import {
   /** Menit sejak tamu duduk - timer durasi meja terisi (dipulihkan dari storage). */
   seatedMin?: number;};
 /** Denah dibaca dari ms_table (seed mengisi 9 meja); kosong = empty-state. */
-const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';const STATUS_META: Record<TableStatus, { bg: string; fg: string }> = {
+const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar durasi bertahan saat aplikasi dibuka ulang. */const SEATED_KEY = 'genfity.tables.seatedMin';/** Status hold order per id meja agar bertahan saat aplikasi dibuka ulang. */const HELD_KEY = 'genfity.tables.held';const STATUS_META: Record<TableStatus, { bg: string; fg: string }> = {
   kosong: { bg: colors.paleGreen, fg: colors.green },
   terisi: { bg: colors.paleRed, fg: colors.red },
   dipesan: { bg: colors.paleOrange, fg: colors.orange },
@@ -59,6 +59,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   const [selected, setSelected] = useState<Table | null>(null);
   const [moveMode, setMoveMode] = useState<'pindah' | 'gabung' | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  /** Peringatan batal meja (mis. masih ada bill terbuka) - tampil di modal detail. */
+  const [cancelWarn, setCancelWarn] = useState('');
   const [bookingVisible, setBookingVisible] = useState(false);
   const [namaBooking, setNamaBooking] = useState('');
   const [jamBooking, setJamBooking] = useState('');
@@ -66,7 +68,29 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   const [bookingWarn, setBookingWarn] = useState(''); /** Hold order: order ditahan, meja tetap terisi tapi ditandai. */
   const [held, setHeld] = useState<Record<string, boolean>>({});
   const [qsCount, setQsCount] = useState(0);
+  /** Kelola meja (pengaturan denah): tambah + hapus meja master. */
+  const [manageOpen, setManageOpen] = useState(false);
+  const [newNo, setNewNo] = useState('');
+  const [newSection, setNewSection] = useState('Dalam');
+  const [newKap, setNewKap] = useState('');
+  const [manageWarn, setManageWarn] = useState('');
+  const [confirmDelTable, setConfirmDelTable] = useState<string | null>(null);
 
+  // Hold order dipulihkan dari storage agar bertahan saat aplikasi dibuka ulang.
+  useEffect(() => {
+    let on = true;
+    void (async () => {
+      try {
+        const h = await getJSON<Record<string, boolean>>(HELD_KEY, {});
+        if (on && h) setHeld(h);
+      } catch {
+        /* abaikan */
+      }
+    })();
+    return () => {
+      on = false;
+    };
+  }, []);
   // F2: sumber utama = persist TableTimer (elapsed per nomor meja, tick 10 dtk);
   // fallback = snapshot lama SEATED_KEY agar durasi lama tak hilang.
   useEffect(() => { let on = true; (async () => { let byNo: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const no = canonTableNo(String(x?.id ?? '')); if (no && Number.isFinite(el) && el >= 0) byNo[no] = el; } } } catch { /* abaikan: pakai fallback */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } if (!on) return; setTables((list) => list.map((tb) => tb.status === 'terisi' || tb.status === 'gabung' ? { ...tb, seatedMin: byNo[normNo(tb.no)] ?? saved[tb.id] ?? tb.seatedMin } : tb, ), ); })().catch(() => undefined); return () => { on = false; }; }, []);
@@ -109,6 +133,49 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     setSelected(null);
     setMoveMode(null);
     setConfirmCancel(false);
+    setCancelWarn('');
+  };
+
+  /** Buka order meja: meja terisi memuat draft tersimpannya ke kasir (item +
+   * mode/ongkir/voucher/member ikut), meja kosong mulai order baru. */
+  const openTableOrder = async (tb: Table): Promise<void> => {
+    const base = { table: tb.no };
+    if (tb.status === 'kosong') {
+      navigation?.navigate?.('Cashier', base);
+      return;
+    }
+    try {
+      await initDb();
+      const rows = await query<{ payload: string }>(
+        'SELECT payload FROM tr_draftorder ORDER BY createdAt DESC',
+      );
+      for (const r of rows) {
+        try {
+          const p = JSON.parse(r.payload) as {
+            table?: unknown; items?: unknown; mode?: unknown; ongkir?: unknown;
+            salesNum?: unknown; voucher?: unknown; memberId?: unknown; customer?: unknown;
+          };
+          if (!p || typeof p.table !== 'string' || p.table.trim() !== tb.no) continue;
+          if (!Array.isArray(p.items) || p.items.length === 0) continue;
+          navigation?.navigate?.('Cashier', {
+            loadItems: p.items,
+            ...(typeof p.mode === 'string' && p.mode ? { mode: p.mode } : {}),
+            table: tb.no,
+            ...(typeof p.ongkir === 'number' ? { ongkir: p.ongkir } : {}),
+            ...(typeof p.salesNum === 'string' && p.salesNum.trim() ? { salesNum: p.salesNum.trim() } : {}),
+            ...(p.voucher && typeof p.voucher === 'object' ? { voucher: p.voucher } : {}),
+            ...(typeof p.memberId === 'string' && p.memberId.trim() ? { memberId: p.memberId.trim() } : {}),
+            ...(typeof p.customer === 'string' && p.customer.trim() ? { customer: p.customer.trim() } : {}),
+          });
+          return;
+        } catch {
+          /* baris korup - lewati */
+        }
+      }
+    } catch {
+      /* DB belum siap - mulai order baru */
+    }
+    navigation?.navigate?.('Cashier', base);
   };
 
   /** Pindah: tamu+total pindah ke meja kosong. Gabung: total digabung ke meja terisi. */
@@ -137,7 +204,34 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         return tb;
       }),
     );
-    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); } closeModal();
+    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); }
+    // Bill SQLite ikut pindah agar "pembayaran meja" tetap benar offline (dulu
+    // hanya memori + ms_table sehingga bill yatim di meja asal): pindah maupun
+    // gabung memindahkan bill terbuka (bukan paid/void) ke meja tujuan.
+    void (async () => {
+      try {
+        await initDb();
+        const open = await query<{ salesNum: string }>(
+          "SELECT salesNum FROM tr_saleshead WHERE TRIM(COALESCE(tableNo,'')) = TRIM(?) AND status NOT IN ('paid','void')",
+          [sel.no],
+        );
+        if (open.length === 0) return;
+        await run(
+          "UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(COALESCE(tableNo,'')) = TRIM(?) AND status NOT IN ('paid','void')",
+          [target.no, sel.no],
+        );
+        for (const b of open) {
+          try {
+            await enqueueOutbox('tr_saleshead', b.salesNum, 'update');
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* abaikan: status denah tetap berubah */
+      }
+    })();
+    closeModal();
     // F2: pindahkan elapsed ke entri timer tujuan, nolkan asal (best-effort).
     if (moveMode === 'pindah') {
       void writeTimerStore(target.no, sel.seatedMin ?? 0);
@@ -149,23 +243,54 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     if (!selected) return;
     if (!confirmCancel) {
       setConfirmCancel(true);
+      setCancelWarn('');
       return;
     }
     const id = selected.id;
-    const no = selected.no; setTables((list) =>
-      list.map((tb) =>
-        tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
-      ),
-    );
-    queueTableOp('table-clear', { table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
-    // F2: nolkan entri timer agar durasi tak terbaca basi (best-effort).
-    void writeTimerStore(no, 0);
+    const no = selected.no;
+    // Jangan kosongkan meja yang masih punya bill terbuka (dulu bill yatim tak
+    // bisa dibayar per meja): kasir harus lunasi/void dulu.
+    void (async () => {
+      try {
+        await initDb();
+        const open = await query<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM tr_saleshead WHERE TRIM(COALESCE(tableNo,'')) = TRIM(?) AND status NOT IN ('paid','void')",
+          [no],
+        );
+        if ((open[0]?.c ?? 0) > 0) {
+          setCancelWarn(`Meja ${no} masih punya bill terbuka - lunasi atau void dulu sebelum dikosongkan.`);
+          setConfirmCancel(false);
+          return;
+        }
+      } catch {
+        /* DB belum siap - lanjutkan pengosongan denah */
+      }
+      setTables((list) =>
+        list.map((tb) =>
+          tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
+        ),
+      );
+      queueTableOp('table-clear', { table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
+      // F2: nolkan entri timer agar durasi tak terbaca basi (best-effort).
+      void writeTimerStore(no, 0);
+    })();
   };
 
   const toggleHold = () => {
     if (!selected) return;
     const id = selected.id;
-    setHeld((h) => ({ ...h, [id]: !h[id] }));
+    // Hold bertahan saat aplikasi dibuka ulang (dulu memori saja).
+    setHeld((h) => {
+      const next = { ...h, [id]: !h[id] };
+      void (async () => {
+        try {
+          await setJSON(HELD_KEY, next);
+        } catch {
+          /* abaikan */
+        }
+      })();
+      return next;
+    });
   queueTableOp('order-hold-toggle', { table: selected.no, held: !held[id] }); };
 
   /** Transaksi cepat (QS): order tanpa meja - langsung buka kasir mode TAKE AWAY. */
@@ -193,6 +318,89 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     setPax('');
   };
 
+  /** Tambah meja master: validasi nomor unik + kapasitas, tulis ms_table + outbox/sync. */
+  const addTable = () => {
+    const no = normNo(newNo);
+    const kap = Math.max(0, Math.round(Number(newKap) || 0));
+    if (!no) {
+      setManageWarn('Isi nomor meja dulu.');
+      return;
+    }
+    if (kap <= 0) {
+      setManageWarn('Isi kapasitas kursi dulu (angka > 0).');
+      return;
+    }
+    if (tables.some((tb) => normNo(tb.no) === no)) {
+      setManageWarn(`Meja ${no} sudah ada.`);
+      return;
+    }
+    const section = newSection.trim() || 'Dalam';
+    setManageWarn('');
+    const id = `t-${Date.now()}`;
+    setTables((list) =>
+      [...list, { id, no, section, kapasitas: kap, status: 'kosong' as TableStatus }].sort((a, b) =>
+        a.no.localeCompare(b.no),
+      ),
+    );
+    setNewNo('');
+    setNewKap('');
+    void (async () => {
+      try {
+        await initDb();
+        await run(
+          'INSERT OR IGNORE INTO ms_table (id, tableNo, sectionId, capacity, status, syncDate) VALUES (?, ?, ?, ?, ?, NULL)',
+          [id, no, section, kap, 'kosong'],
+        );
+        try {
+          await enqueueOutbox('ms_table', id, 'insert');
+        } catch {
+          /* abaikan */
+        }
+        queueTableOp('table-add', { id, table: no, section, capacity: kap });
+      } catch {
+        /* abaikan: denah memori tetap tampil */
+      }
+    })();
+  };
+
+  /** Hapus meja master (dua ketuk): hanya meja kosong tanpa bill terbuka. */
+  const delTable = (tb: Table) => {
+    if (confirmDelTable !== tb.id) {
+      setConfirmDelTable(tb.id);
+      setManageWarn('');
+      return;
+    }
+    setConfirmDelTable(null);
+    if (tb.status !== 'kosong') {
+      setManageWarn(`Meja ${tb.no} sedang ${tb.status} - kosongkan dulu sebelum dihapus.`);
+      return;
+    }
+    void (async () => {
+      try {
+        await initDb();
+        const open = await query<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM tr_saleshead WHERE TRIM(COALESCE(tableNo,'')) = TRIM(?) AND status NOT IN ('paid','void')",
+          [tb.no],
+        );
+        if ((open[0]?.c ?? 0) > 0) {
+          setManageWarn(`Meja ${tb.no} masih punya bill terbuka - lunasi atau void dulu sebelum dihapus.`);
+          return;
+        }
+        await run('DELETE FROM ms_table WHERE id = ?', [tb.id]);
+        try {
+          await enqueueOutbox('ms_table', tb.id, 'delete');
+        } catch {
+          /* abaikan */
+        }
+        queueTableOp('table-delete', { id: tb.id, table: tb.no });
+        setTables((list) => list.filter((x) => x.id !== tb.id));
+        void writeTimerStore(tb.no, 0);
+      } catch {
+        setManageWarn('Gagal menghapus meja - coba lagi.');
+      }
+    })();
+  };
+
   return (
     <View style={s.root}>
       <ScreenHeader
@@ -215,6 +423,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         ))}
         <View style={s.legendRight}>
         {qsCount > 0 && <Text style={s.qsNote}>{t('tbl.qsNote').replace('{n}', String(qsCount))}</Text>}
+        <TouchableOpacity onPress={() => { setManageOpen(true); setManageWarn(''); setConfirmDelTable(null); }} style={s.qsBtn}>
+          <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>Kelola</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>
           <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>+ QS</Text>
         </TouchableOpacity>
@@ -335,8 +546,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                 <AppButton
                   title={selected.status === 'kosong' ? 'Buat Pesanan' : 'Buka Pesanan'}
                   onPress={() => {
+                    const tb = selected;
                     closeModal();
-                    navigation?.navigate?.('Cashier', { table: selected.no });
+                    void openTableOrder(tb);
                   }}
                 />
                 <View style={s.actionRow}>
@@ -383,6 +595,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                     />
                   </View>
                 )}
+                {cancelWarn ? <Text style={s.warn}>{cancelWarn}</Text> : null}
                 <TouchableOpacity
                   style={s.cancelBtn}
                   onPress={closeModal}>
@@ -430,6 +643,62 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               style={s.cancelBtn}
               onPress={() => setBookingVisible(false)}>
               <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('cm_cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+      {/* Kelola meja (pengaturan denah): tambah + hapus meja master. */}
+      <Modal visible={manageOpen} transparent animationType="slide" onRequestClose={() => setManageOpen(false)}>
+        <Pressable style={s.modalBg} onPress={() => setManageOpen(false)}>
+          <View style={[s.modalCard, isTablet && s.modalCardTablet]} onStartShouldSetResponder={() => true}>
+            <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>
+              Kelola Meja
+            </Text>
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Tambah meja baru ke denah.</Text>
+            <View style={s.inputRow}>
+              <View style={[s.inputHalf, s.inputHalfWrap]}>
+                <AppInput
+                  placeholder="Nomor (A5)"
+                  value={newNo}
+                  onChangeText={setNewNo}
+                />
+              </View>
+              <View style={[s.inputHalf, s.inputHalfWrap]}>
+                <AppInput
+                  placeholder="Kursi"
+                  keyboardType="number-pad"
+                  value={newKap}
+                  onChangeText={(v) => setNewKap(v.replace(/[^0-9]/g, ''))}
+                />
+              </View>
+            </View>
+            <AppInput
+              placeholder="Seksi (Dalam/Teras/VIP)"
+              value={newSection}
+              onChangeText={setNewSection}
+            />
+            {manageWarn ? <Text style={s.warn}>{manageWarn}</Text> : null}
+            <AppButton title="＋ Tambah Meja" onPress={addTable} />
+            <Text style={[s.modalHint, isTablet && s.modalHintBig]}>Ketuk Hapus dua kali untuk menghapus meja kosong.</Text>
+            {tables.map((tb) => (
+              <View key={tb.id} style={s.targetRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.targetNo, isTablet && s.targetNoBig]}>Meja {tb.no}</Text>
+                  <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
+                    {t(STATUS_LABEL_KEY[tb.status])} • {tb.section} • {tb.kapasitas} pax
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => delTable(tb)} hitSlop={10}>
+                  <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig, { color: colors.red }]}>
+                    {confirmDelTable === tb.id ? 'Yakin?' : 'Hapus'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity
+              style={s.cancelBtn}
+              onPress={() => setManageOpen(false)}>
+              <Text style={[s.cancelTxt, isTablet && s.cancelTxtBig]}>{t('cm_close')}</Text>
             </TouchableOpacity>
           </View>
         </Pressable>

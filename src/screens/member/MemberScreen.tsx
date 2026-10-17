@@ -18,6 +18,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
 import { initDb, query, run } from '../../lib/db';
+import { getJSON, setJSON } from '../../lib/storage';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
 import * as Network from 'expo-network';
@@ -66,6 +67,28 @@ type MemberRow = {
   depositBalance: number | null;
 };
 
+/** Overlay poin member per perangkat (tanpa ubah skema ms_member yang tak punya
+ * kolom poin): 1 poin per Rp1.000 topup, bertahan saat aplikasi dibuka ulang. */
+const POINTS_KEY = 'genfity.member.points';
+async function loadPoints(): Promise<Record<string, number>> {
+  try {
+    const v = await getJSON<Record<string, number>>(POINTS_KEY, {});
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+/** Tambah poin + kembalikan total overlay (maks dengan nilai server bila ada). */
+async function addPoints(memberId: string, delta: number): Promise<number> {
+  try {
+    const cur = await loadPoints();
+    const next = Math.max(0, Math.round(Number(cur[memberId]) || 0) + Math.max(0, Math.round(delta)));
+    await setJSON(POINTS_KEY, { ...cur, [memberId]: next });
+    return next;
+  } catch {
+    return Math.max(0, Math.round(delta));
+  }
+}
 /** Baca koleksi nyata dari SQLite ms_member (hasil seed/pull/koleksi kasir).
  * Kosong = belum ada member (pemanggil tampilkan empty-state). */
 async function loadMembersFromSqlite(): Promise<Member[]> {
@@ -73,6 +96,7 @@ async function loadMembersFromSqlite(): Promise<Member[]> {
   const rows = await query<MemberRow>(
     'SELECT id, memberName, phone, depositBalance FROM ms_member ORDER BY memberName',
   );
+  const pts = await loadPoints();
   const out: Member[] = [];
   for (const r of rows) {
     const id = (r.id ?? '').trim();
@@ -84,7 +108,7 @@ async function loadMembersFromSqlite(): Promise<Member[]> {
       noHp: (r.phone ?? '').trim(),
       tipe: 'Regular',
       saldo: Math.max(0, Math.round(Number(r.depositBalance) || 0)),
-      poin: 0,
+      poin: Math.max(0, Math.round(Number(pts[id]) || 0)),
     });
   }
   return out;
@@ -329,10 +353,24 @@ export default function MemberScreen({ navigation, route }: Props) {
         const saldo = Number(data.saldo ?? data.balance ?? NaN);
         if (!live || !Number.isFinite(saldo)) return;
         const poin = Number(data.poin ?? data.points ?? NaN);
+        const poinEff = Number.isFinite(poin) ? Math.max(0, Math.round(poin)) : localPoin;
         setInquiry({
           saldo: Math.max(0, Math.round(saldo)),
-          poin: Number.isFinite(poin) ? Math.max(0, Math.round(poin)) : localPoin,
+          poin: poinEff,
         });
+        // Poin server ikut disimpan ke overlay (maks) agar tak kalah dengan cache lama saat muat ulang.
+        if (Number.isFinite(poin)) {
+          void (async () => {
+            try {
+              const cur = await loadPoints();
+              if (poinEff > Math.round(Number(cur[mid]) || 0)) {
+                await setJSON(POINTS_KEY, { ...cur, [mid]: poinEff });
+              }
+            } catch {
+              /* abaikan */
+            }
+          })();
+        }
       } catch {
         /* offline - kartu memakai cache lokal */
       }
@@ -425,6 +463,13 @@ export default function MemberScreen({ navigation, route }: Props) {
     if (!mid || typeof baru !== 'number') return;
     setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, saldo: baru } : m)));
     setSelected((sb) => (sb && sb.id === mid ? { ...sb, saldo: baru } : sb));
+    // Paritas deposit cepat: topup penuh ikut earn 1 poin per Rp1.000 (overlay).
+    if (typeof topup === 'number' && topup > 0) {
+      void addPoints(mid, Math.floor(topup / 1000)).then((total) => {
+        setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
+        setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
+      });
+    }
     setRiwayat((rw) => ({
       ...rw,
       [mid]: [
@@ -495,12 +540,12 @@ export default function MemberScreen({ navigation, route }: Props) {
     const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
     void persistDeposit(selected.id, n, 'cepat');
     const mid = selected.id;
-    const nowIso = new Date().toISOString();
     // Catat transaksi nyata ke SQLite: saldo member + log deposit + outbox/sync
     // (paritas TopupDepositScreen agar topup cepat ikut ter-push server).
     void (async () => {
       try {
         await initDb();
+        const nowIso = new Date().toISOString();
         const depId = `dep-${Date.now()}`;
         await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [n, mid]);
         await run(
@@ -526,13 +571,18 @@ export default function MemberScreen({ navigation, route }: Props) {
         /* abaikan - state memori tetap jalan */
       }
     })();
+    // Poin bertahan di perangkat via overlay (dulu memori saja, hilang saat muat ulang).
+    void addPoints(mid, poin).then((total) => {
+      setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
+      setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
+    });
     setMembers((ms) =>
       ms.map((m) =>
-        m.id === selected.id ? { ...m, saldo: m.saldo + n, poin: m.poin + poin } : m,
+        m.id === selected.id ? { ...m, saldo: m.saldo + n } : m,
       ),
     );
     setSelected((sb) =>
-      sb ? { ...sb, saldo: sb.saldo + n, poin: sb.poin + poin } : sb,
+      sb ? { ...sb, saldo: sb.saldo + n } : sb,
     );
     setRiwayat((rw) => ({
       ...rw,

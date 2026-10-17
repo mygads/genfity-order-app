@@ -103,6 +103,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(p.memberId ? { memberId: p.memberId } : {}),

@@ -274,6 +274,9 @@ export default function BookingScreen({ navigation }: Props) {
     } catch {
       /* antrean belum siap */
     }
+    // Bebaskan denah hanya bila tamu belum datang (Terjadwal): bila sudah
+    // Datang/Selesai, meja dikuasai order kasir - jangan timpa jadi kosong.
+    if (r.status !== 'Terjadwal') return;
     void (async () => {
       try {
         await initDb();
@@ -281,6 +284,19 @@ export default function BookingScreen({ navigation }: Props) {
       } catch {
         /* master belum tersedia */
       }
+    })();
+  };
+
+  /** Buka reservasi ke kasir: status ikut maju Terjadwal → Datang (tamu tiba). */
+  const openResv = (r: Resv) => {
+    void (async () => {
+      const params = { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu };
+      if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
+      setGateNotice('');
+      if (r.status === 'Terjadwal') {
+        persist(list.map((x) => (x.id === r.id ? { ...x, status: 'Datang' as Status } : x)));
+      }
+      navigation?.navigate('Cashier', params);
     })();
   };
 
@@ -299,15 +315,7 @@ export default function BookingScreen({ navigation }: Props) {
         <View key={r.id} style={styles.card}>
           <TouchableOpacity
             style={styles.cardMain}
-            onPress={() => {
-              // Gerbang kasir: shift tutup → notice + buka shift dulu.
-              void (async () => {
-                const params = { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu };
-                if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
-                setGateNotice('');
-                navigation?.navigate('Cashier', params);
-              })();
-            }}>
+            onPress={() => openResv(r)}>
             <View style={styles.avatar}><Text style={styles.avatarT}>{r.name[0]}</Text></View>
             <View style={styles.info}>
               <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} {t('guests')} · {t('c_table')} {r.table}</Text>

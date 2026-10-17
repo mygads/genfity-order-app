@@ -73,7 +73,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
     await applyVoidLocal(orderId, voidLines, reason);
   } catch {
     /* tulis lokal gagal - outbox di bawah tetap jalan */
-  } } catch { /* abaikan */ } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
+  } try { enqueueSync('order', { action: 'void', salesNum: orderId, no: orderId, voidLines, reason }); } catch { /* abaikan */ } try { await apiFetch(ApiPath.pushOrderFinish, { body: { action: 'void', no: orderId, salesNum: orderId, voidLines, reason } }); } catch { /* offline - terkirim via push berikutnya */ }}export default function CancelScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const orderId = (route?.params?.orderId ?? '').trim();
