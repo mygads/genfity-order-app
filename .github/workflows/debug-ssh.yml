@@ -1,0 +1,30 @@
+# SEMENTARA - diagnostik SSH publish-vps. Hapus setelah selesai.
+name: Debug SSH (temporary)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  debug-ssh:
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+    steps:
+      - name: Inspect values (hash only, no secrets printed)
+        run: |
+          echo "len(VPS_HOST)=${#VPS_HOST}"
+          echo -n "$VPS_HOST" | sha256sum
+          echo "len(VPS_USER)=${#VPS_USER}"
+          echo -n "$VPS_SSH_KEY" | wc -c
+          echo "direct-interp:"
+          echo -n "${{ secrets.VPS_HOST }}" | sha256sum
+
+      - name: TCP check port 22
+        run: |
+          timeout 15 bash -c '</dev/tcp/$VPS_HOST/22 && echo TCP22_OPEN' || echo TCP22_FAIL
+
+      - name: Single keyscan attempt
+        run: |
+          timeout 30 ssh-keyscan -T 25 -H "$VPS_HOST" || echo KEYSCAN_FAIL
