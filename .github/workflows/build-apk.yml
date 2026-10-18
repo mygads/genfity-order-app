@@ -226,7 +226,26 @@ jobs:
           mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          # ssh-keyscan ke VPS kadang timeout karena koneksi SSH baru di-drop
+          # saat traffic CI paralel sedang tinggi (terbukti: repo main pun
+          # pernah gagal di step yang sama lalu sukses di run berikutnya).
+          # Coba ulang dengan backoff + timeout lebih panjang.
+          rm -f ~/.ssh/known_hosts
+          for i in 1 2 3 4 5; do
+            if ssh-keyscan -T 20 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>keyscan.err && [ -s ~/.ssh/known_hosts ]; then
+              rm -f keyscan.err
+              echo "keyscan OK (percobaan $i)"
+              break
+            fi
+            echo "keyscan percobaan $i gagal:"
+            cat keyscan.err || true
+            rm -f ~/.ssh/known_hosts
+            if [ "$i" -eq 5 ]; then
+              echo 'ssh-keyscan gagal 5x - kemungkinan VPS men-drop koneksi SSH baru (cek MaxStartups/fail2ban/sshd di VPS)'
+              exit 1
+            fi
+            sleep $((i * 15))
+          done
 
       - name: Publish to downloads folder
         if: steps.gate.outputs.enabled == 'true'
