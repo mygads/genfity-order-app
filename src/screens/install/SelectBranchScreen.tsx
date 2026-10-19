@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import AppButton from '../../components/AppButton';
-import ScreenRoot from '../../components/ScreenRoot';type Nav = {
+import ScreenRoot from '../../components/ScreenRoot';
+import BackChevron from '../../components/BackChevron';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';/** Dev fallback berlabel jelas (B2): HANYA tampil bila BE tak terjangkau,
  * selalu di bawah banner need_be + label mode_local. Bukan data nyata. */
@@ -57,7 +58,7 @@ const DEV_BRANCHES: BranchItem[] = [
   const goSelect = () => {
     if (loading || !branchId) return;
     // B6 fail-closed: daftar fallback dev + needBe = belum ada data cabang
-    // nyata dari BE — tolak maju.
+    // nyata dari BE,tolak maju.
     if (needBe && branches.length === 0) {
       appAlert(t('need_be'));
       return;
@@ -79,7 +80,7 @@ const DEV_BRANCHES: BranchItem[] = [
   const [pinError, setPinError] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
 
-  /** R1: keluar branch — PIN supervisor/owner dulu (GAP-11), lalu konfirmasi,
+  /** R1: keluar branch,PIN supervisor/owner dulu (GAP-11), lalu konfirmasi,
    * lalu cabut binding + sesi. Tanpa binding = tak ada yang dicabut, langsung
    * konfirmasi warisan. */
   const exitBranch = () => {
@@ -94,7 +95,7 @@ const DEV_BRANCHES: BranchItem[] = [
   };
 
   /** Verifikasi PIN modal keluar-branch: eskalasi lokal owner-only
-   * ('settings.edit' — Staff di-deny di seed) dengan throttle persisten
+   * ('settings.edit',Staff di-deny di seed) dengan throttle persisten
    * bawaan verifyLocalEscalation (5x/60 dtk) + offline honesty (DB belum
    * siap/unbound = tolak dengan pesan jujur, bukan bypass). Sukses → lanjut
    * konfirmasi dengan attribution approvedBy. */
@@ -126,7 +127,7 @@ const DEV_BRANCHES: BranchItem[] = [
   };
 
   /** Konfirmasi + eksekusi cabut binding (isi Alert warisan R1; approvedBy =
-   * attribution GAP-11, diteruskan best-effort ke body unbind server — field
+   * attribution GAP-11, diteruskan best-effort ke body unbind server,field
    * aditif, server boleh mengabaikan; jejak lokal: sesi/grant ikut dihapus
    * exitBranchAll sehingga atribusi ini yang tersisa di sisi server). */
   const confirmExitBranch = (b: ReturnType<typeof getBinding>, approvedBy?: string) => {
@@ -136,7 +137,7 @@ const DEV_BRANCHES: BranchItem[] = [
         text: t('exit_branch'),
         style: 'destructive',
         onPress: () => {
-          // E04: coba unbind server best-effort (abaikan gagal — local clear
+          // E04: coba unbind server best-effort (abaikan gagal,local clear
           // di bawah sudah sah). Tanpa terminalId = tak ada yang di-unbind.
           const termId = (b?.terminalId ?? '').trim();
           const devId = (b?.deviceId ?? '').trim();
@@ -194,7 +195,7 @@ const DEV_BRANCHES: BranchItem[] = [
         contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
         showsVerticalScrollIndicator={false}>
         <TouchableOpacity onPress={goBack} hitSlop={12} style={styles.backRow}>
-          <Text style={styles.back}>←</Text>
+          <BackChevron color="#4A4A4A" />
         </TouchableOpacity>
         <View style={styles.titleRow}>
           <Text style={[styles.title, isTablet && styles.titleBig]}>{t('branch_pick_title')}</Text>
@@ -223,8 +224,8 @@ const DEV_BRANCHES: BranchItem[] = [
           <Text style={styles.offline}>
             {t('mode_local')}
             {lang === 'id'
-              ? ' — daftar cabang bawaan (dev).'
-              : ' — built-in branch list (dev).'}
+              ? ',daftar cabang bawaan (dev).'
+              : ',built-in branch list (dev).'}
           </Text>
         ) : null}
         {loading ? (

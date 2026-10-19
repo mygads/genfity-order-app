@@ -1,7 +1,7 @@
 /**
- * B2 — TerminalPicker (SPEC B1 langkah 2): daftar terminal satu branch
+ * B2,TerminalPicker (SPEC B1 langkah 2): daftar terminal satu branch
  * dari BE via fetchBranchTerminals (E09). Baris: nama/tag/pinSet
- * (pinSet sebagai indikator ●/○ + label terminal_pin_title — preseden
+ * (pinSet sebagai indikator ●/○ + label terminal_pin_title,preseden
  * glif ■/□/● di kunci dash_legend). Gagal BE → status need_be jujur;
  * fixture dev → label mode_local. Pilih → TerminalPin.
  */
@@ -11,6 +11,7 @@ import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { fetchBranchTerminals, type TerminalItem } from '../../lib/terminalApi';
 import { useLang } from '../../lib/i18n';
 import ScreenRoot from '../../components/ScreenRoot';
+import BackChevron from '../../components/BackChevron';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -102,7 +103,7 @@ export default function TerminalPickerScreen({
           onPress={() => navigation?.goBack?.()}
           hitSlop={12}
           style={styles.backRow}>
-          <Text style={styles.back}>←</Text>
+          <BackChevron color="#4A4A4A" />
         </TouchableOpacity>
         <Text style={[styles.title, isTablet && styles.titleBig]}>
           {t('terminal_pick_title')}
@@ -113,8 +114,8 @@ export default function TerminalPickerScreen({
           <Text style={styles.offline}>
             {t('mode_local')}
             {lang === 'id'
-              ? ' — daftar terminal bawaan (dev).'
-              : ' — built-in terminal list (dev).'}
+              ? ',daftar terminal bawaan (dev).'
+              : ',built-in terminal list (dev).'}
           </Text>
         ) : null}
         {loading ? (

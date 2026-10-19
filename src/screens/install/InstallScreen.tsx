@@ -42,7 +42,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
   // hanya diverifikasi per-bind oleh server. Bila kontrak absen/offline,
   // jatuh ke klaim kode legacy di bawah (server lama) secara jujur.
   // Daftar cabang/terminal diambil dari lib yang SAMA dengan
-  // SelectBranchScreen (reusable by bind — satu sumber, dua pemakai).
+  // SelectBranchScreen (reusable by bind,satu sumber, dua pemakai).
   // ------------------------------------------------------------------
   const [binding, setBinding] = useState<TerminalBinding | null>(null);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
@@ -69,7 +69,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
   }, []);
 
   // B4: teks via t('inst_*') dengan fallback literal netral ID/EN yang
-  // disalin persis dari teks lama — UI tak berubah sampai STR mendaftarkan
+  // disalin persis dari teks lama,UI tak berubah sampai STR mendaftarkan
   // kunci ini (t() mengembalikan nama kunci bila belum terdaftar).
   const tx = (key: string, fb: string): string => {
     const v = t(key);
@@ -91,23 +91,23 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
     doBind: tx('inst_do_bind', lang === 'id' ? 'Ikat Terminal' : 'Bind Terminal'),
     loading: tx('inst_loading', lang === 'id' ? 'Memuat...' : 'Loading...'),
     noContract: tx('inst_no_contract', lang === 'id'
-      ? 'Backend baru belum terjangkau (atau belum dikonfigurasi) — pakai klaim kode di bawah (server lama).'
-      : 'New backend unreachable (or not configured) — use the code claim below (legacy server).'),
+      ? 'Backend baru belum terjangkau (atau belum dikonfigurasi),pakai klaim kode di bawah (server lama).'
+      : 'New backend unreachable (or not configured),use the code claim below (legacy server).'),
     branchFail: tx('inst_branch_fail', lang === 'id'
-      ? 'Daftar cabang tak terjangkau — periksa koneksi atau pakai klaim kode di bawah.'
-      : 'Branch list unreachable — check the connection or use the code claim below.'),
+      ? 'Daftar cabang tak terjangkau,periksa koneksi atau pakai klaim kode di bawah.'
+      : 'Branch list unreachable,check the connection or use the code claim below.'),
     termFail: tx('inst_term_fail', lang === 'id'
-      ? 'Daftar terminal tak terjangkau — coba lagi.'
-      : 'Terminal list unreachable — try again.'),
+      ? 'Daftar terminal tak terjangkau,coba lagi.'
+      : 'Terminal list unreachable,try again.'),
     termEmpty: tx('inst_term_empty', lang === 'id'
-      ? 'Belum ada terminal di cabang ini — minta owner menambahkannya dulu.'
-      : 'No terminals in this branch yet — ask the owner to add one first.'),
+      ? 'Belum ada terminal di cabang ini,minta owner menambahkannya dulu.'
+      : 'No terminals in this branch yet,ask the owner to add one first.'),
     bindFail: tx('inst_bind_fail', lang === 'id'
-      ? 'Ikat gagal — PIN salah atau terminal ditolak server.'
-      : 'Bind failed — wrong PIN or the server rejected the terminal.'),
+      ? 'Ikat gagal,PIN salah atau terminal ditolak server.'
+      : 'Bind failed,wrong PIN or the server rejected the terminal.'),
     kicked: tx('inst_kicked', lang === 'id'
-      ? 'Perangkat ini mengambil alih terminal — sesi perangkat sebelumnya telah digantikan (login baru menang).'
-      : 'This device took over the terminal — the previous device session was replaced (new login wins).'),
+      ? 'Perangkat ini mengambil alih terminal,sesi perangkat sebelumnya telah digantikan (login baru menang).'
+      : 'This device took over the terminal,the previous device session was replaced (new login wins).'),
     legacyTitle: tx('inst_legacy_title', lang === 'id' ? 'Cara lama (server legacy)' : 'Legacy way (legacy server)'),
     noPinSet: tx('inst_no_pin_set', lang === 'id' ? 'belum ada PIN' : 'no PIN yet'),
   };
@@ -187,7 +187,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
         return;
       }
       // Station printer milik terminal lama tak berlaku lintas re-bind
-      // (kunci store 'genfity.printer.stations' milik lib/print.ts — bukan
+      // (kunci store 'genfity.printer.stations' milik lib/print.ts,bukan
       // bagian adopt sehingga dibersihkan di sini).
       try { await removeItem('genfity.printer.stations'); } catch { /* abaikan */ }
       const b: TerminalBinding = {
@@ -201,10 +201,10 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
         boundAt: new Date().toISOString(),
       };
       // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
-      // adopt) — home guard tetap fail-safe bila ini gagal.
+      // adopt),home guard tetap fail-safe bila ini gagal.
       try {
         setDeviceRoleForTag(tag);
-      } catch { /* peran bertahan — home guard tetap fail-safe */ }
+      } catch { /* peran bertahan,home guard tetap fail-safe */ }
       setBinding(b);
       try { await notifyTerminalVerification('verified'); } catch { /* best-effort */ }
       setShowPin(false);
@@ -238,7 +238,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
   const claim = async () => {
     if (checking) return;
     // Kanon Q7: normalisasi + REGEX dulu (server BE juga menegakkan unik/
-    // format ini) — kode warisan bertanda hubung tak bisa bound.
+    // format ini),kode warisan bertanda hubung tak bisa bound.
     const canon = normalizeTerminalCode(code);
     if (canon.length < 4) {
       setError(t('inst_code_short'));
@@ -324,7 +324,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
         ))}
       </View>
 
-      {/* LEGACY server lama — bukan PIN terminal kontrak (lihat komentar claim). */}
+      {/* LEGACY server lama,bukan PIN terminal kontrak (lihat komentar claim). */}
       <Text style={styles.legacyHead}>{L.legacyTitle}</Text>
       <View style={styles.scanBox}>
         <Text style={styles.scanGlyph}>▣</Text>
@@ -388,7 +388,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
     ))}
     {sheet(
       showTerminals,
-      `${L.pickTerminal} — ${selBranch?.name ?? selBranch?.id ?? ''}`,
+      `${L.pickTerminal},${selBranch?.name ?? selBranch?.id ?? ''}`,
       () => setShowTerminals(false),
       (
         <ScrollView style={styles.sheetList}>
@@ -407,7 +407,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
         </ScrollView>
       ),
     )}
-    {sheet(showPin, `${L.pinTitle} — ${selTerminal?.terminalCode ?? ''}`, () => setShowPin(false), (
+    {sheet(showPin, `${L.pinTitle},${selTerminal?.terminalCode ?? ''}`, () => setShowPin(false), (
       <View>
         <TextInput
           style={styles.pinInput}
