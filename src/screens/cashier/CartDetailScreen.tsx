@@ -232,7 +232,20 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(feeESB > 0 ? { feeESB } : {}),
     });
   const goPromo = () =>
-    navigation?.navigate('PromotionList', { returnTo: 'CartDetail', subtotal, ongkir });
+    // Bawa konteks cart penuh: kembali dari promo hanya membawa {voucher}
+    // tanpa items = instance CartDetail baru ter-init keranjang kosong
+    // (S4-APP-323). echo di PromotionList mengembalikan semua ini.
+    navigation?.navigate('PromotionList', {
+      returnTo: 'CartDetail',
+      subtotal,
+      ongkir,
+      items,
+      mode,
+      ...(table ? { table } : {}),
+      ...(customer ? { customer } : {}),
+      ...(memberId ? { memberId } : {}),
+      ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
+    });
   const goSave = () => {
     setSavedTick(true);
     const title = `${modeLabel} · ${customer.trim() || t('guestFallback')}`;
