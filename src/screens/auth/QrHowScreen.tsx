@@ -4,6 +4,7 @@ import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import ScreenRoot from '../../components/ScreenRoot';
+import BackChevron from '../../components/BackChevron';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -36,7 +37,7 @@ export default function QrHowScreen({ navigation }: Props) {
     <ScreenRoot style={styles.root}>
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} hitSlop={12}>
-          <Text style={styles.headerBack}>←</Text>
+          <BackChevron color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, isTablet && styles.headerTitleBig]}>{t('g_qrhow_title')}</Text>
         <View style={styles.headerSpacer} />

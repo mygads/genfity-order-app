@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TABLET_BP, colors, fonts } from '../theme';
+import BackChevron from './BackChevron';
 
 interface Props {
   /** Judul tengah. */
@@ -30,7 +31,7 @@ interface Props {
 export default function ScreenHeader({
   title,
   onBack,
-  backLabel = '‹',
+  backLabel,
   left,
   right,
   sub,
@@ -49,8 +50,12 @@ export default function ScreenHeader({
     <View style={[styles.bar, { paddingTop: insets.top + 12 }, isTablet && styles.barTablet]}>
       <View style={[styles.side, isTablet && styles.sideTablet]}>
         {left ?? (onBack ? (
-          <TouchableOpacity onPress={onBack} hitSlop={isTablet ? 16 : 12}>
-            <Text style={styles.back}>{backLabel}</Text>
+          <TouchableOpacity onPress={onBack} hitSlop={isTablet ? 16 : 12} style={styles.backBtn} accessibilityRole="button" accessibilityLabel="Kembali">
+            {backLabel != null ? (
+              <Text style={styles.back}>{backLabel}</Text>
+            ) : (
+              <BackChevron color={colors.white} size={isTablet ? 26 : 24} />
+            )}
           </TouchableOpacity>
         ) : null)}
       </View>
@@ -81,6 +86,7 @@ const styles = StyleSheet.create({
   // Tablet: bar lebih tinggi + padding lega agar tak terlihat tipis di layar lebar.
   barTablet: { minHeight: 64, paddingHorizontal: 20, paddingBottom: 14 },
   side: { width: 70, justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   sideRight: { width: 70, alignItems: 'flex-end', justifyContent: 'center' },
   // Tablet: slot aksi lebih lebar (isi kanan tak terpotong) + minHeight 48
   // agar touch target back/burger aman.

@@ -51,6 +51,7 @@ import { syncCurrencyFromProfile } from '../../lib/currency';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
+import BackChevron from '../../components/BackChevron';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -1708,7 +1709,7 @@ export default function LoginScreen({ navigation }: Props) {
     <>
         <View style={styles.header}>
           <TouchableOpacity onPress={goBack} hitSlop={12}>
-            <Text style={styles.back}>←</Text>
+            <BackChevron color="#4A4A4A" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setHelp(true)} hitSlop={12}>
             <View style={styles.helpCircle}>

@@ -16,6 +16,7 @@ import { bindTerminal, claimTerminalPin, validateTerminalPin } from '../../lib/t
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
+import BackChevron from '../../components/BackChevron';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -210,7 +211,7 @@ export default function TerminalPinScreen({
           onPress={() => navigation?.goBack?.()}
           hitSlop={12}
           style={styles.backRow}>
-          <Text style={styles.back}>←</Text>
+          <BackChevron color="#4A4A4A" />
         </TouchableOpacity>
         <Text style={[styles.title, isTablet && styles.titleBig]}>
           {t('terminal_pin_title')}
