@@ -28,6 +28,8 @@ type Props = {
 
 const QUICK = [50000, 100000, 200000, 500000, 1000000];
 const METHODS = ['Tunai', 'QRIS', 'EDC', 'Transfer'];
+// Label tampil per bahasa; nilai METHODS tetap kanonis (paymentMethod kontrak §5.2).
+const METHOD_LABELS = ['pay_method_cash', 'pay_method_qris', 'pay_method_edc', 'pay_method_transfer'];
 const MIN_TOPUP = 10000;
 
 /**
@@ -222,7 +224,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           <Text style={s.sub}>{nama} - {memberId}</Text>
           <View style={s.card}>
             <Row label={t('top_amount')} value={rp(nominalNum)} />
-            <Row label={t('top_method')} value={method} />
+            <Row label={t('top_method')} value={t(METHOD_LABELS[METHODS.indexOf(method)] ?? METHOD_LABELS[0])} />
             <View style={s.divider} />
             <Row label={t('top_balance_before')} value={rp(saldoAwal)} />
             <View style={s.totalRow}>
@@ -296,7 +298,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
                 key={m}
                 style={[s.chip, method === m && s.chipOn]}
                 onPress={() => setMethod(m)}>
-                <Text style={[s.chipTxt, method === m && s.chipTxtOn]}>{m}</Text>
+                <Text style={[s.chipTxt, method === m && s.chipTxtOn]}>{t(METHOD_LABELS[METHODS.indexOf(m)] ?? METHOD_LABELS[0])}</Text>
               </TouchableOpacity>
             ))}
           </View>

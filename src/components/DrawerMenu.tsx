@@ -83,6 +83,18 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
     };
   }, [visible, shiftOpenProp]);
   const shiftOpen = shiftOpenProp ?? shiftDbOpen;
+  // Tag-tick WAJIB di atas early-return (aturan yang sama dengan shiftDbOpen:55-84):
+  // useState/useEffect di bawah `if (!visible) return null` menambah hooks saat
+  // drawer dibuka → "Rendered more hooks than during the previous render".
+  const [, setTagTick] = useState(0);
+  useEffect(() => {
+    const un1 = subscribeSession(() => setTagTick((x) => x + 1));
+    const un2 = subscribeDeviceRole(() => setTagTick((x) => x + 1));
+    return () => {
+      un1();
+      un2();
+    };
+  }, []);
   // Nama user: prop pemanggil dulu, lalu sesi login nyata. Kunci demo i18n
   // hanya last-resort (tanpa sesi = drawer tak bisa dibuka dari layar auth).
   const sessUser = (() => {
@@ -127,15 +139,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // CustomerView); view_queue = HANYA QueueView. Tanpa Settings/role-switch
   // untuk kedua tag view; keluar hanya via aksi owner terautentikasi (Q14).
   // Tag tak dikenal = daftar kosong (fail-closed).
-  const [, setTagTick] = useState(0);
-  useEffect(() => {
-    const un1 = subscribeSession(() => setTagTick((x) => x + 1));
-    const un2 = subscribeDeviceRole(() => setTagTick((x) => x + 1));
-    return () => {
-      un1();
-      un2();
-    };
-  }, []);
+  // (tagTick hooks dipindah ke atas early-return — lih. catatan di shiftOpen.)
   const boundTag = (() => {
     try {
       return normalizeTag(getBinding()?.tag);
