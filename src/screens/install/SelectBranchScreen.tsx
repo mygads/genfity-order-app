@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import AppButton from '../../components/AppButton';
+import { useEffect, useState } from 'react';import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;};const GREY = '#757575';const TITLE_DARK = '#2B2B2B';/** Dev fallback berlabel jelas (B2): HANYA tampil bila BE tak terjangkau,
@@ -59,7 +59,7 @@ const DEV_BRANCHES: BranchItem[] = [
     // B6 fail-closed: daftar fallback dev + needBe = belum ada data cabang
     // nyata dari BE — tolak maju.
     if (needBe && branches.length === 0) {
-      Alert.alert(t('need_be'));
+      appAlert(t('need_be'));
       return;
     }
     const picked =
@@ -130,7 +130,7 @@ const DEV_BRANCHES: BranchItem[] = [
    * aditif, server boleh mengabaikan; jejak lokal: sesi/grant ikut dihapus
    * exitBranchAll sehingga atribusi ini yang tersisa di sisi server). */
   const confirmExitBranch = (b: ReturnType<typeof getBinding>, approvedBy?: string) => {
-    Alert.alert(t('exit_branch'), b ? `${b.branchName || b.branchId} · ${b.terminalCode}` : '', [
+    appAlert(t('exit_branch'), b ? `${b.branchName || b.branchId} · ${b.terminalCode}` : '', [
       { text: t('c_cancel'), style: 'cancel' },
       {
         text: t('exit_branch'),

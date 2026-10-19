@@ -473,6 +473,14 @@ const STR: Record<string, Entry> = {
   xp_auth_sub: { id: 'Aksi ini dicatat atas nama penyetuju. PIN tidak disimpan di perangkat.', en: 'This action is logged under the approver name. The PIN is never stored on this device.' },
   xp_cancel: { id: 'Batal', en: 'Cancel' },
   xp_left: { id: 'sisa {n}x', en: '{n} left' },
+  xp_m_transfer: { id: 'Transfer Bank', en: 'Bank Transfer' },
+  xp_m_transfer_d: { id: 'Konfirmasi manual mutasi bank', en: 'Manual bank statement confirmation' },
+  xp_m_deposit: { id: 'Deposit Member', en: 'Member Deposit' },
+  xp_m_deposit_d: { id: 'Potong saldo deposit member', en: 'Deduct member deposit balance' },
+  xp_m_compliment: { id: 'Kompliment', en: 'Compliment' },
+  xp_m_compliment_d: { id: 'Gratis - butuh persetujuan supervisor', en: 'Free - requires supervisor approval' },
+  xp_m_nonsales: { id: 'Non-Penjualan', en: 'Non-Sales' },
+  xp_m_nonsales_d: { id: 'Konsumsi internal - butuh persetujuan', en: 'Internal use - requires approval' },
 
   // ---- display / idle / scan ----
   disp_queue: { id: 'Antrean', en: 'Queue' },

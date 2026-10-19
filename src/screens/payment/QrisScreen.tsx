@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';import { Alert, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
 type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, buildSaleQrPayload } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { publishDisplayOrder } from '../../lib/display';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -44,7 +44,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       } catch {
         if (on) {
           setChainErr(true);
-          Alert.alert(t('pay_issue_fail'));
+          appAlert(t('pay_issue_fail'));
         }
       }
     })();
@@ -108,12 +108,12 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     } catch (e) {
       settledRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
       } else {
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
       }
       return;
     }
@@ -126,12 +126,12 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     } catch (e) {
       settledRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
       } else {
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
       }
       return;
     }
@@ -166,7 +166,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           try { await saveSale(gInput); } catch (e) {
             // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
             if ((e as { code?: string })?.code === 'terminal-unbound') {
-              Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+              appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
                 { text: t('c_cancel'), style: 'cancel' },
                 { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
               ]);
@@ -181,7 +181,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
         // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
         // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
         if ((e as { code?: string })?.code === 'terminal-unbound') {
-          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
             { text: t('c_cancel'), style: 'cancel' },
             { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
           ]);
@@ -209,7 +209,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch (e) {
       // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);

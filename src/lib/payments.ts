@@ -9,24 +9,27 @@ export type ExtraMethodId = 'transfer' | 'deposit' | 'compliment' | 'nonsales';
 
 export interface ExtraMethod {
   id: ExtraMethodId;
-  label: string;
-  desc: string;
+  labelKey: string;
+  descKey: string;
   needsAuth: boolean;
 }
 
 export const EXTRA_METHODS: ExtraMethod[] = [
-  { id: 'transfer', label: 'Transfer Bank', desc: 'Konfirmasi manual mutasi bank', needsAuth: false },
-  { id: 'deposit', label: 'Deposit Member', desc: 'Potong saldo deposit member', needsAuth: false },
-  { id: 'compliment', label: 'Kompliment', desc: 'Gratis - butuh persetujuan supervisor', needsAuth: true },
-  { id: 'nonsales', label: 'Non-Penjualan', desc: 'Konsumsi internal - butuh persetujuan', needsAuth: true },
+  { id: 'transfer', labelKey: 'xp_m_transfer', descKey: 'xp_m_transfer_d', needsAuth: false },
+  { id: 'deposit', labelKey: 'xp_m_deposit', descKey: 'xp_m_deposit_d', needsAuth: false },
+  { id: 'compliment', labelKey: 'xp_m_compliment', descKey: 'xp_m_compliment_d', needsAuth: true },
+  { id: 'nonsales', labelKey: 'xp_m_nonsales', descKey: 'xp_m_nonsales_d', needsAuth: true },
 ];
 
-export const EXTRA_LABEL: Record<ExtraMethodId, string> = {
-  transfer: 'Transfer',
-  deposit: 'Deposit',
-  compliment: 'Kompliment',
-  nonsales: 'Non-Penjualan',
-};
+/** Label metode lanjutan lewat kamus i18n (jangan hardcode string user-facing). */
+export function xmLabel(m: ExtraMethod, t: (k: string) => string): string {
+  return t(m.labelKey);
+}
+
+/** Deskripsi metode lanjutan lewat kamus i18n. */
+export function xmDesc(m: ExtraMethod, t: (k: string) => string): string {
+  return t(m.descKey);
+}
 
 export interface SaleItemIn {
   id: string;

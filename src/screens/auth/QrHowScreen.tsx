@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import ScreenRoot from '../../components/ScreenRoot';
 
 type Nav = {
@@ -133,7 +134,7 @@ function Step({ n, thumb, body, last }: { n: string; thumb: unknown; body: React
         activeOpacity={0.85}
         onPress={() => {
           // fallback jujur sampai URL video disediakan BE/produk.
-          Alert.alert(t('g_qrhow_title'), t('qrhow_video_unavail').replace('{msg}', t('dash_not_available')));
+          appAlert(t('g_qrhow_title'), t('qrhow_video_unavail').replace('{msg}', t('dash_not_available')));
         }}>
         <Image source={thumb as never} style={styles.thumb} resizeMode="cover" />
         <View style={styles.playWrap} pointerEvents="none">

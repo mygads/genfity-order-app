@@ -13,7 +13,7 @@ import { apiFetch } from './apiSource';
 import { all, markClean, markDirty, queryFirst, run } from './db';
 import { tr } from './i18n';
 import { notifyPushSyncSuccess } from './push';
-import { nextSalesNumRetry } from './sales';
+import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem } from './storage';
 import { logoutRevoke } from './terminalApi';
 import { uuidv7 } from './uuidv7';

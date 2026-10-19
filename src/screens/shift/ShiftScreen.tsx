@@ -164,11 +164,11 @@ const MAX_KAS_AWAL = 10000000;
             <Text style={s.shiftValue}>{lastShift ? lastShift.cashier : '-'}</Text>
           </View>
           <View style={s.shiftRow}>
-            <Text style={s.shiftLabel}>Waktu Buka</Text>
+            <Text style={s.shiftLabel}>{t('shf_opened_at')}</Text>
             <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.opened) : '-'}</Text>
           </View>
           <View style={s.shiftRow}>
-            <Text style={s.shiftLabel}>Waktu Tutup</Text>
+            <Text style={s.shiftLabel}>{t('shf_closed_at')}</Text>
             <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.closed) : '-'}</Text>
           </View>
         </View>

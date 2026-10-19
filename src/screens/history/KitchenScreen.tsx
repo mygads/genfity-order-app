@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import {
-  Alert,
   FlatList,
   Image, Modal,
   Pressable,
@@ -8,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';
 /* APP-EVENTS: impor beda-baris agar edit beda lane tak konflik. */
-import { subscribeLocalSale } from '../../lib/display';import { getSession } from '../../session';
+import { subscribeLocalSale } from '../../lib/display';import { appAlert } from '../../lib/appAlert';import { getSession } from '../../session';
 import { getSaleClientId } from '../../lib/sales';import { useIsFocused } from '@react-navigation/native';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga per baris (R15): utamakan harga bawaan baris (tr_salesmenu.price /
  * harga bawaan payload push), lalu peta live ms_menu. Tanpa harga di mana
  * pun = 0 (jujur Rp 0) — tak ada lagi konstanta MENU_PRICE/FALLBACK_PRICE
@@ -369,7 +368,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
                               )
                             : null;
                           if (head && String(head.status ?? '').trim().toLowerCase() === 'void') {
-                            Alert.alert(t('hist_deny_title'), t('hist_st_void'));
+                            appAlert(t('hist_deny_title'), t('hist_st_void'));
                             return;
                           }
                           const rows = key

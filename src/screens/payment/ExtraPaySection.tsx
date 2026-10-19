@@ -4,7 +4,7 @@ import { TABLET_BP, colors, fonts } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
-import { EXTRA_METHODS, type ExtraMethodId } from '../../lib/payments';
+import { EXTRA_METHODS, xmDesc, xmLabel, type ExtraMethodId } from '../../lib/payments';
 import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 /**
@@ -40,7 +40,7 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
       setMsg('');
       return;
     }
-    onDone(m.label);
+    onDone(xmLabel(m, t));
   };
 
   const submitRef = () => {
@@ -51,7 +51,7 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     }
     const m = EXTRA_METHODS.find((x) => x.id === refFor);
     setRefFor(null);
-    if (m) onDone(m.label, ref.toUpperCase());
+    if (m) onDone(xmLabel(m, t), ref.toUpperCase());
   };
 
   const approve = async () => {
@@ -78,7 +78,7 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     }
     const m = EXTRA_METHODS.find((x) => x.id === authFor);
     setAuthFor(null);
-    if (m) onDone(m.label, undefined, approver);
+    if (m) onDone(xmLabel(m, t), undefined, approver);
   };
 
   return (
@@ -88,8 +88,8 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
       <View style={styles.grid}>
         {EXTRA_METHODS.map((m) => (
           <TouchableOpacity key={m.id} style={[styles.card, isTablet && styles.cardTablet]} onPress={() => tap(m.id)}>
-            <Text style={[styles.cardT, isTablet && styles.cardTTablet]}>{m.label}</Text>
-            <Text style={[styles.cardS, isTablet && styles.cardSTablet]}>{m.desc}</Text>
+            <Text style={[styles.cardT, isTablet && styles.cardTTablet]}>{xmLabel(m, t)}</Text>
+            <Text style={[styles.cardS, isTablet && styles.cardSTablet]}>{xmDesc(m, t)}</Text>
           </TouchableOpacity>
         ))}
       </View>

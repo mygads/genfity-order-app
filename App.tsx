@@ -79,6 +79,7 @@ import PettyCashScreen from './src/screens/cash/PettyCashScreen';
 import PettyCashFormScreen from './src/screens/cash/PettyCashFormScreen';
 import PettyCashDetailScreen from './src/screens/cash/PettyCashDetailScreen';
 import ExpenseScreen from './src/screens/cash/ExpenseScreen';
+import AppAlertHost from './src/components/AppAlertHost';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -729,6 +730,8 @@ export default function App() {
       }}>
       <StatusBar style="light" />
       <GuardedStacks loggedIn={loggedIn} bound={bound} />
+      {/* S2-C308: host Modal appAlert agar failure-path Alert tampil di web. */}
+      <AppAlertHost />
       </NavigationContainer>
     </SafeAreaProvider>
   );

@@ -44,6 +44,7 @@ import {
   type TerminalBinding as LegacyBinding,
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
+import { whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
 import { syncCurrencyFromProfile } from '../../lib/currency';
@@ -955,6 +956,13 @@ export default function LoginScreen({ navigation }: Props) {
     let handedOff = false;
     void (async () => {
       try {
+        // S2-C311: tunggu upaya seed selesai agar login tak baca DB setengah-seed
+        // (fail-open: bila seed gagal/gantung, lanjut ke jalur error normal).
+        try {
+          await whenSeedReady(8000);
+        } catch {
+          /* fail-open: lanjut ke jalur error normal */
+        }
         const uname = username.trim();
         // B1 prasyarat: device ter-bound (fail-closed) — KECUALI login-first
         // F1: device belum bound + online → tahap-A E01 (username+password+

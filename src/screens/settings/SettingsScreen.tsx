@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -7,6 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { useLang, type Lang } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import { getSession, getBinding, logout, subscribeSession } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
@@ -111,7 +112,7 @@ export default function SettingsScreen({ navigation }: Props) {
     try {
       const gate = await requireAccess(sessionKey(), 'settings.edit');
       if (!gate.ok) {
-        Alert.alert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', gate.reason));
+        appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', gate.reason));
         return false;
       }
       return true;

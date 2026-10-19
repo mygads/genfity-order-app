@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
@@ -499,12 +499,12 @@ export default function PayScreen({ navigation, route }: Props) {
       saleClientId = await resolveChainClientId();
     } catch (e) {
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
       } else {
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
       }
       return;
     }
@@ -559,14 +559,14 @@ export default function PayScreen({ navigation, route }: Props) {
         if ((e as { code?: string })?.code === 'terminal-unbound') {
           // Unbound = belum klaim: beri jalan keluar ke Klaim Terminal
           // (bukan pesan buntu), TANPA Success palsu.
-          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
             { text: t('c_cancel'), style: 'cancel' },
             { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
           ]);
           return;
         }
         // L1 fail-closed: tulis DB gagal = JANGAN Success (bukan kasir-jalan).
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
         return;
       }
       // APP-PRINTER-SALES: kunjungan grup ikut menyiarkan display (jalur
@@ -636,14 +636,14 @@ export default function PayScreen({ navigation, route }: Props) {
       // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
       // TANPA Success palsu. DB gagal lain = kasir tetap jalan via antrean.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
         return;
       }
       // L1 fail-closed: tulis DB gagal = JANGAN Success (bukan kasir-jalan).
-      Alert.alert(t('pay_issue_fail'));
+      appAlert(t('pay_issue_fail'));
       return;
     }
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
@@ -736,7 +736,7 @@ export default function PayScreen({ navigation, route }: Props) {
         } catch {
           // resolveChainClientId melempar hanya bila CSPRNG absen (uuidv7
           // melempar sesuai kontrak): tombol tak boleh mati diam-diam.
-          Alert.alert(t('pay_issue_fail'));
+          appAlert(t('pay_issue_fail'));
         }
       })();
       return;
@@ -1170,7 +1170,7 @@ export default function PayScreen({ navigation, route }: Props) {
         onPress={() => void (async () => {
           // G5: block7 = jalur EDC dikunci (Alert + tetap di Pay, bukan tautan mati).
           if (syncBlocked) {
-            Alert.alert(t('sync.blocked'), t('sync.blockedMsg'));
+            appAlert(t('sync.blocked'), t('sync.blockedMsg'));
             return;
           }
           try {
@@ -1202,7 +1202,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })) } : {}),
           });
           } catch {
-            Alert.alert(t('pay_issue_fail'));
+            appAlert(t('pay_issue_fail'));
           }
         })}>
         <Text style={styles.edcLinkText}>{t('pay_edc_guide')} ›</Text>

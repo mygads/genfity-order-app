@@ -36,6 +36,51 @@ import type { TotalsResult } from './totals';
 import { uuidv7 } from './uuidv7';
 import { trimTestUsers } from './seedUsers';
 
+// S2-C311: gate kesiapan seed — App.tsx menjalankan seedIfEmpty fire-and-forget
+// sehingga login bisa jalan sebelum ms_posuser ter-seed. Pelacakan modul ini
+// menandai 'upaya seed selesai' (berhasil maupun gagal) agar pemanggil bisa
+// menunggu tanpa menggantung selamanya (fail-open ke jalur error normal).
+let seedDone = false;
+const seedWaiters: Array<() => void> = [];
+
+export function isSeedReady(): boolean {
+  return seedDone;
+}
+
+export function whenSeedReady(timeoutMs = 8000): Promise<boolean> {
+  if (seedDone) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        resolve(seedDone);
+      }
+    }, Math.max(0, timeoutMs));
+    const fn = () => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve(true);
+      }
+    };
+    seedWaiters.push(fn);
+  });
+}
+
+function markSeedDone(): void {
+  if (seedDone) return;
+  seedDone = true;
+  const w = seedWaiters.splice(0);
+  for (const fn of w) {
+    try {
+      fn();
+    } catch {
+      /* abaikan */
+    }
+  }
+}
+
 const SEED_MENUS: Array<{ id: string; name: string; cat: string; price: number }> = [
   { id: 'm-nasi-goreng', name: 'Nasi Goreng', cat: 'c-makanan', price: 15000 },
   { id: 'm-ayam-geprek', name: 'Ayam Geprek', cat: 'c-makanan', price: 12000 },
@@ -991,16 +1036,21 @@ export async function seedIfEmpty(): Promise<{ seeded: boolean }> {
   await initDb();
   let fresh = true;
   try {
-    const flag = await queryFirst<{ value1: string | null }>(
-      `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
-    );
-    const users = await queryFirst<{ n: number }>(
-      'SELECT COUNT(*) AS n FROM ms_posuser',
-    );
-    fresh = flag?.value1 !== '1' || Number(users?.n ?? 0) === 0;
-  } catch {
-    fresh = true;
+    try {
+      const flag = await queryFirst<{ value1: string | null }>(
+        `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
+      );
+      const users = await queryFirst<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM ms_posuser',
+      );
+      fresh = flag?.value1 !== '1' || Number(users?.n ?? 0) === 0;
+    } catch {
+      fresh = true;
+    }
+    await ensureSeeded();
+    return { seeded: fresh };
+  } finally {
+    // S2-C311: tandai upaya seed selesai agar login tak jalan di DB setengah-seed.
+    markSeedDone();
   }
-  await ensureSeeded();
-  return { seeded: fresh };
 }

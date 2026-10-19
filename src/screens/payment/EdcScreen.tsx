@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getSaleClientId } from '../../lib/sales';
@@ -113,12 +114,12 @@ export default function EdcScreen({ navigation, route }: Props) {
     } catch (e) {
       savedRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
       } else {
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
       }
       return;
     }
@@ -131,12 +132,12 @@ export default function EdcScreen({ navigation, route }: Props) {
     } catch (e) {
       savedRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
       } else {
-        Alert.alert(t('pay_issue_fail'));
+        appAlert(t('pay_issue_fail'));
       }
       return;
     }
@@ -202,7 +203,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             // APP-R3: guard di-reset agar retry hidup setelah klaim terminal
             // (cermin outer catch + non-group path — sebelumnya macet-true di sini).
             if ((e as { code?: string })?.code === 'terminal-unbound') {
-              Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+              appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
                 { text: t('c_cancel'), style: 'cancel' },
                 { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
               ]);
@@ -216,7 +217,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
         // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
         if ((e as { code?: string })?.code === 'terminal-unbound') {
-          Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+          appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
             { text: t('c_cancel'), style: 'cancel' },
             { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
           ]);
@@ -281,7 +282,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     } catch (e) {
       // Gate bound (D3-03): unbound → pesan klaim-terminal + jalan ke Klaim, TANPA Success palsu.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
-        Alert.alert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
+        appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
           { text: t('c_cancel'), style: 'cancel' },
           { text: t('inst_claim_btn'), onPress: () => navigation?.navigate('Install') },
         ]);
@@ -440,7 +441,7 @@ export default function EdcScreen({ navigation, route }: Props) {
               || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
               || uuidv7();
           } catch {
-            Alert.alert(t('pay_issue_fail'));
+            appAlert(t('pay_issue_fail'));
             return;
           }
           navigation?.navigate('Pay', {

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import { useLang } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { enqueueOutbox } from '../../lib/sync';
 import { getBranchId } from '../../config/server';
@@ -298,7 +299,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
 
   /** Hapus menu: konfirmasi dulu, lalu flag nonaktif + outbox agar ikut sync. */
   const confirmDelete = (m: MenuEntry) => {
-    Alert.alert(
+    appAlert(
       t('menu_del_title').replace('{name}', m.name),
       t('menu_del_body'),
       [

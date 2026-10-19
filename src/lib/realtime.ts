@@ -17,7 +17,8 @@
  * Layar view memakai SSE primer (lib/sse.ts); WS di sini sekunder untuk
  * kasir/dapur + fallback. Tak pernah melempar.
  */
-import { Alert, AppState } from 'react-native';
+import { AppState } from 'react-native';
+import { appAlert } from './appAlert';
 import { getWsUrl, getBaseUrl, notePong, isConnDead, noteReconnect } from '../config/server';
 import { getApiMode } from './apiSource';
 import type { TerminalTag } from './deviceRole';
@@ -158,7 +159,7 @@ function handleSessionKicked(): void {
   }
   if (!text) return;
   try {
-    Alert.alert(text);
+    appAlert(text);
   } catch {
     /* abaikan */
   }

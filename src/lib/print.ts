@@ -1,4 +1,5 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
+import { appAlert } from './appAlert';
 import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, type EscKitchenTicket, type EscQueueSlip, type EscReceipt } from './escpos';
 import { getTerminal } from '../config/server';
 import { getJSON } from './storage';
@@ -307,7 +308,7 @@ export async function printForTag(input: TagPrintInput): Promise<PrintOutcome> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
-      Alert.alert(tOf('hist_deny_title', getLang()), tOf('kit_print_fail', getLang()));
+      appAlert(tOf('hist_deny_title', getLang()), tOf('kit_print_fail', getLang()));
     } catch {
       /* abaikan — outcome di bawah tetap jujur */
     }
@@ -353,7 +354,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
     ? (await stationByKey(opts.stationId)) ?? (await defaultStation())
     : await defaultStation();
   if (!d) {
-    Alert.alert(
+    appAlert(
       'Cetak Struk',
       'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.',
     );
@@ -372,7 +373,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? d.cols, cut: r.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
-    Alert.alert(
+    appAlert(
       'Cetak Struk',
       res.reason === 'need-dev-client'
         ? `Pratinjau ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
@@ -408,7 +409,7 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
   }
   const d = await kitchenStation(station);
   if (!d) {
-    Alert.alert(
+    appAlert(
       'Cetak Tiket Dapur',
       `Station "${station}" belum punya alamat printer. Atur di Pengaturan → Printer lalu coba lagi.`,
     );
@@ -425,7 +426,7 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
   const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols, cut: t.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
-    Alert.alert(
+    appAlert(
       'Cetak Tiket Dapur',
       res.reason === 'need-dev-client'
         ? `Tiket ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
@@ -455,7 +456,7 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
   }
   const d = await defaultStation();
   if (!d) {
-    Alert.alert(
+    appAlert(
       'Cetak Antrean',
       'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.',
     );
@@ -471,7 +472,7 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
   const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? d.cols, cut: q.cut ?? d.autocut ?? (await globalAutocut()) });
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
-    Alert.alert(
+    appAlert(
       'Cetak Antrean',
       res.reason === 'need-dev-client'
         ? `Slip ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
@@ -504,7 +505,7 @@ export async function openDefaultDrawer(): Promise<boolean> {
  * Kompat lama: tanpa data struk hanya dialog info (tidak pura-pura mencetak).
  */
 export function printReceipt(printerName = 'Printer Kasir'): void {
-  Alert.alert('Cetak Struk', `Printer ${printerName} - buka struk lalu cetak dari tombol Cetak.`);
+  appAlert('Cetak Struk', `Printer ${printerName} - buka struk lalu cetak dari tombol Cetak.`);
 }
 
 /**
@@ -525,11 +526,11 @@ export async function shareReceipt(text: string): Promise<void> {
     }
     if (nav?.clipboard?.writeText) {
       await nav.clipboard.writeText(text);
-      Alert.alert('Disalin', 'Ringkasan struk disalin ke clipboard.');
+      appAlert('Disalin', 'Ringkasan struk disalin ke clipboard.');
       return;
     }
   } catch {
     return;
   }
-  Alert.alert('Bagikan Struk', text);
+  appAlert('Bagikan Struk', text);
 }
