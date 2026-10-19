@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date) =>
-  d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date, curLang?: Lang) =>
+  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM); titik-dua handling sama dengan fmtClock. */const fmtClockHM = (d: Date, curLang?: Lang) =>
+  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); const s = getSession();
@@ -46,10 +47,10 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
         const nowD = new Date();
         const sameDay = d.getFullYear() === nowD.getFullYear() && d.getMonth() === nowD.getMonth() && d.getDate() === nowD.getDate();
         if (!sameDay) return;
-        setInTime(fmtClock(d).slice(0, 5));
+        setInTime(fmtClockHM(d));
         if (row.clockOut) {
           const o = new Date(row.clockOut);
-          if (!Number.isNaN(o.getTime())) setOutTime(fmtClock(o).slice(0, 5));
+          if (!Number.isNaN(o.getTime())) setOutTime(fmtClockHM(o));
         }
       } catch {
         // DB belum siap - tampilan kosong tetap tampil, kasir tidak diblokir.
@@ -91,7 +92,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
     if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
-    await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClock(new Date()).slice(0, 5));
+    await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClockHM(new Date(), lang));
     setSyncNote(t('att_queued')); setPin('');
   } finally { setBusy(false); } };
 
@@ -101,7 +102,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
     const vOut = await verifyAttendancePin(pin);
     if (vOut.ok !== true || !vOut.userId) { setError(vOut.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
-    await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClock(new Date()).slice(0, 5));
+    await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClockHM(new Date(), lang));
     setSyncNote(t('att_queued')); setPin('');
   } finally { setBusy(false); } };
 
@@ -127,7 +128,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
-      <Text style={styles.clock}>{fmtClock(now)}</Text>
+      <Text style={styles.clock}>{fmtClock(now, lang)}</Text>
       <Text style={styles.date}>{now.toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
       <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
 

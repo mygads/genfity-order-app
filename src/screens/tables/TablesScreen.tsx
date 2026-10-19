@@ -25,7 +25,13 @@ const SECTIONS = ['Semua', 'Dalam', 'Teras', 'VIP'];/** Snapshot timer meja agar
   kosong: 'tbl.stKosong',
   terisi: 'tbl.stTerisi',
   dipesan: 'tbl.stDipesan',
-  gabung: 'tbl.stGabung',};/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */function fmtDurasi(min?: number, minLbl = 'mnt', hrLbl = 'jam'): string {
+  gabung: 'tbl.stGabung',};/** Label tampil seksi (S4-APP-334 display-only): nilai sectionId kontrak ('Semua'/'Dalam'/...) tetap disimpan apa adanya. */const SECTION_LABEL_KEY: Record<string, string> = {
+  Semua: 'tmr_sec_semua',
+  Dalam: 'tmr_sec_dalam',
+  Teras: 'tmr_sec_teras',
+  VIP: 'tmr_sec_vip',};/** Petakan nilai seksi kontrak ke label bahasa aktif; seksi custom tak dikenal tampil apa adanya. */function secLabel(sec: string, t: (k: string) => string): string {
+  const k = SECTION_LABEL_KEY[sec];
+  return k ? t(k) : sec;}/** Format durasi duduk ala POSLite: "25 mnt" / "1 jam 10 mnt". */function fmtDurasi(min?: number, minLbl = 'mnt', hrLbl = 'jam'): string {
   if (min === undefined) return '';
   if (min < 60) return `${min} ${minLbl}`;
   const h = Math.floor(min / 60);
@@ -442,14 +448,14 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         <TouchableOpacity
           style={[s.filterChip, section === 'Semua' && filter === 'semua' && s.filterActive]}
           onPress={() => { setSection('Semua'); setFilter('semua'); }}>
-          <Text style={[s.filterTxt, section === 'Semua' && filter === 'semua' && s.filterTxtActive, isTablet && s.filterTxtBig]}>{t('common.all')}</Text>
+          <Text style={[s.filterTxt, section === 'Semua' && filter === 'semua' && s.filterTxtActive, isTablet && s.filterTxtBig]}>{t('tmr_sec_semua')}</Text>
         </TouchableOpacity>
         {(liveSections ?? SECTIONS).filter((sec) => sec !== 'Semua').map((sec) => (
           <TouchableOpacity
             key={sec}
             style={[s.filterChip, section === sec && s.filterActive]}
             onPress={() => setSection(sec)}>
-            <Text style={[s.filterTxt, section === sec && s.filterTxtActive, isTablet && s.filterTxtBig]}>{sec}</Text>
+            <Text style={[s.filterTxt, section === sec && s.filterTxtActive, isTablet && s.filterTxtBig]}>{secLabel(sec, t)}</Text>
           </TouchableOpacity>
         ))}
         <View style={s.filterSep} />
@@ -537,7 +543,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
               <>
                 <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('tbl_table_no').replace('{no}', selected.no)}</Text>
                 <Text style={[s.modalHint, isTablet && s.modalHintBig]}>
-                  {t(STATUS_LABEL_KEY[selected.status])} • {selected.section} • {t('tbl_cap_pax').replace('{n}', String(selected.kapasitas))}
+                  {t(STATUS_LABEL_KEY[selected.status])} • {secLabel(selected.section, t)} • {t('tbl_cap_pax').replace('{n}', String(selected.kapasitas))}
                   {selected.namaTamu ? ` • ${selected.namaTamu}` : ''}
                   {selected.total ? ` • ${rp(selected.total)}` : ''}
                   {selected.seatedMin !== undefined ? ` • ${fmtDurasi(selected.seatedMin, t('tbl.min'), t('tbl.hour'))}` : ''}
@@ -687,7 +693,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                 <View style={{ flex: 1 }}>
                   <Text style={[s.targetNo, isTablet && s.targetNoBig]}>{t('tbl_table_no').replace('{no}', tb.no)}</Text>
                   <Text style={[s.targetMeta, isTablet && s.targetMetaBig]}>
-                    {t(STATUS_LABEL_KEY[tb.status])} • {tb.section} • {t('tbl_cap_pax').replace('{n}', String(tb.kapasitas))}
+                    {t(STATUS_LABEL_KEY[tb.status])} • {secLabel(tb.section, t)} • {t('tbl_cap_pax').replace('{n}', String(tb.kapasitas))}
                   </Text>
                 </View>
                 <TouchableOpacity onPress={() => delTable(tb)} hitSlop={10}>
