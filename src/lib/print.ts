@@ -7,6 +7,17 @@ import { openCashDrawer, printBytes, type PrinterTarget } from '../native/printe
 import { isViewOnlyTag, resolveEffectiveTag } from './effectiveTag';
 import { drainPrintQueue, enqueuePrint, type QueuedPrintKind } from './printqueue';
 
+/** S4-APP-337 display-only: teks alert cetak via kunci i18n prn_* (id+en); kontrak outcome tak berubah. */
+function prn(key: string, vars?: Record<string, string | number>): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
+  let s = tOf(key, getLang());
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));
+  }
+  return s;
+}
+
 export type PrintOutcome =
   | { ok: true; bytes: number; printer: string }
   // `queued` = byte aman di `tr_printqueue` (offline/printer putus), BUKAN
@@ -355,8 +366,8 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
     : await defaultStation();
   if (!d) {
     appAlert(
-      'Cetak Struk',
-      'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.',
+      prn('prn_receipt_title'),
+      prn('prn_no_printer'),
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target): tercetak otomatis
     // saat printer dipair (drain + resolveDrainTarget) — bukan hilang.
@@ -374,10 +385,10 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     appAlert(
-      'Cetak Struk',
+      prn('prn_receipt_title'),
       res.reason === 'need-dev-client'
-        ? `Pratinjau ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
-        : `Kirim ke ${d.name} gagal: ${res.detail ?? res.reason}. Pekerjaan disimpan di antrean cetak.`,
+        ? prn('prn_preview_receipt', { n: bytes.length, p: d.name })
+        : prn('prn_send_fail', { p: d.name, e: res.detail ?? res.reason }),
     );
     // APP-PRINTER: gagal = antre persisten + outcome `queued` (status pending
     // eksplisit untuk layar), bukan Alert-and-drop.
@@ -410,8 +421,8 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
   const d = await kitchenStation(station);
   if (!d) {
     appAlert(
-      'Cetak Tiket Dapur',
-      `Station "${station}" belum punya alamat printer. Atur di Pengaturan → Printer lalu coba lagi.`,
+      prn('prn_kitchen_title'),
+      prn('prn_kitchen_no_station', { s: station }),
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
     const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32, cut: t.cut ?? (await globalAutocut()) });
@@ -427,10 +438,10 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     appAlert(
-      'Cetak Tiket Dapur',
+      prn('prn_kitchen_title'),
       res.reason === 'need-dev-client'
-        ? `Tiket ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
-        : `Kirim ke ${d.name} gagal: ${res.detail ?? res.reason}. Pekerjaan disimpan di antrean cetak.`,
+        ? prn('prn_preview_kitchen', { n: bytes.length, p: d.name })
+        : prn('prn_send_fail', { p: d.name, e: res.detail ?? res.reason }),
     );
     // APP-PRINTER: gagal = antre persisten + outcome `queued`, bukan Alert-and-drop.
     const queuedId = await enqueuePrintJob(bytes, d.target, {
@@ -457,8 +468,8 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
   const d = await defaultStation();
   if (!d) {
     appAlert(
-      'Cetak Antrean',
-      'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.',
+      prn('prn_queue_title'),
+      prn('prn_no_printer'),
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
     const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? 32, cut: q.cut ?? (await globalAutocut()) });
@@ -473,10 +484,10 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     appAlert(
-      'Cetak Antrean',
+      prn('prn_queue_title'),
       res.reason === 'need-dev-client'
-        ? `Slip ${bytes.length} byte siap. Kirim nyata ke ${d.name} butuh dev-client (modul native).`
-        : `Kirim ke ${d.name} gagal: ${res.detail ?? res.reason}. Pekerjaan disimpan di antrean cetak.`,
+        ? prn('prn_preview_queue', { n: bytes.length, p: d.name })
+        : prn('prn_send_fail', { p: d.name, e: res.detail ?? res.reason }),
     );
     const queuedId = await enqueuePrintJob(bytes, d.target, {
       name: d.name,
@@ -505,7 +516,7 @@ export async function openDefaultDrawer(): Promise<boolean> {
  * Kompat lama: tanpa data struk hanya dialog info (tidak pura-pura mencetak).
  */
 export function printReceipt(printerName = 'Printer Kasir'): void {
-  appAlert('Cetak Struk', `Printer ${printerName} - buka struk lalu cetak dari tombol Cetak.`);
+  appAlert(prn('prn_receipt_title'), prn('prn_receipt_compat', { p: printerName }));
 }
 
 /**
@@ -526,11 +537,11 @@ export async function shareReceipt(text: string): Promise<void> {
     }
     if (nav?.clipboard?.writeText) {
       await nav.clipboard.writeText(text);
-      appAlert('Disalin', 'Ringkasan struk disalin ke clipboard.');
+      appAlert(prn('prn_copied_title'), prn('prn_copied_body'));
       return;
     }
   } catch {
     return;
   }
-  appAlert('Bagikan Struk', text);
+  appAlert(prn('prn_share_title'), text);
 }

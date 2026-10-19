@@ -1432,6 +1432,7 @@ const STR: Record<string, Entry> = {
   tmr_sec_dalam: { id: 'Dalam', en: 'Indoor' },
   tmr_sec_teras: { id: 'Teras', en: 'Terrace' },
   tmr_sec_vip: { id: 'VIP', en: 'VIP' },
+  tmr_sec_semua: { id: 'Semua', en: 'All' },
   tmr_u_min: { id: 'mnt', en: 'min' },
   tmr_u_sec: { id: 'dtk', en: 'sec' },
   tmr_u_hour: { id: 'jam', en: 'hr' },
@@ -1458,6 +1459,21 @@ const STR: Record<string, Entry> = {
   'printers.role_checker': { id: 'Checker', en: 'Checker' },
   'printers.role_label': { id: 'Label', en: 'Label' },
   'printers.cols': { id: '{n} kol', en: '{n} col' },
+
+  // ---- S4-APP-337: teks alert cetak (display-only, nilai kontrak outcome tak berubah) ----
+  prn_receipt_title: { id: 'Cetak Struk', en: 'Print Receipt' },
+  prn_kitchen_title: { id: 'Cetak Tiket Dapur', en: 'Print Kitchen Ticket' },
+  prn_queue_title: { id: 'Cetak Antrean', en: 'Print Queue Slip' },
+  prn_no_printer: { id: 'Belum ada printer terhubung. Atur di Pengaturan → Printer lalu coba lagi.', en: 'No printer connected. Set one up in Settings → Printers then try again.' },
+  prn_kitchen_no_station: { id: 'Station "{s}" belum punya alamat printer. Atur di Pengaturan → Printer lalu coba lagi.', en: 'Station "{s}" has no printer address yet. Set it up in Settings → Printers then try again.' },
+  prn_preview_receipt: { id: 'Pratinjau {n} byte siap. Kirim nyata ke {p} butuh dev-client (modul native).', en: 'Preview {n} bytes ready. Real send to {p} needs the dev-client (native module).' },
+  prn_preview_kitchen: { id: 'Tiket {n} byte siap. Kirim nyata ke {p} butuh dev-client (modul native).', en: 'Ticket {n} bytes ready. Real send to {p} needs the dev-client (native module).' },
+  prn_preview_queue: { id: 'Slip {n} byte siap. Kirim nyata ke {p} butuh dev-client (modul native).', en: 'Slip {n} bytes ready. Real send to {p} needs the dev-client (native module).' },
+  prn_send_fail: { id: 'Kirim ke {p} gagal: {e}. Pekerjaan disimpan di antrean cetak.', en: 'Send to {p} failed: {e}. The job was saved to the print queue.' },
+  prn_receipt_compat: { id: 'Printer {p} - buka struk lalu cetak dari tombol Cetak.', en: 'Printer {p} - open the receipt then print from the Print button.' },
+  prn_copied_title: { id: 'Disalin', en: 'Copied' },
+  prn_copied_body: { id: 'Ringkasan struk disalin ke clipboard.', en: 'Receipt summary copied to clipboard.' },
+  prn_share_title: { id: 'Bagikan Struk', en: 'Share Receipt' },
 
   // ---- FIX-3 menu fallback grup ----
   'menu.otherGroup': { id: 'Lainnya', en: 'Other' },
