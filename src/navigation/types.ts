@@ -69,7 +69,7 @@ export type RootStackParamList = {
   SplitBill: { items?: unknown; total?: number } | undefined;
   MoveItems: { from?: string } | undefined;
   MoveTable: { from?: string } | undefined;
-  PromotionList: { returnTo?: string; subtotal?: number; ongkir?: number; kind?: string } | undefined;
+  PromotionList: { returnTo?: string; subtotal?: number; ongkir?: number; kind?: string; items?: unknown; mode?: string; table?: string; customer?: string; memberId?: string; salesNum?: string } | undefined;
   MenuPrinting: undefined;
   Stock: undefined;
   TableTimer: undefined;

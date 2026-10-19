@@ -6,12 +6,13 @@ import AppInput from '../../components/AppInput';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';
 import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
+import type { CartItem } from './CashierScreen';
 import { initDb, query } from '../../lib/db';
 import { dbNowLocal } from '../../lib/datefmt';
 import { getLang, useLang } from '../../lib/i18n';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
-type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number; ongkir?: number } } };
+type Props = { navigation?: Nav; route?: { params?: { returnTo?: string; subtotal?: number; ongkir?: number; items?: CartItem[]; mode?: string; table?: string; customer?: string; memberId?: string; salesNum?: string } } };
 type Promo = {
   code: string;
   name: string;
@@ -233,6 +234,14 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   const returnTo = route?.params?.returnTo ?? 'CartDetail';
   const subtotal = route?.params?.subtotal;
   const ongkir = route?.params?.ongkir;
+  // Konteks cart pemanggil (S4-APP-323): di-echo kembali saat Pakai agar
+  // layar pemanggil ber-state per-instance (CartDetail) tak ter-init kosong.
+  const callerItems = route?.params?.items;
+  const callerMode = route?.params?.mode;
+  const callerTable = route?.params?.table;
+  const callerCustomer = route?.params?.customer;
+  const callerMemberId = route?.params?.memberId;
+  const callerSalesNum = route?.params?.salesNum;
   const [warn, setWarn] = useState('');
 
   // Katalog live: SQLite ms_voucher + ms_promotion dulu (offline-first),
@@ -290,7 +299,16 @@ export default function PromotionListScreen({ navigation, route }: Props) {
       // Teruskan kind (tag) agar pemanggil tahu voucher ongkir vs diskon belanja.
       // GRATISONGKIR dipotong dari ongkir di layar pemanggil bila ongkir > 0.
       // Rate/cap/minSpend ikut agar totals() hitung persen + backstop minSpend (#15/#16).
-      navigation?.navigate(returnTo, { voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
+      // Konteks cart di-echo agar kembali dari promo tak me-wipe keranjang
+      // (S4-APP-323): kontrak voucher tak berubah, hanya tambahan echo.
+      navigation?.navigate(returnTo, {
+        ...(callerItems !== undefined ? { items: callerItems } : {}),
+        ...(callerMode !== undefined ? { mode: callerMode } : {}),
+        ...(callerTable !== undefined ? { table: callerTable } : {}),
+        ...(callerCustomer !== undefined ? { customer: callerCustomer } : {}),
+        ...(callerMemberId !== undefined ? { memberId: callerMemberId } : {}),
+        ...(callerSalesNum !== undefined ? { salesNum: callerSalesNum } : {}),
+        voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
     };
     // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
     // server menang bila backend asli menjawab; offline pakai nilai lokal.
