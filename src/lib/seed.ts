@@ -837,8 +837,9 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  // Stok awal + relasi cabang B002 (Ciputat) dan B003 (Bintaro) agar kasir
-  // di cabang mana pun langsung punya menu. Jus Alpukat sengaja 3 =
+  // Stok awal + relasi cabang B002 (Ciputat), B003 (Bintaro), dan B004 (cabang
+  // uji AUD — lihat AUD_TEST_BRANCH + switchSeedBranchForTest di bawah) agar
+  // kasir di cabang mana pun langsung punya menu. Jus Alpukat sengaja 3 =
   // demo peringatan restock di Dashboard. Syarat stationId KOSONG memastikan
   // isi-ulang hanya untuk baris segar seed (INSERT di atas tak mengisi qty /
   // station → qty default skema 0 + stationId NULL): baris yang sudah tersentuh
@@ -871,7 +872,7 @@ export async function ensureSeeded(): Promise<void> {
          AND (stationId IS NULL OR stationId = '')`,
       [stock, station, nowSeed, m.id],
     );
-    for (const branchId of ['B002', 'B003']) {
+    for (const branchId of ['B002', 'B003', 'B004']) {
       await run(
         `INSERT OR IGNORE INTO ms_branchmenu
            (branchId, menuId, stationId, qty, flagSoldOut, flagActive, syncDate)
@@ -920,6 +921,65 @@ export async function ensureSeeded(): Promise<void> {
   await run(
     `UPDATE ms_setting SET value1 = '1' WHERE key1 = 'seed' AND key2 = 'local'`,
   );
+}
+
+/**
+ * Cabang uji AUD (B004) untuk pengujian dual-currency lokal.
+ *
+ * DB lokal hanya memegang SATU cabang aktif (ms_setting Branch Name/Currency
+ * + Tax PPN global) — tak ada tabel ms_branch — sehingga "cabang kedua" di
+ * sini = (a) relasi ms_branchmenu B004 yang di-seed otomatis di ensureSeeded
+ * (aditif, INSERT OR IGNORE, tak mengubah seed IDR), + (b) helper eksplisit
+ * switchSeedBranchForTest() di bawah untuk mengaktifkan cabang uji.
+ *
+ * SENGAJA tak jalan otomatis di ensureSeeded: default instalasi segar tetap
+ * IDR (Cabang Poris, PPN 11). Pajak per-cabang belum didukung pola seed
+ * (Tax PPN satu baris global) — helper menimpa global saat aktif AUD dan
+ * mengembalikannya saat kembali IDR; lihat docs/DUAL-CURRENCY-STATUS.md.
+ */
+export const AUD_TEST_BRANCH_ID = 'B004';
+
+/** Baris ms_setting aktif per cabang uji: [key1, key2, value1, value2]. */
+const SEED_BRANCH_ROWS: Record<'IDR' | 'AUD', [string, string, string, string][]> = {
+  IDR: [
+    ['Branch', 'Name', 'Genfity Cabang Poris', 'B001'],
+    ['Branch', 'Currency', 'IDR', 'id'],
+    ['Tax', 'PPN', '11', ''],
+  ],
+  AUD: [
+    ['Branch', 'Name', 'Genfity Sydney (Uji AUD)', 'B004'],
+    ['Branch', 'Currency', 'AUD', 'en-AU'],
+    ['Tax', 'PPN', '10', ''],
+  ],
+};
+
+/**
+ * Alihkan cabang aktif seed untuk pengujian (HANYA instalasi dev/uji — fungsi
+ * ini SENGAJA menimpa baris ms_setting, termasuk nama cabang yang mungkin
+ * sudah diganti merchant). Idempoten, aman jalan ulang. Tak melempar yang
+ * fatal (gagal tulis = catat + lanjut). Kembalikan ke IDR dengan
+ * switchSeedBranchForTest('IDR').
+ */
+export async function switchSeedBranchForTest(which: 'IDR' | 'AUD'): Promise<void> {
+  await initDb();
+  const nowSeed = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const rows = SEED_BRANCH_ROWS[which] ?? SEED_BRANCH_ROWS.IDR;
+  for (const [k1, k2, v1, v2] of rows) {
+    try {
+      await run(
+        `INSERT OR IGNORE INTO ms_setting (key1, key2, value1, value2, syncDate)
+         VALUES (?, ?, ?, ?, ?)`,
+        [k1, k2, v1, v2, nowSeed],
+      );
+      await run(
+        `UPDATE ms_setting SET value1 = ?, value2 = ?, syncDate = ?
+         WHERE key1 = ? AND key2 = ?`,
+        [v1, v2, nowSeed, k1, k2],
+      );
+    } catch (e) {
+      console.warn(`[seed] switch cabang uji ${which} (${k1}/${k2}) gagal: ${e instanceof Error ? e.message : e}`);
+    }
+  }
 }
 
 /**

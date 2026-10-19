@@ -108,6 +108,21 @@ export function escRp(n: number): string {
   return `${neg ? '-' : ''}Rp ${digits}`;
 }
 
+/**
+ * Uang struk sadar-currency di samping escRp (escRp TAK diubah):
+ * IDR (atau tak diketahui/asing) = perilaku escRp persis;
+ * AUD = 'A$ ' + grouping koma + 2 desimal.
+ */
+export function escMoney(n: number, currency?: string): string {
+  if ((currency ?? '').trim().toUpperCase() === 'AUD') {
+    const neg = n < 0;
+    const [int, dec] = Math.abs(n).toFixed(2).split('.');
+    const grouped = (int ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return `${neg ? '-' : ''}A$ ${grouped}.${dec}`;
+  }
+  return escRp(n);
+}
+
 function row2(out: number[], left: string, right: string, cols = ESC_COLS) {
   const l = [...left].slice(0, cols).join('');
   const r = [...right].slice(0, cols).join('');

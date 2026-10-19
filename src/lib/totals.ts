@@ -22,7 +22,7 @@
  *   (voucherAmt 0 + ongkirCut 0). Backstop kanonis — entry (PromotionList pakai,
  *   Pay applyVoucher) sudah menegakkan duluan.
  */
-import { initDb, queryFirst } from './db';
+import { initDb, query, queryFirst } from './db';
 
 export type TotalsVoucher = {
   code?: string;
@@ -91,10 +91,12 @@ export function defaultOngkirForMode(mode?: string): number {
 
 /**
  * Baca tarif pajak dari ms_setting(Tax, PPN) (dummy: value1 '11').
- * Fallback TAX_DEFAULT bila DB kosong / nilai tak valid. Tanpa infrastruktur
+ * Setting eksplisit SELALU menang; bila tak ada/tak valid pakai default per
+ * currency: IDR = TAX_DEFAULT (11 PPN), AUD = 10 (GST). Tanpa argumen =
+ * perilaku lama persis (eksplisit atau 11). Tanpa infrastruktur
  * baru: memakai pola queryFirst yang sudah ada (lih. ExpenseScreen loadCoa).
  */
-export async function getTaxRate(): Promise<number> {
+export async function getTaxRate(currency?: string): Promise<number> {
   try {
     await initDb();
     const row = await queryFirst<{ value1: string | null }>(
@@ -105,7 +107,38 @@ export async function getTaxRate(): Promise<number> {
   } catch {
     /* abaikan: pakai fallback default */
   }
+  if ((currency ?? '').trim().toUpperCase() === 'AUD') return 10;
   return TAX_DEFAULT;
+}
+
+/**
+ * Langkah pembulatan grand total per currency. Setting eksplisit
+ * ms_setting(Rounding, Step) — dua layout ala getRoundingSetting di lib/db.ts —
+ * SELALU menang; bila tak ada pakai default: IDR = FEE_DEFAULTS.roundStep
+ * (100, kompatibel), AUD = 1 (sen, tanpa pembulatan ratusan).
+ */
+export async function getRoundStep(currency?: string): Promise<number> {
+  try {
+    await initDb();
+    const rows = await query<{
+      key1: string | null;
+      key2: string | null;
+      value1: string | null;
+    }>(`SELECT key1, key2, value1 FROM ms_setting WHERE key1 LIKE 'Rounding%' LIMIT 20`);
+    for (const r of rows) {
+      const k1 = (r.key1 ?? '').trim().toLowerCase();
+      const k2 = (r.key2 ?? '').trim().toLowerCase();
+      const k = k1 === 'rounding' ? k2 : k1.replace(/^rounding\s+/, '');
+      if (k === 'step') {
+        const n = Number((r.value1 ?? '').trim());
+        if (Number.isFinite(n) && n > 0) return Math.round(n);
+      }
+    }
+  } catch {
+    /* abaikan: pakai fallback default */
+  }
+  if ((currency ?? '').trim().toUpperCase() === 'AUD') return 1;
+  return FEE_DEFAULTS.roundStep;
 }
 
 export type TotalsInput = {

@@ -1,3 +1,5 @@
+import { getCachedCurrency } from '../lib/currency';
+
 export const colors = {
   navy: '#16215E',
   navyDark: '#101845',
@@ -33,7 +35,26 @@ export const fonts = {
   semibold: 'HKGrotesk-SemiBold',
   bold: 'HKGrotesk-Bold',
 };
-export const rp = (n: number) => 'Rp ' + rpNum(n);
+/** rp sadar-currency via cache (lib/currency): IDR = 'Rp ' + rpNum (PERSIS lama);
+ * AUD = 'A$ ' + grouping koma + 2 desimal; kode asing = fallback IDR + warn sekali. */
+export const rp = (n: number) => {
+  const { code } = getCachedCurrency();
+  if (code === 'AUD') {
+    const neg = n < 0;
+    const [int, dec] = Math.abs(n).toFixed(2).split('.');
+    const grouped = (int ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return `${neg ? '-' : ''}A$ ${grouped}.${dec}`;
+  }
+  if (code && code !== 'IDR' && !warnedCurrencyFallback) {
+    warnedCurrencyFallback = true;
+    try {
+      console.warn(`[currency] unknown code "${code}", fallback IDR`);
+    } catch {
+      /* abaikan */
+    }
+  }
+  return 'Rp ' + rpNum(n);
+};
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 export const rpNum = (n: number) =>

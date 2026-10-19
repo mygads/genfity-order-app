@@ -46,6 +46,7 @@ import {
 import { queryFirst } from '../../lib/db';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
+import { syncCurrencyFromProfile } from '../../lib/currency';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -596,6 +597,9 @@ async function completeOnline(
   // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
   if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
+  // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
+  // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+  try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try {
     const pol = payload.policy as Record<string, unknown> | undefined;
     const days = Number(pol?.max_offline_grant_days ?? payload.maxOfflineGrantDays);
@@ -654,6 +658,9 @@ async function completeOffline(
   // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
   if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
+  // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
+  // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+  try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
@@ -884,6 +891,9 @@ export default function LoginScreen({ navigation }: Props) {
         ...(ctx?.terminalTag ? { terminalTag: ctx.terminalTag } : {}),
       },
     );
+    // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
+    // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+    try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
     // M8: QR/DEV login menerbitkan grant rangkap-tiga via penerbit kanonis yang
     // sama dengan completeOnline (buildSessionGrant + saveSessionGrant).
     // Fail-closed: triple (userId, terminalId, deviceId) tak lengkap = TANPA
