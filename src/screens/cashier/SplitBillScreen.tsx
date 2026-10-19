@@ -90,6 +90,8 @@ const splitShare = (amount: number, weights: number[], base: number): number[] =
 
 
 const METHODS = ['Tunai', 'QRIS', 'EDC', 'Transfer'];
+// Label tampil per bahasa; nilai METHODS tetap kanonis (kontrak PAY + usulan tab Pay).
+const METHOD_LABELS = ['pay_method_cash', 'pay_method_qris', 'pay_method_edc', 'pay_method_transfer'];
 const NAMES = ['Bill 1', 'Bill 2', 'Bill 3', 'Bill 4'];
 
 /**
@@ -583,7 +585,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                     key={m}
                     style={[styles.chip, methods[i] === m && styles.chipOn, isTablet && styles.chipBig]}
                     onPress={() => setMethods((arr) => arr.map((x, j) => (j === i ? m : x)))}>
-                    <Text style={[styles.chipT, methods[i] === m && styles.chipTOn, isTablet && styles.chipTBig]}>{m}</Text>
+                    <Text style={[styles.chipT, methods[i] === m && styles.chipTOn, isTablet && styles.chipTBig]}>{t(METHOD_LABELS[METHODS.indexOf(m)] ?? METHOD_LABELS[0])}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -591,7 +593,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 {!paid[i] && (
                   <AppButton
                     size="sm"
-                    title={`${t('sp_pay').replace('{m}', methods[i] as string)} ›`}
+                    title={`${t('sp_pay').replace('{m}', t(METHOD_LABELS[METHODS.indexOf(methods[i] as string)] ?? METHOD_LABELS[0]))} ›`}
                     onPress={() => payBill(i)}
                     disabled={val <= 0 || nominalBlocked || !groupNum}
                     fullWidth={false}

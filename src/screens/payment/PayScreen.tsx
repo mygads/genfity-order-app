@@ -1037,7 +1037,7 @@ export default function PayScreen({ navigation, route }: Props) {
             onPress={() => setDrawer(d)}
             accessibilityState={{ selected: drawer === d }}>
             <Text style={[styles.subTabText, drawer === d && styles.subTabTextActive]}>
-              {d}
+              {t(`pay_drawer_${CASH_DRAWERS.indexOf(d) + 1}`)}
             </Text>
             {drawer === d && <View style={styles.subTabUnderline} />}
           </TouchableOpacity>
