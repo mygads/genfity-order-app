@@ -6,7 +6,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
-import { posModesFor } from '../../lib/posModes';
+import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
 import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
@@ -56,8 +56,16 @@ export default function DineInScreen({ navigation, route }: Props) {
   const { t } = useLang();
   /** C2: daftar mode per merchant-type dari binding (layar ini alur meja-resto;
    * tipe PRODUCT/SERVICE tak menavigasi ke sini karena kasir tak menawarkan
-   * DINE IN untuknya). Dihitung per render agar re-bind tercermin. */
-  const MODES = posModesFor(getBinding()?.merchantType);
+   * DINE IN untuknya). Dihitung per render agar re-bind tercermin.
+   * KOREKSI-FLAG (owner 21-Okt, offer-time only): kanal delivery
+   * disembunyikan bila flag OFF; flag = STATE + langganan (reaktif saat
+   * profil tersinkron sesudah layar dibuka, bukan const statis). */
+  const [deliveryOn, setDeliveryOn] = useState(getCachedDeliveryEnabled());
+  useEffect(() => subscribeDeliveryFlag(setDeliveryOn), []);
+  const MODES = (() => {
+    const all = posModesFor(getBinding()?.merchantType);
+    return deliveryOn ? all : all.filter((m) => !isDeliveryChannelLabel(m));
+  })();
   const initTable = (() => {
     const raw = route?.params?.table ?? 'A3';
     const code = canonTableNo(raw);

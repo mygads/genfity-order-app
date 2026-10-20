@@ -26,7 +26,7 @@ import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
-import { posModesFor } from '../../lib/posModes';
+import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
@@ -191,8 +191,18 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
   /** C2: daftar mode per merchant-type dari binding (RESTAURANT default bila
    * tak diketahui — [ASUMSI] koordinator). Dihitung per render (murah, murni)
-   * agar re-bind lintas-tipe langsung tercermin tanpa restart. */
-  const MODES = posModesFor(getBinding()?.merchantType);
+   * agar re-bind lintas-tipe langsung tercermin tanpa restart.
+   * KOREKSI-FLAG (owner 21-Okt, offer-time only): kanal delivery (GOFOOD/
+   * GRABFOOD/SHOPEEFOOD/DELIVERY) disembunyikan bila flag OFF. Flag dibaca ke
+   * STATE + langganan (bukan const statis) agar daftar mutakhir saat profil
+   * tersinkron sesudah layar dibuka. Mode terpilih yang lama tetap mengalir
+   * via collapse legacy (pesanan lama tak di-BLOCKED oleh flag). */
+  const [deliveryOn, setDeliveryOn] = useState(getCachedDeliveryEnabled());
+  useEffect(() => subscribeDeliveryFlag(setDeliveryOn), []);
+  const MODES = (() => {
+    const all = posModesFor(getBinding()?.merchantType);
+    return deliveryOn ? all : all.filter((m) => !isDeliveryChannelLabel(m));
+  })();
   const [mode, setMode] = useState(() => {
     const init = String(route?.params?.mode ?? '').trim();
     if (init && MODES.includes(init)) return init;

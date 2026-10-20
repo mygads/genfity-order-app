@@ -96,6 +96,46 @@ export function setCachedMerchantType(raw: unknown): PosMerchantType {
 }
 
 /**
+ * KOREKSI-FLAG (putusan owner 21-Okt — menggantikan gate sync 7b829a3 yang
+ * TERBALIK): flag delivery = OFFER-TIME only. Flag menentukan apa yang BOLEH
+ * DIPESAN saat itu (kasir sembunyikan delivery bila OFF). Pesanan LAMA tak
+ * pernah berubah: flag-OFF tak mem-BLOCKED sync (collapse legacy di
+ * goPosOrderType UNCONDITIONAL). SEARCH FACT tetap (BE profile :1285 ada;
+ * POS-create abaikan flag); yang berubah = LOKASI gate: UI, bukan sync.
+ */
+const DELIVERY_CHANNEL_RE = /DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD/;
+
+/** true bila label mode adalah kanal delivery (disembunyikan saat flag OFF). */
+export function isDeliveryChannelLabel(label?: unknown): boolean {
+  const k = String(label ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return DELIVERY_CHANNEL_RE.test(k);
+}
+
+type DeliveryFlagListener = (on: boolean) => void;
+const deliveryFlagListeners = new Set<DeliveryFlagListener>();
+
+/**
+ * Langganan perubahan flag delivery (layar daftar-mode me-render ulang saat
+ * profil tersinkron SESUDAH layar dibuka — reaktivitas wajib putusan).
+ */
+export function subscribeDeliveryFlag(fn: DeliveryFlagListener): () => void {
+  deliveryFlagListeners.add(fn);
+  return () => {
+    deliveryFlagListeners.delete(fn);
+  };
+}
+
+function notifyDeliveryFlag(on: boolean): void {
+  deliveryFlagListeners.forEach((fn) => {
+    try {
+      fn(on);
+    } catch {
+      /* listener tak boleh melempar */
+    }
+  });
+}
+
+/**
  * R1 (SC-QA3 rekonsiliasi, putusan owner A): flag delivery-enabled merchant.
  * SEARCH FACT (2026-10-21, kutip baris-per-baris):
  * - BE `GET /api/merchant/profile` MENGEMBALIKAN flag ini:
@@ -110,15 +150,14 @@ export function setCachedMerchantType(raw: unknown): PosMerchantType {
  * - APP TAK membaca flag ini (grep src NOL isDelivery/is_delivery) — rantai
  *   profil di bawah (api/merchant/profile, dipakai syncMerchantTypeFromProfile)
  *   hanya mengupas merchantType.
- * GATE JUJUR (flag ada → gate + tripwire): runtuh DELIVERY/agregator→TAKEAWAY
- * RESTAURANT di goPosOrderType hanya bila flag true; false eksplisit =
- * UNSUPPORTED (BLOCKED fail-once + alasan, pola S10) — pesanan delivery yang
- * dicatat diam-diam sebagai takeaway = data tak jujur (tanpa alamat/kurir;
- * domain kurir-vs-gosend/grab + ongkir API = PARKED, bukan dibangun di sini).
- * Daftar UI (POS_MODES_BY_TYPE) TAK berubah — tanpa label DELIVERY di daftar
- * mana pun (ikut main). Default true = perilaku lama lestari bila flag belum
- * pernah tersinkron (offline/BE lama): hanya opt-out eksplisit merchant yang
- * menggerbang ([ASUMSI] R1, didokumentasi di sini, bukan dikarang diam-diam).
+ * GATE (KOREKSI-FLAG owner 21-Okt, offer-time only): flag menggerbang DAFTAR
+ * UI (CashierScreen + DineInScreen sembunyikan kanal delivery bila OFF,
+ * reaktif via subscribeDeliveryFlag) — BUKAN sync-mapping. goPosOrderType
+ * runtuh legacy UNCONDITIONAL agar pesanan lama tetap mengalir. Daftar
+ * POS_MODES_BY_TYPE TAK berubah (tanpa label DELIVERY — ikut main).
+ * Default true = perilaku lama lestari bila flag belum pernah tersinkron
+ * (offline/BE lama): hanya opt-out eksplisit merchant yang menyembunyikan
+ * ([ASUMSI] R1, didokumentasi di sini, bukan dikarang diam-diam).
  */
 let cachedDeliveryEnabled: boolean = true;
 
@@ -129,11 +168,16 @@ export function getCachedDeliveryEnabled(): boolean {
 
 /** Tulis cache eksplisit (boolean() longgar: 'false'/0/false → false). */
 export function setCachedDeliveryEnabled(raw: unknown): boolean {
+  let next: boolean;
   if (typeof raw === 'string') {
     const k = raw.trim().toLowerCase();
-    cachedDeliveryEnabled = !(k === '' || k === 'false' || k === '0' || k === 'no' || k === 'off');
+    next = !(k === '' || k === 'false' || k === '0' || k === 'no' || k === 'off');
   } else {
-    cachedDeliveryEnabled = raw == null ? true : Boolean(raw);
+    next = raw == null ? true : Boolean(raw);
+  }
+  if (next !== cachedDeliveryEnabled) {
+    cachedDeliveryEnabled = next;
+    notifyDeliveryFlag(next);
   }
   return cachedDeliveryEnabled;
 }

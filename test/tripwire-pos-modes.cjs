@@ -13,6 +13,9 @@
 //     (HOME_SERVICE→UNSUPPORTED, owner-need BE); RESTAURANT perilaku pra-C2
 //     (agregator→TAKEAWAY, IN_STORE_*/HOME_SERVICE→UNSUPPORTED,
 //     asing→DINE_IN); toGoPosRequest menggerbang UNSUPPORTED (tak dikirim BE).
+//  R1 KOREKSI-FLAG (21-Okt, offer-time only): collapse agregator→TAKEAWAY
+//     UNCONDITIONAL (sync buta-flag; pesanan lama mengalir); flag menggerbang
+//     DAFTAR UI reaktif (Cashier+DineIn sembunyikan kanal delivery bila OFF).
 //  3. C3: modeLabel memuat cabang IN_STORE_PICKUP/IN_STORE_ORDER/
 //     IN_STORE_SERVICE/HOME_SERVICE + SERVICE persis (tanpa fallthrough generik).
 const fs = require('fs');
@@ -84,19 +87,28 @@ function run() {
     'C2: agregator/DELIVERY → TAKEAWAY (kurir-bawa-pulang collapse)');
   ok(/return 'DINE_IN';\s*\n\}/.test(sync),
     'C2: default DINE_IN ([ASUMSI] restaurant-default) tetap ada');
-  // R1 (flag ada → gate UI + tripwire): isDeliveryEnabled dikupas dari profil
-  // (BE merchant_profile.go:1285) + di-cache; runtuh DELIVERY/agregator
-  // RESTAURANT→TAKEAWAY hanya bila flag true; false = UNSUPPORTED.
+  // R1: rantai flag tetap dikunci (kupas profil + cache + default-true).
   ok(/readDeliveryEnabledFromProfile/.test(modes) && /isDeliveryEnabled/.test(modes),
     'R1: posModes mengupas isDeliveryEnabled dari payload profil');
-  ok(/getCachedDeliveryEnabled/.test(modes) && /ms_setting.*Merchant.*Delivery|Merchant', 'Delivery/.test(modes),
+  ok(/getCachedDeliveryEnabled/.test(modes) && /Merchant', 'Delivery/.test(modes),
     'R1: flag delivery di-cache + persist ms_setting(Merchant, Delivery)');
   ok(/cachedDeliveryEnabled: boolean = true/.test(modes) || /loadDeliveryEnabledLocal\(\)/.test(modes),
-    'R1: default flag true = legacy lestari (hanya opt-out eksplisit menggerbang)');
-  ok(/getCachedDeliveryEnabled\(\)\) return 'TAKEAWAY'/.test(sync),
-    'R1: runtuh DELIVERY/agregator→TAKEAWAY HANYA bila flag true');
-  ok(/return UNSUPPORTED_ORDER_TYPE;\s*\n\s*\}\s*\n\s*if \(k === 'IN_STORE_ORDER'/.test(sync) || /false eksplisit = UNSUPPORTED/.test(sync),
-    'R1: flag false = UNSUPPORTED (BLOCKED jujur, bukan DINE_IN diam-diam)');
+    'R1: default flag true = legacy lestari (hanya opt-out eksplisit menyembunyikan)');
+  // R1 KOREKSI-FLAG (owner 21-Okt, offer-time only): collapse legacy
+  // UNCONDITIONAL (pesanan lama mengalir apa pun flag kini); gate = DAFTAR
+  // UI reaktif (Cashier+DineIn sembunyikan kanal delivery bila flag OFF).
+  ok(/if \(\/DELIVER\|ANTAR\|KURIR\|OJEK\|GOFOOD\|GRABFOOD\|SHOPEEFOOD\|ONLINE\/\.test\(k\)\) return 'TAKEAWAY';/.test(sync),
+    'R1: runtuh DELIVERY/agregator→TAKEAWAY UNCONDITIONAL (pesanan lama mengalir)');
+  ok(!/getCachedDeliveryEnabled/.test(sync),
+    'R1: goPosOrderType TAK memakai flag (sync buta-flag; gate milik UI)');
+  ok(/subscribeDeliveryFlag\(/.test(cashier) && /isDeliveryChannelLabel\(m\)/.test(cashier),
+    'R1: CashierScreen langganan flag + saring kanal delivery (reaktif)');
+  ok(/subscribeDeliveryFlag\(/.test(dinein) && /isDeliveryChannelLabel\(m\)/.test(dinein),
+    'R1: DineInScreen langganan flag + saring kanal delivery (reaktif)');
+  ok(/useState\(getCachedDeliveryEnabled\(\)\)/.test(cashier) && /useState\(getCachedDeliveryEnabled\(\)\)/.test(dinein),
+    'R1: flag dibaca ke STATE (bukan const statis) — daftar mutakhir saat sync tiba');
+  ok(/export function subscribeDeliveryFlag/.test(modes) && /export function isDeliveryChannelLabel/.test(modes),
+    'R1: posModes mengekspor subscribe + penanda kanal delivery');
   // 2d. Binding membawa merchantType (bukan hardcode layar).
   ok(/merchantType\?: string/.test(read('session.ts')) &&
     /normalizeMerchantType\(b\.merchantType/.test(read('session.ts')),

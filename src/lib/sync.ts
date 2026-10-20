@@ -13,7 +13,7 @@ import { apiFetch } from './apiSource';
 import { all, initDb, markClean, markDirty, queryFirst, run } from './db';
 import { getLang, tr } from './i18n';
 import { fmtDateInTz, fmtTimeInTz } from './datefmt';
-import { getCachedDeliveryEnabled, getCachedMerchantType, normalizeMerchantType } from './posModes';
+import { getCachedMerchantType, normalizeMerchantType } from './posModes';
 import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
@@ -272,11 +272,12 @@ export const UNSUPPORTED_ORDER_TYPE = 'UNSUPPORTED';
  * per-tipe :223-237). merchantType tak diisi = cache sesi (tak-dikenal =
  * default RESTAURANT, ASUMSI koordinator — perilaku lama lestari).
  * - RESTAURANT: DINE_IN→DINE_IN; TAKEAWAY/TAKE_AWAY→TAKEAWAY;
- *   DELIVERY/agregator→TAKEAWAY HANYA bila flag delivery-enabled merchant true
- *   (R1: proksi legacy; flag dari rantai server-profile, default true = legacy
- *   lestari) — false eksplisit = UNSUPPORTED (BLOCKED jujur: ongkir tetap
- *   tercatat terpisah di payload bila didukung; perilaku pra-C2 persis saat
- *   flag true/tak-diketahui); varian IN_STORE dan HOME_SERVICE →UNSUPPORTED.
+ *   DELIVERY/agregator→TAKEAWAY UNCONDITIONAL (proksi legacy: ongkir tetap
+ *   tercatat terpisah di payload — perilaku pra-C2 persis, milik 550361a).
+ *   KOREKSI-FLAG (owner 21-Okt, offer-time only): gate flag delivery ada di
+ *   DAFTAR UI (kasir sembunyikan kanal delivery bila OFF), BUKAN di sini —
+ *   sync buta-flag agar pesanan lama tetap mengalir walau flag mati belakangan.
+ *   Varian IN_STORE dan HOME_SERVICE →UNSUPPORTED (logika TIPE, bukan flag).
  * - PRODUCT: IN_STORE_ORDER/IN_STORE_PICKUP→IN_STORE_ORDER (alias eksplisit:
  *   pickup = order in-store); TAKEAWAY/TAKE_AWAY→TAKEAWAY; DELIVERY/agregator/
  *   DINE_IN→UNSUPPORTED — SENGAJA tak dilipat ke TAKEAWAY (delivery ≠ takeaway;
@@ -299,15 +300,11 @@ function goPosOrderType(raw?: unknown, merchantType?: unknown): string {
     return UNSUPPORTED_ORDER_TYPE;
   }
   // RESTAURANT + tak-dikenal (default restaurant, ASUMSI): perilaku pra-C2.
+  // Collapse legacy UNCONDITIONAL (milik 550361a) — KOREKSI-FLAG: sync
+  // buta-flag; pesanan lama mengalir apa pun status flag kini.
   if (k === 'DINE_IN') return 'DINE_IN';
   if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
-  // R1: runtuh DELIVERY/agregator→TAKEAWAY hanya bila delivery diaktifkan
-  // merchant (flag profil); false eksplisit = UNSUPPORTED (BLOCKED jujur —
-  // BE POS-create tak membaca flag ini, jadi gerbang milik APP di sini).
-  if (/DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE/.test(k)) {
-    if (getCachedDeliveryEnabled()) return 'TAKEAWAY';
-    return UNSUPPORTED_ORDER_TYPE;
-  }
+  if (/DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE/.test(k)) return 'TAKEAWAY';
   if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_PICKUP' || k === 'IN_STORE_SERVICE' || k === 'HOME_SERVICE') {
     return UNSUPPORTED_ORDER_TYPE;
   }
