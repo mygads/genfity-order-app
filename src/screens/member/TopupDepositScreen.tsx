@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -275,7 +275,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
                 key={n}
                 style={[s.chip, nominalNum === n && s.chipOn]}
                 onPress={() => setNominal(String(n))}>
-                <Text style={[s.chipTxt, nominalNum === n && s.chipTxtOn]}>{rpNum(n)}</Text>
+                <Text style={[s.chipTxt, nominalNum === n && s.chipTxtOn]}>{numGrouping(n)}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -283,7 +283,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             label={t('top_custom_label')}
             keyboardType="number-pad"
             placeholder="0"
-            value={nominalNum ? rpNum(nominalNum) : ''}
+            value={nominalNum ? numGrouping(nominalNum) : ''}
             onChangeText={(txt) => setNominal(txt.replace(/\D/g, '').slice(0, 12))}
             boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 20 }}
@@ -330,7 +330,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           <Text style={s.offlineBanner}>{saveErr}</Text>
         ) : null}
         {!ready && !saving && (
-          <Text style={s.hint}>{t('top_hint')}</Text>
+          <Text style={s.hint}>{t('top_hint').replace('{m}', rp(MIN_TOPUP))}</Text>
         )}
       </ScrollView>
     </View>

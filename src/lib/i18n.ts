@@ -228,7 +228,6 @@ const STR: Record<string, Entry> = {
   // ---- topup ----
   top_title: { id: 'Top Up Deposit', en: 'Deposit Top Up' },
   top_quick: { id: 'Nominal Cepat', en: 'Quick Amount' },
-  top_custom: { id: 'Nominal custom (min. Rp 10.000)', en: 'Custom amount (min. Rp 10,000)' },
   top_custom_label: { id: 'Nominal top up (Rp)', en: 'Top up amount (Rp)' },
   top_method: { id: 'Metode Bayar', en: 'Payment Method' },
   top_note_ph: { id: 'Catatan top up', en: 'Top up note' },
@@ -236,7 +235,7 @@ const STR: Record<string, Entry> = {
   top_amount: { id: 'Nominal top up', en: 'Top up amount' },
   top_balance_after: { id: 'Saldo akhir', en: 'Ending balance' },
   top_pay: { id: 'Bayar dan Top Up', en: 'Pay and Top Up' },
-  top_hint: { id: 'Nominal minimal Rp 10.000 dan metode bayar wajib dipilih.', en: 'Minimum Rp 10,000 and a payment method is required.' },
+  top_hint: { id: 'Nominal minimal {m} dan metode bayar wajib dipilih.', en: 'Minimum {m} and a payment method is required.' },
   top_queued: { id: 'Tersimpan ke antrean sync bila offline.', en: 'Saved to the sync queue when offline.' },
   top_success: { id: 'Top Up Berhasil', en: 'Top Up Successful' },
   top_back_member: { id: 'Kembali ke Member', en: 'Back to Member' },
@@ -1660,6 +1659,7 @@ const STR: Record<string, Entry> = {
   rcp_expense_total: { id: 'Total pengeluaran outlet', en: 'Outlet expense total' },
   rcp_manage_expense: { id: 'Kelola pengeluaran cabang ›', en: 'Manage branch expenses ›' },
   vou_type_disc_idr: { id: 'Diskon (Rp)', en: 'Discount (IDR)' },
+  vou_type_disc_aud: { id: 'Diskon (A$)', en: 'Discount (A$)' },
   petty_flow_in: { id: 'Masuk', en: 'Cash in' },
   petty_flow_out: { id: 'Keluar', en: 'Cash out' },
   promo_min_spend_warn: { id: 'Belanja {total} belum mencapai {min} untuk {code}.', en: 'Spending {total} has not reached {min} for {code}.' },
@@ -1778,9 +1778,22 @@ const STR: Record<string, Entry> = {
   bok_del: { id: '🗑 Batal/Hapus', en: '🗑 Cancel/Delete' },
 };
 
+const missingWarned = new Set<string>();
 export function tOf(key: string, lang?: Lang): string {
   const e = STR[key];
-  if (!e) return key;
+  // S4: kunci tak terdaftar = bug kamus, BUKAN teks tampil — jangan bocorkan
+  // key mentah ke UI (jebakan tOf); warn sekali + string kosong.
+  if (!e) {
+    if (!missingWarned.has(key)) {
+      missingWarned.add(key);
+      try {
+        console.warn(`[i18n] missing key "${key}"`);
+      } catch {
+        /* abaikan */
+      }
+    }
+    return '';
+  }
   return (lang ?? current) === 'en' ? e.en : e.id;
 }
 

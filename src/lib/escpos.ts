@@ -16,6 +16,9 @@ export interface EscReceipt {
   trx?: string;
   cashier?: string;
   datetime?: string;
+  /** Kode currency cabang ('IDR'/'AUD') — S4: struk ikut format cabang
+   * (default = perilaku IDR lama bila absen). */
+  currency?: string;
   items: EscItem[];
   subtotal: number;
   discount?: number;
@@ -111,14 +114,16 @@ export function escRp(n: number): string {
 /**
  * Uang struk sadar-currency di samping escRp (escRp TAK diubah):
  * IDR (atau tak diketahui/asing) = perilaku escRp persis;
- * AUD = 'A$ ' + grouping koma + 2 desimal.
+ * AUD = 'A$' + grouping koma + 2 desimal TANPA spasi (paritas dashboard FE
+ * `A$10.50` + rp()/formatCurrency() S2).
  */
 export function escMoney(n: number, currency?: string): string {
   if ((currency ?? '').trim().toUpperCase() === 'AUD') {
-    const neg = n < 0;
-    const [int, dec] = Math.abs(n).toFixed(2).split('.');
+    const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+    const neg = v < 0;
+    const [int, dec] = Math.abs(v).toFixed(2).split('.');
     const grouped = (int ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return `${neg ? '-' : ''}A$ ${grouped}.${dec}`;
+    return `${neg ? '-' : ''}A$${grouped}.${dec}`;
   }
   return escRp(n);
 }
@@ -229,28 +234,31 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.unpaid) text(out, '** BELUM BAYAR **');
   push(out, ESC, 0x61, 0); // rata kiri
   text(out, '-'.repeat(cols));
+  // S4: semua nominal struk lewat escMoney(currency cabang) — escRp mentah
+  // IDR-only dilarang di badan struk (residu PW-4).
+  const money = (n: number): string => escMoney(n, r.currency);
   for (const i of r.items) {
-    row2(out, `${i.qty}x ${i.name}`, escRp(i.qty * i.price), cols);
+    row2(out, `${i.qty}x ${i.name}`, money(i.qty * i.price), cols);
   }
   text(out, '-'.repeat(cols));
   // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
   // eksklusif → PPN info-only → feeESB → voucher → ongkir → rounding → total.
-  row2(out, 'Subtotal', escRp(r.subtotal), cols);
-  if (r.discount) row2(out, 'Diskon', `-${escRp(r.discount)}`, cols);
-  if (r.service) row2(out, 'Service 5%', escRp(r.service), cols);
-  if (r.tax) row2(out, 'PPN (Inkl.)', escRp(r.tax), cols);
-  if (r.feeESB) row2(out, 'Fee Layanan', escRp(r.feeESB), cols);
+  row2(out, 'Subtotal', money(r.subtotal), cols);
+  if (r.discount) row2(out, 'Diskon', `-${money(r.discount)}`, cols);
+  if (r.service) row2(out, 'Service 5%', money(r.service), cols);
+  if (r.tax) row2(out, 'PPN (Inkl.)', money(r.tax), cols);
+  if (r.feeESB) row2(out, 'Fee Layanan', money(r.feeESB), cols);
   if (r.voucherCode || r.voucherAmount) {
-    row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${escRp(r.voucherAmount)}` : '-', cols);
+    row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${money(r.voucherAmount)}` : '-', cols);
   }
-  if (r.ongkir) row2(out, 'Ongkir', escRp(r.ongkir), cols);
-  if (r.ongkirCut) row2(out, 'Potongan Ongkir', `-${escRp(r.ongkirCut)}`, cols);
-  if (r.rounding) row2(out, 'Pembulatan', escRp(r.rounding), cols);
+  if (r.ongkir) row2(out, 'Ongkir', money(r.ongkir), cols);
+  if (r.ongkirCut) row2(out, 'Potongan Ongkir', `-${money(r.ongkirCut)}`, cols);
+  if (r.rounding) row2(out, 'Pembulatan', money(r.rounding), cols);
   push(out, ESC, 0x45, 1); // tebal
-  row2(out, 'TOTAL', escRp(r.total), cols);
+  row2(out, 'TOTAL', money(r.total), cols);
   push(out, ESC, 0x45, 0);
-  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${escRp(r.paid)}` : r.method, cols);
-  if (r.change) row2(out, 'Kembali', escRp(r.change), cols);
+  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${money(r.paid)}` : r.method, cols);
+  if (r.change) row2(out, 'Kembali', money(r.change), cols);
   if (r.qr) {
     // QR di bawah rincian bayar, sebelum footer (ala POSLite).
     for (const b of buildQrBytes(r.qr)) out.push(b);

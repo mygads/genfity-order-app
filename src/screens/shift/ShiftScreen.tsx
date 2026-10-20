@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -21,10 +21,11 @@ import React, { useEffect, useRef, useState } from 'react';import {
   };
   return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Batas kas awal sesuai hint chip di bawah. */
 const MAX_KAS_AWAL = 10000000;
-/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift. */const fmtShift = (iso: string | null): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const tgl = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }); const jam = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
+/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift — sadar-bahasa (id/en)
+ * + sadar-zona-merchant (PW-4/S3; dulu id-ID-only + jam perangkat). */const fmtShift = (iso: string | null, lang: 'id' | 'en' = 'id', timeZone?: string): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const locale = lang === 'id' ? 'id-ID' : 'en-AU'; const tz = (timeZone ?? '').trim() || getCachedTimezone(); let tgl: string; let jam: string; try { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: tz }).replace(/\./g, ':'); } catch { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); } return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [kasAwal, setKasAwal] = useState('');
+  const { t, lang } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [kasAwal, setKasAwal] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
@@ -165,11 +166,11 @@ const MAX_KAS_AWAL = 10000000;
           </View>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>{t('shf_opened_at')}</Text>
-            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.opened) : '-'}</Text>
+            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.opened, lang, getCachedTimezone()) : '-'}</Text>
           </View>
           <View style={s.shiftRow}>
             <Text style={s.shiftLabel}>{t('shf_closed_at')}</Text>
-            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.closed) : '-'}</Text>
+            <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.closed, lang, getCachedTimezone()) : '-'}</Text>
           </View>
         </View>
 
@@ -180,12 +181,14 @@ const MAX_KAS_AWAL = 10000000;
             keyboardType="number-pad"
             placeholder="0"
             textAlign="right"
-            value={kasAwalNum ? rpNum(kasAwalNum) : '0'}
+            value={kasAwalNum ? numGrouping(kasAwalNum) : '0'}
             onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
             boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange, marginTop: 8 }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
           />
-          <Text style={s.rpPreview}>{kasAwalNum > 0 ? terbilang(kasAwalNum) : t('shf_zero_hint')}</Text>
+          {/* S4: terbilang HANYA untuk UI Indonesia — merchant EN/AUD
+              melihat nominal format-currency (terbilang-ID dilarang tampil). */}
+          <Text style={s.rpPreview}>{kasAwalNum > 0 ? (lang === 'id' ? terbilang(kasAwalNum) : rp(kasAwalNum)) : t('shf_zero_hint')}</Text>
           <Text style={s.chipHint}>{t('shf_chip_hint').replace('{m}', rp(MAX_KAS_AWAL))}</Text>
           <View style={s.chips}>
             {QUICK_NOMINAL.map((n) => (
@@ -194,7 +197,7 @@ const MAX_KAS_AWAL = 10000000;
                 style={[s.chip, kasAwalNum === n && s.chipActive]}
                 onPress={() => setKasAwal(String(Math.min(kasAwalNum + n, MAX_KAS_AWAL)))}>
                 <Text style={[s.chipTxt, kasAwalNum === n && s.chipTxtActive]}>
-                  +{rpNum(n)}
+                  +{numGrouping(n)}
                 </Text>
               </TouchableOpacity>
             ))}

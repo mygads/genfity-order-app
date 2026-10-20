@@ -11,7 +11,8 @@
 import { ApiPath, apiPost, getCustomBaseUrl, getServerEnv, getTerminal } from '../config/server';
 import { apiFetch } from './apiSource';
 import { all, markClean, markDirty, queryFirst, run } from './db';
-import { tr } from './i18n';
+import { getLang, tr } from './i18n';
+import { fmtDateInTz, fmtTimeInTz } from './datefmt';
 import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem } from './storage';
@@ -896,7 +897,14 @@ export async function pushAll(): Promise<PushResult> {
   let failed = 0;
   const touchSuccess = (): void => {
     lastSyncMs = Date.now();
-    lastSync = new Date().toLocaleString('id-ID');
+    // S4: cap waktu sync terakhir sadar-bahasa + sadar-zona-cabang (dulu
+    // toLocaleString('id-ID') hardcode + jam perangkat).
+    try {
+      const now = new Date();
+      lastSync = `${fmtDateInTz(now, getLang())} ${fmtTimeInTz(now)}`;
+    } catch {
+      lastSync = new Date().toISOString();
+    }
   };
   // Drain GABUNGAN (temuan offline-kind-rank-breaks-fifo + causal FIFO per
   // bill): antrean fisik DAN ringan dikuras dalam SATU urutan strict by

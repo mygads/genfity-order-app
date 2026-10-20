@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
+import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { getLang, useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
   applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS,
 
 type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
 // APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
-import { fmtDate } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
+import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
@@ -32,8 +32,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }
   return String(p.table ?? p.rowId ?? labels.other);}function fmtTime(iso: string): string
   { try
-  { return new Date(iso).toLocaleString('id-ID',
-  { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch
+  { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return `${fmtDateInTz(d, getLang())} ${fmtTimeInTz(d)}`; } catch
   { return iso; }}/** S7: level umur sync SELALU dari kanonis syncWarnLevel(lib/sync) — layar tak
  * mengimplementasikan ambang sendiri. daysAgo hari → ms untuk demo/dev. */export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -127,7 +126,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const doPull = async () => {
     if (busy) return;
     setBusy('pull'); setMsg(t('sync_pull_msg')); try {
-      const r = await pullMaster(); setLastPull(new Date().toLocaleString('id-ID'));
+      const r = await pullMaster(); { const now = new Date(); setLastPull(`${fmtDateInTz(now, lang)} ${fmtTimeInTz(now)}`); }
       refreshDaysAgo();
       setMsg(t('sync_pull_done').replace('{t}', String(r.total)).replace('{m}', String(r.per.menu ?? 0)).replace('{tb}', String(r.per.table ?? 0)).replace('{mb}', String(r.per.member ?? 0)).replace('{v}', String(r.per.voucher ?? 0))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_pull_fail')} (${e.message})` : t('sync_pull_fail')); } finally { setBusy(null); }
   };

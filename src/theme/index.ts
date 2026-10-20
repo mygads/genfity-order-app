@@ -66,6 +66,10 @@ export const rpNum = (n: number) =>
  * (butuh 2 desimal) — pakai formatCurrency()/rp() di bawah. */
 export const audNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+/** Grouping angka input/chip sadar-currency (S4): IDR = titik (rpNum),
+ * AUD = koma (audNum). Untuk nominal TAMPIL (ada prefix) pakai rp()/formatCurrency. */
+export const numGrouping = (n: number) =>
+  getCachedCurrency().code === 'AUD' ? audNum(n) : rpNum(n);
 let warnedCurrencyFallback = false;
 /** Format mata uang cabang: 'AUD' → 'A$' + grouping en-AU + 2 desimal TANPA
  * spasi (paritas dashboard FE `A$10.50`; grouping dipertahankan ala en-AU —

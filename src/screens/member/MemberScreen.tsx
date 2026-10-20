@@ -644,7 +644,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       }
       // Deposit cepat menolak nominal di bawah MIN_TOPUP dengan pesan.
       if (n < MIN_TOPUP) {
-        setDepositErr(t('top_hint'));
+        setDepositErr(t('top_hint').replace('{m}', rp(MIN_TOPUP)));
         return;
       }
       setDepositErr('');

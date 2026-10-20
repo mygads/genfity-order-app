@@ -17,6 +17,7 @@ import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVouc
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { tOf, useLang } from '../../lib/i18n';
+import { getCachedCurrency } from '../../lib/currency';
 import type { Lang } from '../../lib/i18n';
 import { verifyLocalEscalation } from '../../lib/supervisor';
 import { uuidv7 } from '../../lib/uuidv7';
@@ -96,7 +97,9 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
       id: String(r.id ?? `V${idx + 1}`),
       kode,
       nama: (r.voucherName ?? '').trim() || kode,
-      jenis: tOf('vou_type_disc_idr', lang),
+      // S4: label jenis diskon ikut currency cabang (dulu vou_type_disc_idr
+      // hardcode "Rp/IDR" untuk semua merchant, salah untuk AUD).
+      jenis: tOf(getCachedCurrency().code === 'AUD' ? 'vou_type_disc_aud' : 'vou_type_disc_idr', lang),
       nilai,
       minBelanja: 0,
       berlakuHingga: hingga,
