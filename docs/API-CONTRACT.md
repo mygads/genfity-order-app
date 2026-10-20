@@ -182,8 +182,8 @@ Contoh item menu:
 | `shift/close` | `v1/push/shift` (`body.op: 'shift-close'`) | [FAKTA] |
 | `branch-expenses/push` | `v1/push/branch-expenses` | [FAKTA] |
 | `device/register-push` | `device/register-push` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
-| `auth/supervisor-approve` | `auth/supervisor-approve` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
-| `auth/cashier-login` | `auth/cashier-login` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `auth/supervisor-approve` | LEGACY — DINYATAKAN MATI (Real mode = 404; lihat §4.4 kontrak baru) | `asumsi-clean-room`, TIDAK ADA di APK |
+| `auth/cashier-login` | LEGACY — DINYATAKAN MATI (Real mode = 404; login kini E01 `terminal-login`, lihat API-TERMINAL-CONTRACT §10) | `asumsi-clean-room`, TIDAK ADA di APK |
 | `member-deposit-withdrawal/topup` | `member-deposit-withdrawal/topup` (tetap) | `asumsi-clean-room` (inquiry-deposit ADA, topup nihil) |
 | `member/register` | `erp/member` (path dasar grup) | grup [FAKTA] (REA-3), sub-path pasti `asumsi-clean-room` |
 
@@ -222,6 +222,23 @@ REA-19: string berikut JANGAN dipakai mentah (artefak/terpotong):
 `pos-lite-minimum-version-v2P`, `esb_api/poslite/expense-chart-of-accounts&`,
 `esb-order/eso-qs/pos-void&`, `sales-expenseX`, `ms_promotionheadr`.
 Tidak ada yang dipakai di kontrak ini maupun di kode lane REA-FIX-A.
+
+### 4.4 Kontrak supervisor baru (BE Go, handover 2026-10-20, PP-001/PP-014)
+
+Legacy `auth/supervisor-approve` + `auth/cashier-login` + `esb/*` =
+**404 di Real mode** — JANGAN dipakai. Kontrak baru (sumber: BE
+`internal/http/router.go:1119`, `internal/http/handlers/supervisor_approve.go`):
+
+`POST /api/v1/terminals/{id}/supervisor-approve`
+`{supervisorUserId: int64, supervisorPin: string, action: 1..64, refId: max 128 char, reason: 1..500 char}`
+
+- Supervisor = role OWNER **atau** grant `supervisor_override`.
+- Self-approval DIIZINKAN dan direkam apa adanya (bukan ditolak).
+- Validasi 171-190: action 1..64, refId ≤128, reason 1..500.
+- APP: rewire `lib/supervisor.ts` + picker
+  supervisorUserId/action/refId/reason di UI void/eskalasi/compliment (S7,
+  PP-001/PP-016). Timeout abort 15 dtk sisi-APP sudah ada (S1); legacy path
+  `{pin}` dipertahankan hanya sampai S7 memutusnya.
 
 ## 5. Push (aplikasi → server) -dirty = `syncDate IS NULL`
 

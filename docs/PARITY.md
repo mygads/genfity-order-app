@@ -344,3 +344,37 @@ dikerjakan terpisah).
   - CATATAN: `tsc` masih merah di file lane lain (CancelScreen/InstallScreen/
     style AppButton di ReceiptScreen — refactor design-system agen lain,
     bukan file audit ini).
+
+## 8. Kunci handover 2026-10-20 (Sesi-C, PP-014)
+
+### 8.1 Kontradiksi M10/T13 — DIKUNCI (bukan kontradiksi)
+
+M10 berstatus DONE sementara T13 TODO karena keduanya mengukur level
+bukti berbeda — dikunci agar tidak diperdebatkan lagi:
+
+- **M10 = DONE-FUNGSIONAL**: kode display/idle/scan selaras dossier
+  (`CustomerDisplayScreen`, `IdleScreen`, `QrScanScreen` + `display.ts`
+  pub/sub) + 36 PNG verifikasi phone+tablet (§7 D7 Batch 4).
+- **T13 = TODO-BUKTI-FISIK**: verifikasi visual di device kecil + tablet
+  fisik + Presentation display = aksi luar-kode, ikut paket F8/T10
+  (prebuild + dev-client + uji fisik). Tak ada yang bisa menutup T13
+  dari artefak statis (kelas BLOKIR yang sama dengan B8).
+
+### 8.2 Kolom APP per F-ID (sumber: LEDGER-FID-v2 §9 + §11 handover;
+status kerja Sesi-C S1–S5 per 2026-10-20)
+
+| F-ID | Status §9 | Sisi-APP + update Sesi-C |
+|---|---|---|
+| F-02 | IMPLEMENTED-partial | APP-OPEN KRITIS → S7 (rewire supervisor) + S8 (SSE E26/E27/401). GAP-1 timeout DONE (S1); GAP-8/GAP-7 tetap open |
+| F-04 | IN_PROGRESS-partial | APP-part DONE (S1: `pushPhysicalRow`/`pushLightItem` abort-timeout 8 dtk). Eksekusi stock-count gabung W4 |
+| F-05 | IMPLEMENTED-test-only | APP-part DONE (S2 desimal AUD + S4 residu IDR: `vou_type_disc_idr`, `top_custom`/`top_hint`, `toLocaleString` id-ID, terbilang gate, `escRp` legacy). Sisa: nominal wajar per currency (butuh owner) |
+| F-08 | IMPLEMENTED | APP-N/A (bulk = admin FE/BE). Tidak berubah |
+| F-10 | IMPLEMENTED-test-only | APP-OPEN RINGAN: invarian binding perangkat→branch/tag belum diuji. Jangan klaim invarian level sistem |
+| F-12 | TODO | APP-OPEN P0 → S7: approval-without-identity + short-PIN bypass + `supervisor.ts` LEGACY mismatch + GAP-5 timeout (timeout DONE S1, rewire endpoint S7) |
+| F-13 | IMPLEMENTED-test-only | APP-OPEN KRITIS → S8: mapper E26 + route E27 + auth `?token=` + `callNext` server-acked + putusan WS (PP-004) |
+| F-16 | DRAF definisi | DRAF menunggu owner; worker jalan di atas draf (kriteria a–e di ledger §11) |
+| F-19 | IMPLEMENTED-partial | APP-part OPEN → S7: `LoginScreen` E29 single-shot + owner-override tanpa timeout total (GAP-10) |
+| F-21 | IMPLEMENTED | APP-N/A. Tidak berubah |
+| F-23 | TODO | Label tetap; eksekusi gabung F-04/W4 |
+| F-01/F-03/F-06/F-07/F-09/F-11/F-14/F-15/F-17/F-18/F-20/F-22/F-24/F-25 | TODO / test-only / partial | APP-N/A atau antre — tak ada permukaan APP yang perlu diubah Sesi-C |
+

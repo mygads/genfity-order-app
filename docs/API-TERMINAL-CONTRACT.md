@@ -396,6 +396,18 @@ didobel di sini agar tidak divergen). Ringkas status + bentuk:
   (server-wins). (Reader WIRED app-side: `offlineGrantPolicyKey` di
   `server.ts`, dibaca `session.ts` + `LoginScreen`;
   fixture `pull-terminal-settings-v2.json`; nilai server-pending.)
+- **E29** `pinVerifyTerminalPin` (WIRED app-side 2026-10-17, lajur
+  auth-app): verifikasi PIN staff pasca-E01 single-stage; 401 non-PIN →
+  auto-logout + `setUnauthorizedHandler`. Detail di API-CONTRACT §4.4
+  untuk sisi supervisor.
+- **Supervisor baru (PP-001, APP S7)**: `POST
+  /api/v1/terminals/{id}/supervisor-approve`
+  `{supervisorUserId, supervisorPin, action 1..64, refId ≤128,
+  reason 1..500}` (BE `router.go:1119`, `supervisor_approve.go`:
+  OWNER atau grant `supervisor_override`; self-approval direkam).
+  E23/E24 DINYATAKAN DEPRECATED (hanya konstanta path, nol pemanggil)
+  — digantikan endpoint ini. Legacy `auth/supervisor-approve`
+  `{pin}` + `auth/cashier-login` + `esb/*` = 404 di Real mode.
 
 **Q7 — identitas sale (CLOSED, nilai final, SPEC §12)**: PK =
 `client_id` **UUIDv7** device-generated (merge/upsert/retry/outbox/
