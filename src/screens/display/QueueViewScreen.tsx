@@ -211,9 +211,11 @@ export default function QueueViewScreen() {
       }
     };
     void poll();
+    // C11 EFF-09: fallback poll 10 dtk → 60 dtk (efek ini HANYA jalan saat SSE
+    // mati — return-awal di atas; banner basi D3 menandai staleness).
     const timer = setInterval(() => {
       void poll();
-    }, 10000);
+    }, 60000);
     return () => {
       alive = false;
       clearInterval(timer);

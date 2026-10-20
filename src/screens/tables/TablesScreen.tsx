@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';import {
-  Image, Modal,
+  AppState, Image, Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -110,6 +110,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   // 10-detik TableTimerScreen tiap menit; hanya perbaiki bila store basi/tertinggal.
   useEffect(() => {
     const timer = setInterval(() => {
+      // C11 EFF-09: skip tick+snapshot saat background (hemat storage writes;
+      // presisi milik tick 10-dtk TableTimerScreen yang foreground).
+      try { if (AppState.currentState !== 'active') return; } catch { /* lanjut */ }
       setTables((list) =>
         { const next = list.map((tb) =>
           tb.status === 'terisi' || tb.status === 'gabung'

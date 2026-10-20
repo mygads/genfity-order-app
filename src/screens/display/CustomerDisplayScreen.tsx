@@ -327,7 +327,10 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       }
     };
     void poll();
-    const timer = setInterval(() => { void poll(); }, 10000);
+    // C11 EFF-09: fallback poll 10 dtk → 60 dtk. Jalur live tetap event-driven
+    // (subscribeDisplay/onWsMessage/SSE + efek [sseOk]); GAP-19 di atas sudah
+    // skip saat data live segar, banner basi (D3) menandai staleness.
+    const timer = setInterval(() => { void poll(); }, 60000);
     return () => { alive = false; clearInterval(timer); };
   }, [sseOk]);
 

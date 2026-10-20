@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date, curLang?: Lang) =>
-  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM); titik-dua handling sama dengan fmtClock. */const fmtClockHM = (d: Date, curLang?: Lang) =>
+import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
+ * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
+ * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
   d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync.
  * S9 (PP-010): OFFLINE-ONLY EKSPLISIT — layar ini TIDAK memanggil endpoint BE
  * workforce/shifts/clock-in|out. Alasan: (1) grup /api/merchant memakai
@@ -28,7 +29,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   const [pinModal, setPinModal] = useState(false);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
+    const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -148,7 +149,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>
-      <Text style={styles.clock}>{fmtClock(now, lang)}</Text>
+      <Text style={styles.clock}>{fmtClockHM(now, lang)}</Text>
       <Text style={styles.date}>{now.toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
       <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('fallback_shift')} (08:00 - 16:00) · {clockedIn ? `● ${t('att_st_in')}` : outTime ? `● ${t('att_st_out')}` : `● ${t('att_st_none')}`}</Text>
 

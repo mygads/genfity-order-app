@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { verifyLocalEscalation } from '../../lib/supervisor';
 import { uuidv7 } from '../../lib/uuidv7';
+import { shrinkReceiptPhoto } from '../../lib/photo';
 import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Expense = {
   id: string;
   nama: string;
@@ -37,7 +38,8 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     try {
       const cam = await ImagePicker.launchCameraAsync({ quality: 0.5 });
       if (!cam.canceled && cam.assets?.[0]?.uri) {
-        setPhoto(cam.assets[0].uri);
+        // C11 EFF-08: resize sebelum simpan (unbounded-photo-growth).
+        setPhoto(await shrinkReceiptPhoto(cam.assets[0].uri));
         return;
       }
     } catch {
@@ -47,10 +49,11 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.5,
     });
-    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(res.assets[0].uri);
+    if (!res.canceled && res.assets?.[0]?.uri) setPhoto(await shrinkReceiptPhoto(res.assets[0].uri));
   };
 
   /** Simpan expense ke tr_branchexpense + dokumen foto, antrekan outbox. ID UUID-style (Q7): EX- + UUIDv7 agar unik lintas-device; prefix EX- dipertahankan agar filter daftar 'EX-%' tetap cocok. */ const tambah = async () => {
+
     if (!ready) return;
     // UNBOUND-GUARD: device belum terikat terminal (branchId kosong) = tulis
     // lokal DILEWATI + pesan jujur; form tetap terbuka agar input tak hilang.
