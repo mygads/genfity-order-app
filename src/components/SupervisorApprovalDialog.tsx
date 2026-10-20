@@ -39,10 +39,18 @@ export interface SupervisorApprovalResult {
 
 interface SupervisorApprovalDialogProps {
   visible: boolean;
-  /** Preset aksi 1..64 char (void|cancel|compliment|refund|...) — tampil statis. */
+  /** Preset aksi 1..64 char (void|cancel|refund|... bebas; compliment = konstanta
+   * SUPERVISOR_ACTION_COMPLIMENT_SETTLE via ExtraPaySection, bukan literal) — tampil statis. */
   action: string;
   /** Ref default (order/item id); pemanggil boleh biarkan pemohon ubah. */
   refId?: string;
+  /**
+   * COND-2: kunci refId (tampil statis, tak bisa diubah pemohon). WAJIB true
+   * bila refId = id-desimal order untuk approval COMPLIMENT_SETTLE — satu
+   * digit diubah = approval tak cocok = settle 403. Untuk aksi bebas lain
+   * (void/cancel/refund) biarkan false (default).
+   */
+  lockRefId?: boolean;
   /** Alasan awal (cth. alasan void layar); tetap bisa diubah, wajib diisi. */
   reasonPreset?: string;
   /** Hak untuk fallback lokal: 'order.void' | 'order.cancel' | 'sale.refund'. */
@@ -57,6 +65,7 @@ export default function SupervisorApprovalDialog({
   visible,
   action,
   refId: refIdProp,
+  lockRefId,
   reasonPreset,
   fallbackAccessKey,
   title,
@@ -164,12 +173,16 @@ export default function SupervisorApprovalDialog({
             onChangeText={(v) => setUserId(v.replace(/[^0-9]/g, '').slice(0, 10))}
           />
           <Text style={styles.fieldLabel}>{t('sup_v1_refid')}</Text>
+          {lockRefId ? (
+            <Text style={styles.staticVal}>{refId || '—'}</Text>
+          ) : (
           <AppInput
             placeholder={t('sup_v1_refid_ph')}
             value={refId}
             onChangeText={(v) => setRefId(v.slice(0, 128))}
             autoCapitalize="characters"
           />
+          )}
           <Text style={styles.fieldLabel}>{t('sup_v1_reason')}</Text>
           <AppInput
             placeholder={t('sup_v1_reason_ph')}

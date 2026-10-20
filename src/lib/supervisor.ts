@@ -293,6 +293,26 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
 /** Batas kontrak BE (supervisor_approve.go:179-193): action 1..64, refId ≤128, reason 1..500. */
 export const SUPERVISOR_V1_LIMITS = { actionMin: 1, actionMax: 64, refIdMax: 128, reasonMin: 1, reasonMax: 500 } as const;
 
+/**
+ * COND-2 (syarat merge, PP-028/BE orders_pos_payment.go:404): aksi kanonis
+ * yang WAJIB dipakai approval compliment — persis `COMPLIMENT_SETTLE`
+ * (case-sensitive, tanpa trim-toleransi di sisi APP: BE memang trim, tapi
+ * APP mengirim persis agar tak ada ambiguitas). Satu char salah = baris
+ * approval tak cocok → settle COMPLIMENT 403 COMPLIMENT_APPROVAL_REQUIRED
+ * permanen yang benar. JANGAN hardcode string ini di layar — impor konstanta.
+ */
+export const SUPERVISOR_ACTION_COMPLIMENT_SETTLE = 'COMPLIMENT_SETTLE';
+
+/**
+ * COND-2: refId approval compliment = id-desimal order BE
+ * (strconv.FormatInt(orderID, 10) — tanpa nol depan, bukan nomor struk
+ * human-readable/salesNum). False = jangan kunci (dialog tetap bisa diisi
+ * manual, tapi approval itu TAKKAN cocok untuk settle — lihat ExtraPaySection).
+ */
+export function isDecimalOrderId(s: string): boolean {
+  return /^[1-9][0-9]{0,18}$/.test((s ?? '').trim());
+}
+
 export interface SupervisorV1Input {
   /** ID numerik BE terminal untuk path /terminals/{id} (bukan terminalCode). */
   terminalId: string;

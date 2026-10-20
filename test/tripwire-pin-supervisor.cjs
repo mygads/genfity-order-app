@@ -90,6 +90,34 @@ function run() {
     'supervisor: gate PIN V1 4..8 paritas BE');
   ok(/slice\(0,\s*8\)/.test(dlg) && /maxLength=\{8\}/.test(readRaw('components/SupervisorApprovalDialog.tsx')),
     'dialog: input PIN tanpa truncate 6-digit (maxLength 8)');
+  // 8. COND-2 (PP-028, syarat merge): approval compliment WAJIB action persis
+  //    COMPLIMENT_SETTLE + refId id-desimal order (satu char salah = settle
+  //    403 permanen yang benar). Pin: konstanta kanonis (anti-literal di
+  //    layar), ExtraPaySection memakai konstanta + kunci refId desimal,
+  //    validator desimal menolak salesNum/nol-depan/negatif, dialog bisa
+  //    mengunci refId (tampil statis).
+  const extra = read('screens/payment/ExtraPaySection.tsx');
+  ok(/export const SUPERVISOR_ACTION_COMPLIMENT_SETTLE = 'COMPLIMENT_SETTLE'/.test(readRaw('lib/supervisor.ts')),
+    'supervisor: konstanta aksi kanonis COMPLIMENT_SETTLE persis');
+  ok(/SUPERVISOR_ACTION_COMPLIMENT_SETTLE/.test(extra) && !/action=\{authFor === 'compliment' \? 'compliment'/.test(readRaw('screens/payment/ExtraPaySection.tsx')),
+    'extrapay: compliment pakai konstanta kanonis (bukan literal compliment)');
+  ok(/isDecimalOrderId/.test(extra) && /lockRefId=\{authFor === 'compliment' && isDecimalOrderId/.test(readRaw('screens/payment/ExtraPaySection.tsx')),
+    'extrapay: refId dikunci hanya bila orderId desimal valid');
+  ok(/export function isDecimalOrderId/.test(readRaw('lib/supervisor.ts')),
+    'supervisor: validator isDecimalOrderId diekspor');
+  // 8b. Runtime (regex PRODUKSI asli diekstrak dari sumber, bukan duplikat):
+  // desimal murni lolos; nomor human-readable/nol-depan/negatif/kosong ditolak.
+  const rxSrc = (readRaw('lib/supervisor.ts').match(/export function isDecimalOrderId[\s\S]*?return (\/.*?\/)\.test/) || [])[1];
+  ok(!!rxSrc, 'supervisor: regex isDecimalOrderId terekstrak dari sumber');
+  if (rxSrc) {
+    const rx = eval(rxSrc);
+    ok(rx.test('900001'), 'decimal-id: 900001 (id BE) lolos');
+    ok(!rx.test('TRX-0001') && !rx.test('A3') && !rx.test(''), 'decimal-id: nomor human-readable/kosong ditolak');
+    ok(!rx.test('0901') && !rx.test('-5') && !rx.test('0'), 'decimal-id: nol-depan/negatif/nol ditolak');
+    ok(!rx.test('9'.repeat(20)), 'decimal-id: >19 digit ditolak');
+  }
+  ok(/lockRefId/.test(dlg) && /staticVal\}>\{refId/.test(dlg),
+    'dialog: mode lockRefId render refId statis (tak bisa diubah pemohon)');
 
   return { checks, failures };
 }

@@ -5,14 +5,24 @@ import { useLang } from '../../lib/i18n';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
+import { SUPERVISOR_ACTION_COMPLIMENT_SETTLE, isDecimalOrderId } from '../../lib/supervisor';
 import { EXTRA_METHODS, xmDesc, xmLabel, type ExtraMethodId } from '../../lib/payments';
 
 /**
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
  * non-penjualan. Dua terakhir wajib otorisasi supervisor via kontrak BE BARU
  * (S7: SupervisorApprovalDialog — legacy {pin} NOL, Real mode 404).
+ *
+ * COND-2 (PP-028): approval compliment WAJIB action persis
+ * COMPLIMENT_SETTLE + refId = id-desimal order BE (BUKAN salesNum/nomor
+ * struk). `orderId` = id desimal dari pemanggil bila alur sudah punya order
+ * BE (create-first); bila absen/tak-desimal, refId dikosongkan dan TIDAK
+ * dikunci — approval itu tercatat tapi TAKKAN cocok untuk settle (403 yang
+ * benar). Batas jujur: alur offline-first APP (saveSale lokal → sync
+ * order/finish) tak punya id BE pra-approval; who-supplies-orderId adalah
+ * keputusan koordinator (E2E memasok via API).
  */
-export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void }) {
+export default function ExtraPaySection({ onDone, orderId }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void; orderId?: string }) {
   // Tablet: kartu 4 sebaris proporsional di dalam konten PayScreen.
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -72,11 +82,14 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
         ))}
       </View>
 
-      {/* S7: kompliment/non-penjualan via dialog persetujuan supervisor V1
-          (kontrak BE baru; aksi compliment|non-sales, hak fallback order.void). */}
+      {/* COND-2: compliment = aksi kanonis COMPLIMENT_SETTLE (konstanta, bukan
+          literal 'compliment' — itu 403 permanen yang benar) + refId id-desimal
+          order yang DIKUNCI bila pemanggil memasok orderId desimal valid. */}
       <SupervisorApprovalDialog
         visible={authFor !== null}
-        action={authFor === 'compliment' ? 'compliment' : 'non-sales'}
+        action={authFor === 'compliment' ? SUPERVISOR_ACTION_COMPLIMENT_SETTLE : 'non-sales'}
+        refId={authFor === 'compliment' && isDecimalOrderId(orderId ?? '') ? (orderId as string).trim() : undefined}
+        lockRefId={authFor === 'compliment' && isDecimalOrderId(orderId ?? '')}
         fallbackAccessKey="order.void"
         onApproved={(r) => approved(r)}
         onCancel={() => setAuthFor(null)}
