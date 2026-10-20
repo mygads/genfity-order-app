@@ -263,21 +263,71 @@ interface StaffLoginCall {
   body: Record<string, unknown>;
 }
 
-async function callStaffLogin(body: Record<string, string | number>): Promise<StaffLoginCall> {
-  try {
-    if (getApiMode() === 'local') return { reached: false, status: 0, body: {} };
-    const res = await withTimeout(apiPost(ApiPath.staffLogin, body), 12000);
-    let json: unknown = null;
-    try {
-      json = await res.json();
-    } catch {
-      json = null;
+async function callStaffLogin(
+  body: Record<string, string | number>,
+  opts?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<StaffLoginCall> {
+  // S4-APP-313: timeout eksplisit PER-ATTEMPT via AbortController (bukan
+  // Promise.race tanpa abort — fetch yang dibiarkan hidup menahan soket dan,
+  // di RN-web, penolakan balapan bisa tak menjatuhkan submit bila pemanggil
+  // menunggu hal lain). Timeout 15 dtk menutup jendela SYN-blackhole (~21 dtk
+  // akan memotong SEBELUM OS menyerah — verifikasi inti memakai 10.255.255.1).
+  // 1x retry HANYA untuk kegagalan transpor (throw/timeout), BUKAN untuk
+  // jawaban definitif server (reached apa pun statusnya = final, tanpa retry).
+  // Sinyal pemanggil (pembatalan user: submit baru / unmount) dihubungkan ke
+  // controller yang sama — abort user TIDAK memicu retry, langsung jatuh ke
+  // jalur offline. Semua lemparan termasuk AbortError → {reached:false} =
+  // jalur offline-path yang sama dengan fast-fail; tak pernah melempar.
+  if (getApiMode() === 'local') return { reached: false, status: 0, body: {} };
+  const TIMEOUT_MS = opts?.timeoutMs ?? 15000;
+  const userSignal = opts?.signal;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (userSignal?.aborted) break;
+    const ctrl = new AbortController();
+    const onUserAbort = () => {
+      try {
+        ctrl.abort();
+      } catch {
+        /* abaikan */
+      }
+    };
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        ctrl.abort();
+      } catch {
+        /* abaikan */
+      }
+    }, TIMEOUT_MS);
+    if (userSignal) {
+      if (typeof userSignal.addEventListener === 'function') {
+        userSignal.addEventListener('abort', onUserAbort);
+      }
     }
-    const b = (unwrapData<unknown>(json) ?? {}) as Record<string, unknown>;
-    return { reached: true, status: res.status, body: b && typeof b === 'object' ? b : {} };
-  } catch {
-    return { reached: false, status: 0, body: {} };
+    try {
+      const res = await apiPost(ApiPath.staffLogin, body, { signal: ctrl.signal });
+      let json: unknown = null;
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+      const b = (unwrapData<unknown>(json) ?? {}) as Record<string, unknown>;
+      return { reached: true, status: res.status, body: b && typeof b === 'object' ? b : {} };
+    } catch {
+      // Abort user = niat pembatalan → JANGAN retry, langsung offline-path.
+      if (userSignal?.aborted && !timedOut) break;
+      // attempt 0 = coba sekali lagi; attempt 1 = habis → offline-path.
+      if (attempt >= 1) break;
+    } finally {
+      clearTimeout(timer);
+      if (userSignal && typeof userSignal.removeEventListener === 'function') {
+        userSignal.removeEventListener('abort', onUserAbort);
+      }
+    }
   }
+  return { reached: false, status: 0, body: {} };
 }
 
 /** E29 pin-verify (fase-1a, faktor 3 login staged): INTI HTTP TUNGGAL di
@@ -859,6 +909,21 @@ export default function LoginScreen({ navigation }: Props) {
   const [qrCode, setQrCode] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
   const qrBusy = useRef(false);
+  /** S4-APP-313: pembatalan user untuk fetch login. Tiap submit membuat
+   * controller baru (submit lama yang masih hidup diabort — tak menimpa hasil
+   * submit baru karena guard busy); unmount mengabort fetch yang tersisa.
+   * Sinyal ini dihubungkan dengan timeout per-attempt di callStaffLogin:
+   * timeout-abort → 1x retry → offline-path; user-abort → langsung
+   * offline-path tanpa retry. Kontrak grant/PIN tak berubah. */
+  const loginAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => {
+    try {
+      loginAbortRef.current?.abort();
+    } catch {
+      /* abaikan */
+    }
+    loginAbortRef.current = null;
+  }, []);
   /** Web: kamera nyata (getUserMedia) - video dibuka, bukan tempelan kode. */
   const [webManual, setWebManual] = useState(false);
   const [webCamError, setWebCamError] = useState<'denied' | 'nocam' | ''>('');
@@ -973,6 +1038,17 @@ export default function LoginScreen({ navigation }: Props) {
     setNotice('');
     setBlocked(null);
     setBusy(true);
+    // S4-APP-313: controller pembatalan milik submit ini — submit lama yang
+    // masih hidup diabort; sinyal diteruskan ke callStaffLogin agar
+    // timeout-abort dan user-abort memakai controller yang sama (balancing).
+    try {
+      loginAbortRef.current?.abort();
+    } catch {
+      /* abaikan */
+    }
+    const loginCtrl = new AbortController();
+    loginAbortRef.current = loginCtrl;
+    const loginSignal = loginCtrl.signal;
     // Race auto-skip (temuan review Trek 1): runStageB mengelola busy sendiri;
     // bila tahap-B diambil alih (handedOff), finally submit JANGAN nol-kan busy.
     let handedOff = false;
@@ -1000,8 +1076,13 @@ export default function LoginScreen({ navigation }: Props) {
           }
           // S4-APP-313: batasi I/O deviceId (wedged = gantung, bukan reject);
           // '' = jalur error jujur di bawah (unbound/need_be), bukan hang.
+          // + sinyal network-layer (retry slice): timeout-abort → 1x retry →
+          // offline-path; user-abort → langsung offline-path tanpa retry.
           const devId = await withTimeout(getContractDeviceId(), 5000).catch(() => '');
-          const stageA = await callStaffLogin({ username: uname, password, deviceId: devId });
+          const stageA = await callStaffLogin(
+            { username: uname, password, deviceId: devId },
+            { signal: loginSignal },
+          );
           if (stageA.reached && stageA.status >= 200 && stageA.status < 300 && str(stageA.body.stage) === 'pick-terminal') {
             const branches = normBranches(stageA.body.branches);
             const terminals = normTerminals(stageA.body.terminals);
@@ -1047,13 +1128,16 @@ export default function LoginScreen({ navigation }: Props) {
         // staffPin (server mengabaikan field tak dikenal). terminalCode
         // OPSIONAL — bound device resolve via fast-path server; terminalPin
         // ikut terkirim bila user sudah mengisinya (server meminta).
-        const first = await callStaffLogin({
-          username: uname,
-          password,
-          deviceId,
-          ...(ctx.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
-          ...(termPin.trim() ? { terminalPin: termPin.trim() } : {}),
-        });
+        const first = await callStaffLogin(
+          {
+            username: uname,
+            password,
+            deviceId,
+            ...(ctx.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
+            ...(termPin.trim() ? { terminalPin: termPin.trim() } : {}),
+          },
+          { signal: loginSignal },
+        );
         if (hasSessionMaterial(first)) {
           // Single-stage: sesi SUDAH ada di respons pertama — disimpan sebagai
           // kandidat, dikunci setelah gerbang PIN LOKAL (tanpa call kedua).
@@ -1178,17 +1262,30 @@ export default function LoginScreen({ navigation }: Props) {
   ) => {
     setServerError('');
     setBusy(true);
+    // S4-APP-313: tahap-B = submit tersendiri (dari picker) → controller
+    // pembatalan sendiri, pola sama seperti submit utama.
+    try {
+      loginAbortRef.current?.abort();
+    } catch {
+      /* abaikan */
+    }
+    const stageBCtrl = new AbortController();
+    loginAbortRef.current = stageBCtrl;
+    const stageBSignal = stageBCtrl.signal;
     void (async () => {
       try {
         const merchantNum = Number(branchId);
-        const second = await callStaffLogin({
-          username: data.username,
-          password: data.password,
-          deviceId: data.deviceId,
-          terminalCode: term.code,
-          ...(Number.isFinite(merchantNum) && merchantNum > 0 ? { merchantId: merchantNum } : {}),
-          ...(pin.trim() ? { terminalPin: pin.trim() } : {}),
-        });
+        const second = await callStaffLogin(
+          {
+            username: data.username,
+            password: data.password,
+            deviceId: data.deviceId,
+            terminalCode: term.code,
+            ...(Number.isFinite(merchantNum) && merchantNum > 0 ? { merchantId: merchantNum } : {}),
+            ...(pin.trim() ? { terminalPin: pin.trim() } : {}),
+          },
+          { signal: stageBSignal },
+        );
         if (hasSessionMaterial(second)) {
           // Server sudah bind device+user ke terminal ini; cerminkan ke store
           // lokal (UNIFIKASI TULIS 3 store) agar fast-path + grant triple
@@ -1307,6 +1404,15 @@ export default function LoginScreen({ navigation }: Props) {
     }
     setPinError('');
     setPinBusy(true);
+    // S4-APP-313: refetch defensif = submit tersendiri → controller sendiri.
+    try {
+      loginAbortRef.current?.abort();
+    } catch {
+      /* abaikan */
+    }
+    const pinCtrl = new AbortController();
+    loginAbortRef.current = pinCtrl;
+    const pinSignal = pinCtrl.signal;
     void (async () => {
       try {
         const pin = staffPin.trim();
@@ -1492,12 +1598,15 @@ export default function LoginScreen({ navigation }: Props) {
         // staffPin — mengirim staffPin akan menyiratkan verifikasi server
         // yang tak ada (server abaikan field tak dikenal). Payload SELALU
         // bawa terminalCode+deviceId.
-        const second = await callStaffLogin({
-          username: candidate.username,
-          password: candidate.password,
-          terminalCode: ctx.terminalCode,
-          deviceId,
-        });
+        const second = await callStaffLogin(
+          {
+            username: candidate.username,
+            password: candidate.password,
+            terminalCode: ctx.terminalCode,
+            deviceId,
+          },
+          { signal: pinSignal },
+        );
         if (second.reached && second.status >= 200 && second.status < 300) {
           const p = second.body;
           const userId = str(p.userId ?? p.user_id);

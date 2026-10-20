@@ -397,7 +397,7 @@ export async function apiGet(
 export async function apiPost(
   path: string,
   body: unknown,
-  opts?: { idempotencyKey?: string; token?: string },
+  opts?: { idempotencyKey?: string; token?: string; signal?: AbortSignal },
 ): Promise<Response> {
   const t = getTerminal();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -416,6 +416,9 @@ export async function apiPost(
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    // S4-APP-313: teruskan sinyal abort pemanggil (timeout per-attempt /
+    // pembatalan user) — aditif, pemanggil lama tanpa signal tetap jalan.
+    ...(opts?.signal ? { signal: opts.signal } : {}),
   });
 }
 
