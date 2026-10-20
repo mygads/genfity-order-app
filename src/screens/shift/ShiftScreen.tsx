@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -103,6 +103,27 @@ const MAX_KAS_AWAL = 10000000;
       const sess = getSession();
       const shiftUserId = openerUserId || sess?.userId || sess?.username || '';
       const shiftCashier = sess?.name || sess?.username || '';
+      // S9 (PP-010): GERBANG ABSENSI buka-shift — pembuka WAJIB punya baris
+      // 'absen' hari-ini-lokal (paritas gerbang tutup di EndShiftScreen).
+      // Lokal SQLite sehingga berlaku offline; DB tak terbaca = fail-closed
+      // (jatuh ke shf_open_failed di catch). Pesan = tautan ke Absensi.
+      const attRows = await query<{ clockIn: string | null }>(
+        `SELECT clockIn FROM tr_shiftlog WHERE status = 'absen' AND userId = ? ORDER BY clockIn DESC LIMIT 3`,
+        [shiftUserId],
+      );
+      const todayD = new Date();
+      const clockedToday = attRows.some((r) => {
+        try {
+          const d = new Date(String(r.clockIn));
+          return d.getFullYear() === todayD.getFullYear() && d.getMonth() === todayD.getMonth() && d.getDate() === todayD.getDate();
+        } catch {
+          return false;
+        }
+      });
+      if (!clockedToday) {
+        setError(t('shf_att_link'));
+        return;
+      }
       try {
         await run(
           `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, 'open', NULL)`,

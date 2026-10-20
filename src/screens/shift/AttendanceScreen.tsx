@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];const fmtClock = (d: Date, curLang?: Lang) =>
   d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM); titik-dua handling sama dengan fmtClock. */const fmtClockHM = (d: Date, curLang?: Lang) =>
-  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync. */export default function AttendanceScreen({ navigation }: Props) {
+  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync.
+ * S9 (PP-010): OFFLINE-ONLY EKSPLISIT — layar ini TIDAK memanggil endpoint BE
+ * workforce/shifts/clock-in|out. Alasan: (1) grup /api/merchant memakai
+ * MerchantAuth (bukan token sesi kasir POS — kompatibilitas TANPA live BE
+ * tak bisa dibuktikan; salah tebak = 401 → logout sesi via 401-handler);
+ * (2) BE clock mencatat AUTH-USER saja (ac.UserID) sehingga mengikat
+ * titip-absen (clock atas pemilik PIN) tak terpetakan; (3) tanpa modul GPS
+ * (tak ada expo-location) sehingga outlet geofence-wajib akan 422.
+ * Sampai ketiga hal di atas diputuskan owner + E2E live, banner
+ * att_offline_only tampil jujur di bawah. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); const s = getSession();
@@ -157,6 +166,8 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_out')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{outTime ?? '-- : --'}</Text></View>
       </View>
       {!inTime && <Text style={styles.empty}>{t('att_empty_in')}</Text>}
+      {/* S9: banner offline-only eksplisit — selalu tampil, bukan syarat. */}
+      <Text style={styles.hint}>{t('att_offline_only')}</Text>
 
       <Text style={styles.sec}>{t('att_pin_entry')}</Text>
       <View style={styles.pinRow}>

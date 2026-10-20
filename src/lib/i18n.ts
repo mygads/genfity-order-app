@@ -1325,6 +1325,7 @@ const STR: Record<string, Entry> = {
   att_after_shift: { id: 'Setelah masuk - Buka Shift', en: 'After clock-in - Open Shift' },
   att_skip_dash: { id: 'Lewati - Dashboard', en: 'Skip - Dashboard' },
   att_empty_in: { id: 'Belum ada absen masuk hari ini.', en: 'No clock-in recorded today.' },
+  att_offline_only: { id: 'Absensi tercatat di perangkat ini + antrean sync (offline-only eksplisit — bukan clock server; tanpa GPS perangkat).', en: 'Attendance is recorded on this device + sync queue (explicit offline-only — not a server clock; no device GPS).' },
 
   // ---- install klaim terminal (InstallScreen) ----
   inst_title: { id: 'Klaim Terminal', en: 'Claim Terminal' },
