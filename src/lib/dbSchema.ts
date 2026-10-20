@@ -188,6 +188,8 @@ export const SCHEMA_STATEMENTS: string[] = [
   // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
   // logika drain diimplementasikan lane printer belakangan (jangan drain di
   // lane ini). status: 'antre' | 'cetak' | 'gagal' (kosakata = outbox).
+  // C9: 'cetak' warisan — drain kini DELETE saat sukses + menyapu 'cetak' lama;
+  // baris hidup hanya antre/gagal. Skema TAK diubah (kompatibel mundur).
   `CREATE TABLE IF NOT EXISTS tr_printqueue (
     id TEXT PRIMARY KEY, payload TEXT, target TEXT,
     status TEXT DEFAULT 'antre', createdAt TEXT)`,

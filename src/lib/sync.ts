@@ -1032,6 +1032,14 @@ export async function pushAll(): Promise<PushResult> {
     outbox = [...queued, ...keptSent.slice(outbox.length - 500)];
   }
   persist();
+  // C9: retensi 'lokal' tiap akhir drain (best-effort; gagal = abaikan).
+  // Purge server pos_offline_order_sync milik BE (migration 00045 —
+  // catatan owner-need, bukan kode APP).
+  try {
+    await pruneLocalOnly();
+  } catch {
+    /* abaikan */
+  }
   // S13: beri tahu subsistem push (token dsb.) setelah push sukses.
   if (sent > 0) {
     try {
@@ -1301,6 +1309,34 @@ export async function listLocalOnly(limit = 50): Promise<LocalOnlyRow[]> {
     }));
   } catch {
     return [];
+  }
+}
+
+/**
+ * C9 (SESI-C): retensi baris 'lokal' esoprocessqueue — status terminal yang
+ * informatif (kartu SyncScreen, maks 200 via listLocalOnly) tapi TAK PERNAH
+ * dihapus drain (bukan antre/bukan gagal/bukan terkirim) sehingga tumbuh tanpa
+ * batas. Pangkas ke `keep` terbaru (default 200 = jendela tampil penuh);
+ * baris antre/gagal/terkirim TAK tersentuh. Best-effort, tak pernah melempar
+ * (dipanggil tiap akhir pushAll).
+ */
+export async function pruneLocalOnly(keep = 200): Promise<number> {
+  try {
+    const n = Math.max(50, Math.min(1000, Math.floor(keep) || 200));
+    // Tanpa initDb eksplisit (konvensi berkas ini — pushAll sudah menyentuh DB
+    // via fetchPhysicalRows sebelum prune dipanggil).
+    await run(
+      `DELETE FROM tr_esoprocessqueue WHERE status = 'lokal' AND id NOT IN (
+         SELECT id FROM tr_esoprocessqueue WHERE status = 'lokal'
+         ORDER BY createdAt DESC LIMIT ${n}
+       )`,
+    );
+    const row = await queryFirst<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM tr_esoprocessqueue WHERE status = 'lokal'`,
+    );
+    return row?.n ?? 0;
+  } catch {
+    return -1;
   }
 }
 

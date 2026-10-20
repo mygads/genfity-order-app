@@ -5,9 +5,16 @@
  *   di `lib/dbSchema.ts` (Wave1, HEADER TABEL SAJA); file ini adalah logika
  *   drain-nya. `initDb()` dipanggil di setiap entry agar instalasi lama ikut
  *   dapat tabelnya tanpa migrasi khusus.
- * - Kosakata status = outbox (`'antre' | 'cetak' | 'gagal'`), drain FIFO
+ * - Kosakata status = outbox (`'antre' | 'gagal'` untuk baris hidup; `'cetak'`
+ *   warisan pra-C9 dibersihkan drain — lihat RETENSI di bawah), drain FIFO
  *   `ORDER BY createdAt ASC` (meniru `sync.ts`: baris gagal tidak menghentikan
  *   drain, dicoba lagi di drain berikut).
+ * - RETENSI (C9, SESI-C): baris SUKSES langsung DELETE (bukan UPDATE 'cetak')
+ *   + sapu warisan 'cetak' tiap drain — tabel cetak tak boleh tumbuh tanpa
+ *   batas; yang hidup hanya antre/gagal (sumber `pendingPrintCount`, tampil di
+ *   SyncScreen). Retensi 'lokal' esoprocessqueue milik `pruneLocalOnly`
+ *   (lib/sync.ts); purge server `pos_offline_order_sync` milik BE
+ *   (migration 00045 — catatan owner-need, bukan kode APP).
  * - `payload` = byte ESC/POS dalam base64 (via `escpos.toBase64/fromBase64`
  *   agar jalan di semua runtime); `target` = envelope JSON
  *   `{target, name, kind, label, retries}` — retry count tinggal di envelope
@@ -219,6 +226,13 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
   } catch {
     return out;
   }
+  // C9: sapu warisan 'cetak' pra-C9 (sukses dulu di-UPDATE-bukan-DELETE) —
+  // best-effort, gagal = abaikan (drain tetap jalan).
+  try {
+    await run(`DELETE FROM tr_printqueue WHERE status = 'cetak'`);
+  } catch {
+    /* abaikan */
+  }
   let rows: QueuedPrintRow[] = [];
   try {
     rows = await all<QueuedPrintRow>(
@@ -264,7 +278,9 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
     }
     try {
       if (ok) {
-        await run(`UPDATE tr_printqueue SET status = 'cetak' WHERE id = ?`, [row.id]);
+        // C9: sukses = DELETE langsung (retensi device) — 'cetak' tak lagi
+        // ditulis; baris hidup hanya antre/gagal (pendingPrintCount lestari).
+        await run(`DELETE FROM tr_printqueue WHERE id = ?`, [row.id]);
         out.sent += 1;
       } else {
         const retries = env.retries + 1;
