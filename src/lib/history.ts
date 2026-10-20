@@ -20,6 +20,16 @@ export function modeLabel(salesMode?: string | null): string {
   if (/DINE/.test(k)) return 'Dine In';
   if (/TAKE/.test(k)) return 'Take Away';
   if (/DELIVER/.test(k)) return 'Delivery';
+  // C3: enum BE di luar trio resto — IN_STORE_PICKUP dipakai di alur
+  // customer/group-order (customer_reservations.go:818, group_order.go:411);
+  // IN_STORE_ORDER/IN_STORE_SERVICE = kanal POS (orders_pos_create.go:196).
+  // Urutan penting: HOME_SERVICE/IN_STORE_SERVICE dicek sebelum SERVICE
+  // persis agar tak terbayang (shadowing).
+  if (/IN_STORE_PICKUP/.test(k)) return 'In-Store Pickup';
+  if (/IN_STORE_ORDER/.test(k)) return 'In-Store Order';
+  if (/HOME_SERVICE/.test(k)) return 'Home Service';
+  if (/IN_STORE_SERVICE/.test(k)) return 'In-Store Service';
+  if (k === 'SERVICE') return 'Service';
   if (!k) return 'Dine In';
   return k.split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
 }
