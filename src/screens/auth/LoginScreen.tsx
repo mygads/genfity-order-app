@@ -44,7 +44,7 @@ import {
   type TerminalBinding as LegacyBinding,
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
-import { whenSeedReady } from '../../lib/seed';
+import { isSeedReady, whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
 import { syncCurrencyFromProfile } from '../../lib/currency';
@@ -200,10 +200,14 @@ function mapLegacyBinding(leg: LegacyBinding): SessionBinding {
 }
 
 /** Selesaikan konteks terminal: binding sesi dulu, fallback store lawas agar
- * device yang ter-bind sebelum Wave1 tetap bisa login (tanpa bind ulang). */
+ * device yang ter-bind sebelum Wave1 tetap bisa login (tanpa bind ulang).
+ * S4-APP-313: I/O lokal dibatasi withTimeout — storage/SQLite yang wedged tak
+ * pernah settle (bukan reject), jadi try/catch saja tak cukup; tanpa batas ini
+ * submit gantung di "Verifying..." selamanya. 5 dtk longgar untuk I/O lokal
+ * normal (<50 mdtk) sekaligus fail-fast menuju jalur error jujur. */
 async function resolveTermCtx(): Promise<TermCtx | null> {
   try {
-    await hydrateTerminalState();
+    await withTimeout(hydrateTerminalState(), 5000);
   } catch {
     /* memori dingin tetap dipakai apa adanya (fail-closed di bawah) */
   }
@@ -220,7 +224,7 @@ async function resolveTermCtx(): Promise<TermCtx | null> {
     };
   }
   try {
-    const leg = await loadBinding();
+    const leg = await withTimeout(loadBinding(), 5000);
     if (leg && leg.terminalCode.trim()) {
       const m = mapLegacyBinding(leg);
       return {
@@ -442,6 +446,23 @@ async function lookupLocalUserId(username: string): Promise<string> {
   }
 }
 
+/** S4-APP-313: lookup tahan-seed — query SQLite antri di belakang seed-write
+ * (~40 dtk di first-run web; bukti runtime 2026-10-20 :3120-vs-:3131: batas
+ * tunggal 3 dtk/60 dtk = login offline valid gagal-palsu jadi need_be).
+ * Selama seed BELUM selesai, '' = "belum tahu" → ulangi (tiap query dibatasi
+ * 15 dtk); berhenti bila: user ketemu, seed selesai ('' = tak ada user =
+ * jawaban final), atau budget total 90 dtk habis (wedged = '' → need_be
+ * jujur). Tak pernah gantung selamanya; kasus umum (seed done) = 1 iterasi,
+ * tanpa latensi tambahan. */
+async function lookupLocalUserIdAfterSeed(username: string): Promise<string> {
+  const t0 = Date.now();
+  for (;;) {
+    const uid = await withTimeout(lookupLocalUserId(username), 15000).catch(() => '');
+    if (uid || isSeedReady() || Date.now() - t0 > 90000) return uid;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+
 /** Seed hash PIN lokal (kompatibel layar absensi/shift yang baca loadPinRecord). */
 async function ensureLocalPinHash(userId: string, pin: string): Promise<void> {
   try {
@@ -636,7 +657,7 @@ async function completeOffline(
 ): Promise<void> {
   const ctx = await resolveTermCtx();
   if (!ctx) throw new Error('unbound');
-  const deviceId = ctx.deviceId || (await getContractDeviceId());
+  const deviceId = ctx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
   const prev = getSession();
   const sameUser = !!prev && prev.userId === userId;
   const sess: DeviceSession = {
@@ -977,7 +998,9 @@ export default function LoginScreen({ navigation }: Props) {
             setBlocked({ kind: 'unbound' });
             return;
           }
-          const devId = await getContractDeviceId();
+          // S4-APP-313: batasi I/O deviceId (wedged = gantung, bukan reject);
+          // '' = jalur error jujur di bawah (unbound/need_be), bukan hang.
+          const devId = await withTimeout(getContractDeviceId(), 5000).catch(() => '');
           const stageA = await callStaffLogin({ username: uname, password, deviceId: devId });
           if (stageA.reached && stageA.status >= 200 && stageA.status < 300 && str(stageA.body.stage) === 'pick-terminal') {
             const branches = normBranches(stageA.body.branches);
@@ -1019,7 +1042,7 @@ export default function LoginScreen({ navigation }: Props) {
           if (stageA.reached) setBlocked({ kind: 'unbound' });
           return;
         }
-        const deviceId = ctx.deviceId || (await getContractDeviceId());
+        const deviceId = ctx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
         // B1 langkah 1 fase-1a (login staged): username+password dulu, TANPA
         // staffPin (server mengabaikan field tak dikenal). terminalCode
         // OPSIONAL — bound device resolve via fast-path server; terminalPin
@@ -1099,7 +1122,13 @@ export default function LoginScreen({ navigation }: Props) {
           }
         }
         // Offline/unconfigured: gate grant jujur — tanpa silent local login.
-        const userId = await lookupLocalUserId(uname);
+        // S4-APP-313: AKAR HANG — lookupLocalUserId = query expo-sqlite TANPA
+        // timeout; SQLite wedged = promise tak pernah settle = "Verifying..."
+        // selamanya (finally tak jalan). lookupLocalUserIdAfterSeed: tahan
+        // selama seed berjalan (batas total 90 dtk), tiap query 15 dtk;
+        // '' final → 'no-grant' → pesan need_be jujur. Outer catch di bawah
+        // menjaring lemparan tak terduga menjadi need_be (bukan hang).
+        const userId = await lookupLocalUserIdAfterSeed(uname);
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
         if (problem === 'grant-expired') {
           setBlocked({ kind: 'grant-expired' });
@@ -1120,6 +1149,12 @@ export default function LoginScreen({ navigation }: Props) {
         // bersyarat (tamu -> authed) dan stack authed mount dengan initial
         // Dashboard/Shift sendiri. Navigate sinkron di sini race melawan
         // setLoggedIn sehingga error "not handled by any navigator" di HP.
+      } catch {
+        // S4-APP-313: jaring pengaman — lemparan tak terduga (termasuk
+        // 'login-timeout' dari withTimeout) = pesan need_be jujur + busy
+        // dibersihkan finally, BUKAN unhandled rejection tanpa pesan.
+        // i18n frozen: pakai kunci need_be yang sudah ada.
+        setServerError(needBeText());
       } finally {
         if (!handedOff) setBusy(false);
       }
@@ -1390,7 +1425,7 @@ export default function LoginScreen({ navigation }: Props) {
           setPinError(needBeText());
           return;
         }
-        const deviceId = ctx.deviceId || (await getContractDeviceId());
+        const deviceId = ctx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
         if (candidate.kind === 'online') {
           const userId = str(candidate.payload.userId ?? candidate.payload.user_id);
           if (!userId) {
@@ -2095,7 +2130,7 @@ export default function LoginScreen({ navigation }: Props) {
                       setPinError(needBeText());
                       return;
                     }
-                    const deviceId = ctx.deviceId || (await getContractDeviceId());
+                    const deviceId = ctx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
                     await completeOnline(cur.payload, cur.pin, ctx, deviceId, uname);
                     // F14-flush: takeover terkonfirmasi = login ONLINE sukses.
                     try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
