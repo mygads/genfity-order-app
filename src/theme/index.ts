@@ -36,14 +36,16 @@ export const fonts = {
   bold: 'HKGrotesk-Bold',
 };
 /** rp sadar-currency via cache (lib/currency): IDR = 'Rp ' + rpNum (PERSIS lama);
- * AUD = 'A$ ' + grouping koma + 2 desimal; kode asing = fallback IDR + warn sekali. */
+ * AUD = 'A$' + grouping koma + 2 desimal TANPA spasi (paritas dashboard FE
+ * formatCurrency `A$10.50`); kode asing = fallback IDR + warn sekali. */
 export const rp = (n: number) => {
   const { code } = getCachedCurrency();
   if (code === 'AUD') {
-    const neg = n < 0;
-    const [int, dec] = Math.abs(n).toFixed(2).split('.');
+    const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+    const neg = v < 0;
+    const [int, dec] = Math.abs(v).toFixed(2).split('.');
     const grouped = (int ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return `${neg ? '-' : ''}A$ ${grouped}.${dec}`;
+    return `${neg ? '-' : ''}A$${grouped}.${dec}`;
   }
   if (code && code !== 'IDR' && !warnedCurrencyFallback) {
     warnedCurrencyFallback = true;
@@ -59,14 +61,28 @@ export const rp = (n: number) => {
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 export const rpNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-/** Angka grouping ala Australia tanpa prefix - pasangan rpNum utk AUD. */
+/** Angka grouping ala Australia tanpa prefix - pasangan rpNum utk AUD.
+ * INTEGER-only (cermin rpNum): JANGAN dipakai untuk nominal currency AUD
+ * (butuh 2 desimal) — pakai formatCurrency()/rp() di bawah. */
 export const audNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 let warnedCurrencyFallback = false;
-/** Format mata uang cabang: 'AUD' → 'A$ ' + grouping en-AU; default/''/tak dikenal → rp(n) (fallback IDR, tak pernah blank). */
+/** Format mata uang cabang: 'AUD' → 'A$' + grouping en-AU + 2 desimal TANPA
+ * spasi (paritas dashboard FE `A$10.50`; grouping dipertahankan ala en-AU —
+ * dashboard kini tanpa grouping, owner putuskan bila dashboard ikut grouping);
+ * default/''/tak dikenal → rp(n) (fallback IDR, tak pernah blank).
+ * BUG-FIX PW-4: dulu `'A$ ' + audNum(n)` (integer round → desimal hilang,
+ * mis. 10.50 → "A$ 11"); kini desimal-aware. NaN/Infinity → 0 (defensif
+ * ala dashboard). */
 export const formatCurrency = (n: number, currency?: string) => {
   const code = (currency ?? '').trim().toUpperCase();
-  if (code === 'AUD') return 'A$ ' + audNum(n);
+  if (code === 'AUD') {
+    const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+    const neg = v < 0;
+    const [int, dec] = Math.abs(v).toFixed(2).split('.');
+    const grouped = (int ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return `${neg ? '-' : ''}A$${grouped}.${dec}`;
+  }
   if (code && code !== 'IDR' && !warnedCurrencyFallback) {
     warnedCurrencyFallback = true;
     try {
