@@ -114,14 +114,18 @@ export function lineSubtotal(it: SaleItemIn): number {
 }
 
 /**
- * Normalisasi mode kasir → enum kontrak §5 (DINE_IN / TAKE_AWAY / DELIVERY).
- * Mode agregator (GOFOOD/GRABFOOD/SHOPEEFOOD/online) diteruskan apa adanya.
+ * Normalisasi mode kasir → enum BE-kanonis §5 (DINE_IN / TAKEAWAY / DELIVERY).
+ * TAKE_AWAY (underscore) TAK PERNAH di-emit: POS create Go menolaknya
+ * (orders_pos_create.go:196 — hanya DINE_IN/TAKEAWAY/IN_STORE_ORDER/
+ * IN_STORE_SERVICE). Mode agregator (GOFOOD/GRABFOOD/SHOPEEFOOD/online)
+ * diteruskan apa adanya di payload; kanonisasi POS-create terjadi di
+ * sync.ts goPosOrderType (agregator/DELIVERY → TAKEAWAY).
  */
 export function normalizeSalesMode(raw?: string): string {
   const k = (raw ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
   if (!k) return 'DINE_IN';
   if (/DINE/.test(k)) return 'DINE_IN';
-  if (/TAKE|BAWA|BUNGKUS|TA\b/.test(k)) return 'TAKE_AWAY';
+  if (/TAKE|BAWA|BUNGKUS|TA\b/.test(k)) return 'TAKEAWAY';
   if (/DELIVER|ANTAR|KURIR|OJEK|DEL\b/.test(k)) return 'DELIVERY';
   if (/GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE|ESB/.test(k)) return k.replace(/_ORDER$/, '');
   return k;

@@ -251,7 +251,7 @@ async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed:
      VALUES (?, ?, 'B001', 'T001', 'u-kasir', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'kasir', ?, ?, NULL)`,
     [
       no, clientId, nowSeed,
-      spec.mode === 'DINE IN' ? 'DINE_IN' : spec.mode === 'TAKE AWAY' ? 'TAKE_AWAY' : spec.mode,
+      spec.mode === 'DINE IN' ? 'DINE_IN' : spec.mode === 'TAKE AWAY' ? 'TAKEAWAY' : spec.mode,
       gross, voucherAmt,
       canon.taxIncl, canon.service,
       canon.feeESB, canon.rounding,
