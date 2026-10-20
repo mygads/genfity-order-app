@@ -396,6 +396,40 @@ function strList(v: unknown): string[] {
   return out;
 }
 
+/**
+ * JB-4: parser snapshot/tunggal antrean TUNGGAL — dipakai mapSseToDisplay
+ * (E26 bus) + QueueViewScreen.applyEvent (E27) agar duplikasi logika hilang
+ * (satu kebenaran). Perilaku disalin persis dari kedua sisi: daftar memakai
+ * `preparing ?? tickets` / `ready`; done = status ready|done|call.
+ */
+export function parseQueuePayload(
+  d: Record<string, unknown>,
+  fallbackStatus = '',
+): {
+  preparing: string[];
+  ready: string[];
+  hasPrep: boolean;
+  hasReady: boolean;
+  ticket: string;
+  done: boolean;
+} {
+  const src = (d ?? {}) as Record<string, unknown>;
+  const preparing = strList(src.preparing ?? src.tickets);
+  const ready = strList(src.ready);
+  const ticket = String(
+    src.ticket ?? src.code ?? src.no ?? src.salesNum ?? '',
+  ).trim();
+  const status = String(src.status ?? fallbackStatus ?? '').trim();
+  return {
+    preparing,
+    ready,
+    hasPrep: Array.isArray(src.preparing),
+    hasReady: Array.isArray(src.ready),
+    ticket,
+    done: /^(ready|done|call)$/i.test(status),
+  };
+}
+
 /** Petakan satu event SSE (E26) menjadi 0..N DisplayEvent lokal. */
 function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
   // Backend membingkai SETIAP frame sebagai `event: message` dengan JSON
@@ -422,13 +456,13 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
     return ticket ? [{ type: 'ready', ticket }] : [];
   }
   // Snapshot antrean (queue-update / preparing+ready): kipas menjadi
-  // call/ready individual (dedupe milik layar, max 6 per kaki).
-  const preparing = strList(d.preparing ?? d.tickets);
-  const ready = strList(d.ready);
-  if (/queue/.test(t) && (preparing.length > 0 || ready.length > 0)) {
+  // call/ready individual (dedupe milik layar, max 6 per kaki). JB-4: via
+  // parseQueuePayload tunggal (bukan parser kedua).
+  const q = parseQueuePayload(d);
+  if (/queue/.test(t) && (q.preparing.length > 0 || q.ready.length > 0)) {
     const out: DisplayEvent[] = [];
-    for (const tk of preparing.slice(0, 6)) out.push({ type: 'order', ticket: tk, items: [] });
-    for (const tk of ready.slice(0, 6)) out.push({ type: 'ready', ticket: tk });
+    for (const tk of q.preparing.slice(0, 6)) out.push({ type: 'order', ticket: tk, items: [] });
+    for (const tk of q.ready.slice(0, 6)) out.push({ type: 'ready', ticket: tk });
     return out;
   }
   const items = toOrderItems(d.items);

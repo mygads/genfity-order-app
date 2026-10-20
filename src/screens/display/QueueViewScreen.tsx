@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
-import { DISPLAY_STALE_MS, refreshDisplayTransport } from '../../lib/display';
+import { DISPLAY_STALE_MS, parseQueuePayload, refreshDisplayTransport } from '../../lib/display';
 import { useLang, type Lang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import { initDb, query } from '../../lib/db';
@@ -121,24 +121,20 @@ export default function QueueViewScreen() {
     // version = sekuens hub: catat progres, bukan revisi tiket.
     const v = Number(e.version);
     if (Number.isFinite(v)) lastVersion.current = Math.max(lastVersion.current, v);
-    const listOf = (val: unknown): string[] =>
-      Array.isArray(val) ? val.map(str).filter((s) => s !== '') : [];
+    // JB-4: parser tunggal dari lib/display (dulu duplikat lokal di sini).
     // Snapshot queue-update membawa kunci preparing/ready (bisa kosong):
     // GANTI kolom (daftar kosong = kosong jujur, bukan stale).
-    const hasPrep = Array.isArray(e.preparing);
-    const hasReady = Array.isArray(e.ready);
-    if (hasPrep) setPrep(listOf(e.preparing).slice(0, 12));
-    if (hasReady) setReady(listOf(e.ready).slice(0, 12));
-    // Frame tunggal membawa data.ticket + status preparing|ready|done
+    const q = parseQueuePayload((e ?? {}) as Record<string, unknown>);
+    if (q.hasPrep) setPrep(q.preparing.slice(0, 12));
+    if (q.hasReady) setReady(q.ready.slice(0, 12));
+    // Frame tunggal membawa ticket + status preparing|ready|done
     // (status absen = fallback nama event SSE, diteruskan pemanggil).
-    const ticket = str(e.ticket);
-    if (ticket) {
-      const done = /^(ready|done|call)$/i.test(str(e.status));
-      if (done) {
-        setPrep((p) => p.filter((x) => x !== ticket));
-        setReady((r) => (r.includes(ticket) ? r : [ticket, ...r].slice(0, 12)));
+    if (q.ticket) {
+      if (q.done) {
+        setPrep((p) => p.filter((x) => x !== q.ticket));
+        setReady((r) => (r.includes(q.ticket) ? r : [q.ticket, ...r].slice(0, 12)));
       } else {
-        setPrep((p) => (p.includes(ticket) ? p : [...p, ticket].slice(0, 12)));
+        setPrep((p) => (p.includes(q.ticket) ? p : [...p, q.ticket].slice(0, 12)));
       }
     }
     setLastDataAt(Date.now());
