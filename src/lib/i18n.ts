@@ -547,6 +547,7 @@ const STR: Record<string, Entry> = {
   scan_desc_voucher_pre: { id: 'Voucher - Potongan ', en: 'Voucher - ' },
   scan_unknown_voucher: { id: 'Kode voucher tidak dikenal di data lokal.', en: 'Voucher code not found in local data.' },
   scan_unknown_member: { id: 'ID member tidak dikenal di data lokal.', en: 'Member ID not found in local data.' },
+  scan_nav_fail: { id: 'Tak bisa membuka layar klaim.', en: 'Could not open the claim screen.' },
 
   // ---- navbar / header / drawer (area navbar-header-drawer) ----
   nav_dashboard: { id: 'Dasbor', en: 'Dashboard' },

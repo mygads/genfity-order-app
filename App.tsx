@@ -398,6 +398,10 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
       <Stack.Screen name="Member" component={MemberScreen} options={{ title: t('title_member'), headerShown: false }} />
       <Stack.Screen name="Voucher" component={VoucherScreen} options={{ title: t('title_voucher'), headerShown: false }} />
       <Stack.Screen name="QrScan" component={QrScanScreen} options={{ title: t('title_scan'), headerShown: false }} />
+      {/* S4-APP-333: target tab Claim QrScan (navigate('Install', {code})).
+        Tanpa rute ini di stack authed, Use = no-op sunyi. Komponen sama
+        dengan stack tamu; pra-isi kode via route.params.code. */}
+      <Stack.Screen name="Install" component={InstallScreen} options={{ title: t('title_claim') }} />
       <Stack.Screen name="Pay" component={PayScreen} options={{ title: t('title_pay'), headerShown: false }} />
       <Stack.Screen name="Qris" component={QrisScreen} options={{ title: t('title_qris'), headerShown: false }} />
       <Stack.Screen name="Edc" component={EdcScreen} options={{ title: t('title_edc'), headerShown: false }} />

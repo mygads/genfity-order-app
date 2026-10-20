@@ -113,7 +113,15 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   const useCode = async () => {
     const clean = code.trim();
     if (clean.length < 3) { setMsg(t('scan_short')); setResult(false); return; } if (tab === 'claim') {
-      navigation?.navigate('Install', { code: clean.toUpperCase() });
+      // S4-APP-333: Install WAJIB terdaftar di stack aktif (authed). Tanpa
+      // itu navigate = no-op sunyi (dulu: rute hanya ada di stack tamu).
+      // Tangkap kegagalan agar terlihat, bukan layar diam.
+      try {
+        navigation?.navigate('Install', { code: clean.toUpperCase() });
+      } catch {
+        setMsg(t('scan_nav_fail'));
+        setResult(false);
+      }
       return;
     }
     if (tab === 'esb') {
