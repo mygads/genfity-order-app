@@ -184,6 +184,17 @@ Contoh item menu:
 | `device/register-push` | `device/register-push` (tetap) | `asumsi-clean-room`, TIDAK ADA di APK |
 | `auth/supervisor-approve` | LEGACY — DINYATAKAN MATI (Real mode = 404; lihat §4.4 kontrak baru) | `asumsi-clean-room`, TIDAK ADA di APK |
 | `auth/cashier-login` | LEGACY — DINYATAKAN MATI (Real mode = 404; login kini E01 `terminal-login`, lihat API-TERMINAL-CONTRACT §10) | `asumsi-clean-room`, TIDAK ADA di APK |
+| E29 `pinVerifyTerminalPin` | KONTRAK AKTIF — definisi penuh di API-TERMINAL-CONTRACT (E29, login staged fase-1a langkah 3; APP wired via `terminalApi.ts` inti HTTP tunggal, PIN hybrid berversi) | IMPLEMENTED app-side |
+
+### 4.1a Referensi silang supervisor/E29 (PP-014, dikunci 2026-10-20)
+
+- Supervisor baru: §4.4 (`POST /api/v1/terminals/{id}/supervisor-approve`,
+  PP-001/PP-014) — satu-satunya kontrak supervisor yang hidup; legacy
+  `auth/supervisor-approve` mati (baris tabel §4.1 di atas).
+- E29: definisi di API-TERMINAL-CONTRACT (bukan duplikat di sini) — baris
+  tabel §4.1 di atas menautkannya agar aiding tak mengira E29 belum kontrak.
+- PARITY.md §8.1 (M10/T13) + §8.2 (kolom APP per F-ID) tetap kunci yang
+  berlaku; file ini hanya menautkan, tak mengubah status.
 | `member-deposit-withdrawal/topup` | `member-deposit-withdrawal/topup` (tetap) | `asumsi-clean-room` (inquiry-deposit ADA, topup nihil) |
 | `member/register` | `erp/member` (path dasar grup) | grup [FAKTA] (REA-3), sub-path pasti `asumsi-clean-room` |
 
