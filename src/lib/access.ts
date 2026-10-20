@@ -14,7 +14,9 @@
  *    (role, '*') - mis. template 'Merchant Staff' berisi deny eksplisit untuk
  *    aksi sensitif, template 'Merchant Owner' berisi allow-all wildcard;
  * 4. tanpa baris apa pun = fail-open allow (kompatibilitas kasir offline),
- *    KECUALI ada deny eksplisit di tingkat di atas.
+ *    KECUALI ada deny eksplisit di tingkat di atas — DAN kecuali 4 kunci
+ *    sensitif C5 (order.void/order.cancel/sale.refund/settings.edit) yang
+ *    fail-CLOSED (default-deny).
  *
  * Model peran hanya ada 2: Merchant Owner (akses penuh) dan Merchant Staff
  * (dibatasi: deny order.void/order.cancel/sale.refund/settings.edit, lalu
@@ -25,7 +27,8 @@
  * server dipetakan ke kanonis via normalizeRole agar template terbaca.
  *
  * Fail-open juga berlaku saat DB belum siap (catch -> allow, reason
- * 'db-unready'); tiap jalur fail-open memancarkan console.warn sekali
+ * 'db-unready') — KECUALI 4 kunci sensitif C5 (catch -> deny fail-closed).
+ * Tiap jalur fail-open memancarkan console.warn sekali
  * (warn-once) agar tidak diam. Fungsi ini TIDAK PERNAH melempar. Alur PIN
  * supervisor (lib/pin.ts) tidak disentuh - modul ini hanya membaca tabel akses.
  */
@@ -88,6 +91,22 @@ export const ACCESS_KEYS = [
 ] as const;
 
 export type AccessKey = (typeof ACCESS_KEYS)[number] | string;
+
+/**
+ * C5 (SESI-C): 4 kunci sensitif = FAIL-CLOSED. Tanpa baris (default) atau
+ * DB-tak-siap (catch) = DENY untuk kunci ini; kunci non-sensitif
+ * ('petty.approve' Q18 dkk) tetap default-allow. requireEscalationAccess
+ * (PIN owner, 295-311) tetap fail-closed dan jadi rujukan pola.
+ * Seed menjamin peran kanonis tak terdampak: 'Merchant Owner' membawa
+ * wildcard-allow, 'Merchant Staff' membawa deny eksplisit per kunci
+ * (seed.ts:545-568) — cabang ini hanya menjerat user tanpa baris/seed.
+ */
+export const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
+  'order.void',
+  'order.cancel',
+  'sale.refund',
+  'settings.edit',
+]);
 
 /** Deskripsi tiap kunci untuk dokumentasi pemilik layar. */
 export const ACCESS_KEY_DESCRIPTIONS: Record<string, string> = {
@@ -225,6 +244,12 @@ async function decideHierarchy(userId: string, accessKey: string): Promise<Acces
   // tapi peran/user tanpa baris (kompatibilitas RBAC lama; grant sudah
   // memverifikasi ikatan). Bound + grant HILANG tak pernah sampai sini
   // (ditolak 'no-grant' di gerbang 0 di atas).
+  // C5: kunci sensitif TIDAK ikut fail-open — tanpa baris = DENY eksplisit
+  // (default-deny). Peran seed tak terdampak (owner wildcard-allow, staff
+  // deny eksplisit — keduanya kembali SEBELUM titik ini).
+  if (SENSITIVE_KEYS.has(accessKey)) {
+    return { ok: false, reason: 'default-deny' };
+  }
   warnFailOpenOnce('default-allow', userId, accessKey);
   return { ok: true, reason: 'default-allow' };
 }
@@ -247,12 +272,14 @@ async function decide(userId: string, accessKey: string): Promise<AccessDecision
 
 /**
  * True bila user boleh memakai accessKey. Tidak pernah melempar:
- * DB belum siap -> true (fail-open).
+ * DB belum siap -> deny (fail-closed) untuk 4 kunci sensitif (C5),
+ * true (fail-open) untuk kunci non-sensitif.
  */
 export async function hasAccess(userId: string, accessKey: string): Promise<boolean> {
   try {
     return (await decide(userId, accessKey)).ok;
   } catch {
+    if (SENSITIVE_KEYS.has(accessKey)) return false;
     warnFailOpenOnce('db-unready', userId, accessKey);
     return true;
   }
@@ -260,7 +287,8 @@ export async function hasAccess(userId: string, accessKey: string): Promise<bool
 
 /**
  * Gate check: {ok, reason}. Tidak pernah melempar: DB belum siap ->
- * {ok: true, reason: 'db-unready'} (fail-open).
+ * {ok: false, reason: 'db-unready'} (fail-closed) untuk 4 kunci sensitif
+ * (C5); kunci non-sensitif tetap {ok: true, reason: 'db-unready'} (fail-open).
  */
 export async function requireAccess(
   userId: string,
@@ -269,6 +297,7 @@ export async function requireAccess(
   try {
     return await decide(userId, accessKey);
   } catch {
+    if (SENSITIVE_KEYS.has(accessKey)) return { ok: false, reason: 'db-unready' };
     warnFailOpenOnce('db-unready', userId, accessKey);
     return { ok: true, reason: 'db-unready' };
   }
