@@ -105,8 +105,11 @@ export default function QueueViewScreen() {
       /* abaikan */
     }
   }, [uiTick]);
+  // EFF-09: tick render label umur-data 30 dtk (selaras DISPLAY_STALE_MS),
+  // bukan 10 dtk — event live datang via SSE E27 primer (event-driven);
+  // poll SQLite fallback di bawah tetap ber-gate SSE + berpenanda stale.
   useEffect(() => {
-    const id = setInterval(() => setUiTick((x) => x + 1), 10000);
+    const id = setInterval(() => setUiTick((x) => x + 1), 30000);
     return () => clearInterval(id);
   }, []);
 

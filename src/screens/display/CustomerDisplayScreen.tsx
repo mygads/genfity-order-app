@@ -45,8 +45,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   /** D3-06: true bila device belum ter-bound — daftar dikosongkan + prompt ikat. */
   const [needBind, setNeedBind] = useState(false);
   const [uiTick, setUiTick] = useState(0);
+  // EFF-09: tick render label umur-data 30 dtk (selaras DISPLAY_STALE_MS),
+  // bukan 10 dtk — event live datang via SSE/WS/bus lokal (event-driven);
+  // poll SQLite fallback di bawah tetap ber-gate SSE + berpenanda stale.
   useEffect(() => {
-    const id = setInterval(() => setUiTick((x) => x + 1), 10000);
+    const id = setInterval(() => setUiTick((x) => x + 1), 30000);
     const un1 = subscribeSession(() => setUiTick((x) => x + 1));
     const un2 = subscribeDeviceRole(() => setUiTick((x) => x + 1));
     return () => {
