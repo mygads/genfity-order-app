@@ -1,14 +1,16 @@
-// Tripwire efisiensi baterai (C11, SESI-C APP): EFF-08 resize foto bukti +
-// EFF-09 timer gating. Kunci statik:
-//  EFF-08: expo-image-manipulator terinstal; lib/photo.ts satu-satunya pintu
-//    resize (lebar maks + JPEG terkompresi, best-effort fallback URI asli);
-//    SEMUA call-site picker membungkus setPhoto via shrinkReceiptPhoto
+// Tripwire efisiensi baterai (SC-QA3 P3 hibrida R3-B): EFF-08 resize foto
+// bukti + EFF-09 timer gating. Kunci statik:
+//  EFF-08 (milik sc): expo-image-manipulator terinstal; lib/photo.ts
+//    satu-satunya pintu resize via helper kanonis preparePhoto (maks-1280
+//    tanpa-upscale + JPEG terkompresi, best-effort fallback URI asli);
+//    SEMUA call-site picker membungkus setPhoto via preparePhoto
 //    (ExpenseScreen kamera+galeri, PettyCashFormScreen galeri+kamera).
-//  EFF-09: Attendance tick 60 dtk + tampil HM (fmtClock detik DIHAPUS);
-//    Idle loadCount 30 dtk + Tables tick menit di-gate AppState background;
-//    display 10 dtk → 60 dtk fallback (jalur live event-driven + banner basi);
-//    auto-pushAll 5 mnt di-gate custom-env + wifiOnly (tanpa gate pendingCount
-//    by design — antrean fisik hanya terlihat di dalam pushAll);
+//    shrinkReceiptPhoto + RECEIPT_PHOTO_* DITOLAK (R3-B ikut owner B).
+//  EFF-09 (milik main C11): Attendance tick 60 dtk + tampil HM (fmtClock detik
+//    DIHAPUS); Idle loadCount 30 dtk + Tables tick menit di-gate AppState
+//    background; display 10 dtk → 60 dtk fallback (jalur live event-driven +
+//    banner basi); auto-pushAll 5 mnt di-gate custom-env + wifiOnly (tanpa gate
+//    pendingCount by design — antrean fisik hanya terlihat di dalam pushAll);
 //    flushPendingRevokes early-return saat kosong; status realtime idle
 //    tersurface via useConnectivity.wsConnected ke badge layar.
 const fs = require('fs');
@@ -37,20 +39,20 @@ function run() {
   ok(!!(pkg.dependencies && pkg.dependencies['expo-image-manipulator']),
     'C11 EFF-08: expo-image-manipulator di dependencies');
   const photo = read('lib/photo.ts');
-  ok(/export async function shrinkReceiptPhoto/.test(photo),
-    'C11 EFF-08: lib/photo.ts mengekspor shrinkReceiptPhoto');
-  ok(/RECEIPT_PHOTO_MAX_WIDTH/.test(photo) && /SaveFormat\.JPEG/.test(photo),
-    'C11 EFF-08: resize lebar-maks + JPEG terkompresi');
-  ok(/catch \{\s*return uri;/.test(photo),
-    'C11 EFF-08: gagal resize = fallback URI asli (best-effort, tak melempar)');
+  ok(/export async function preparePhoto/.test(photo),
+    'SC EFF-08: lib/photo.ts mengekspor preparePhoto (kanonis kita; P5 konvergen)');
+  ok(/MAX_SIDE/.test(photo) && /1280/.test(photo) && /JPEG|jpeg/.test(photo) && /compress/.test(photo),
+    'SC EFF-08: resize maks-1280 tanpa-upscale + JPEG terkompresi');
+  ok(/return next \|\| src;/.test(photo) && /return src;/.test(photo),
+    'SC EFF-08: gagal resize = fallback URI asli (best-effort, tak melempar)');
 
   // EFF-08: semua call-site picker terbungkus.
   const expense = read('screens/cash/ExpenseScreen.tsx');
-  ok((expense.match(/shrinkReceiptPhoto\(/g) || []).length >= 2,
-    'C11 EFF-08: ExpenseScreen kamera + galeri via shrinkReceiptPhoto');
+  ok((expense.match(/preparePhoto\(/g) || []).length >= 2,
+    'SC EFF-08: ExpenseScreen kamera + galeri via preparePhoto');
   const form = read('screens/cash/PettyCashFormScreen.tsx');
-  ok((form.match(/shrinkReceiptPhoto\(/g) || []).length >= 2,
-    'C11 EFF-08: PettyCashFormScreen pickPhoto + takePhoto via shrinkReceiptPhoto');
+  ok((form.match(/preparePhoto\(/g) || []).length >= 2,
+    'SC EFF-08: PettyCashFormScreen pickPhoto + takePhoto via preparePhoto');
 
   // EFF-09: Attendance 60 dtk + HM.
   const att = read('screens/shift/AttendanceScreen.tsx');
