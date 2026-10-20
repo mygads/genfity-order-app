@@ -1012,6 +1012,12 @@ export async function pushAll(): Promise<PushResult> {
     } else if (outcome === 'failed') {
       failed += 1;
       consecFails += 1;
+    } else if (outcome === 'failed-once') {
+      // C8: guard pra-ESB (counterpart-less: group-payment tanpa identitas
+      // server dkk) — tally failed jujur SEKALI, tapi consecFails SENGAJA tak
+      // tersentuh: transport tak dicoba, breaker hanya mengukur kesehatan
+      // jaringan (kegagalan transport nyata di 'failed' di atas + catch bawah).
+      failed += 1;
     }
     if (consecFails >= 3) break; // S4: jeda drain sampai siklus berikut
     await sleepMs(150); // S4: pacing antar-item
@@ -1044,11 +1050,17 @@ export async function pushAll(): Promise<PushResult> {
 }
 
 /**
- * Dorong satu item ringan (path endpoint tidak berubah). 'sent'/'failed'
- * dihitung pushAll; 'skipped' = master-local-only atau cermin lokal
- * (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya).
+ * Dorong satu item ringan (path endpoint tidak berubah). 'sent'/'failed' /
+ * 'failed-once' dihitung pushAll; 'skipped' = master-local-only atau cermin
+ * lokal (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya)
+ * atau counterpart-less yang SUDAH difinalkan-gagal sebelumnya.
+ * C8: 'failed-once' = guard pra-ESB (tanpa path — transport TAK PERNAH
+ * dicoba, mis. kaki group-payment tanpa {orderId, shareId} server): status
+ * 'gagal' + note SEKALI (fail-once S10, tally failed jujur), tapi BUKAN
+ * 'failed' transport sehingga breaker consecFails tak tersentuh — 3 item
+ * counterpart-less baru tak boleh menjeda drain seolah jaringan putus.
  */
-async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipped'> {
+async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'failed-once' | 'skipped'> {
   // Perubahan master lokal (ms_*) local-only (M9-3, tanpa endpoint push):
   // lewati agar tidak terkirim ke order/finish; baris tetap kotor
   // (syncDate NULL) + tercatat di tr_esoprocessqueue (status 'lokal' oleh
@@ -1087,10 +1099,13 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
     // 'gagal' SEKALI dengan catatan, bukan antre-selamanya. Siklus berikut
     // dilewati (skipped) agar hitungan gagal tak bertambah tiap push.
     // Legacy ms_* (return lebih awal di atas) tak tersentuh.
+    // C8: 'failed-once' (bukan 'failed') — guard pra-ESB ini tak menyentuh
+    // transport, jadi drain tak boleh menghitungnya ke breaker consecFails
+    // (kaki group-payment counterpart-less dkk tak menjeda drain).
     if (item.status === 'gagal') return 'skipped';
     item.status = 'gagal';
     item.note = tr('sync.masterQueued');
-    return 'failed';
+    return 'failed-once';
   }
   try {
     // C1: client_id sale JANGAN PERNAH ditimpa id antrean. buildSalePayload
