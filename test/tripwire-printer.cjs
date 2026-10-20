@@ -88,6 +88,23 @@ function run() {
   const queue = readRaw('lib/printqueue.ts');
   ok(/t\.transport === 'loopback'/.test(queue), 'printqueue: envelopeOf menerima target loopback');
 
+  // ---- C. C10: drain ikut test-print sukses + reconnect (resolver kind-aware milik main) ----
+  const ps = readRaw('screens/settings/PrintersScreen.tsx');
+  const testBody = (ps.match(/const testPrintStation[\s\S]*?\n  \};/) || [''])[0];
+  ok(/drainPrintQueue/.test(testBody), 'c10: testPrintStation memicu drainPrintQueue');
+  ok(/if \(res\.ok\)[\s\S]*drainPrintQueue\(/.test(testBody),
+    'c10: drain test-print HANYA saat res.ok (uji gagal tak menguras)');
+  ok(/\.catch\(/.test(testBody), 'c10: drain test-print best-effort (catch, tak lempar)');
+  const rtc = readRaw('lib/realtime.ts');
+  const openBody = (rtc.match(/ch\.ws\.onopen = \(\) => \{[\s\S]*?\n  \};/) || [''])[0];
+  ok(/drainPrintQueue/.test(openBody), 'c10: reconnect worker memicu drainPrintQueue');
+  ok(/require\('\.\/printqueue'\)/.test(openBody),
+    'c10: reconnect drain lazy-require (nol tepi statis baru)');
+  ok(/if \(reconnected\)[\s\S]*drainPrintQueue\(/.test(openBody),
+    'c10: drain reconnect HANYA saat reconnect (connect pertama tak memicu)');
+  const syncScr = readRaw('screens/settings/SyncScreen.tsx');
+  ok(/pendingPrintCount/.test(syncScr), 'c10: pendingPrintCount tetap tampil (badge backlog lestari)');
+
   return { checks, failures };
 }
 

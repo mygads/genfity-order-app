@@ -189,6 +189,10 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
+  /** C2: daftar mode per merchant-type dari binding (RESTAURANT default bila
+   * tak diketahui — [ASUMSI] koordinator). Dihitung per render (murah, murni)
+   * agar re-bind lintas-tipe langsung tercermin tanpa restart. */
+  const MODES = posModesFor(getBinding()?.merchantType);
   const [mode, setMode] = useState(() => {
     const init = String(route?.params?.mode ?? '').trim();
     if (init && MODES.includes(init)) return init;
@@ -596,7 +600,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       setCustomer(nx > 0 ? (nm ? `${nm} (${nx} ${t('guests')})` : `${nx} ${t('guests')}`) : nm);
     }
     if (p.ongkir !== undefined) setOngkir(Math.max(0, Number(p.ongkir) || 0));
-    if (p.mode && modesForSession().includes(p.mode)) {
+    if (p.mode && MODES.includes(p.mode)) {
       setMode(p.mode);
       setShowModes(false);
     }
@@ -1545,7 +1549,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             {renderToolbar()}
             {showModes && (
               <View style={styles.modeDropdown}>
-                {modesForSession().map((m) => (
+                {MODES.map((m) => (
                   <TouchableOpacity
                     key={m}
                     style={[styles.modeOption, m === mode && styles.modeOptionActive]}
@@ -1603,7 +1607,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       {renderToolbar()}
       {showModes && (
         <View style={styles.modeDropdown}>
-          {modesForSession().map((m) => (
+          {MODES.map((m) => (
             <TouchableOpacity
               key={m}
               style={[styles.modeOption, m === mode && styles.modeOptionActive]}
