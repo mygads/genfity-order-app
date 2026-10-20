@@ -253,7 +253,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   }, []);
 
   /** APP-FIXUP (fix-sse2 M5): poll SQLite FALLBACK — antrean + item/total
-   * berjalan ikut kasir tiap 10 detik hanya bila SSE primer tak
+   * berjalan ikut kasir tiap 60 detik hanya bila SSE primer tak
    * terkonfigurasi/gagal/offline (TRANSPORT); berpenanda stale via banner. */
   useEffect(() => {
     try {
