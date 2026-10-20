@@ -18,6 +18,7 @@ import {
   buildGrant as buildSessionGrant,
   consumeKickNotice,
   describeGrantProblem,
+  forceLogoutOnTokenLoss,
   getBinding as getSessionBinding,
   getGrantPinVersion,
   getMaxOfflineGrantDays,
@@ -641,6 +642,12 @@ async function completeOnline(
   // GAP-14: attribution owner-override ('owner:<approverUserId>') — dicatat ke
   // sesi apa adanya (jejak audit lokal); absen = login normal tanpa override.
   approvedBy?: string,
+  // C4: { requireToken: true } = E01 online terverifikasi WAJIB membawa token —
+  // tanpanya gagal fail-closed 'e01-no-token' (logout paksa + grant dihapus via
+  // forceLogoutOnTokenLoss), bukan sesi bisu yang 401 di mana-mana. Default
+  // false: jalur fallback lokal/offline memanggil TANPA opsi ini (token
+  // opsional — login offline/L1 tak boleh diblokir).
+  opts?: { requireToken?: boolean },
 ): Promise<void> {
   const userId = str(payload.userId ?? payload.user_id);
   if (!userId) throw new Error('e01-no-user');
@@ -649,6 +656,10 @@ async function completeOnline(
   const branchId = branches[0]?.id || ctx.branchId;
   const tag = str(payload.tag ?? payload.terminalTag) || ctx.tag;
   const authToken = str(payload.authToken ?? payload.token ?? payload.authKey);
+  if (opts?.requireToken && !authToken) {
+    forceLogoutOnTokenLoss('e01-no-token');
+    throw new Error('e01-no-token');
+  }
   const prev = getSession();
   const sameUser = !!prev && prev.username === username;
   const sess: DeviceSession = {
@@ -1562,7 +1573,18 @@ export default function LoginScreen({ navigation }: Props) {
               // Server memverifikasi — langsung kunci sesi (tanpa gerbang lokal).
               // B: bandingkan versi grant vs server (sembuhkan, bukan blokir).
               noteGrantPinVersion(userId, verifyTermId, deviceId, pv.pinVersion);
-              await completeOnline(candidate.payload, pin, ctx, deviceId, candidate.username, pv.pinVersion);
+              // C4: E29 terverifikasi = token WAJIB ada; payload tanpa token =
+              // 'e01-no-token' jujur (need-BE) — sesi parsial sudah dibersihkan
+              // forceLogoutOnTokenLoss di completeOnline.
+              try {
+                await completeOnline(candidate.payload, pin, ctx, deviceId, candidate.username, pv.pinVersion, undefined, { requireToken: true });
+              } catch (e) {
+                if (e instanceof Error && e.message === 'e01-no-token') {
+                  setPinError(needBeText());
+                  return;
+                }
+                throw e;
+              }
               // F14-flush: login ONLINE sukses = momen kirim utang revoke.
               try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
               setPinOpen(false);

@@ -1,7 +1,11 @@
 /**
  * Sesi kasir di memori + persistensi AsyncStorage (lib/storage.ts) agar
  * sesi bertahan restart di web + native. API tetap sinkron seperti semula.
+ * C4 (SESI-C): authToken JWT E01 TAK PERNAH ke AsyncStorage — salinan
+ * persistennya milik expo-secure-store (lihat blok C4 di bawah); memori
+ * Session.authToken tetap sumber sinkron pembaca bearer.
  */
+import * as SecureStore from 'expo-secure-store';
 import { getItem, removeItem, setItem } from './lib/storage';
 import {
   parseDeviceRole,
@@ -35,8 +39,9 @@ export interface Session {
   terminalId?: string;
   /** Id device sesi (1 device = 1 terminal, SPEC-TERMINAL-SESSION §7.1). */
   deviceId?: string;
-  /** Token sesi server dari E01 terminal-login single-stage (live 2026-10-17;
-   *  pindahkan ke SecureStore ala lib/pin.ts, jangan plaintext di storage). */
+  /** Token sesi server dari E01 terminal-login single-stage (live 2026-10-17).
+   * C4 (SESI-C, CLOSED): HANYA di memori + SecureStore (saveAuthTokenStore) —
+   * persist() di bawah men-strip-nya dari JSON AsyncStorage. */
   authToken?: string;
   /** Waktu login ISO (dibuat saat loginEmployee/saveSession). */
   loginAt?: string;
@@ -179,8 +184,15 @@ function emit() {
 }
 
 function persist(): void {
-  if (current) void setItem(LS_SESSION, JSON.stringify(current));
-  else void removeItem(LS_SESSION);
+  if (current) {
+    // C4: authToken TAK PERNAH ke AsyncStorage plaintext — strip sebelum
+    // stringify; salinan persistennya milik SecureStore (saveAuthTokenStore,
+    // dicerminkan saveSession). Pembaca bearer sinkron (server.ts/sse.ts/
+    // terminalContract.ts) tetap memakai Session.authToken di memori.
+    const scrubbed: Session = { ...current };
+    delete scrubbed.authToken;
+    void setItem(LS_SESSION, JSON.stringify(scrubbed));
+  } else void removeItem(LS_SESSION);
 }
 
 /** Muat sesi tersimpan sekali di background; panggil emit bila ada. */
@@ -195,10 +207,95 @@ function restore(): void {
       if (!parsed.role) parsed.role = 'Merchant Staff';
       current = parsed;
       emit();
+      // C4: migrasi-scrub sesi lama — token plaintext warisan (pra-C4) pindah
+      // ke SecureStore sekali, lalu re-persist menimpa simpanan plaintext.
+      // Guard identitas (current === parsed): login yang menyusul restore
+      // tak boleh tokennya ditimpa salinan basi user lain.
+      const legacyToken = parsed.authToken ? String(parsed.authToken) : '';
+      delete parsed.authToken;
+      if (legacyToken && current === parsed) {
+        void saveAuthTokenStore(legacyToken)
+          .then(() => {
+            if (current === parsed) persist();
+          })
+          .catch(() => {});
+      }
+      // C4: hidrasi malas — salinan SecureStore kembali ke memori. Guard ganda:
+      // sesi hasil restore ini + BUKAN sesi offline (offline tak memegang token
+      // server; lihat saveSession yang membersihkan salinan saat tanpa token).
+      void loadAuthTokenStore()
+        .then((t) => {
+          if (t && current === parsed && !current.authToken && !current.offline) {
+            current.authToken = t;
+          }
+        })
+        .catch(() => {});
     } catch {
       /* abaikan */
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// C4 (SESI-C): salinan persisten authToken di SecureStore (pola lib/pin.ts).
+// AsyncStorage HANYA fallback bertanda-TODO bila SecureStore tak tersedia
+// (web) — build produksi wajib dev-client agar OS-level terenkripsi.
+// Semua fungsi tak pernah melempar (fire-and-forget aman via void).
+// ---------------------------------------------------------------------------
+
+/** Kunci SecureStore (+fallback AsyncStorage) salinan persisten authToken. */
+const LS_AUTH_TOKEN = 'genfity.session.authToken';
+
+/** Tulis salinan persisten token; string kosong = buang salinan (anti basi). */
+export async function saveAuthTokenStore(token: string): Promise<void> {
+  const t = String(token ?? '').trim();
+  if (!t) {
+    await clearAuthTokenStore();
+    return;
+  }
+  try {
+    if (await SecureStore.isAvailableAsync()) {
+      await SecureStore.setItemAsync(LS_AUTH_TOKEN, t);
+      return;
+    }
+  } catch {
+    /* jatuh ke fallback di bawah */
+  }
+  try {
+    await setItem(LS_AUTH_TOKEN, t);
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Baca salinan persisten token; '' = tak ada. */
+export async function loadAuthTokenStore(): Promise<string> {
+  try {
+    const raw = await SecureStore.getItemAsync(LS_AUTH_TOKEN);
+    if (raw) return String(raw).trim();
+  } catch {
+    /* coba fallback di bawah */
+  }
+  try {
+    const fb = await getItem(LS_AUTH_TOKEN);
+    return String(fb ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Buang salinan persisten token (SecureStore + fallback). Idempoten. */
+export async function clearAuthTokenStore(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(LS_AUTH_TOKEN);
+  } catch {
+    /* lanjut ke fallback di bawah */
+  }
+  try {
+    await removeItem(LS_AUTH_TOKEN);
+  } catch {
+    /* abaikan */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1157,11 @@ export function saveSession(s: Session): Session {
   if (!current.role) current.role = 'Merchant Staff';
   if (!current.loginAt) current.loginAt = new Date().toISOString();
   persist();
+  // C4: cermin SecureStore mengikuti sesi resmi — ada token = simpan, tanpa
+  // token (login lokal/offline) = buang salinan lama agar token user
+  // sebelumnya tak bocor ke sesi/token user lain (anti token basi lintas-user).
+  if (current.authToken) void saveAuthTokenStore(current.authToken);
+  else void clearAuthTokenStore();
   emit();
   return current;
 }
@@ -1146,6 +1248,10 @@ export function loginEmployee(
   delete current.offline;
   current.loginAt = new Date().toISOString();
   persist();
+  // C4: login lokal tanpa token server — salinan SecureStore basi (milik sesi
+  // online user sebelumnya) WAJIB dibuang di sini; kalau tidak, restart di
+  // bawah sesi lokal ini menghidrasi token user lain (bocor lintas-user).
+  void clearAuthTokenStore();
   emit();
   return current;
 }
@@ -1169,6 +1275,9 @@ export function logout(): void {
   current = null;
   postLoginRoute = null;
   persist();
+  // C4: logout membuang salinan SecureStore (memori sudah null di atas;
+  // tanpa ini salinan bertahan dan bisa terhidrasi ke sesi berikutnya).
+  void clearAuthTokenStore();
   emit();
   // Matikan realtime + foreground service (pasangan startRealtime saat login).
   try {
@@ -1180,6 +1289,39 @@ export function logout(): void {
   try {
     const { setWsForeground } = require('./native/printer') as typeof import('./native/printer');
     void setWsForeground(false);
+  } catch {
+    /* abaikan */
+  }
+}
+
+/**
+ * C4 (SESI-C): jalur token-hilang — authToken yang SEHARUSNYA ada ternyata
+ * tak ada = sesi tak lagi tepercaya: buang salinan SecureStore, hapus grant
+ * (akses offline berbasis grant tak boleh bertahan tanpa token server yang
+ * sah), lalu logout penuh. Jejak revoke E06 memakai alasan token-loss agar
+ * server bisa membedakan dari logout normal. Dipakai completeOnline dengan
+ * { requireToken: true } (E01 online terverifikasi E29 tanpa token = payload
+ * tak lengkap → gagal fail-closed 'e01-no-token', bukan sesi bisu yang 401
+ * di mana-mana). Tak pernah melempar.
+ */
+export function forceLogoutOnTokenLoss(reason?: string): void {
+  const who = current?.userId ?? current?.username;
+  void clearAuthTokenStore();
+  try {
+    clearGrant();
+  } catch {
+    /* abaikan */
+  }
+  try {
+    logout();
+  } catch {
+    /* abaikan */
+  }
+  try {
+    markPendingRevoke({
+      ...(who ? { userId: who } : {}),
+      reason: reason ?? 'token-loss',
+    });
   } catch {
     /* abaikan */
   }
