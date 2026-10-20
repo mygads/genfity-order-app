@@ -48,6 +48,7 @@ import { isSeedReady, whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
 import { syncCurrencyFromProfile } from '../../lib/currency';
+import { syncTimezoneFromProfile } from '../../lib/timezone';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -672,7 +673,9 @@ async function completeOnline(
   saveSession(sess);
   // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+  // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
   try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try {
     const pol = payload.policy as Record<string, unknown> | undefined;
     const days = Number(pol?.max_offline_grant_days ?? payload.maxOfflineGrantDays);
@@ -733,7 +736,9 @@ async function completeOffline(
   saveSession(sess);
   // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+  // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
   try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
@@ -981,7 +986,9 @@ export default function LoginScreen({ navigation }: Props) {
     );
     // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
     // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
+    // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
     try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+    try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
     // M8: QR/DEV login menerbitkan grant rangkap-tiga via penerbit kanonis yang
     // sama dengan completeOnline (buildSessionGrant + saveSessionGrant).
     // Fail-closed: triple (userId, terminalId, deviceId) tak lengkap = TANPA
