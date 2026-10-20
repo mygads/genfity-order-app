@@ -247,8 +247,10 @@ async function stationByKey(key: string, opts?: { scoped?: boolean }): Promise<R
  *   checker/label ter-scoping, atau TETAP ANTRE (null). TIDAK PERNAH jatuh ke
  *   printer kasir agar tiket dapur tak keluar di kertas struk ber-harga.
  * - receipt/queue/raw → station-by-nama (baris antrean lawas) lalu default kasir.
+ * Diekspor (C10): dipakai piggyback test-print (PrintersScreen) + reconnect
+ * realtime agar antrean terkuras saat jalur printer terbukti hidup.
  */
-async function resolveDrainTarget(hint: { name: string; kind: QueuedPrintKind }): Promise<{ target: PrinterTarget; name: string } | null> {
+export async function resolveDrainTarget(hint: { name: string; kind: QueuedPrintKind }): Promise<{ target: PrinterTarget; name: string } | null> {
   if (hint.kind === 'kitchen') {
     if (hint.name) {
       const byName = await stationByKey(hint.name);

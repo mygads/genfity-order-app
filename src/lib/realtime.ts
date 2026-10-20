@@ -302,6 +302,20 @@ function openSocket(ch: Channel, url: string): void {
       } catch {
         /* master belum siap — reconnect soket tetap sah */
       }
+      // C10: reconnect = jaringan kembali hidup → kuras antrean cetak
+      // (best-effort piggyback; lazy require ala master di atas agar nol tepi
+      // statis baru; gagal = antrean tetap untuk piggyback cetak berikut).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pq = require('./printqueue') as typeof import('./printqueue');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pr = require('./print') as typeof import('./print');
+        void pq.drainPrintQueue({ resolveTarget: pr.resolveDrainTarget }).catch(() => {
+          /* antrean tetap — piggyback berikut yang menguras */
+        });
+      } catch {
+        /* antrean tetap — piggyback berikut yang menguras */
+      }
     }
     ch.beat = setInterval(() => {
       try {
