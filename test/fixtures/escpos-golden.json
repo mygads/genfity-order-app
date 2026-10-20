@@ -1,0 +1,76 @@
+{
+  "_note": "Fixture kanonis S10/PP-015: masukan builder ESC/POS + ekspektasi byte. Dipakai test/tripwire-printer.cjs (transpile escpos.ts asli di node — bukan duplikat logika). Nama toko SENGAJA tanpa 'Rp'/'A$' agar cek kontaminasi currency valid.",
+  "receiptIDR": {
+    "input": {
+      "shop": "Warung Sesi C",
+      "addr": "Jl. Sunset 12",
+      "trx": "TRX-0001",
+      "cashier": "Kasir: Budi",
+      "datetime": "2026-10-20 10:00",
+      "items": [
+        { "name": "Kopi Tubruk", "qty": 2, "price": 15000 },
+        { "name": "Pisang Goreng", "qty": 1, "price": 15000 }
+      ],
+      "subtotal": 45000,
+      "total": 45000,
+      "method": "Tunai",
+      "paid": 50000,
+      "change": 5000
+    },
+    "expect": {
+      "startsWith": "1b40",
+      "endsWith": "1d5600",
+      "containsText": ["Rp 45.000", "TOTAL", "Kembali", "TRX-0001"],
+      "notContainsText": ["A$"]
+    }
+  },
+  "receiptAUD": {
+    "input": {
+      "shop": "Harbour Cafe",
+      "currency": "AUD",
+      "items": [{ "name": "Flat White", "qty": 2, "price": 5.25 }],
+      "subtotal": 10.5,
+      "total": 10.5,
+      "method": "Cash",
+      "paid": 20,
+      "change": 9.5
+    },
+    "expect": {
+      "startsWith": "1b40",
+      "endsWith": "1d5600",
+      "containsText": ["A$10.50", "TOTAL"],
+      "notContainsText": ["Rp"]
+    }
+  },
+  "receiptNoCut": {
+    "input": {
+      "shop": "Warung Sesi C",
+      "items": [{ "name": "Teh", "qty": 1, "price": 5000 }],
+      "subtotal": 5000,
+      "total": 5000,
+      "cut": false
+    },
+    "expect": {
+      "startsWith": "1b40",
+      "notEndsWith": "1d5600",
+      "notContainsHex": ["1d5600"]
+    }
+  },
+  "kitchen": {
+    "input": {
+      "station": "dapur",
+      "no": "K-12",
+      "table": "A3",
+      "items": [
+        { "name": "Mie Goreng", "qty": 2, "note": "Pedas sedang" },
+        { "name": "Es Teh", "qty": 1 }
+      ]
+    },
+    "expect": {
+      "startsWith": "1b40",
+      "endsWith": "1d5600",
+      "containsText": ["DAPUR", "K-12", "2x Mie Goreng", "Pedas sedang"],
+      "notContainsText": ["Rp", "A$", "TOTAL"]
+    }
+  }
+}

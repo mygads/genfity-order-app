@@ -14,7 +14,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import GenfityPrinterSpec, { type UsbDeviceInfo } from '../specs/GenfityPrinter';
 
-export type PrinterTransport = 'lan' | 'bt' | 'ble' | 'usb';
+export type PrinterTransport = 'lan' | 'bt' | 'ble' | 'usb' | 'loopback';
 export type PrintResult =
   | { ok: true; bytes: number }
   | { ok: false; reason: 'need-dev-client' | 'connect-failed' | 'send-failed'; detail?: string };
@@ -50,6 +50,33 @@ function native(): NativePrinter | null {
 /** True bila modul native printer tersedia (dev-client / APK produksi). */
 export function hasNativePrinter(): boolean {
   return native() !== null;
+}
+
+/**
+ * Jurnal loopback S10/PP-015 (fixture + mock cetak tanpa hardware).
+ * Satu entri = satu pemanggilan `printBytes` bertarget loopback.
+ * `bytes` disalin saat tulis DAN saat baca (pemanggil tak bisa merusak jurnal).
+ * Memori saja — hilang saat reload; bukan antrean persisten (itu `printqueue`).
+ */
+export interface LoopbackPrint {
+  at: string;
+  bytes: number[];
+}
+
+/** Batas jurnal (memori): entri tertua dibuang bila penuh. */
+export const LOOPBACK_CAP = 20;
+
+/** Target loopback kanonis untuk fixture/uji (jangan jadi station produksi). */
+export const LOOPBACK_TARGET: PrinterTarget = { transport: 'loopback' };
+
+const loopbackJournal: LoopbackPrint[] = [];
+
+export function getLoopbackJournal(): LoopbackPrint[] {
+  return loopbackJournal.map((e) => ({ at: e.at, bytes: [...e.bytes] }));
+}
+
+export function clearLoopbackJournal(): void {
+  loopbackJournal.length = 0;
 }
 
 function bytesToBinary(bytes: Uint8Array): string {
@@ -143,6 +170,16 @@ export async function listBlePrinters(): Promise<Array<{ name: string; mac: stri
 
 /** Kirim byte ESC/POS ke target. */
 export async function printBytes(target: PrinterTarget, data: Uint8Array): Promise<PrintResult> {
+  // S10/PP-015 loopback: tangkap byte ke jurnal memori agar byte ESC/POS bisa
+  // diverifikasi tanpa hardware (fixture + uji drain). Cabang ini SENGAJA di
+  // paling atas — jalan identik di Expo Go/web/dev-client (tanpa modul native).
+  // SUKSES DI SINI BUKAN BUKTI KERTAS KELUAR: klaim cetak fisik butuh perangkat
+  // + dev-client/APK (daftar colok-akhir: docs/PRINTER-PLUGLAST.md).
+  if (target.transport === 'loopback') {
+    loopbackJournal.push({ at: new Date().toISOString(), bytes: Array.from(data) });
+    while (loopbackJournal.length > LOOPBACK_CAP) loopbackJournal.shift();
+    return { ok: true, bytes: data.length };
+  }
   if (target.transport === 'lan' && target.host) {
     return printLan(target.host, target.port ?? 9100, data);
   }

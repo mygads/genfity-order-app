@@ -106,7 +106,11 @@ function envelopeOf(raw: string): PrintTargetEnvelope {
       (t.transport === 'lan' ||
         t.transport === 'bt' ||
         t.transport === 'ble' ||
-        t.transport === 'usb');
+        t.transport === 'usb' ||
+        // S10/PP-015: loopback = target sah (fixture/uji tanpa hardware).
+        // Tanpa ini, cetak antre bertarget loopback kehilangan target saat
+        // drain (jadi null → macet 'antre' selamanya, bukan 'gagal' jujur).
+        t.transport === 'loopback');
     return {
       target: okTarget ? (t as PrinterTarget) : null,
       name: typeof p.name === 'string' ? p.name : '',
