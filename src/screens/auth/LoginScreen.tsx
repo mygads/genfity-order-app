@@ -44,7 +44,7 @@ import {
   type TerminalBinding as LegacyBinding,
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
-import { whenSeedReady } from '../../lib/seed';
+import { isSeedReady, whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
 import { syncCurrencyFromProfile } from '../../lib/currency';
@@ -443,6 +443,23 @@ async function lookupLocalUserId(username: string): Promise<string> {
     return str(row?.id);
   } catch {
     return '';
+  }
+}
+
+/** S4-APP-313: lookup tahan-seed — query SQLite antri di belakang seed-write
+ * (~40 dtk di first-run web; bukti runtime 2026-10-20 :3120-vs-:3131: batas
+ * tunggal 3 dtk/60 dtk = login offline valid gagal-palsu jadi need_be).
+ * Selama seed BELUM selesai, '' = "belum tahu" → ulangi (tiap query dibatasi
+ * 15 dtk); berhenti bila: user ketemu, seed selesai ('' = tak ada user =
+ * jawaban final), atau budget total 90 dtk habis (wedged = '' → need_be
+ * jujur). Tak pernah gantung selamanya; kasus umum (seed done) = 1 iterasi,
+ * tanpa latensi tambahan. */
+async function lookupLocalUserIdAfterSeed(username: string): Promise<string> {
+  const t0 = Date.now();
+  for (;;) {
+    const uid = await withTimeout(lookupLocalUserId(username), 15000).catch(() => '');
+    if (uid || isSeedReady() || Date.now() - t0 > 90000) return uid;
+    await new Promise((r) => setTimeout(r, 3000));
   }
 }
 
@@ -1107,13 +1124,11 @@ export default function LoginScreen({ navigation }: Props) {
         // Offline/unconfigured: gate grant jujur — tanpa silent local login.
         // S4-APP-313: AKAR HANG — lookupLocalUserId = query expo-sqlite TANPA
         // timeout; SQLite wedged = promise tak pernah settle = "Verifying..."
-        // selamanya (finally tak jalan). Batas 60 dtk (BUKAN 3 dtk: bukti
-        // runtime 2026-10-20 — query legit antri di belakang seed-write
-        // wa-sqlite ~40 dtk di first-run web; batas agresif = login offline
-        // valid gagal-palsu jadi need_be). Timeout → '' → 'no-grant' →
-        // pesan need_be jujur. Total worst-case submit tetap terbatas
-        // (~8+5+5+12+60 dtk), tak pernah gantung selamanya.
-        const userId = await withTimeout(lookupLocalUserId(uname), 60000).catch(() => '');
+        // selamanya (finally tak jalan). lookupLocalUserIdAfterSeed: tahan
+        // selama seed berjalan (batas total 90 dtk), tiap query 15 dtk;
+        // '' final → 'no-grant' → pesan need_be jujur. Outer catch di bawah
+        // menjaring lemparan tak terduga menjadi need_be (bukan hang).
+        const userId = await lookupLocalUserIdAfterSeed(uname);
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
         if (problem === 'grant-expired') {
           setBlocked({ kind: 'grant-expired' });
