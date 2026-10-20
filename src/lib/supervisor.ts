@@ -372,9 +372,14 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
   if (reason.length < SUPERVISOR_V1_LIMITS.reasonMin || reason.length > SUPERVISOR_V1_LIMITS.reasonMax) {
     return { ok: false, code: 'invalid', message: badField };
   }
-  // R38: PIN full-string 4-6 digit; M1: shape salah ikut dihitung (burn).
+  // R38: PIN full-string TANPA pemotongan; kebijakan panjang = BE 4..8 digit
+  // (merchant_workforce.go:898,945; terminal.go:329) — AUDIT-V2: gate 4..6
+  // + truncate dialog = PIN 7-8 digit sah tak pernah lolos (bahkan membakar
+  // lockout server via 6-digit terpotong yang SALAH). M1: shape salah bakar.
+  // (Gate legacy authorizeSupervisor + verifyLocalEscalation tetap 4..6:
+  // pre-existing, dipakai alur shared di luar S7 — follow-up owner.)
   const clean = String(input?.supervisorPin ?? '').replace(/[^0-9]/g, '');
-  if (!clean || clean.length < 4 || clean.length > 6) {
+  if (!clean || clean.length < 4 || clean.length > 8) {
     return fail('invalid', tOf('sup_invalid'));
   }
   try {

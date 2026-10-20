@@ -196,6 +196,36 @@ function normPath(path: string): string {
 
 /** Ambil bagian `response` dari file dummy; null bila path tak dikenal. */
 function dummyResponse(path: string): { found: boolean; body: unknown } {
+  // AUDIT-V2 (demo-only, Dummy Mode eksplisit): kontrak V1 memakai path
+  // ber-{id} yang tak bisa dikatalog statis per terminal. Tanpa ini, dialog
+  // supervisor di Dummy Mode selalu DENIED + bakar attempt (E422 tak dikenal
+  // → fail('denied')). Kembalikan envelope sukses BE-shaped agar demo/
+  // screenshot bisa approve — cermin perilaku fixture legacy
+  // auth/supervisor-approve → approved:true. Real-mode offline TAK tersentuh:
+  // pemanggil V1 memfail-closed-kan fromDummy+real → offline SEBELUM unwrap
+  // (lib/supervisor.ts), dan Local Mode tak sampai sini (early-return).
+  const segs = normPath(path).split('/');
+  if (
+    segs.length === 5 &&
+    segs[0] === 'api' &&
+    segs[1] === 'v1' &&
+    segs[2] === 'terminals' &&
+    segs[4] === 'supervisor-approve' &&
+    segs[3].length > 0
+  ) {
+    return {
+      found: true,
+      body: {
+        success: true,
+        data: {
+          approvalId: `dummy-${segs[3]}-0001`,
+          terminalId: segs[3],
+          action: 'demo',
+          approvedAt: new Date().toISOString(),
+        },
+      },
+    };
+  }
   const file = DUMMY[normPath(path)] as { response?: unknown } | undefined;
   if (!file || file.response === undefined) {
     return {
@@ -249,8 +279,12 @@ let unauthorizedHandler: UnauthorizedHandler = () => {
 export function setUnauthorizedHandler(fn: UnauthorizedHandler): void {
   unauthorizedHandler = fn;
 }
-/** Kode error faktor-PIN: 401-nya = PIN salah/belum enroll, bukan sesi mati. */
-const PIN_FACTOR_401_RE = /^(USER_PIN_|PIN_REQUIRED)/;
+/** Kode error faktor-PIN: 401-nya = PIN salah/belum enroll, bukan sesi mati.
+ * AUDIT-V2 (kill): SUPERVISOR_PIN_* milik endpoint supervisor-approve V1 —
+ * PIN supervisor salah = 401 SUPERVISOR_PIN_INVALID (supervisor_approve.go:
+ * 231-232), BUKAN sesi kasir mati. Tanpa prefix ini, satu PIN supervisor
+ * salah di Real mode memicu unauthorizedHandler → logout() kasir. */
+const PIN_FACTOR_401_RE = /^(USER_PIN_|PIN_REQUIRED|SUPERVISOR_PIN_)/;
 function errorCodeOf(body: unknown): string {
   try {
     const b = (body ?? {}) as Record<string, unknown>;

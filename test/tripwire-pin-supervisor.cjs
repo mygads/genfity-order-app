@@ -74,6 +74,22 @@ function run() {
     'screens: void/eskalasi/compliment NOL authorizeSupervisor legacy' + (legacyUse.length ? ' (' + legacyUse.join(',') + ')' : ''));
   ok(/authorizeSupervisorV1/.test(dlg) && /verifyLocalEscalation/.test(dlg) && /fallbackAccessKey/.test(dlg),
     'dialog: SupervisorApprovalDialog = V1 + fallback lokal + hak eksplisit');
+  // 7. AUDIT-V2 fixes (kill + non-killing, re-audit pasca-fix):
+  //  a. 401 SUPERVISOR_PIN_* = faktor-PIN, BUKAN sesi mati (tanpa ini satu PIN
+  //     supervisor salah me-logout kasir via unauthorizedHandler).
+  //  b. Dummy Mode layani path V1 ber-{id} (demo-only; Real-mode offline tetap
+  //     fail-closed sebelum unwrap).
+  //  c. PIN V1 + dialog 4..8 paritas kebijakan BE (tanpa truncate diam-diam
+  //     yang membakar lockout server).
+  const apiSrc = readRaw('lib/apiSource.ts');
+  ok(/PIN_FACTOR_401_RE\s*=\s*\/\^\(.*SUPERVISOR_PIN_/.test(apiSrc),
+    'apiSource: 401 SUPERVISOR_PIN_* diklasifikasikan faktor-PIN (tanpa logout)');
+  ok(/segs\[2\]\s*===\s*'terminals'/.test(apiSrc) && /supervisor-approve/.test(apiSrc) && /approvalId/.test(apiSrc),
+    'apiSource: Dummy Mode layani V1 supervisor-approve (demo-only, envelope sukses)');
+  ok(/clean\.length > 8/.test(sup),
+    'supervisor: gate PIN V1 4..8 paritas BE');
+  ok(/slice\(0,\s*8\)/.test(dlg) && /maxLength=\{8\}/.test(readRaw('components/SupervisorApprovalDialog.tsx')),
+    'dialog: input PIN tanpa truncate 6-digit (maxLength 8)');
 
   return { checks, failures };
 }

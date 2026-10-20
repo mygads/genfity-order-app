@@ -179,11 +179,11 @@ export default function SupervisorApprovalDialog({
           <Text style={styles.fieldLabel}>{t('cx_pin')}</Text>
           <AppInput
             keyboardType="numeric"
-            maxLength={6}
+            maxLength={8}
             secureTextEntry
             placeholder={t('xp_pin_ph')}
             value={pin}
-            onChangeText={(v) => setPin(v.replace(/[^0-9]/g, '').slice(0, 6))}
+            onChangeText={(v) => setPin(v.replace(/[^0-9]/g, '').slice(0, 8))}
             style={styles.pinField}
           />
           {msg ? <Text style={styles.msg}>{msg}</Text> : null}
