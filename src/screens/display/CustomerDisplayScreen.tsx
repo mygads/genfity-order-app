@@ -343,6 +343,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     const [next, ...rest] = prep;
     setPrep(rest);
     setReady((r) => [next, ...r].slice(0, 6));
+    // S8 (PW-3): LOKAL-ONLY by design — tak ada endpoint BE call-ticket
+    // (BE nyatakan event `call` reserved dan aksi panggil server BELUM ADA).
+    // JANGAN invent POST di sini (ubah kontrak BE dari sisi APP = DILARANG) —
+    // server-ack/marking butuh endpoint owner-BE; hingga itu ada, siaran call
+    // hanya ke bus lokal (+WS fallback).
     publishDisplay({ type: 'call', ticket: next });
   };
 
