@@ -30,7 +30,7 @@
           "salesNum": "TRX-20261016-012",
           "branchId": "B001", "terminalId": "T001", "userId": "U08",
           "salesDate": "2026-10-16 11:47:00",
-          "salesMode": "TAKE_AWAY", "tableNo": "",
+          "salesMode": "TAKEAWAY", "tableNo": "",
           "subtotal": 33000, "discount": 3000, "tax": 2973,
           "voucherAmount": 0, "serviceCharge": 1500, "rounding": 0,
           "grandTotal": 31500, "paidAmount": 31500, "changeAmount": 0,
