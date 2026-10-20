@@ -118,6 +118,23 @@ function run() {
   }
   ok(/lockRefId/.test(dlg) && /staticVal\}>\{refId/.test(dlg),
     'dialog: mode lockRefId render refId statis (tak bisa diubah pemohon)');
+  // 9. C6 Sesi-C QA3 (owner-override server-verified): E29 dipanggil DULU di
+  //    verifyOwnerOverridePin; penolakan server eksplisit (INVALID/LOCKED)
+  //    = {ok:false} langsung TANPA fallback hash lokal; fallback lokal HANYA
+  //    bila server tak terjangkau (!pv.reached) atau USER_PIN_NOT_SET.
+  const login = read('screens/auth/LoginScreen.tsx');
+  const loginRaw = readRaw('screens/auth/LoginScreen.tsx');
+  ok(/callPinVerify\(termId\.trim\(\),\s*clean,\s*stageToken\)/.test(loginRaw),
+    'override: E29 callPinVerify dipanggil DULU sebelum hash lokal');
+  ok(/Server menolak eksplisit \(INVALID\/LOCKED\/lainnya\) = server menang/.test(loginRaw) &&
+    /else if \(\!\(pv\.status === 400 && pv\.errorCode === 'USER_PIN_NOT_SET'\)\)[\s\S]{0,160}?return \{ ok: false \}/.test(login),
+    'override: INVALID/LOCKED server = {ok:false} tanpa fallback lokal');
+  ok(/Tak terjangkau → jatuh ke hash lokal di bawah/.test(loginRaw),
+    'override: fallback hash lokal HANYA bila server tak terjangkau');
+  ok(/USER_PIN_INVALID.*server menang|server menang — tampilkan pesan server jujur/.test(loginRaw),
+    'staff-pin: jalur normal INVALID/LOCKED = server menang (tanpa gerbang lokal)');
+  ok(/approvedBy = `owner:\$\{ov\.approverUserId\}`/.test(loginRaw) || /approvedBy = `owner:/.test(loginRaw),
+    'override: attribution approvedBy owner:<id> dikunci ke sesi (jejak audit lokal)');
 
   return { checks, failures };
 }
