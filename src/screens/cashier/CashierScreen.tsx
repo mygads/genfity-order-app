@@ -309,6 +309,8 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [discDraft, setDiscDraft] = useState('');
+  // PP-026: pesan validasi diskon per-item (negatif / melebihi nilai line).
+  const [discMsg, setDiscMsg] = useState('');
   /** Eskalasi void: gate RBAC order.void, deny -> dialog persetujuan supervisor
    * V1 (kontrak BE baru; S7). Gate-throw (DB error) tetap buka dialog —
    * persetujuan server otoritatif, fallback lokal dialog fail-closed sendiri
@@ -745,11 +747,33 @@ export default function CashierScreen({ navigation, route }: Props) {
     setEditingId(c.id);
     setNoteDraft(c.note ?? '');
     setDiscDraft(c.discount > 0 ? String(c.discount) : '');
+    setDiscMsg('');
   };
 
+  /**
+   * PP-026 (definisi koordinator): validasi lokal batas diskon per-item.
+   * Field ini nominal Rupiah (bukan persen) — padanan jujur ">100%" adalah
+   * diskon melebihi nilai bruto line. Negatif DITOLAK eksplisit dengan pesan
+   * (dulu diam-diam jadi 0 via Math.max). RESIDU jujur: validasi server-side
+   * belum diuji — BE boleh punya batas sendiri; klaim = lokal saja.
+   */
   const saveEditor = () => {
     if (!editingId) return;
-    const disc = Math.max(0, Number(discDraft.replace(/[^0-9]/g, '')) || 0);
+    const raw = discDraft.trim();
+    if (/-/.test(raw)) {
+      setDiscMsg(t('disc_neg'));
+      return;
+    }
+    const disc = Math.max(0, Number(raw.replace(/[^0-9]/g, '')) || 0);
+    const item = activeCart.find((c) => c.id === editingId);
+    const lineGross = item
+      ? (item.basePrice + item.modifiers.reduce((m, x) => m + x.price, 0)) * item.qty
+      : 0;
+    if (disc > lineGross) {
+      setDiscMsg(t('disc_over_line'));
+      return;
+    }
+    setDiscMsg('');
     setCart((prev) =>
       prev.map((c) =>
         c.id === editingId ? { ...c, note: noteDraft.trim() || undefined, discount: disc } : c,
@@ -967,6 +991,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           placeholder={rp(0)}
           keyboardType="numeric"
         />
+        {discMsg ? <Text style={styles.editorErr}>{discMsg}</Text> : null}
         <View style={styles.editorRow}>
           <AppButton
             size="sm"
@@ -1979,6 +2004,8 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   editorLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.navy, marginTop: 6 },
+  // PP-026: pesan validasi diskon per-item.
+  editorErr: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 4 },
   editorInput: {
     backgroundColor: colors.white,
     borderWidth: 1,

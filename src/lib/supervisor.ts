@@ -322,7 +322,9 @@ export interface SupervisorV1Input {
   supervisorPin: string;
   /** Aksi bebas 1..64 char (preset UI: void|cancel|compliment|refund|...). */
   action: string;
-  /** Referensi bebas ≤128 char (cth. order id); boleh kosong. */
+  /** Referensi bebas ≤128 char (cth. order id); boleh kosong — KECUALI
+   * untuk COMPLIMENT_SETTLE (OFFLINE-RULE: wajib id-desimal, lihat gate di
+   * authorizeSupervisorV1). */
   refId?: string;
   /** Alasan WAJIB 1..500 char — tercatat di audit BE. */
   reason: string;
@@ -387,6 +389,14 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
   const refId = String(input?.refId ?? '').trim();
   if (refId.length > SUPERVISOR_V1_LIMITS.refIdMax) {
     return { ok: false, code: 'invalid', message: badField };
+  }
+  // OFFLINE-RULE (putusan koordinator): approval COMPLIMENT_SETTLE wajib
+  // refId id-desimal order (create-first). BE membolehkan refId kosong, tapi
+  // approval begitu TAKKAN cocok untuk settle (403 permanen) — jadi APP
+  // menolak mengirimnya di sini (tanpa bakar attempt). Non-desimal lain
+  // (salesNum/nomor struk) ikut ditolak dengan pesan yang sama.
+  if (action === SUPERVISOR_ACTION_COMPLIMENT_SETTLE && !isDecimalOrderId(refId)) {
+    return { ok: false, code: 'invalid', message: tOf('sup_v1_refid_need') };
   }
   const reason = String(input?.reason ?? '').trim();
   if (reason.length < SUPERVISOR_V1_LIMITS.reasonMin || reason.length > SUPERVISOR_V1_LIMITS.reasonMax) {

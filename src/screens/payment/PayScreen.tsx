@@ -1431,7 +1431,7 @@ export default function PayScreen({ navigation, route }: Props) {
         {renderBody()}
         {/* G5: block7 = ExtraPay disembunyikan; banner blokir di atas memberi jalan Sync. */}
         {syncBlocked ? null : (
-        <ExtraPaySection onDone={(label, ref, approver) => {
+        <ExtraPaySection online={online} onDone={(label, ref, approver) => {
           const method = extraLabelToMethod(label);
           if (method === 'deposit') {
             // Deposit wajib lewat alur member (cek saldo + memberId): lunas

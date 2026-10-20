@@ -8,6 +8,8 @@ import {
   attemptsLeft,
   authorizeSupervisorV1,
   getBoundSupervisorTerminalId,
+  isDecimalOrderId,
+  SUPERVISOR_ACTION_COMPLIMENT_SETTLE,
   verifyLocalEscalation,
 } from '../lib/supervisor';
 
@@ -98,13 +100,17 @@ export default function SupervisorApprovalDialog({
 
   const terminalId = (boundTerminal || terminalManual).trim();
   const userIdNum = Number((userId || '').replace(/[^0-9]/g, ''));
+  // OFFLINE-RULE: compliment = aksi kanonis; refId wajib id-desimal (tombol
+  // tak bisa submit selama kosong — pesan petunjuk tampil di bawah field).
+  const isCompliment = action === SUPERVISOR_ACTION_COMPLIMENT_SETTLE;
   const canSubmit =
     !busy &&
     terminalId.length > 0 &&
     Number.isInteger(userIdNum) &&
     userIdNum > 0 &&
     pin.replace(/[^0-9]/g, '').length >= 4 &&
-    reason.trim().length >= 1;
+    reason.trim().length >= 1 &&
+    (!isCompliment || isDecimalOrderId(refId));
 
   const approve = async () => {
     if (!canSubmit) return;
@@ -120,7 +126,14 @@ export default function SupervisorApprovalDialog({
       reason: reason.trim(),
     });
     // Offline-first: cocokkan PIN lokal milik pemegang hak (fail-closed).
+    // OFFLINE-RULE: compliment DILARANG lewat fallback lokal — approval lokal
+    // tak punya approvalId dan settle BE pasti 403. Tampilkan syarat online.
     if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
+      setBusy(false);
+      if (isCompliment) {
+        setMsg(t('xp_compliment_offline'));
+        return;
+      }
       const local = await verifyLocalEscalation(pin, fallbackAccessKey);
       setBusy(false);
       if (!local.ok) {
@@ -183,6 +196,9 @@ export default function SupervisorApprovalDialog({
             autoCapitalize="characters"
           />
           )}
+          {isCompliment && !isDecimalOrderId(refId) ? (
+            <Text style={styles.msg}>{t('sup_v1_refid_need')}</Text>
+          ) : null}
           <Text style={styles.fieldLabel}>{t('sup_v1_reason')}</Text>
           <AppInput
             placeholder={t('sup_v1_reason_ph')}

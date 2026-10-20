@@ -21,8 +21,13 @@ import { EXTRA_METHODS, xmDesc, xmLabel, type ExtraMethodId } from '../../lib/pa
  * benar). Batas jujur: alur offline-first APP (saveSale lokal → sync
  * order/finish) tak punya id BE pra-approval; who-supplies-orderId adalah
  * keputusan koordinator (E2E memasok via API).
+ *
+ * OFFLINE-RULE (putusan koordinator): approval compliment WAJIB online +
+ * orderId desimal (create-first). Kartu compliment nonaktif + pesan jelas
+ * bila offline ATAU orderId absen; refId kosong DILARANG dikirim (gate ganda:
+ * di sini, di dialog, di authorizeSupervisorV1).
  */
-export default function ExtraPaySection({ onDone, orderId }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void; orderId?: string }) {
+export default function ExtraPaySection({ onDone, orderId, online }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void; orderId?: string; online?: boolean | null }) {
   // Tablet: kartu 4 sebaris proporsional di dalam konten PayScreen.
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -32,6 +37,10 @@ export default function ExtraPaySection({ onDone, orderId }: { onDone: (methodLa
   const [refFor, setRefFor] = useState<ExtraMethodId | null>(null);
   const [refNo, setRefNo] = useState('');
   const [refMsg, setRefMsg] = useState('');
+  // OFFLINE-RULE: pesan penolakan kartu compliment (offline / tanpa order).
+  const [xpMsg, setXpMsg] = useState('');
+  const orderIdDecimal = isDecimalOrderId(orderId ?? '');
+  const complimentBlocked = online !== true || !orderIdDecimal;
 
   const tap = (id: ExtraMethodId) => {
     const m = EXTRA_METHODS.find((x) => x.id === id);
@@ -40,12 +49,28 @@ export default function ExtraPaySection({ onDone, orderId }: { onDone: (methodLa
       setRefFor(id);
       setRefNo('');
       setRefMsg('');
+      setXpMsg('');
       return;
     }
+    // OFFLINE-RULE: compliment WAJIB online + orderId desimal. Tombol
+    // nonaktif (lihat disabled kartu) + pesan jelas; tap yang lolos
+    // (mis. aksesibilitas) tetap ditolak di sini, jangan buka dialog.
+    if (id === 'compliment') {
+      if (online !== true) {
+        setXpMsg(t('xp_compliment_offline'));
+        return;
+      }
+      if (!orderIdDecimal) {
+        setXpMsg(t('xp_compliment_no_order'));
+        return;
+      }
+    }
     if (m.needsAuth) {
+      setXpMsg('');
       setAuthFor(id);
       return;
     }
+    setXpMsg('');
     onDone(xmLabel(m, t));
   };
 
@@ -74,17 +99,24 @@ export default function ExtraPaySection({ onDone, orderId }: { onDone: (methodLa
       <Text style={styles.title}>{t('xp_title')}</Text>
       <Text style={styles.hint}>{t('xp_hint')}</Text>
       <View style={styles.grid}>
-        {EXTRA_METHODS.map((m) => (
-          <TouchableOpacity key={m.id} style={[styles.card, isTablet && styles.cardTablet]} onPress={() => tap(m.id)}>
+        {EXTRA_METHODS.map((m) => {
+          // OFFLINE-RULE: kartu compliment nonaktif visual bila diblokir.
+          const dis = m.id === 'compliment' && complimentBlocked;
+          return (
+          <TouchableOpacity key={m.id} style={[styles.card, isTablet && styles.cardTablet, dis && styles.cardDisabled]} disabled={dis} onPress={() => tap(m.id)}>
             <Text style={[styles.cardT, isTablet && styles.cardTTablet]}>{xmLabel(m, t)}</Text>
             <Text style={[styles.cardS, isTablet && styles.cardSTablet]}>{xmDesc(m, t)}</Text>
           </TouchableOpacity>
-        ))}
+          );
+        })}
       </View>
+      {xpMsg ? <Text style={styles.msg}>{xpMsg}</Text> : null}
 
       {/* COND-2: compliment = aksi kanonis COMPLIMENT_SETTLE (konstanta, bukan
           literal 'compliment' — itu 403 permanen yang benar) + refId id-desimal
-          order yang DIKUNCI bila pemanggil memasok orderId desimal valid. */}
+          order yang DIKUNCI bila pemanggil memasok orderId desimal valid.
+          OFFLINE-RULE: dialog ini hanya tercapai bila tap() lolos (online +
+          desimal); refId di sini selalu desimal-valid. */}
       <SupervisorApprovalDialog
         visible={authFor !== null}
         action={authFor === 'compliment' ? SUPERVISOR_ACTION_COMPLIMENT_SETTLE : 'non-sales'}
@@ -141,6 +173,8 @@ const styles = StyleSheet.create({
   },
   cardT: { fontFamily: fonts.bold, fontSize: 13, color: colors.navy },
   cardS: { fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 },
+  // OFFLINE-RULE: kartu nonaktif (compliment diblokir offline/tanpa order).
+  cardDisabled: { opacity: 0.45 },
   // Tablet: 4 kartu sebaris proporsional dengan teks sedikit besar.
   cardTablet: { flexBasis: '23%', minHeight: 64, padding: 16 },
   cardTTablet: { fontSize: 14 },
