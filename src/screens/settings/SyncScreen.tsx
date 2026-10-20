@@ -8,6 +8,8 @@ import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { f
   kind: string;
   desc: string;
   createdAt: string;
+  /** C8: catatan fail-once mesin sync (S10/C2/C8) — ditampilkan jujur di kartu. */
+  note: string;
   status: 'antre' | 'terkirim' | 'gagal';}/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). S8:
  * kind deposit/shift/voucher/member memakai kunci kamus + identifier. */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string; dep: string; shift: string; voucher: string; member: string }): string {
 
@@ -113,7 +115,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   useEffect(() => { refreshDaysAgo(); }, []); // S19: segarkan umur tiap layar
   // difokuskan; tak ada emit session-restore di sesi (grep) — focus saja.
   useFocusEffect(useCallback(() => { refreshDaysAgo(); setTick((x) => x + 1); }, [])); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
-      sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind, dep: t('sync_kind_deposit'), shift: t('sync_kind_shift'), voucher: t('sync_kind_voucher'), member: t('sync_kind_member') }), createdAt: fmtTime(o.createdAt), status: o.status, })),
+      sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind, dep: t('sync_kind_deposit'), shift: t('sync_kind_shift'), voucher: t('sync_kind_voucher'), member: t('sync_kind_member') }), createdAt: fmtTime(o.createdAt), note: String(o.note ?? ''), status: o.status, })),
   [tick, lang], );
 
   const pending = pendingCount(); // S21: hitung lokal-only (flag local) untuk badge.
@@ -221,6 +223,8 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
             </View>
           </View>
           <Text style={styles.qDesc}>{q.desc}</Text>
+          {/* C8 UI-jujur: catatan fail-once (BLOCKED/S10) tampil bila ada. */}
+          {q.note ? <Text style={styles.qDesc}>{q.note}</Text> : null}
           <Text style={styles.qTime}>{q.createdAt}</Text>
         </View>
       ))}

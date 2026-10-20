@@ -1149,6 +1149,22 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     return 'failed';
   }
   const path = compat ? compat.path : pathFor(item.kind, item.payload);
+  // C8: kaki group-payment TANPA identitas server ({orderId, shareId} — app
+  // tak pernah membuat group-bill shares) = ops-tanpa-padanan Go. Tanpa
+  // cabang ini ia jatuh ke fallback pushOrderFinish ESB lalu 'gagal' TIAP
+  // siklus (retry-buta + men-trip breaker drain 3-gagal-beruntun). BLOCKED
+  // jujur fail-once pola S10: 'gagal' + catatan SEKALI, siklus berikut
+  // skipped sehingga legs grup tak trip breaker. Deposit tak tersentuh
+  // (kind/op berbeda; kunci-tunggal DEPOSIT-SINGLE-POST lestari di bawah).
+  if (!compat && item.kind === 'order') {
+    const gop = String(((item.payload ?? {}) as { op?: unknown }).op ?? '');
+    if (gop === 'group-payment') {
+      if (item.status === 'gagal') return 'skipped';
+      item.status = 'gagal';
+      item.note = tr('sync.groupLegNoCounterpart');
+      return 'failed';
+    }
+  }
   if (!path) {
     const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown; type?: unknown };
     const op = String(p.op ?? '');
