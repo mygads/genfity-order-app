@@ -195,9 +195,11 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
           };
-          recordSale(gInput);
+          // C7/L1 save-then-record (cermin PayScreen:553-554): tulis DB dulu,
+          // antre HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
           try {
             await saveSale(gInput);
+            recordSale(gInput);
           } catch (e) {
             // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
             // APP-R3: guard di-reset agar retry hidup setelah klaim terminal
@@ -210,7 +212,10 @@ export default function EdcScreen({ navigation, route }: Props) {
               savedRef.current = false;
               return;
             }
-            /* DB gagal - kasir tetap jalan */
+            // L1 fail-closed: tulis DB gagal = JANGAN antre + JANGAN Success.
+            appAlert(t('pay_issue_fail'));
+            savedRef.current = false;
+            return;
           }
         }
       } catch (e) {
@@ -276,9 +281,11 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
     };
-    recordSale(input);
+    // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
+    // HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
     try {
       await saveSale(input);
+      recordSale(input);
     } catch (e) {
       // Gate bound (D3-03): unbound → pesan klaim-terminal + jalan ke Klaim, TANPA Success palsu.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
@@ -290,7 +297,10 @@ export default function EdcScreen({ navigation, route }: Props) {
         savedRef.current = false;
         return;
       }
-      /* DB gagal - kasir tetap jalan */
+      // L1 fail-closed: tulis DB gagal = JANGAN antre + JANGAN Success.
+      appAlert(t('pay_issue_fail'));
+      savedRef.current = false;
+      return;
     }
     navigation?.navigate('Success', {
       total: fullTotal,

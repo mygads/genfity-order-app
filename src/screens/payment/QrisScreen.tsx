@@ -162,8 +162,12 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           await appendGroupPayment(groupNo, { payments: visitPay, method: 'qris', change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}) });
         } else {
           const gInput: SaleInput = { method: 'qris', salesNum: groupNo, clientId: saleClientId, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), };
-          recordSale(gInput);
-          try { await saveSale(gInput); } catch (e) {
+          // C7/L1 save-then-record (cermin PayScreen:553-554): tulis DB dulu,
+          // antre HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+          try {
+            await saveSale(gInput);
+            recordSale(gInput);
+          } catch (e) {
             // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
             if ((e as { code?: string })?.code === 'terminal-unbound') {
               appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
@@ -174,7 +178,10 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
               settledRef.current = false;
               return;
             }
-            /* DB gagal - kasir tetap jalan */
+            // L1 fail-closed: tulis DB gagal = JANGAN antre + JANGAN Success.
+            appAlert(t('pay_issue_fail'));
+            settledRef.current = false;
+            return;
           }
         }
       } catch (e) {
@@ -206,7 +213,14 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       navigation?.navigate('Success', { total: orderTotalFull, method: 'qris', orderNo: groupNo, clientId: saleClientId, approvalCode: refCode, items, discount, splitPaid: { amount: fullTotal, method: 'qris' }, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}) });
       return;
     }
-    const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), }; recordSale(input); try { await saveSale(input); } catch (e) {
+    const input: SaleInput = { method: 'qris', salesNum: orderNo, clientId: saleClientId, grandTotal: fullTotal, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), items, payments: [...fwdSplits, { method: 'qris', amount: total }], ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}),       ...(customerName ? { customer: customerName } : {}),
+    };
+    // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
+    // HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+    try {
+      await saveSale(input);
+      recordSale(input);
+    } catch (e) {
       // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
       if ((e as { code?: string })?.code === 'terminal-unbound') {
         appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
@@ -217,8 +231,12 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
         settledRef.current = false;
         return;
       }
-      /* DB gagal - kasir tetap jalan */
-    } navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
+      // L1 fail-closed: tulis DB gagal = JANGAN antre + JANGAN Success.
+      appAlert(t('pay_issue_fail'));
+      settledRef.current = false;
+      return;
+    }
+    navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
