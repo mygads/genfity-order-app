@@ -68,7 +68,9 @@ export default function DineInScreen({ navigation, route }: Props) {
   const [pax, setPax] = useState('2');
   const [guest, setGuest] = useState(route?.params?.customer ?? '');
   const [mode, setMode] = useState(
-    route?.params?.mode && MODES.includes(route.params.mode) ? route.params.mode : 'DINE IN',
+    route?.params?.mode && MODES.includes(route.params.mode)
+      ? route.params.mode
+      : (MODES[0] ?? 'DINE IN'),
   );
   const [memberId] = useState(route?.params?.memberId ?? '');
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */

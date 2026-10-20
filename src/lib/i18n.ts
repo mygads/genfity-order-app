@@ -1283,6 +1283,9 @@ const STR: Record<string, Entry> = {
   'sync.masterQueued': { id: 'Master hanya di perangkat ini (tanpa push ke server).', en: 'Master is on this device only (no server push).' },
   'sync.localOnly': { id: 'Lokal - tak perlu push.', en: 'Local-only - no push needed.' },
   'sync.depositLocal': { id: 'Deposit tercatat lokal + outbox fisik.', en: 'Deposit recorded locally + physical outbox.' },
+  // C2 Sesi-C QA3: orderType tak didukung merchant-type (BE pasti menolak) —
+  // BLOCKED jujur fail-once; {mode}/{type} diisi pemanggil via .replace.
+  'sync.orderTypeUnsupported': { id: 'Mode {mode} tak didukung merchant {type} - butuh backend (BLOCKED).', en: 'Mode {mode} unsupported for {type} merchant - needs backend (BLOCKED).' },
   'sync.duplicateAcked': { id: 'Duplikat (409) - sudah di server.', en: 'Duplicate (409) - already on server.' },
   'sync.displayConflict': { id: '409 {code},display_no bentrok / respons tak dikenal; tidak ditandai terkirim, perlu tindakan manual.', en: '409 {code},display_no conflict / unrecognized response; not marked sent, needs manual action.' },
   'sync.displayRenumberFailed': { id: '409 {code},gagal menerbitkan nomor display baru ({err}); tidak ditandai terkirim, perlu tindakan manual.', en: '409 {code},failed to issue a new display number ({err}); not marked sent, needs manual action.' },

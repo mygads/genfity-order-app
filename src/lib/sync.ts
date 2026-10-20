@@ -13,6 +13,7 @@ import { apiFetch } from './apiSource';
 import { all, markClean, markDirty, queryFirst, run } from './db';
 import { getLang, tr } from './i18n';
 import { fmtDateInTz, fmtTimeInTz } from './datefmt';
+import { getCachedMerchantType, normalizeMerchantType } from './posModes';
 import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
@@ -259,30 +260,62 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 const GO_POS_CREATE_PATH = 'api/merchant/orders/pos';
 
 /**
- * Petakan mode kasir → enum orderType Go yang ketat.
- * Matriks POS-create BE — orders_pos_create.go:196 (gate umum) + :224-250
- * (gate per tipe): RESTAURANT = DINE_IN|TAKEAWAY, PRODUCT =
- * IN_STORE_ORDER|TAKEAWAY, SERVICE = IN_STORE_SERVICE.
- * Collapse TERDOKUMENTASI (bukan diam-diam):
- * - TAKE_AWAY (underscore warisan payload lama) → TAKEAWAY (C1 kanonis).
- * - IN_STORE_PICKUP → IN_STORE_ORDER (kanal POS terdekat; BE POS create
- *   menolak literal IN_STORE_PICKUP).
- * - DELIVERY + agregator (GOFOOD/GRABFOOD/SHOPEEFOOD/ONLINE) → TAKEAWAY
- *   (kurir-bawa-pulang; BE POS create menolak DELIVERY).
- * - HOME_SERVICE / SERVICE → IN_STORE_SERVICE (satu-satunya kanal POS SERVICE).
- * - Default DINE_IN = [ASUMSI] restaurant-default bila tipe tak diketahui.
- * Penolakan BE atas orderType hasil mapping DITANDAI BLOCKED jujur (pola S10
- * sync.ts:1073-1080), bukan diganti diam-diam.
+ * Sentinel internal: mode kasir tak punya padanan orderType untuk merchant-type
+ * aktif (backend Go pasti menolak). TAK PERNAH dikirim ke BE; pemanggil wajib
+ * mem-BLOCKED jujur (fail-once + catatan, pola S10).
  */
-function goPosOrderType(raw?: unknown): string {
+export const UNSUPPORTED_ORDER_TYPE = 'UNSUPPORTED';
+
+/**
+ * Petakan mode kasir → enum orderType Go yang ketat, SADAR merchant-type
+ * (C2 Sesi-C QA3; cermin validasi orders_pos_create.go:196 + gerbang
+ * per-tipe :223-237). merchantType tak diisi = cache sesi (tak-dikenal =
+ * default RESTAURANT, ASUMSI koordinator — perilaku lama lestari).
+ * - RESTAURANT: DINE_IN→DINE_IN; TAKEAWAY/TAKE_AWAY→TAKEAWAY;
+ *   DELIVERY/agregator→TAKEAWAY (proksi legacy: ongkir tetap tercatat terpisah
+ *   di payload — perilaku pra-C2 persis); varian IN_STORE dan HOME_SERVICE
+ *   →UNSUPPORTED.
+ * - PRODUCT: IN_STORE_ORDER/IN_STORE_PICKUP→IN_STORE_ORDER (alias eksplisit:
+ *   pickup = order in-store); TAKEAWAY/TAKE_AWAY→TAKEAWAY; DELIVERY/agregator/
+ *   DINE_IN→UNSUPPORTED — SENGAJA tak dilipat ke TAKEAWAY (delivery ≠ takeaway;
+ *   BE menolak = BLOCKED jujur).
+ * - SERVICE: IN_STORE_SERVICE→IN_STORE_SERVICE; lainnya (termasuk
+ *   HOME_SERVICE)→UNSUPPORTED — BE service kini hanya IN_STORE_SERVICE
+ *   (owner-need: dukungan HOME_SERVICE/DELIVERY di BE).
+ * Mode asing RESTAURANT → DINE_IN (default lama, lestari).
+ */
+function goPosOrderType(raw?: unknown, merchantType?: unknown): string {
+  const mt = normalizeMerchantType(merchantType ?? getCachedMerchantType());
   const k = String(raw ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (mt === 'PRODUCT') {
+    if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_PICKUP') return 'IN_STORE_ORDER';
+    if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
+    return UNSUPPORTED_ORDER_TYPE;
+  }
+  if (mt === 'SERVICE') {
+    if (k === 'IN_STORE_SERVICE') return 'IN_STORE_SERVICE';
+    return UNSUPPORTED_ORDER_TYPE;
+  }
+  // RESTAURANT + tak-dikenal (default restaurant, ASUMSI): perilaku pra-C2.
   if (k === 'DINE_IN') return 'DINE_IN';
   if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
-  if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_SERVICE') return k;
-  if (k === 'IN_STORE_PICKUP') return 'IN_STORE_ORDER';
-  if (k === 'HOME_SERVICE' || k === 'SERVICE') return 'IN_STORE_SERVICE';
   if (/DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE/.test(k)) return 'TAKEAWAY';
+  if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_PICKUP' || k === 'IN_STORE_SERVICE' || k === 'HOME_SERVICE') {
+    return UNSUPPORTED_ORDER_TYPE;
+  }
   return 'DINE_IN';
+}
+
+/**
+ * Alasan BLOCKED untuk orderType UNSUPPORTED (teks i18n + nilai dinamis via
+ * .replace — pola render tabel; dipanggil saat fail-once agar bahasa catatan
+ * ikut bahasa sesi). null = didukung (tak ada alasan).
+ */
+export function orderTypeBlockReason(raw?: unknown, merchantType?: unknown): string | null {
+  const mt = normalizeMerchantType(merchantType ?? getCachedMerchantType());
+  if (goPosOrderType(raw, mt) !== UNSUPPORTED_ORDER_TYPE) return null;
+  const mode = String(raw ?? '').trim() || '?';
+  return tr('sync.orderTypeUnsupported').replace('{mode}', mode).replace('{type}', mt);
 }
 
 /**
@@ -344,7 +377,10 @@ function goPosItems(raw: unknown): Record<string, unknown>[] | null {
 
 /**
  * Terjemahan Go-POS untuk satu item ringan. Kembali {path, body} bila ada
- * padanan backend, null bila ops tetap ESB (pathFor yang memutuskan).
+ * padanan backend, {unsupported} bila mode tak didukung merchant-type aktif
+ * (C2: BE pasti menolak — JANGAN kirim, JANGAN jatuh ke path ESB 404-retry
+ * buta; pushLightItem mem-BLOCKED jujur fail-once), null bila ops tetap ESB
+ * (pathFor yang memutuskan).
  * - sale-create (kind 'order' tanpa op, bentuk buildSalePayload) → create POS
  *   {orderType, items, clientId/displayNo, tableNumber?, customer?}.
  *   Total/diskon/voucher/payments SENGAJA tak dibawa: server menghitung ulang
@@ -363,7 +399,7 @@ function toGoPosRequest(
   kind: SyncKind,
   payload: Record<string, unknown>,
   outboxId?: string,
-): { path: string; body: Record<string, unknown> } | null {
+): { path: string; body: Record<string, unknown> } | { unsupported: string } | null {
   if (kind !== 'order') return null;
   const p = payload as {
     op?: unknown; items?: unknown; mode?: unknown; salesMode?: unknown;
@@ -403,6 +439,17 @@ function toGoPosRequest(
   if (op || !Array.isArray(p.items)) return null;
   const items = goPosItems(p.items);
   if (!items) return null;
+  // C2: routing orderType sadar merchant-type (cache sesi; tak-dikenal =
+  // default restaurant, ASUMSI). UNSUPPORTED = BE pasti menolak → kembalikan
+  // penanda (bukan null) agar tak jatuh ke path ESB.
+  const merchantType = getCachedMerchantType();
+  const orderType = goPosOrderType(p.mode ?? p.salesMode, merchantType);
+  if (orderType === UNSUPPORTED_ORDER_TYPE) {
+    return {
+      unsupported:
+        orderTypeBlockReason(p.mode ?? p.salesMode, merchantType) ?? 'orderType tak didukung',
+    };
+  }
   const cid = String(p.client_id ?? p.clientId ?? '').trim();
   const salesNum = String(p.salesNum ?? '').trim();
   const tableNumber = String(p.tableId ?? '').trim();
@@ -410,7 +457,7 @@ function toGoPosRequest(
   return {
     path: GO_POS_CREATE_PATH,
     body: {
-      orderType: goPosOrderType(p.mode ?? p.salesMode),
+      orderType,
       items,
       // displayNo tanpa clientId DITOLAK backend; clientId dipastikan di
       // pushLightItem (fallback id antrean UUIDv7) sebelum kirim.
@@ -1090,6 +1137,17 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // group-payment dengan identitas server menuju group-bill/payments.
   // null = tanpa padanan backend → path ESB apa adanya (dilaporkan).
   const compat = toGoPosRequest(item.kind, rawPayloadEarly, item.id);
+  // C2: orderType tak didukung merchant-type (BE pasti menolak) — BLOCKED
+  // jujur fail-once pola S10: 'gagal' + catatan SEKALI, siklus berikut
+  // skipped agar hitungan gagal/breaker tak bertambah tiap push. Bukan
+  // 'skipped' langsung: kaki sale lokal tetap kotor (syncDate NULL) + kartu
+  // Sync jujur menampilkan gagal + alasan (butuh tindakan/BE).
+  if (compat && 'unsupported' in compat) {
+    if (item.status === 'gagal') return 'skipped';
+    item.status = 'gagal';
+    item.note = (compat as { unsupported: string }).unsupported;
+    return 'failed';
+  }
   const path = compat ? compat.path : pathFor(item.kind, item.payload);
   if (!path) {
     const p = (item.payload ?? {}) as { op?: unknown; kind?: unknown; type?: unknown };

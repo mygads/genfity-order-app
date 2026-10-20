@@ -36,19 +36,27 @@ function run() {
   ok(!/TAKE_AWAY/.test(fixture),
     'fixture: dummy pull tanpa TAKE_AWAY');
 
-  // C2: goPosOrderType sadar merchant-type + sentinel UNSUPPORTED.
+  // C2: goPosOrderType sadar merchant-type + sentinel UNSUPPORTED diekspor
+  // (tak pernah dikirim ke BE; pushLightItem mem-BLOCKED jujur fail-once).
   ok(/function goPosOrderType\(raw\?: unknown, merchantType\?: unknown\)/.test(sync),
     'sync: goPosOrderType menerima merchantType');
-  ok(/return 'UNSUPPORTED'/.test(sync),
-    'sync: goPosOrderType punya sentinel UNSUPPORTED (BE menolak = BLOCKED jujur)');
+  ok(/export const UNSUPPORTED_ORDER_TYPE = 'UNSUPPORTED'/.test(sync)
+      && /return UNSUPPORTED_ORDER_TYPE/.test(sync),
+    'sync: sentinel UNSUPPORTED diekspor + dipakai (BE menolak = BLOCKED jujur)');
   // C2: DELIVERY PRODUCT tak boleh dilipat ke TAKEAWAY — cabang PRODUCT
   // mengembalikan UNSUPPORTED untuk DELIVERY/agregator (BE menolak = BLOCKED
   // jujur); lipatan ke TAKEAWAY hanya milik RESTAURANT/tak-dikenal.
-  ok(/PRODUCT/.test(sync) && /DELIVER/.test(sync) && /return 'UNSUPPORTED'/.test(sync),
+  ok(/PRODUCT/.test(sync) && /DELIVER/.test(sync) && /return UNSUPPORTED_ORDER_TYPE/.test(sync),
     'sync: jalur DELIVERY PRODUCT terpisah dari lipatan TAKEAWAY');
-  // C2: daftar mode per merchant-type ada (alias pickup eksplisit).
+  // C2: penanda unsupported tak jatuh ke path ESB + fail-once di pushLightItem.
+  ok(/\{ unsupported: string \}/.test(sync) && /'unsupported' in compat/.test(sync),
+    'sync: toGoPosRequest mengembalikan penanda unsupported; pushLightItem BLOCKED fail-once');
+  ok(/sync\.orderTypeUnsupported/.test(readRaw('lib/i18n.ts')),
+    'i18n: kunci catatan BLOCKED orderType ada (ID/EN)');
+  // C2: daftar mode per merchant-type ada (label UI bentuk spasi, sesuai
+  // posModesForMerchant — dinormalisasi ke underscore oleh goPosOrderType).
   const mt = read('lib/merchantType.ts');
-  ok(/IN_STORE_PICKUP/.test(mt) && /HOME_SERVICE/.test(mt) && /IN_STORE_SERVICE/.test(mt),
+  ok(/IN STORE PICKUP/.test(mt) && /HOME SERVICE/.test(mt) && /IN STORE SERVICE/.test(mt),
     'merchantType: daftar mode PRODUCT/SERVICE eksplisit');
   ok(/RESTAURANT/.test(mt) && /fallback|default/i.test(readRaw('lib/merchantType.ts')),
     'merchantType: tak-dikenal default restaurant (ASUMSI terdokumentasi)');

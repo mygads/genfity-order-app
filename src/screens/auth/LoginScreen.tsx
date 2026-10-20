@@ -50,6 +50,7 @@ import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '
 import { requireEscalationAccess } from '../../lib/access';
 import { readMerchantTypeFromLoginBody } from '../../lib/posModes';
 import { syncCurrencyFromProfile } from '../../lib/currency';
+import { syncMerchantTypeFromProfile } from '../../lib/posModes';
 import { syncTimezoneFromProfile } from '../../lib/timezone';
 import { useLang } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
@@ -696,6 +697,10 @@ async function completeOnline(
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
   // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
   try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  // C2 Sesi-C QA3: sekalian segarkan cache merchant-type (RESTAURANT/PRODUCT/
+  // SERVICE → daftar mode kasir + routing orderType; tak ada = default
+  // restaurant, ASUMSI). Fire-and-forget best-effort cermin currency.
+  try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try {
     const pol = payload.policy as Record<string, unknown> | undefined;
@@ -761,6 +766,8 @@ async function completeOffline(
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
   // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
   try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  // C2 Sesi-C QA3: segarkan cache merchant-type (cermin completeOnline).
+  try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
@@ -1013,6 +1020,8 @@ export default function LoginScreen({ navigation }: Props) {
     // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
     // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
     try { void syncCurrencyFromProfile().catch(() => {}); } catch { /* abaikan */ }
+    // C2 Sesi-C QA3: segarkan cache merchant-type (cermin completeOnline).
+    try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
     try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
     // M8: QR/DEV login menerbitkan grant rangkap-tiga via penerbit kanonis yang
     // sama dengan completeOnline (buildSessionGrant + saveSessionGrant).

@@ -17,6 +17,8 @@
  * menghendaki DELIVERY via POS, itu owner-need ke BE (endpoint + field alamat),
  * bukan yang bisa diperbaiki APP. Lihat laporan SESI-C C2.
  */
+import { apiFetch, unwrap } from './apiSource';
+import { initDb, queryFirst, run } from './db';
 
 /** Tipe merchant kanonis BE (CLAUDE.md §5 + orders_pos_create.go:224-250). */
 export type PosMerchantType = 'RESTAURANT' | 'PRODUCT' | 'SERVICE';
@@ -69,6 +71,100 @@ export function isPosModeOffered(rawType: unknown, mode?: unknown): boolean {
  * Bila BE kelak mengirimnya (owner-need C2), binding mempelajarinya tanpa
  * perubahan kode.
  */
+/**
+ * Rantai server-profile (R2 SC-QA3 rekonsiliasi — port SATU hal dari
+ * merchantType.ts sc yang dihapus; TANPA daftar mode sc, TANPA normalisasi
+ * sc — normalisasi = milik main di atas).
+ *
+ * Urutan sumber tipe merchant: profil server → binding E01 (dibaca via
+ * readMerchantTypeFromLoginBody di titik login) → RESTAURANT (default di
+ * normalizeMerchantType). Cache in-memory + persist ms_setting
+ * (key1='Merchant', key2='Type'), cermin lib/currency.ts. Best-effort tanpa
+ * throw; SENGAJA tanpa markDirty (baris milik server/pull).
+ */
+let cachedMerchantType: PosMerchantType = 'RESTAURANT';
+
+/** Baca cache tipe merchant sesi (sinkron agar bisa dipakai render/sync). */
+export function getCachedMerchantType(): PosMerchantType {
+  return cachedMerchantType;
+}
+
+/** Tulis cache eksplisit (normalisasi milik main — gabung alias). */
+export function setCachedMerchantType(raw: unknown): PosMerchantType {
+  cachedMerchantType = normalizeMerchantType(raw);
+  return cachedMerchantType;
+}
+
+/** Kupas field tipe dari payload profil (toleran dua bentuk envelope). */
+function readMerchantTypeFromProfile(data: Record<string, unknown>): string {
+  for (const key of ['merchantType', 'merchant_type', 'type']) {
+    const direct = data[key];
+    if (typeof direct === 'string' && direct.trim()) return direct;
+  }
+  for (const nest of ['merchant', 'branch', 'profile', 'data']) {
+    const inner = data[nest];
+    if (inner && typeof inner === 'object') {
+      const rec = inner as Record<string, unknown>;
+      for (const key of ['merchantType', 'merchant_type', 'type']) {
+        const c = rec[key];
+        if (typeof c === 'string' && c.trim()) return c;
+      }
+    }
+  }
+  return '';
+}
+
+/** Persist cache ke ms_setting(Merchant, Type). */
+async function persistMerchantType(code: PosMerchantType): Promise<void> {
+  await initDb();
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Type', ?, ?)` +
+      ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+    [code, ''],
+  );
+}
+
+/**
+ * Sinkronisasi merchant-type: server dulu, lalu baris lokal, lalu fallback
+ * RESTAURANT. Best-effort tanpa throw (cermin syncCurrencyFromProfile).
+ */
+export async function syncMerchantTypeFromProfile(): Promise<PosMerchantType> {
+  try {
+    const r = await apiFetch('api/merchant/profile', { method: 'GET' });
+    if (r.ok && !r.fromDummy) {
+      const { data } = unwrap<Record<string, unknown>>(r.data);
+      const raw = readMerchantTypeFromProfile(data ?? {});
+      if (raw.trim()) {
+        const code = normalizeMerchantType(raw);
+        try {
+          await persistMerchantType(code);
+        } catch {
+          /* persist gagal: cache tetap di-set */
+        }
+        cachedMerchantType = code;
+        return cachedMerchantType;
+      }
+    }
+  } catch {
+    /* offline / BE belum ada: jatuh ke baris lokal */
+  }
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Type' LIMIT 1`,
+    );
+    const raw = (row?.value1 ?? '').trim();
+    if (raw) {
+      cachedMerchantType = normalizeMerchantType(raw);
+      return cachedMerchantType;
+    }
+  } catch {
+    /* DB gagal: jatuh ke fallback */
+  }
+  cachedMerchantType = 'RESTAURANT';
+  return cachedMerchantType;
+}
+
 export function readMerchantTypeFromLoginBody(body: unknown): string {
   if (!body || typeof body !== 'object') return '';
   const MERCHANT_KEYS = ['merchantType', 'merchant_type', 'merchanttype'];
