@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { getBranchCurrency, initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
+import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { formatCurrency } from '../../theme';import AppButton from '../../components/AppButton';import { DISPLAY_STALE_MS, isBackendConfigured, publishDisplay, refreshDisplayTransport, resolveDisplaySseTerminalId, resolvePairedKasirCode, subscribeDisplay, subscribeLocalSale } from '../../lib/display';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS } from '../../lib/deviceRole';import { useConnectivity } from '../../hooks/useConnectivity';import { onWsMessage, startRealtime, subscribeRealtimeIdle } from '../../lib/realtime';import { subscribeSseFeed, terminalFeedId } from '../../lib/sse';import { getBranchCurrency, initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { useLang,
 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
@@ -36,6 +36,9 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   /** D16: status feed SSE milik view ini (per-feed, bukan agregat modul) —
    * langganan dipasang di efek [uiTick] di bawah agar ikut re-bind. */
   const [sseOk, setSseOk] = useState(false);
+  /** EFF-09: idle realtime pasca-MAX_RETRY dimunculkan ke UI (jangan diam). */
+  const [rtIdle, setRtIdle] = useState(false);
+  useEffect(() => subscribeRealtimeIdle(setRtIdle), []);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
   /** GAP-19: cermin jam live untuk poll fallback (ref agar closure interval tak basi). */
   const liveAtRef = useRef<number | null>(null);
@@ -377,6 +380,10 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       ) : null}
       {showStaleBanner ? (
         <Text style={styles.staleText}>{staleAgeLabel ? `${t('disp_stale')} · ${staleAgeLabel}` : t('disp_stale')}</Text>
+      ) : null}
+      {/* EFF-09: idle realtime (hemat baterai pasca-retry) terlihat di UI. */}
+      {rtIdle ? (
+        <Text style={styles.staleText}>{t('rt_idle')}</Text>
       ) : null}
       {/* Q3 ORPHAN-DISPLAY-JADI-PROMO: promo dominan saat unpaired (mode order tak punya blok promo). */}
       {isUnpairedView && promo ? (

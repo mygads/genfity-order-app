@@ -67,6 +67,43 @@ export function subscribeWsStatus(cb: (connected: boolean) => void): () => void 
   };
 }
 
+// EFF-09: idle pasca-MAX_RETRY dimunculkan ke UI (jangan diam) — channel
+// berhenti dial (hemat baterai); layar menampilkan penanda via langganan ini.
+const idleListeners = new Set<(idle: boolean) => void>();
+
+/** True bila ada channel yang idle karena mencapai MAX_RETRY. */
+export function isRealtimeIdle(): boolean {
+  try {
+    return channels.some((ch) => ch.retry >= MAX_RETRY && !ch.ws && !ch.timer);
+  } catch {
+    return false;
+  }
+}
+
+/** Langganan status idle realtime (dipanggil segera dengan status kini). */
+export function subscribeRealtimeIdle(cb: (idle: boolean) => void): () => void {
+  idleListeners.add(cb);
+  try {
+    cb(isRealtimeIdle());
+  } catch {
+    /* abaikan */
+  }
+  return () => {
+    idleListeners.delete(cb);
+  };
+}
+
+function emitRealtimeIdle(): void {
+  const idle = isRealtimeIdle();
+  idleListeners.forEach((cb) => {
+    try {
+      cb(idle);
+    } catch {
+      /* abaikan */
+    }
+  });
+}
+
 function notifyWsStatus(): void {
   const connected = getWsConnected();
   statusListeners.forEach((cb) => {
@@ -287,6 +324,7 @@ function openSocket(ch: Channel, url: string): void {
     // (master sudah ditarik alur login/boot).
     const reconnected = ch.retry > 0;
     ch.retry = 0;
+    emitRealtimeIdle();
     if (reconnected) {
       try {
         noteReconnect();
@@ -373,12 +411,16 @@ function schedule(ch: Channel): void {
   if (ch.timer) return;
   // R48: idle setelah MAX_RETRY — berhenti dial sampai startRealtime /
   // foreground membangunkan lagi (hemat baterai, bukan retry selamanya).
-  if (ch.retry >= MAX_RETRY) return;
+  if (ch.retry >= MAX_RETRY) {
+    emitRealtimeIdle();
+    return;
+  }
   ch.retry += 1;
   ch.timer = setTimeout(() => {
     ch.timer = null;
     connect(ch);
   }, backoff(ch.retry));
+  emitRealtimeIdle();
 }
 
 /** Nyalakan kedua channel. Panggil sekali setelah login. */
@@ -388,6 +430,7 @@ export function startRealtime(): void {
     ch.retry = 0;
     connect(ch);
   });
+  emitRealtimeIdle();
 }
 
 // R48: foreground membangunkan channel yang idle karena max-retry.
@@ -420,4 +463,5 @@ export function stopRealtime(): void {
     ch.retry = 0;
   });
   notifyWsStatus();
+  emitRealtimeIdle();
 }

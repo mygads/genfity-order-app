@@ -1755,8 +1755,26 @@ export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): 
       try {
         if (getServerEnv() !== 'custom') return;
         if (!(await wifiOk(wifiOnly))) return;
-        // Tanpa gate pendingCount: antrean fisik (tr_esoprocessqueue) hanya
-        // terlihat di dalam pushAll, bukan di outbox ringan.
+        // EFF-09 gate: tanpa antrean pending = lewati pushAll (hemat
+        // baterai/radio). Antrean ringan via pendingCount; antrean fisik
+        // (tr_esoprocessqueue) via COUNT — keduanya nol = diam.
+        try {
+          if (pendingCount() === 0) {
+            let physical = 1;
+            try {
+              await initDb();
+              const r = await queryFirst<{ n: number }>(
+                `SELECT COUNT(*) AS n FROM tr_esoprocessqueue WHERE status = 'antre'`,
+              );
+              physical = Number(r?.n) || 0;
+            } catch {
+              physical = 1; // DB belum siap — anggap ada agar tak menahan sync
+            }
+            if (physical === 0) return;
+          }
+        } catch {
+          /* gate best-effort — lanjut pushAll */
+        }
         await pushAll();
       } catch {
         /* diam: coba lagi interval berikut */

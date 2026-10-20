@@ -1585,6 +1585,7 @@ const STR: Record<string, Entry> = {
   queue_empty: { id: 'Belum ada antrean', en: 'No queue yet' },
   disp_offline_banner: { id: 'Offline,menunggu koneksi server', en: 'Offline,waiting for server connection' },
   disp_stale: { id: 'Data basi', en: 'Stale data' },
+  rt_idle: { id: 'Realtime idle (hemat baterai) — data mungkin basi', en: 'Realtime idle (battery saver) — data may be stale' },
   disp_qr_offline: { id: 'QR tersedia saat online', en: 'QR available when online' },
 
   // ---- REAUDIT-2: bill / tables / move / booking ----
