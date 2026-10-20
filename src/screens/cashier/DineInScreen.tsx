@@ -6,6 +6,8 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { posModesFor } from '../../lib/posModes';
+import { getBinding } from '../../session';
 import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
 
@@ -47,13 +49,15 @@ function sectionOf(no: string): string {
   }
   return 'Dalam';
 }
-const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
-
 /** Dine In - pilih section + meja, pax, nama tamu, ringkasan bill, Simpan/Cetak/Bayar. */
 export default function DineInScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  /** C2: daftar mode per merchant-type dari binding (layar ini alur meja-resto;
+   * tipe PRODUCT/SERVICE tak menavigasi ke sini karena kasir tak menawarkan
+   * DINE IN untuknya). Dihitung per render agar re-bind tercermin. */
+  const MODES = posModesFor(getBinding()?.merchantType);
   const initTable = (() => {
     const raw = route?.params?.table ?? 'A3';
     const code = canonTableNo(raw);

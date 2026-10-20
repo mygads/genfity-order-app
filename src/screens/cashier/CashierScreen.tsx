@@ -26,6 +26,7 @@ import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { posModesFor } from '../../lib/posModes';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
@@ -99,8 +100,6 @@ const PRODUCTS: Product[] = [
   { id: 'p14', name: 'Spaghetti Bolognese', price: 35000, category: 'Pasta', tags: ['Spaghetti'] },
   { id: 'p15', name: 'Puding Coklat', price: 12000, category: 'Dessert', tags: ['Puding'] },
 ];
-
-const MODES = ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'];
 
 /** M9: cabang aktif = terminal yang diklaim; '' = unbound (fail-closed — tanpa
  * fallback diam-diam 'B001'; query di bawah + banner unbound menanganinya). */
@@ -190,7 +189,15 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
-  const [mode, setMode] = useState('DINE IN');
+  /** C2: daftar mode per merchant-type dari binding (RESTAURANT default bila
+   * tak diketahui — [ASUMSI] koordinator). Dihitung per render (murah, murni)
+   * agar re-bind lintas-tipe langsung tercermin tanpa restart. */
+  const MODES = posModesFor(getBinding()?.merchantType);
+  const [mode, setMode] = useState(() => {
+    const init = String(route?.params?.mode ?? '').trim();
+    if (init && MODES.includes(init)) return init;
+    return MODES[0] ?? 'DINE IN';
+  });
   const [showModes, setShowModes] = useState(false);
   const catScrollRef = useRef<ScrollView>(null);
   /** Posisi x tiap chip kategori (phone) - untuk scroll chip aktif ke view saat diketuk. */

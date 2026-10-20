@@ -47,6 +47,7 @@ import { queryFirst } from '../../lib/db';
 import { isSeedReady, whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
+import { readMerchantTypeFromLoginBody } from '../../lib/posModes';
 import { syncCurrencyFromProfile } from '../../lib/currency';
 import { syncTimezoneFromProfile } from '../../lib/timezone';
 import { useLang } from '../../lib/i18n';
@@ -1313,6 +1314,9 @@ export default function LoginScreen({ navigation }: Props) {
               // bName segar — jangan biarkan fallback adopt mewarisi prev
               // lintas-cabang. Pola sama seperti Install/TerminalPinScreen.
               merchantName: bName,
+              // C2: tipe merchant dari body E01 (forward-compat; BE 2026-10-20
+              // belum mengirim → '' → adopt pertahankan prev/default).
+              merchantType: readMerchantTypeFromLoginBody(second.body) || undefined,
               tag: str(pTerm.tag) || term.tag,
               deviceId: data.deviceId,
             });

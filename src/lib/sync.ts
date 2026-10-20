@@ -259,15 +259,28 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 const GO_POS_CREATE_PATH = 'api/merchant/orders/pos';
 
 /**
- * Petakan mode kasir → enum orderType Go yang ketat (DINE_IN / TAKEAWAY /
- * IN_STORE_ORDER / IN_STORE_SERVICE). TAKE_AWAY (underscore) dan DELIVERY /
- * agregator tak dikenal backend → TAKEAWAY terdekat; default DINE_IN.
+ * Petakan mode kasir → enum orderType Go yang ketat.
+ * Matriks POS-create BE — orders_pos_create.go:196 (gate umum) + :224-250
+ * (gate per tipe): RESTAURANT = DINE_IN|TAKEAWAY, PRODUCT =
+ * IN_STORE_ORDER|TAKEAWAY, SERVICE = IN_STORE_SERVICE.
+ * Collapse TERDOKUMENTASI (bukan diam-diam):
+ * - TAKE_AWAY (underscore warisan payload lama) → TAKEAWAY (C1 kanonis).
+ * - IN_STORE_PICKUP → IN_STORE_ORDER (kanal POS terdekat; BE POS create
+ *   menolak literal IN_STORE_PICKUP).
+ * - DELIVERY + agregator (GOFOOD/GRABFOOD/SHOPEEFOOD/ONLINE) → TAKEAWAY
+ *   (kurir-bawa-pulang; BE POS create menolak DELIVERY).
+ * - HOME_SERVICE / SERVICE → IN_STORE_SERVICE (satu-satunya kanal POS SERVICE).
+ * - Default DINE_IN = [ASUMSI] restaurant-default bila tipe tak diketahui.
+ * Penolakan BE atas orderType hasil mapping DITANDAI BLOCKED jujur (pola S10
+ * sync.ts:1073-1080), bukan diganti diam-diam.
  */
 function goPosOrderType(raw?: unknown): string {
   const k = String(raw ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
   if (k === 'DINE_IN') return 'DINE_IN';
   if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
   if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_SERVICE') return k;
+  if (k === 'IN_STORE_PICKUP') return 'IN_STORE_ORDER';
+  if (k === 'HOME_SERVICE' || k === 'SERVICE') return 'IN_STORE_SERVICE';
   if (/DELIVER|ANTAR|KURIR|OJEK|GOFOOD|GRABFOOD|SHOPEEFOOD|ONLINE/.test(k)) return 'TAKEAWAY';
   return 'DINE_IN';
 }

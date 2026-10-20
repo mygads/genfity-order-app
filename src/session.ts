@@ -10,6 +10,7 @@ import {
 } from './lib/deviceRole';
 import { hashPin, verifyPinHash } from './lib/pin';
 import type { PinRecord } from './lib/pin';
+import { normalizeMerchantType } from './lib/posModes';
 
 export interface Session {
   name: string;
@@ -65,6 +66,13 @@ export interface Binding {
    * Opsional; diderivasi dari branchName saat disimpan (saveBinding/adopt).
    * Jangan dipakai sebagai kunci/otorisasi. */
   merchantName?: string;
+  /** C2 (SESI-C): tipe merchant untuk daftar mode kasir (RESTAURANT default
+   * bila tak diketahui — [ASUMSI] koordinator; penolakan BE ditandai BLOCKED
+   * jujur). Diderivasi dari body E01 bila BE mengirim merchantType
+   * (readMerchantTypeFromLoginBody; FAKTA 2026-10-20: BE belum mengirim →
+   * default), dipertahankan lintas re-bind terminal yang sama. BUKAN
+   * otorisasi — gate izin tetap milik access.ts + server. */
+  merchantType?: string;
   /** Satu dari 5 tag kanonis, disimpan lowercase (kasir|dapur|view_pelanggan|view_queue|full_access). */
   tag: string;
   /** Untuk tag view_pelanggan: terminal kasir pasangan (aturan 1:1, BE E15). */
@@ -210,6 +218,8 @@ function isBindingLike(v: unknown): v is Binding {
     typeof b['branchName'] === 'string' &&
     // Q1: merchantName opsional (binding lama tanpa kunci ini tetap valid).
     (b['merchantName'] === undefined || typeof b['merchantName'] === 'string') &&
+    // C2: merchantType opsional (binding lama tanpa kunci ini tetap valid).
+    (b['merchantType'] === undefined || typeof b['merchantType'] === 'string') &&
     typeof b['tag'] === 'string' &&
     typeof b['boundAt'] === 'string'
   );
@@ -257,6 +267,8 @@ export function saveBinding(b: Binding): Binding {
     branchName: b.branchName,
     // Q1: materialisasi cermin display — simpanan selalu ada string.
     merchantName: (b.merchantName ?? b.branchName ?? '').trim(),
+    // C2: materialisasi tipe (default RESTAURANT = [ASUMSI] koordinator).
+    merchantType: normalizeMerchantType(b.merchantType),
     // Kanon SPEC §11.1: tag simpanan SELALU satu dari 5 nilai —
     // resolveTerminalTag memaksa explicit default 'full_access' untuk
     // string asing/kosong (tanpa '' diam-diam yang merusak DrawerMenu dkk).
@@ -291,6 +303,8 @@ export interface AdoptTerminalBindingInput {
   tag: string;
   deviceId: string;
   merchantName?: string;
+  /** C2: tipe merchant dari body E01 ('' = tak diketahui → default saat baca). */
+  merchantType?: string;
 }
 
 /**
@@ -337,6 +351,9 @@ export function adoptTerminalBinding(
     branchId,
     branchName,
     merchantName,
+    // C2: input E01 > binding lama > default RESTAURANT (di saveBinding).
+    // BUKAN otorisasi — hanya daftar mode kasir.
+    merchantType: normalizeMerchantType(input?.merchantType ?? prev?.merchantType),
     tag,
     // Pairing 1:1 (BE E15) dipertahankan hanya bila terminalnya sama.
     ...(prev && prev.terminalId === terminalId && prev.pairedKasirId
