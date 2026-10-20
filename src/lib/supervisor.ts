@@ -226,9 +226,26 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     return fail('invalid', tOf('sup_invalid'));
   }
   try {
-    // Lewat apiFetch (bukan apiPost langsung): Dummy Mode dilayani fixture
-    // lokal tanpa PIN keluar perangkat; Real Mode ke server sendiri.
-    const r = await apiFetch(ApiPath.supervisorApprove, { body: { pin: clean } });
+    // GAP-5: timeout eksplisit via AbortController (pola callStaffLogin
+    // LoginScreen:266) — BE macet tak boleh menggantung UI void/eskalasi
+    // selamanya. 15 dtk selaras endpoint auth; AbortError jatuh ke offline
+    // jujur di catch bawah (tanpa bakar attempt).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      try {
+        ctrl.abort();
+      } catch {
+        /* abaikan */
+      }
+    }, 15_000);
+    let r: Awaited<ReturnType<typeof apiFetch>>;
+    try {
+      // Lewat apiFetch (bukan apiPost langsung): Dummy Mode dilayani fixture
+      // lokal tanpa PIN keluar perangkat; Real Mode ke server sendiri.
+      r = await apiFetch(ApiPath.supervisorApprove, { body: { pin: clean }, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (r.fromDummy && getApiMode() === 'real') {
       // R35: jaringan gagal lalu jatuh ke dummy = offline — fail-closed jujur
       // TANPA membakar attempt (klasifikasi sebelum penghitungan).

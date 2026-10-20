@@ -697,7 +697,9 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
     for (const [k, v] of Object.entries(body)) {
       if (!k.startsWith('_')) wireBody[k] = v;
     }
-    const res = await apiPost(
+    // GAP-1: timeout abort eksplisit agar drain fisik tak gantung (lihat
+    // apiPostWithTimeout di bawah — hoisted, aman dipakai di sini).
+    const res = await apiPostWithTimeout(
       path,
       { ...wireBody, table, rowId: row.orderID, op: row.op, clientId: physCid, ...identityFields(physCid) },
       { idempotencyKey: physCid },
@@ -822,6 +824,34 @@ export function withTimeout<T>(promise: Promise<T>, ms = IMMEDIATE_TIMEOUT_MS): 
       setTimeout(() => reject(new Error('timeout')), limit);
     }),
   ]);
+}
+
+/**
+ * GAP-1: POST antrean dengan timeout abort eksplisit (pola callStaffLogin
+ * LoginScreen:266) — apiPost tanpa signal bisa gantung selamanya di
+ * SYN-blackhole; di sini fetch benar-benar di-abort agar drain tak macet.
+ * Timeout default IMMEDIATE_TIMEOUT_MS (8 dtk) selaras postImmediate.
+ * AbortError dilempar ke pemanggil (push* memetakan ke 'failed' jujur).
+ */
+async function apiPostWithTimeout(
+  path: string,
+  body: Record<string, unknown>,
+  opts: { idempotencyKey: string },
+  ms = IMMEDIATE_TIMEOUT_MS,
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try {
+      ctrl.abort();
+    } catch {
+      /* abaikan */
+    }
+  }, Math.max(1000, Math.floor(ms)));
+  try {
+    return await apiPost(path, body, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1079,7 +1109,8 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
       ((item.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '',
     ).trim();
     let sendBody = body;
-    let res = await apiPost(
+    // GAP-1: timeout abort eksplisit (cermin pushPhysicalRow di atas).
+    let res = await apiPostWithTimeout(
       path,
       sendBody,
       { idempotencyKey: item.id },
@@ -1133,7 +1164,8 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'skipp
       reissues += 1;
       sendBody = { ...sendBody, displayNo: fresh };
       if ('salesNum' in sendBody) sendBody = { ...sendBody, salesNum: fresh };
-      res = await apiPost(
+      // GAP-1: retry re-issue ikut timeout yang sama (bukan tanpa batas).
+      res = await apiPostWithTimeout(
         path,
         sendBody,
         { idempotencyKey: item.id },

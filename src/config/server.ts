@@ -371,7 +371,7 @@ function needsSessionBearer(path: string): boolean {
 export async function apiGet(
   path: string,
   params?: Record<string, string | number>,
-  opts?: { token?: string; idempotencyKey?: string },
+  opts?: { token?: string; idempotencyKey?: string; signal?: AbortSignal },
 ): Promise<Response> {
   const t = getTerminal();
   const q = new URLSearchParams({
@@ -391,7 +391,11 @@ export async function apiGet(
       ? resolveSessionToken()
       : '';
   if (getToken) headers['Authorization'] = `Bearer ${getToken}`;
-  return fetch(url, { headers });
+  return fetch(url, {
+    headers,
+    // GAP-1/5: teruskan sinyal abort (timeout per-attempt / pembatalan user).
+    ...(opts?.signal ? { signal: opts.signal } : {}),
+  });
 }
 
 export async function apiPost(
@@ -429,7 +433,7 @@ export async function apiPost(
  */
 export async function apiDelete(
   path: string,
-  opts?: { idempotencyKey?: string; token?: string },
+  opts?: { idempotencyKey?: string; token?: string; signal?: AbortSignal },
 ): Promise<Response> {
   const t = getTerminal();
   const headers: Record<string, string> = {};
@@ -445,6 +449,7 @@ export async function apiDelete(
   return fetch(apiUrl(path), {
     method: 'DELETE',
     headers,
+    ...(opts?.signal ? { signal: opts.signal } : {}),
   });
 }
 
@@ -456,7 +461,7 @@ export async function apiDelete(
 export async function apiPatch(
   path: string,
   body: unknown,
-  opts?: { idempotencyKey?: string; token?: string },
+  opts?: { idempotencyKey?: string; token?: string; signal?: AbortSignal },
 ): Promise<Response> {
   const t = getTerminal();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -473,6 +478,7 @@ export async function apiPatch(
     method: 'PATCH',
     headers,
     body: JSON.stringify(body),
+    ...(opts?.signal ? { signal: opts.signal } : {}),
   });
 }
 

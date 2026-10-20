@@ -88,6 +88,9 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   // APP-SHIFT 2026-10-17 (titip-absen CONFIRMED-1): baris + payload diikat ke
   // userId pemilik PIN terverifikasi (argumen), BUKAN nama sesi.
   /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out', verifiedUserId: string, verifiedName: string) => { const nowIso = new Date().toISOString(); const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, verifiedUserId, verifiedName, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [verifiedUserId, verifiedName], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', userId: verifiedUserId, user: verifiedName, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
+    // GAP-4: guard ganda ala changePin — ketuk ganda saat verifikasi async
+    // berjalan ditolak (tombol juga disabled via busy).
+    if (busy) return;
     if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
@@ -97,6 +100,8 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   } finally { setBusy(false); } };
 
   const clockOut = async () => {
+    // GAP-4: guard ganda ala changePin (cermin clockIn di atas).
+    if (busy) return;
     if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
     setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.

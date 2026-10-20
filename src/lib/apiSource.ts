@@ -103,6 +103,9 @@ export interface FetchOpts {
   body?: unknown;
   idempotencyKey?: string;
   token?: string;
+  /** S4-APP-313/GAP-1/5: sinyal abort pemanggil (timeout per-attempt /
+   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch. */
+  signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,20 +278,23 @@ export async function apiFetch<T = unknown>(
     try {
       const res =
         method === 'GET'
-          ? await apiGet(path, opts?.params, { token: opts?.token, idempotencyKey: opts?.idempotencyKey })
+          ? await apiGet(path, opts?.params, { token: opts?.token, idempotencyKey: opts?.idempotencyKey, signal: opts?.signal })
           : method === 'DELETE'
             ? await apiDelete(path, {
                 idempotencyKey: opts?.idempotencyKey,
                 token: opts?.token,
+                signal: opts?.signal,
               })
             : method === 'PATCH'
               ? await apiPatch(path, opts?.body ?? {}, {
                   idempotencyKey: opts?.idempotencyKey,
                   token: opts?.token,
+                  signal: opts?.signal,
                 })
               : await apiPost(path, opts?.body ?? {}, {
                   idempotencyKey: opts?.idempotencyKey,
                   token: opts?.token,
+                  signal: opts?.signal,
                 });
       const body = (await res.json()) as T;
       if (!res.ok) {
