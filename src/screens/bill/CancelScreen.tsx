@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong. */
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong. */
 async function loadHeadAdj(salesNum: string): Promise<{ discount: number; service: number; tax: number }> {
   try {
     await initDb();
@@ -360,8 +360,8 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   const REASONS = [t('cx_reason_1'), t('cx_reason_2'), t('cx_reason_3'), t('cx_reason_4')];
   const [reason, setReason] = useState(REASONS[0]);
   const [note, setNote] = useState('');
-  const [pin, setPin] = useState('');
-  const [authMsg, setAuthMsg] = useState(''); const [confirming, setConfirming] = useState(false); const [done, setDone] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [authMsg, setAuthMsg] = useState(''); const [done, setDone] = useState(false);
 
   const step = (id: string, delta: number, max: number) => setVoidQty((q) => { const next = Math.min(max, Math.max(0, (q[id] ?? 0) + delta)); return { ...q, [id]: next }; }); const picked = items.filter((i) => (voidQty[i.id] ?? 0) > 0); const voidTotal = picked.reduce((s, i) => s + i.price * (voidQty[i.id] ?? 0), 0);
   /** Total live (jumlah item) bila pemanggil tak mengirim total; tanpa mock. */
@@ -377,22 +377,24 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
 
   // PIN eskalasi 4-6 digit: seed uji 4 digit (1111/2222/1234) lolos ke
   // authorizeSupervisor (server tetap menuntut 6) + fallback lokal.
-  const canConfirm = picked.length > 0 && pin.replace(/\D/g, '').length >= 4 && !confirming; /** * Konfirmasi void: otorisasi supervisor via server, fallback eskalasi * lokal saat offline (fail-closed untuk PIN salah/tanpa hak); lalu * simpan via outbox + antrean sync. */ const confirm = () => {
-   if (!canConfirm) return; setConfirming(true); setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.cancel').then((gate) => {
-        // Gate RBAC order.cancel: deny = eskalasi ke PIN supervisor di bawah
-        // (bukan hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
+  const canConfirm = picked.length > 0; /** S7: tombol ini hanya gate RBAC +
+   * buka dialog persetujuan supervisor V1 (kontrak BE baru, legacy NOL);
+   * persistVoid jalan di approveVoid (dipanggil dialog saat disetujui). */
+  const confirm = () => {
+   if (!canConfirm) return; setAuthMsg(''); void requireAccess(getSession()?.userId || getSession()?.username || '', 'order.cancel').then((gate) => {
+        // Gate RBAC order.cancel: deny = eskalasi ke dialog di bawah (bukan
+        // hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
         if (!gate.ok) setAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
-        return authorizeSupervisor(pin); }).then((res) => {
-        // Offline-first: server tak terjangkau -> cocokkan PIN lokal milik
-        // pemegang hak order.cancel (owner); PIN staf/salah tetap ditolak.
-        if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
-          return verifyLocalEscalation(pin, 'order.cancel');
-        }
-        return res; }).then((res) => { if (!res.ok) {
-        // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
-        setAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setConfirming(false); return;
-   } const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason, (res as { userId?: string }).userId).finally(() => { setConfirming(false); setDone(true);
- }); }); };
+        setApproveOpen(true); }).catch(() => {
+        // Gate-throw: dialog tetap dibuka (pola guardVoidOpen) — persetujuan
+        // server otoritatif, fallback lokal dialog fail-closed sendiri.
+        setApproveOpen(true); }); };
+  /** Persetujuan V1 ok (approvalId server / userId lokal) → simpan void via
+   * outbox + antrean sync. */
+  const approveVoid = (res: { supervisorUserId: string }) => {
+   setApproveOpen(false);
+   const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason, res.supervisorUserId || undefined).finally(() => { setDone(true);
+ }); };
 
   /** Empty-state: DB nol-baris / tanpa orderId — tanpa ITEMS/SPLITS/TRX-047 mock.
    * Teks netral ID/EN (tanpa kunci i18n baru), gaya teks empty yang sudah ada. */
@@ -429,7 +431,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         </TouchableOpacity>
       ))}
       <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
-      <AppInput label={t('cx_pin')} value={pin} onChangeText={(txt) => { setPin(txt.replace(/\D/g, '').slice(0, 6)); setAuthMsg(''); }} placeholder={t('cx_pin_ph')} keyboardType="numeric" maxLength={6} secureTextEntry />
+      {/* S7: PIN + identitas supervisor pindah ke SupervisorApprovalDialog. */}
 
       {authMsg ? <Text style={styles.authErr}>{authMsg}</Text> : null}
       </View>
@@ -447,8 +449,17 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
 
       <View style={styles.actions}>
         <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.goBack()} fullWidth={false} size="md" style={styles.actionBtn} />
-        <AppButton title={confirming ? '...' : `${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} size="md" style={styles.actionBtn} />
+        <AppButton title={`${t('cx_yes_void')} ›`} variant="danger" disabled={!canConfirm} onPress={confirm} fullWidth={false} size="md" style={styles.actionBtn} />
       </View>
+      <SupervisorApprovalDialog
+        visible={approveOpen}
+        action="cancel"
+        refId={orderId}
+        reasonPreset={note ? `${reason} — ${note}` : reason}
+        fallbackAccessKey="order.cancel"
+        onApproved={(r) => approveVoid(r)}
+        onCancel={() => setApproveOpen(false)}
+      />
       {done && <Text style={styles.done}>{t('cx_done')}</Text>}{done && (
       <AppButton title={t('cx_void_print')} onPress={printVoid} size="md" /> )}<TouchableOpacity onPress={() => navigation?.navigate('History')}>
         <Text style={styles.link}>{t('cx_history')}</Text>

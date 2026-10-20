@@ -9,7 +9,7 @@
  * Pesan lewat kamus i18n (tOf) agar ikut bahasa aktif; kode hasil
  * (AuthResult.code) dipakai layar untuk memilih pesan via t().
  */
-import { ApiPath, getBaseUrl } from '../config/server';
+import { ApiPath, getBaseUrl, getTerminal } from '../config/server';
 import { apiFetch, getApiMode, unwrap } from './apiSource';
 import { requireEscalationAccess } from './access';
 import { verifyAttendancePin } from './pin';
@@ -262,6 +262,183 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     // R40: jalur server membiarkan userId/role null — pemanggil fallback ke
     // user sesi (JANGAN edit pemanggil).
     return { ok: true, code: 'ok', message: tOf('sup_ok') };
+  } catch {
+    // R35: network error tak membakar attempt — hasil offline jujur.
+    return { ok: false, code: 'offline', message: tOf('sup_offline') };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// S7 (PP-001/PP-016): otorisasi supervisor via kontrak BE BARU
+// POST /api/v1/terminals/{id}/supervisor-approve {supervisorUserId,
+// supervisorPin, action, refId, reason} (BE router.go:1119,
+// supervisor_approve.go). PENGGANTI legacy authorizeSupervisor {pin} untuk
+// alur void/eskalasi/compliment — legacy DINYATAKAN MATI di Real mode (404,
+// kontrak API-CONTRACT §4.4) dan NOL dipakai alur-alur tersebut; shift screens
+// tetap legacy (E29 territory, follow-up eksplisit, bukan urusan S7).
+//
+// Perbedaan vs legacy: identitas supervisor EKSPLISIT (userId numerik BE —
+// APP tak punya roster staf, E18 MISSING-BE, jadi UI memakai input ID numerik
+// eksplisit; follow-up owner: endpoint roster) + aksi/refId/alasan tercatat
+// append-only di pos_supervisor_approvals. Supervisor = OWNER atau grant
+// supervisor_override; self-approval direkam BE apa adanya.
+//
+// Throttle 5x/60 dtk + klasifikasi offline-sebelum-hitung (R35) + PIN
+// full-string tanpa slice (R38) + abort 15 dtk (GAP-5) dipertahankan sama
+// dengan legacy. Kegagalan bentuk-formulir (userId/aksi/refId/alasan)
+// TIDAK membakar attempt — itu kesalahan isi, bukan tebakan PIN; hanya
+// PIN-shape salah (M1) dan penolakan server yang membakar.
+// ---------------------------------------------------------------------------
+
+/** Batas kontrak BE (supervisor_approve.go:179-193): action 1..64, refId ≤128, reason 1..500. */
+export const SUPERVISOR_V1_LIMITS = { actionMin: 1, actionMax: 64, refIdMax: 128, reasonMin: 1, reasonMax: 500 } as const;
+
+export interface SupervisorV1Input {
+  /** ID numerik BE terminal untuk path /terminals/{id} (bukan terminalCode). */
+  terminalId: string;
+  /** ID numerik BE supervisor (merchant_users) — input eksplisit di UI. */
+  supervisorUserId: number;
+  /** PIN workforce milik supervisor (bukan PIN kasir yang login). */
+  supervisorPin: string;
+  /** Aksi bebas 1..64 char (preset UI: void|cancel|compliment|refund|...). */
+  action: string;
+  /** Referensi bebas ≤128 char (cth. order id); boleh kosong. */
+  refId?: string;
+  /** Alasan WAJIB 1..500 char — tercatat di audit BE. */
+  reason: string;
+}
+
+export interface SupervisorV1Result extends AuthResult {
+  /** ID baris pos_supervisor_approvals (string angka; undefined = jalur lokal). */
+  approvalId?: string;
+  /** Waktu persetujuan ISO dari BE (undefined = jalur lokal). */
+  approvedAt?: string;
+}
+
+/** ID numerik BE terminal yang ter-bound (cermin session → server store, S7).
+ * '' = belum ada (binding lama / belum bind) → dialog wajib minta isi manual. */
+export function getBoundSupervisorTerminalId(): string {
+  try {
+    return String(getTerminal().terminalIdBe ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Baca kode error envelope BE {success:false, error:CODE, message} (response.go:33). */
+function v1ErrorOf(body: unknown): { code: string; message: string } {
+  try {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const code = typeof b.error === 'string' ? b.error : '';
+    const message = typeof b.message === 'string' ? b.message : '';
+    return { code, message };
+  } catch {
+    return { code: '', message: '' };
+  }
+}
+
+export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<SupervisorV1Result> {
+  await hydrateThrottle();
+  if (lockedUntil !== 0 && !isLocked()) {
+    attempts = 0;
+    lockedUntil = 0;
+    persistThrottle();
+  }
+  if (isLocked()) return locked();
+  // R39 (paritas legacy): tanpa base URL / mode local → unconfigured AWAL,
+  // tanpa bakar attempt. Pemanggil lanjut ke verifyLocalEscalation.
+  if (getApiMode() === 'local' || !getBaseUrl()) {
+    return { ok: false, code: 'unconfigured', message: tOf('sup_unconfigured') };
+  }
+  // Validasi bentuk-formulir: TANPA fail() (tanpa bakar attempt).
+  const badField = tOf('sup_v1_badfield');
+  const terminalId = String(input?.terminalId ?? '').trim();
+  if (!terminalId) {
+    return { ok: false, code: 'denied', message: tOf('terminal_unbound_hint') };
+  }
+  const supervisorUserId = input?.supervisorUserId;
+  if (!Number.isInteger(supervisorUserId) || (supervisorUserId as number) <= 0) {
+    return { ok: false, code: 'invalid', message: badField };
+  }
+  const action = String(input?.action ?? '').trim();
+  if (action.length < SUPERVISOR_V1_LIMITS.actionMin || action.length > SUPERVISOR_V1_LIMITS.actionMax) {
+    return { ok: false, code: 'invalid', message: badField };
+  }
+  const refId = String(input?.refId ?? '').trim();
+  if (refId.length > SUPERVISOR_V1_LIMITS.refIdMax) {
+    return { ok: false, code: 'invalid', message: badField };
+  }
+  const reason = String(input?.reason ?? '').trim();
+  if (reason.length < SUPERVISOR_V1_LIMITS.reasonMin || reason.length > SUPERVISOR_V1_LIMITS.reasonMax) {
+    return { ok: false, code: 'invalid', message: badField };
+  }
+  // R38: PIN full-string 4-6 digit; M1: shape salah ikut dihitung (burn).
+  const clean = String(input?.supervisorPin ?? '').replace(/[^0-9]/g, '');
+  if (!clean || clean.length < 4 || clean.length > 6) {
+    return fail('invalid', tOf('sup_invalid'));
+  }
+  try {
+    // GAP-5: abort 15 dtk selaras endpoint auth; AbortError → offline jujur.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      try {
+        ctrl.abort();
+      } catch {
+        /* abaikan */
+      }
+    }, 15_000);
+    let r: Awaited<ReturnType<typeof apiFetch>>;
+    try {
+      const path = ApiPath.supervisorApproveV1.replace('{id}', encodeURIComponent(terminalId));
+      r = await apiFetch(path, {
+        body: { supervisorUserId, supervisorPin: clean, action, refId, reason },
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (r.fromDummy && getApiMode() === 'real') {
+      // R35: jatuh ke dummy = offline — fail-closed jujur tanpa bakar attempt.
+      return { ok: false, code: 'offline', message: tOf('sup_offline') };
+    }
+    const { success, data } = unwrap<Record<string, unknown>>(r.data);
+    if (r.ok && success) {
+      const approvalId = String((data as Record<string, unknown>)?.approvalId ?? '').trim();
+      const approvedAt = String((data as Record<string, unknown>)?.approvedAt ?? '').trim();
+      if (approvalId) {
+        attempts = 0;
+        lockedUntil = 0;
+        persistThrottle();
+        return {
+          ok: true,
+          code: 'ok',
+          message: tOf('sup_ok'),
+          userId: String(supervisorUserId),
+          ...(approvalId ? { approvalId } : {}),
+          ...(approvedAt ? { approvedAt } : {}),
+        };
+      }
+      // 200 tanpa approvalId = respons tak dikenal → tolak + bakar (deny).
+      return fail('denied', tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1)));
+    }
+    // Gagal: petakan kode BE (supervisor_approve.go:221-237) ke throttle lokal.
+    const { code, message } = v1ErrorOf(r.data);
+    if (code === 'SUPERVISOR_PIN_INVALID') {
+      return fail('invalid', tOf('sup_invalid'));
+    }
+    if (code === 'SUPERVISOR_PIN_LOCKED' || r.status === 423 || r.status === 429) {
+      // Kunci sisi server (E29 5x/5 mnt) → kunci lokal juga agar tak spam.
+      attempts = MAX_ATTEMPTS;
+      lockedUntil = Date.now() + LOCK_MS;
+      persistThrottle();
+      return locked();
+    }
+    if (code === 'VALIDATION_ERROR') {
+      // Bentuk ditolak server — kesalahan isi, bukan tebakan: tanpa burn.
+      return { ok: false, code: 'invalid', message: message || badField };
+    }
+    const msg = message || tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1));
+    return fail('denied', msg);
   } catch {
     // R35: network error tak membakar attempt — hasil offline jujur.
     return { ok: false, code: 'offline', message: tOf('sup_offline') };

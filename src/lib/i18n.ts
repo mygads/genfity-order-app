@@ -1134,6 +1134,17 @@ const STR: Record<string, Entry> = {
   sup_offline: { id: 'Offline, aksi sensitif ditolak demi keamanan.', en: 'Offline, sensitive action denied for safety.' },
   sup_unconfigured: { id: 'Server belum diatur, otorisasi ditolak.', en: 'Server not configured, authorization denied.' },
   sup_ok: { id: 'Disetujui supervisor.', en: 'Approved by supervisor.' },
+  // ---- supervisor V1 (S7/PP-016: kontrak BE baru, identitas eksplisit) ----
+  sup_v1_badfield: { id: 'Lengkapi ID supervisor, aksi, dan alasan (alasan wajib diisi).', en: 'Complete the supervisor ID, action, and reason (reason is required).' },
+  sup_v1_userid: { id: 'ID supervisor (angka)', en: 'Supervisor ID (numeric)' },
+  sup_v1_userid_ph: { id: 'cth: 12', en: 'e.g. 12' },
+  sup_v1_terminal: { id: 'ID terminal BE (angka)', en: 'BE terminal ID (numeric)' },
+  sup_v1_terminal_ph: { id: 'cth: 7', en: 'e.g. 7' },
+  sup_v1_action: { id: 'Aksi', en: 'Action' },
+  sup_v1_refid: { id: 'Ref ID', en: 'Ref ID' },
+  sup_v1_refid_ph: { id: 'cth: TRX-B001-K01-20261020-0042', en: 'e.g. TRX-B001-K01-20261020-0042' },
+  sup_v1_reason: { id: 'Alasan persetujuan (wajib, tercatat di audit)', en: 'Approval reason (required, recorded in audit)' },
+  sup_v1_reason_ph: { id: 'cth: salah input kasir, disetujui. Min 1 karakter.', en: 'e.g. cashier input error, approved. Min 1 character.' },
 
   // ---- kode error sync eksplisit (kontrak API E00043/E00044) ----
   sync_code_warn: { id: 'Kode E00043', en: 'Code E00043' },

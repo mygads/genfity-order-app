@@ -107,6 +107,9 @@ export const ApiPath = {
   voucherTemplateClaim: 'esb_api/voucher/claim-voucher-template',
   clockIn: 'employee-attendance/clock-in',
   // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
+  // LEGACY MATI — Real mode = 404 (kontrak §4.4). authorizeSupervisor legacy
+  // (shift screens, E29 territory) masih memakainya sampai follow-up E29;
+  // alur void/eskalasi/compliment WAJIB supervisorApproveV1 (S7).
   supervisorApprove: 'auth/supervisor-approve',
   // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
   cashierLogin: 'auth/cashier-login',
@@ -171,6 +174,14 @@ export const ApiPath = {
   terminalClaim: 'api/v1/terminals/{id}/claim', // E32 POST ambil alih {pin,deviceId} → {bound, kickedUserId} (fase-1b: PIN terminal WAJIB; pindah device saja, kapasitas per-tag 409 TAG_CONFLICT)
   terminalQrIssue: 'api/v1/terminals/{id}/qr-issue', // POST terbitkan token QR login sekali-pakai (tanpa body; member-only) → {qrToken, expiresAt, ttlSeconds} (TTL 60 dtk BE; E25 login-qr TBD Q2)
   terminalQrConsume: 'api/v1/terminals/{id}/qr-consume', // POST tukar token QR hasil scan {qrToken, deviceId?} (PUBLIC, HP belum bersesi) → {terminalId, terminalCode, merchantId, pinVersion advisory} — TANPA sesi/grant/binding; PIN terminal tetap wajib tahap-B
+  // PP-001/S7: kontrak supervisor BARU (BE router.go:1119,
+  // supervisor_approve.go) — PENGGANTI legacy auth/supervisor-approve untuk
+  // alur void/eskalasi/compliment. '{id}' = ID numerik BE terminal (bukan
+  // terminalCode), diganti caller via .replace('{id}', encodeURIComponent(id))
+  // ala terminalApi.ts:109. Body {supervisorUserId:int64, supervisorPin,
+  // action 1..64, refId ≤128, reason 1..500} → {approvalId, approvedAt}.
+  // Supervisor = OWNER atau grant supervisor_override; self-approval direkam.
+  supervisorApproveV1: 'api/v1/terminals/{id}/supervisor-approve',
   // E28: tanpa endpoint — policy max_offline_grant_days via pull-terminal-settings
   // (lihat offlineGrantPolicyKey di bawah).
 } as const;
@@ -182,6 +193,11 @@ export interface TerminalInfo {
   terminalCode: string;
   branchId: string;
   branchName: string;
+  /** ID numerik BE terminal (string angka dari E09 picker/bind) untuk path
+   * kontrak-Go /terminals/{id}/... (S7 supervisor-approve V1). Opsional agar
+   * binding lama tetap kompilasi; kosong = bind ulang / isi manual di dialog
+   * persetujuan (fail-closed bila kosong dan tak diisi). */
+  terminalIdBe?: string;
   /** Tag terminal model-5 (SPEC §1): kasir|dapur|view_pelanggan|view_queue|full_access.
    * Opsional agar konstruktor lama tetap kompilasi; undefined = belum sync dari BE. */
   tag?: string;

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
   useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -32,14 +32,13 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmVoid, setConfirmVoid] = useState(false);
   const [voidNote, setVoidNote] = useState('');
-  const [voidPin, setVoidPin] = useState('');
-  const [voidAuthMsg, setVoidAuthMsg] = useState('');
-  const [voidConfirming, setVoidConfirming] = useState(false);
   const [payModal, setPayModal] = useState(false);
-  const [payPin, setPayPin] = useState('');
-  const [payAuthMsg, setPayAuthMsg] = useState('');
-  const [payConfirming, setPayConfirming] = useState(false);
   const [payPending, setPayPending] = useState<string | null>(null);
+  // S7: PIN + identitas supervisor pindah ke SupervisorApprovalDialog (V1,
+  // kontrak BE baru, legacy NOL). Dialog dibuka sesudah alasan/opsi lengkap.
+  const [approveVoidOpen, setApproveVoidOpen] = useState(false);
+  const [approveVoidPrint, setApproveVoidPrint] = useState(false);
+  const [approvePayOpen, setApprovePayOpen] = useState(false);
   const [payOver, setPayOver] = useState<Record<string, string>>({});
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
@@ -80,31 +79,20 @@ import { useEffect, useMemo, useState } from 'react';import {
   const selected: Transaction | null =
     list.find((tr) => tr.id === selectedId) ?? list[0] ?? null;
 
-  /** Otorisasi supervisor: server dulu, offline/unconfigured → fallback PIN
- * lokal 4-6 digit + cek hak via requireAccess (pola buka/tutup shift).
- * Fail-closed: PIN salah/tanpa hak tetap ditolak. */
-const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund') => {
-  const res = await authorizeSupervisor(pin);
-  if (res.ok) return res;
-  if (res.code === 'offline' || res.code === 'unconfigured') {
-    return verifyLocalEscalation(pin, accessKey);
-  }
-  return res;
-};
+  // S7: otorisasi supervisor via dialog V1 (kontrak BE baru) — helper
+  // authedOrLocal legacy DIHAPUS (Real mode 404). Offline-first + fail-closed
+  // kini di dalam SupervisorApprovalDialog (server → fallback PIN lokal).
 /** Tandai void di state DB langsung (tanpa overlay demo); persist via persistVoidDb. */ const markVoided = (id: string) => {
-    setDbTxns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev)); }; /** PIN supervisor 4-6 digit wajib sebelum void (server; offline → PIN lokal + cek hak order.void). */ const voidPinOk = (() => { const d = voidPin.replace(/\D/g, ''); return d.length >= 4 && d.length <= 6 && !voidConfirming; })(); const runVoidAuthed = (print: boolean) => { if (!selected || !voidPinOk) return; const target = selected; const reason = voidNote.trim(); if (!reason) return; setVoidConfirming(true); setVoidAuthMsg(''); void authedOrLocal(voidPin, 'order.void').then((res) => { if (!res.ok) {
-      setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setVoidConfirming(false); return; } void persistVoid(target, reason, (res as { userId?: string }).userId).catch(() => undefined); markVoided(target.id); setVoidConfirming(false); setConfirmVoid(false); setVoidNote(''); setVoidPin(''); setVoidAuthMsg(''); if (print) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, voided: true, }); } }); };   /** Gate RBAC order.void: deny = eskalasi ke PIN supervisor di modal
-   * (bukan hard block); fail-open (allow/db-unready) buka modal biasa. */
+    setDbTxns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev)); }; /** Alasan void wajib sebelum dialog persetujuan supervisor V1 dibuka (S7: PIN pindah ke dialog). */ const voidNoteOk = voidNote.trim().length > 0; /** S7: buka dialog V1; eksekusi di runVoidApproved. */ const openVoidApproval = (print: boolean) => { if (!selected || !voidNoteOk) return; setApproveVoidPrint(print); setApproveVoidOpen(true); }; /** S7: eksekusi void sesudah dialog V1 disetujui (tanpa PIN di layar). */ const runVoidApproved = (approverUserId: string) => { const target = selected; if (!target) return; const reason = voidNote.trim(); if (!reason) return; {
+      void persistVoid(target, reason, approverUserId || undefined).catch(() => undefined); markVoided(target.id); setApproveVoidOpen(false); setConfirmVoid(false); setVoidNote(''); if (approveVoidPrint) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, voided: true, }); } } };   /** Gate RBAC order.void: deny = eskalasi ke dialog persetujuan V1 (bukan
+   * hard block); fail-open (allow/db-unready) buka modal alasan biasa. */
   const guardVoidOpen = async () => {
     try {
       const s = getSession();
-      const gate = await requireAccess(s?.userId || s?.username || '', 'order.void');
-      if (!gate.ok) setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
-    } catch { /* abaikan - modal PIN tetap dibuka */ }
+      await requireAccess(s?.userId || s?.username || '', 'order.void');
+    } catch { /* abaikan - modal alasan tetap dibuka */ }
     setConfirmVoid(true);
-  }; const doVoid = () => { runVoidAuthed(false); };
-
-  const doVoidAndPrint = () => { runVoidAuthed(true); }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } appAlert(t('hist_deny_title'), t('hist_deny_change_pay').replace('{r}', gate.reason)); setPayPending(method); setPayPin(''); setPayAuthMsg(t('hist_deny_change_pay').replace('{r}', gate.reason)); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }; const payPinOk = (() => { const d = payPin.replace(/\D/g, ''); return d.length >= 4 && d.length <= 6 && !payConfirming; })(); /** PIN supervisor 4-6 digit wajib sebelum simpan bila gate sale.refund deny (server; offline → PIN lokal + cek hak). */ const confirmPayAuthed = () => { if (!selected || !payPending || !payPinOk) return; const target = selected; const method = payPending; setPayConfirming(true); setPayAuthMsg(''); void authedOrLocal(payPin, 'sale.refund').then((res) => { if (!res.ok) { setPayAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`); setPayConfirming(false); return; } applyPayChange(target, method); setPayConfirming(false); setPayModal(false); setPayPending(null); setPayPin(''); setPayAuthMsg(''); }); }; const sendMail = () => {
+  }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } appAlert(t('hist_deny_title'), t('hist_deny_change_pay').replace('{r}', gate.reason)); setPayPending(method); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setApprovePayOpen(false); }; /** S7: opsi terpilih → buka dialog persetujuan V1 (PIN pindah ke dialog). */ const openPayApproval = () => { if (!selected || !payPending) return; setApprovePayOpen(true); }; /** S7: simpan ganti metode sesudah dialog V1 disetujui (jejak approver tak dibawa persistPayChangeDb — batas dicatat). */ const confirmPayApproved = () => { const target = selected; const method = payPending; if (!target || !method) return; applyPayChange(target, method); setApprovePayOpen(false); setPayModal(false); setPayPending(null); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
       setMailMsg(t('hist_mail_bad'));
@@ -309,23 +297,24 @@ const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund
             ))}
             {payPending ? (
               <View>
-                <AppInput
-                  label={t('cx_pin')}
-                  placeholder={t('cx_pin_ph')}
-                  value={payPin}
-                  onChangeText={(txt) => setPayPin(txt.replace(/\D/g, '').slice(0, 6))}
-                  keyboardType="numeric"
-                  maxLength={6}
-                  secureTextEntry
-                />
-                {payAuthMsg ? <Text style={styles.authErr}>{payAuthMsg}</Text> : null}
-                <AppButton title={payConfirming ? '...' : `${payPending} ›`} disabled={!payPinOk} onPress={confirmPayAuthed} />
+                {/* S7: PIN + identitas supervisor pindah ke dialog V1. */}
+                <AppButton title={`${t('xp_approve')} ${payPending} ›`} onPress={openPayApproval} />
               </View>
             ) : null}
             <AppButton title={t('c_cancel')} variant="secondary" onPress={closePayModal} />
           </View>
         </View>
       </Modal>
+
+      {/* S7: ganti metode bayar via persetujuan supervisor V1 (aksi refund). */}
+      <SupervisorApprovalDialog
+        visible={approvePayOpen}
+        action="refund"
+        refId={selected?.id ?? ''}
+        fallbackAccessKey="sale.refund"
+        onApproved={() => confirmPayApproved()}
+        onCancel={() => setApprovePayOpen(false)}
+      />
 
       <Modal visible={confirmVoid} animationType="fade" transparent>
         <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>
@@ -343,16 +332,7 @@ const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund
               boxStyle={styles.noteBox}
               style={styles.noteField}
             />
-            <AppInput
-              label={t('cx_pin')}
-              placeholder={t('cx_pin_ph')}
-              value={voidPin}
-              onChangeText={(txt) => { setVoidPin(txt.replace(/\D/g, '').slice(0, 6)); setVoidAuthMsg(''); }}
-              keyboardType="numeric"
-              maxLength={6}
-              secureTextEntry
-            />
-            {voidAuthMsg ? <Text style={styles.authErr}>{voidAuthMsg}</Text> : null}
+            {/* S7: PIN + identitas supervisor pindah ke SupervisorApprovalDialog. */}
             <View style={styles.dialogBtns}>
               <AppButton
                 title={t('c_cancel')}
@@ -360,24 +340,33 @@ const authedOrLocal = async (pin: string, accessKey: 'order.void' | 'sale.refund
                 onPress={() => {
                   setConfirmVoid(false);
                   setVoidNote('');
-                  setVoidPin('');
-                  setVoidAuthMsg('');
                 }}
                 fullWidth={false}
                 style={styles.dialogBtn}
               />
               <AppButton
-                title={voidConfirming ? '...' : t('hist_void_yes')}
+                title={t('hist_void_yes')}
                 variant="danger"
-                disabled={!voidNote.trim() || !voidPinOk}
-                onPress={doVoid}
+                disabled={!voidNoteOk}
+                onPress={() => openVoidApproval(false)}
                 fullWidth={false}
                 style={styles.dialogBtn}
               />
             </View>
-          <AppButton title={voidConfirming ? '...' : t('hist_void_print')} disabled={!voidNote.trim() || !voidPinOk} onPress={doVoidAndPrint} /></View>
+          <AppButton title={t('hist_void_print')} disabled={!voidNoteOk} onPress={() => openVoidApproval(true)} /></View>
         </View>
       </Modal>
+
+      {/* S7: void transaksi via persetujuan supervisor V1 (kontrak BE baru). */}
+      <SupervisorApprovalDialog
+        visible={approveVoidOpen}
+        action="void"
+        refId={selected?.id ?? ''}
+        reasonPreset={voidNote}
+        fallbackAccessKey="order.void"
+        onApproved={(r) => runVoidApproved(r.supervisorUserId)}
+        onCancel={() => setApproveVoidOpen(false)}
+      />
 
       <Modal visible={mailOpen} animationType="fade" transparent>
         <View style={[styles.centerWrap, isTablet && styles.centerWrapTablet]}>

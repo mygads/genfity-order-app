@@ -377,6 +377,10 @@ export function adoptTerminalBinding(
       branchId: next.branchId,
       branchName: next.branchName,
       tag: next.tag,
+      // S7: cerminkan ID numerik BE agar supervisor-approve V1 bisa memakai
+      // path /terminals/{id} tanpa input manual (binding lama: kosong → dialog
+      // minta isi eksplisit, fail-closed).
+      terminalIdBe: next.terminalId,
     });
   } catch {
     /* abaikan: cermin best-effort */

@@ -4,12 +4,13 @@ import { TABLET_BP, colors, fonts } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { EXTRA_METHODS, xmDesc, xmLabel, type ExtraMethodId } from '../../lib/payments';
-import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 /**
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
- * non-penjualan. Dua terakhir wajib otorisasi supervisor (fail-closed).
+ * non-penjualan. Dua terakhir wajib otorisasi supervisor via kontrak BE BARU
+ * (S7: SupervisorApprovalDialog — legacy {pin} NOL, Real mode 404).
  */
 export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: string, ref?: string, approverUserId?: string) => void }) {
   // Tablet: kartu 4 sebaris proporsional di dalam konten PayScreen.
@@ -17,9 +18,6 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [authFor, setAuthFor] = useState<ExtraMethodId | null>(null);
-  const [pin, setPin] = useState('');
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
   // Transfer Bank wajib no. referensi/bukti sebelum lunas (jangan langsung onDone).
   const [refFor, setRefFor] = useState<ExtraMethodId | null>(null);
   const [refNo, setRefNo] = useState('');
@@ -36,8 +34,6 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     }
     if (m.needsAuth) {
       setAuthFor(id);
-      setPin('');
-      setMsg('');
       return;
     }
     onDone(xmLabel(m, t));
@@ -54,31 +50,13 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
     if (m) onDone(xmLabel(m, t), ref.toUpperCase());
   };
 
-  const approve = async () => {
-    if (!authFor || busy) return;
-    setBusy(true);
-    setMsg(t('xp_requesting'));
-    let r = await authorizeSupervisor(pin);
-    // Identitas penyetuju diteruskan ke Pay agar diaudit (tr_salesinfo +
-    // payload). Jalur server tak mengembalikan userId — hanya eskalasi lokal
-    // yang membawa identitas (verifyLocalEscalation → userId).
-    let approver: string | undefined;
-    // Offline-first: kompliment/non-penjualan butuh hak order.void; PIN staf
-    // atau salah tetap ditolak (fail-closed).
-    if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
-      const local = await verifyLocalEscalation(pin, 'order.void');
-      if (local.ok) approver = local.userId;
-      r = local;
-    }
-    setBusy(false);
-    if (!r.ok) {
-      // Terkunci sementara: pesan sudah lokal via kamus (sup_locked + detik).
-      setMsg(r.code === 'locked' ? r.message : `${r.message} (${t('xp_left').replace('{n}', String(attemptsLeft()))})`);
-      return;
-    }
+  /** S7: sesudah dialog V1 disetujui — teruskan approvalId (jadi approvalCode
+   * di Pay) + ID supervisor (jadi approvedBy). Beda vs lama: dulu ref kosong
+   * dan approver hanya ada di jalur lokal; kini audit BE selalu tercatat. */
+  const approved = (r: { approvalId?: string; supervisorUserId: string }) => {
     const m = EXTRA_METHODS.find((x) => x.id === authFor);
     setAuthFor(null);
-    if (m) onDone(xmLabel(m, t), undefined, approver);
+    if (m) onDone(xmLabel(m, t), r.approvalId, r.supervisorUserId || undefined);
   };
 
   return (
@@ -94,35 +72,15 @@ export default function ExtraPaySection({ onDone }: { onDone: (methodLabel: stri
         ))}
       </View>
 
-      <Modal visible={authFor !== null} animationType="fade" transparent>
-        <View style={styles.wrap}>
-          <View style={[styles.dialog, styles.dialogNarrow]}>
-            <Text style={styles.dTitle}>{t('xp_auth_title')}</Text>
-            <Text style={styles.dSub}>{t('xp_auth_sub')}</Text>
-            <AppInput
-              keyboardType="numeric"
-              maxLength={6}
-              secureTextEntry
-              placeholder={t('xp_pin_ph')}
-              value={pin}
-              onChangeText={(v) => setPin(v.replace(/[^0-9]/g, '').slice(0, 6))}
-              style={styles.pinField}
-            />
-            {msg ? <Text style={styles.msg}>{msg}</Text> : null}
-            <View style={styles.btns}>
-              <AppButton title={t('xp_cancel')} variant="secondary" disabled={busy} onPress={() => setAuthFor(null)} fullWidth={false} size="md" style={styles.modalBtn} />
-              <AppButton
-                title={busy ? t('xp_checking') : t('xp_approve')}
-                disabled={pin.replace(/[^0-9]/g, '').length < 4 || busy}
-                onPress={() => { void approve(); }}
-                fullWidth={false}
-                size="md"
-                style={styles.modalBtn}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* S7: kompliment/non-penjualan via dialog persetujuan supervisor V1
+          (kontrak BE baru; aksi compliment|non-sales, hak fallback order.void). */}
+      <SupervisorApprovalDialog
+        visible={authFor !== null}
+        action={authFor === 'compliment' ? 'compliment' : 'non-sales'}
+        fallbackAccessKey="order.void"
+        onApproved={(r) => approved(r)}
+        onCancel={() => setAuthFor(null)}
+      />
 
       <Modal visible={refFor !== null} animationType="fade" transparent>
         <View style={styles.wrap}>

@@ -49,6 +49,31 @@ function run() {
   // 5. tOf tak bocorkan key mentah.
   ok(!/if \(!e\) return key/.test(i18n) && /return ''/.test(i18n),
     'i18n: tOf missing-key tak mengembalikan key mentah');
+  // 6. Supervisor V1 (S7/PP-001): kontrak BE baru ter-wire; legacy NOL di
+  //    alur void/eskalasi/compliment (shift screens dikecualikan: E29).
+  const serverRaw = readRaw('config/server.ts');
+  const dlg = read('components/SupervisorApprovalDialog.tsx');
+  ok(/supervisorApproveV1:\s*'api\/v1\/terminals\/\{id\}\/supervisor-approve'/.test(serverRaw),
+    'server: ApiPath.supervisorApproveV1 = kontrak BE baru');
+  ok(/export\s+(async\s+)?function\s+authorizeSupervisorV1/.test(sup) && /supervisorPin:\s*clean/.test(sup) && /supervisorUserId/.test(sup),
+    'supervisor: authorizeSupervisorV1 kirim identitas eksplisit (bukan {pin} saja)');
+  ok(/actionMax:\s*64/.test(sup) && /refIdMax:\s*128/.test(sup) && /reasonMax:\s*500/.test(sup),
+    'supervisor: batas action/refId/reason paritas BE');
+  ok(/getBoundSupervisorTerminalId/.test(sup) && /terminalIdBe/.test(serverRaw),
+    'supervisor: {id} path dari ID numerik BE binding (bukan terminalCode)');
+  const v1screens = [
+    'screens/cashier/CashierScreen.tsx',
+    'screens/cashier/CartDetailScreen.tsx',
+    'screens/bill/CancelScreen.tsx',
+    'screens/history/HistoryScreen.tsx',
+    'screens/booking/BookingScreen.tsx',
+    'screens/payment/ExtraPaySection.tsx',
+  ];
+  const legacyUse = v1screens.filter((f) => /authorizeSupervisor\s*\(/.test(read(f)));
+  ok(legacyUse.length === 0,
+    'screens: void/eskalasi/compliment NOL authorizeSupervisor legacy' + (legacyUse.length ? ' (' + legacyUse.join(',') + ')' : ''));
+  ok(/authorizeSupervisorV1/.test(dlg) && /verifyLocalEscalation/.test(dlg) && /fallbackAccessKey/.test(dlg),
+    'dialog: SupervisorApprovalDialog = V1 + fallback lokal + hak eksplisit');
 
   return { checks, failures };
 }

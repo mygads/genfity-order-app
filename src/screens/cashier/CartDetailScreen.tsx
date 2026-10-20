@@ -4,6 +4,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
+import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
@@ -12,7 +13,6 @@ import { enqueueSync } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
-import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -86,11 +86,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [priceDraft, setPriceDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [savedTick, setSavedTick] = useState(false);
-  /** Eskalasi void: gate RBAC order.void, deny -> PIN supervisor (fail-closed offline). */
-  const [voidPin, setVoidPin] = useState('');
+  /** Eskalasi void: gate RBAC order.void, deny -> dialog persetujuan supervisor
+   * V1 (kontrak BE baru; S7, legacy NOL). */
   const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
-  const [voidAuthMsg, setVoidAuthMsg] = useState('');
-  const [voidConfirming, setVoidConfirming] = useState(false);
 
   const active = useMemo(() => items.filter((c) => !c.voided), [items]);
   const subtotalGross = useMemo(
@@ -130,7 +128,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     setItems((prev) => prev.map((c) => (c.id === id ? { ...c, voided: wantVoid } : c)));
     if (wantVoid) setEditingId(null);
   };
-  /** Gate RBAC order.void: allow/db-unready langsung terap; deny eskalasi ke PIN supervisor. */
+  /** Gate RBAC order.void: allow/db-unready langsung terap; deny eskalasi ke
+   * dialog persetujuan supervisor V1 (S7). */
   const requestVoid = async (id: string, wantVoid: boolean) => {
     try {
       const s = getSession();
@@ -139,14 +138,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         applyVoid(id, wantVoid);
         return;
       }
-      setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
     } catch {
-      // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
-      // terapkan void tanpa otorisasi.
-      setVoidAuthMsg(t('void_check_fail'));
-      return;
+      // Gate-throw: dialog dibuka agar supervisor (otoritatif via server) bisa
+      // memutuskan; fallback lokal dialog fail-closed sendiri.
     }
-    setVoidPin('');
     setVoidTarget({ id, wantVoid });
   };
   const voidItem = (id: string) => {
@@ -155,29 +150,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const unvoidItem = (id: string) => {
     void requestVoid(id, false);
   };
-  /** Konfirmasi PIN supervisor untuk target void yang tertunda: server dulu,
-   * lalu eskalasi lokal saat offline (fail-closed untuk PIN salah/tanpa hak). */
-  const confirmVoidPin = () => {
-    if (!voidTarget || voidPin.replace(/\D/g, '').length < 4 || voidConfirming) return;
-    setVoidConfirming(true);
-    void authorizeSupervisor(voidPin).then((res) => {
-      if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
-        return verifyLocalEscalation(voidPin, 'order.void');
-      }
-      return res;
-    }).then((res) => {
-      if (!res.ok) {
-        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`);
-        setVoidConfirming(false);
-        return;
-      }
-      const target = voidTarget;
-      applyVoid(target.id, target.wantVoid);
-      setVoidConfirming(false);
-      setVoidTarget(null);
-      setVoidPin('');
-      setVoidAuthMsg('');
-    });
+  /** Persetujuan supervisor V1 ok → terapkan void/unvoid target tertunda. */
+  const approveVoid = () => {
+    const target = voidTarget;
+    if (!target) return;
+    applyVoid(target.id, target.wantVoid);
+    setVoidTarget(null);
   };
 
   const openEditor = (c: CartItem) => {
@@ -623,47 +601,15 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         </View>
       </Modal>
 
-      {/* Dialog PIN supervisor untuk void yang terdeny gate RBAC (tanpa kunci i18n baru). */}
-      <Modal visible={voidTarget !== null} transparent animationType="fade" onRequestClose={() => setVoidTarget(null)}>
-        <View style={styles.modalBg}>
-          <View style={styles.modalCard}>
-            <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('cx_pin')}</Text>
-            <Text style={styles.modalLabel}>{t('void_dialog_sub')}</Text>
-            <AppInput
-              boxStyle={styles.modalInput}
-              style={styles.fieldText}
-              value={voidPin}
-              onChangeText={(v) => { setVoidPin(v.replace(/[^0-9]/g, '').slice(0, 6)); }}
-              keyboardType="numeric"
-              maxLength={6}
-              secureTextEntry
-              placeholder={t('xp_pin_ph')}
-            />
-            {voidAuthMsg ? <Text style={[styles.modalLabel, { color: colors.red }]}>{voidAuthMsg}</Text> : null}
-            <View style={styles.modalRow}>
-              <AppButton
-                size="sm"
-                variant="secondary"
-                title={t('c_cancel')}
-                onPress={() => { setVoidTarget(null); setVoidPin(''); setVoidAuthMsg(''); }}
-                disabled={voidConfirming}
-                fullWidth={false}
-                style={[styles.modalGhost, { marginTop: 0 }]}
-                textStyle={styles.modalGhostT}
-              />
-              <AppButton
-                size="sm"
-                title={voidConfirming ? '...' : t('xp_approve')}
-                onPress={confirmVoidPin}
-                disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
-                fullWidth={false}
-                style={[styles.modalPrimary, { marginTop: 0, backgroundColor: colors.navy }]}
-                textStyle={styles.modalPrimaryT}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* S7: eskalasi void via dialog persetujuan supervisor V1 (kontrak BE baru). */}
+      <SupervisorApprovalDialog
+        visible={voidTarget !== null}
+        action="void"
+        refId={voidTarget?.id ?? ''}
+        fallbackAccessKey="order.void"
+        onApproved={() => approveVoid()}
+        onCancel={() => setVoidTarget(null)}
+      />
 
       {/* Simpan / Cetak / Bayar - sembunyi saat keranjang 0, ganti CTA tambah menu */}
       <View style={styles.footer}>

@@ -16,13 +16,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useLang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
+import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
 import { dbNowLocal } from '../../lib/datefmt';
 import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
-import { attemptsLeft, authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
@@ -309,11 +309,11 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [discDraft, setDiscDraft] = useState('');
-  /** Eskalasi void: gate RBAC order.void, deny -> PIN supervisor (fail-closed offline). */
-  const [voidPin, setVoidPin] = useState('');
+  /** Eskalasi void: gate RBAC order.void, deny -> dialog persetujuan supervisor
+   * V1 (kontrak BE baru; S7). Gate-throw (DB error) tetap buka dialog —
+   * persetujuan server otoritatif, fallback lokal dialog fail-closed sendiri
+   * (pola guardVoidOpen HistoryScreen/CancelScreen). */
   const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
-  const [voidAuthMsg, setVoidAuthMsg] = useState('');
-  const [voidConfirming, setVoidConfirming] = useState(false);
   // Drawer /home APK asli (order, table, shift, sales-history, detail-recap,
   // esb-order-dashboard, member, expense, petty-cash, settings).
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -706,7 +706,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     if (wantVoid) setEditingId(null);
   };
 
-  /** Gate RBAC order.void: allow/db-unready langsung terap; deny eskalasi ke PIN supervisor. */
+  /** Gate RBAC order.void: allow/db-unready langsung terap; deny eskalasi ke
+   * dialog persetujuan supervisor V1 (S7: kontrak BE baru, legacy NOL). */
   const requestVoid = async (id: string, wantVoid: boolean) => {
     try {
       const s = getSession();
@@ -715,14 +716,10 @@ export default function CashierScreen({ navigation, route }: Props) {
         applyVoid(id, wantVoid);
         return;
       }
-      setVoidAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
     } catch {
-      // Fail-closed: izin tak dapat diperiksa (DB error) = tolak, JANGAN
-      // terapkan void tanpa otorisasi.
-      setVoidAuthMsg(t('void_check_fail'));
-      return;
+      // Fail-closed catatan: dialog dibuka agar supervisor (otoritatif via
+      // server) bisa memutuskan; fallback lokal dialog fail-closed sendiri.
     }
-    setVoidPin('');
     setVoidTarget({ id, wantVoid });
   };
 
@@ -734,29 +731,14 @@ export default function CashierScreen({ navigation, route }: Props) {
     void requestVoid(id, false);
   };
 
-  /** Konfirmasi PIN supervisor untuk target void yang tertunda: server dulu,
-   * lalu eskalasi lokal saat offline (fail-closed untuk PIN salah/tanpa hak). */
-  const confirmVoidPin = () => {
-    if (!voidTarget || voidPin.replace(/\D/g, '').length < 4 || voidConfirming) return;
-    setVoidConfirming(true);
-    void authorizeSupervisor(voidPin).then((res) => {
-      if (!res.ok && (res.code === 'offline' || res.code === 'unconfigured')) {
-        return verifyLocalEscalation(voidPin, 'order.void');
-      }
-      return res;
-    }).then((res) => {
-      if (!res.ok) {
-        setVoidAuthMsg(res.code === 'locked' ? res.message : `${res.message} (${attemptsLeft()} ${t('cx_attempts')})`);
-        setVoidConfirming(false);
-        return;
-      }
-      const target = voidTarget;
-      applyVoid(target.id, target.wantVoid);
-      setVoidConfirming(false);
-      setVoidTarget(null);
-      setVoidPin('');
-      setVoidAuthMsg('');
-    });
+  /** Persetujuan supervisor V1 ok (server approvalId / lokal userId) → terapkan
+   * void/unvoid target tertunda. Identitas penyetuju tersedia di hasil bila
+   * pemanggil butuh audit (di sini void keranjang lokal: cukup terap). */
+  const approveVoid = () => {
+    const target = voidTarget;
+    if (!target) return;
+    applyVoid(target.id, target.wantVoid);
+    setVoidTarget(null);
   };
 
   const openEditor = (c: CartItem) => {
@@ -872,48 +854,17 @@ export default function CashierScreen({ navigation, route }: Props) {
     </Modal>
   );
 
-  /** Dialog PIN supervisor untuk void yang terdeny gate RBAC (tanpa kunci i18n baru). */
+  // S7: eskalasi void via dialog persetujuan supervisor V1 (kontrak BE baru;
+  // legacy PIN-modal {pin} NOL — Real mode 404).
   const renderVoidDialog = () => (
-    <Modal visible={voidTarget !== null} transparent animationType="fade" onRequestClose={() => setVoidTarget(null)}>
-      <View style={styles.dialogOverlay}>
-        <View style={styles.dialogCard}>
-          <Text style={styles.dialogTitle}>{t('cx_pin')}</Text>
-          <Text style={styles.dialogSub}>{t('void_dialog_sub')}</Text>
-          <AppInput
-            boxStyle={styles.dialogInput}
-            style={styles.fieldText}
-            value={voidPin}
-            onChangeText={(v) => { setVoidPin(v.replace(/[^0-9]/g, '').slice(0, 6)); }}
-            keyboardType="numeric"
-            maxLength={6}
-            secureTextEntry
-            placeholder={t('xp_pin_ph')}
-          />
-          {voidAuthMsg ? <Text style={[styles.dialogSub, { color: colors.red }]}>{voidAuthMsg}</Text> : null}
-          <View style={styles.dialogRow}>
-            <AppButton
-              size="sm"
-              variant="secondary"
-              title={t('c_cancel')}
-              onPress={() => { setVoidTarget(null); setVoidPin(''); setVoidAuthMsg(''); }}
-              disabled={voidConfirming}
-              fullWidth={false}
-              style={[styles.dialogGhost, { marginTop: 0 }]}
-              textStyle={styles.dialogGhostT}
-            />
-            <AppButton
-              size="sm"
-              title={voidConfirming ? '...' : t('xp_approve')}
-              onPress={confirmVoidPin}
-              disabled={voidPin.replace(/\D/g, '').length < 4 || voidConfirming}
-              fullWidth={false}
-              style={[styles.dialogPrimary, { marginTop: 0 }]}
-              textStyle={styles.dialogPrimaryT}
-            />
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <SupervisorApprovalDialog
+      visible={voidTarget !== null}
+      action="void"
+      refId={voidTarget?.id ?? ''}
+      fallbackAccessKey="order.void"
+      onApproved={() => approveVoid()}
+      onCancel={() => setVoidTarget(null)}
+    />
   );
 
   /** Konfirmasi ganti keranjang terisi dengan order yang dimuat. */

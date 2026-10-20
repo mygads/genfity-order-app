@@ -11,7 +11,7 @@ import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
-import { authorizeSupervisor, verifyLocalEscalation } from '../../lib/supervisor';
+import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -272,10 +272,11 @@ export default function BookingScreen({ navigation }: Props) {
   };
 
   /** Hapus/batalkan reservasi (tanya dua ketuk: tombol berubah jadi konfirmasi).
-   * U5: ketuk kedua = gerbang PIN supervisor 'order.cancel' (cermin CancelScreen:
-   * server dulu, fallback eskalasi lokal saat offline/unconfigured; fail-closed). */
+   * U5: ketuk kedua = dialog persetujuan supervisor V1 'order.cancel'
+   * (S7: kontrak BE baru, legacy NOL; PIN + identitas pindah ke dialog). */
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
-  const [delPin, setDelPin] = useState('');
+  const [pendingDel, setPendingDel] = useState<Resv | null>(null);
+  const [approveDelOpen, setApproveDelOpen] = useState(false);
   const removeResv = async (r: Resv) => {
     // U5: mutasi booking = gerbang bound terminal (fail-closed).
     if (!branchId.trim()) {
@@ -284,28 +285,21 @@ export default function BookingScreen({ navigation }: Props) {
     }
     if (confirmDel !== r.id) {
       setConfirmDel(r.id);
-      setDelPin('');
       setGateNotice(t('void_need_pin').replace('{r}', 'order.cancel'));
       return;
     }
-    const clean = delPin.replace(/\D/g, '');
-    if (!clean) {
-      setGateNotice(t('void_need_pin').replace('{r}', 'order.cancel'));
-      return;
-    }
-    const server = await authorizeSupervisor(clean);
-    if (!server.ok && (server.code === 'offline' || server.code === 'unconfigured')) {
-      const esc = await verifyLocalEscalation(clean, 'order.cancel');
-      if (!esc.ok) {
-        setGateNotice(esc.message);
-        return;
-      }
-    } else if (!server.ok) {
-      setGateNotice(server.message);
-      return;
-    }
+    // Ketuk kedua: buka dialog V1 (otorisasi + alasan tercatat di audit BE).
+    setPendingDel(r);
+    setGateNotice('');
+    setApproveDelOpen(true);
+  };
+  /** Eksekusi hapus sesudah dialog V1 disetujui (server approvalId / lokal). */
+  const approveDel = () => {
+    const r = pendingDel;
+    setApproveDelOpen(false);
+    setPendingDel(null);
+    if (!r) return;
     setConfirmDel(null);
-    setDelPin('');
     setGateNotice('');
     if (editingId === r.id) resetForm();
     persist(list.filter((x) => x.id !== r.id));
@@ -399,17 +393,9 @@ export default function BookingScreen({ navigation }: Props) {
               textStyle={[styles.delT, confirmDel === r.id && styles.delTConfirm]}
             />
           </View>
-          {/* U5: kolom PIN supervisor muncul saat konfirmasi hapus dipersenjatai. */}
+          {/* S7: PIN supervisor pindah ke dialog V1 (ketuk kedua buka dialog). */}
           {confirmDel === r.id ? (
-            <AppInput
-              boxStyle={styles.input}
-              style={styles.fieldText}
-              value={delPin}
-              onChangeText={(v) => setDelPin(v.replace(/\D/g, '').slice(0, 6))}
-              placeholder={t('cx_pin')}
-              keyboardType="numeric"
-              secureTextEntry
-            />
+            <Text style={styles.hint}>{t('void_need_pin').replace('{r}', 'order.cancel')}</Text>
           ) : null}
         </View>
       ))}
@@ -423,6 +409,16 @@ export default function BookingScreen({ navigation }: Props) {
           <TouchableOpacity onPress={() => navigation?.navigate('Tables')}><Text style={[styles.link, isTablet && styles.linkBig]}>Denah Meja ›</Text></TouchableOpacity>
         </View>
       </View>
+      {/* S7: hapus reservasi via persetujuan supervisor V1 (aksi cancel). */}
+      <SupervisorApprovalDialog
+        visible={approveDelOpen}
+        action="cancel"
+        refId={pendingDel?.id ?? ''}
+        reasonPreset={pendingDel ? `Batal reservasi ${pendingDel.name} meja ${pendingDel.table}` : ''}
+        fallbackAccessKey="order.cancel"
+        onApproved={() => approveDel()}
+        onCancel={() => { setApproveDelOpen(false); setPendingDel(null); }}
+      />
     </>
   );
 
