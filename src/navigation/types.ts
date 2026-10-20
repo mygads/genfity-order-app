@@ -13,7 +13,8 @@ export type NavVoucher = {
 
 export type RootStackParamList = {
   Intro: undefined;
-  Install: undefined;
+  /** S4-APP-333: kode klaim pra-isi dari tab Claim QrScan (authed). */
+  Install: { code?: string } | undefined;
   SelectBranch: undefined;
   /** B2 BindFlow (SPEC B1): branch → terminal → PIN, sebelum Login. */
   BranchPicker: { branchId?: string } | undefined;
