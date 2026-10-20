@@ -16,7 +16,7 @@ import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { subscribeTerminalEvents } from './src/lib/sse';
 import { getApiMode } from './src/lib/apiSource';
-import { flushPendingRevokes } from './src/lib/sync';
+import { flushPendingRevokes, restoreAutoSyncPrefs } from './src/lib/sync';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
@@ -508,6 +508,9 @@ export default function App() {
         // S18: boot = momen online untuk mengirim utang revoke logout
         // (fire-and-forget, tak menahan splash).
         try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
+        // SYNC-02 (C12): pulihkan timer auto-sync tersimpan — sebelumnya timer
+        // hanya nyala bila SyncScreen dibuka (mati diam-diam pasca-restart).
+        try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
         const b = st.binding;
         setBound(!!(b && b.terminalId));
         const tag = b?.tag ? parseDeviceRole(b.tag) : null;

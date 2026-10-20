@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { getLang, useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
-  applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS,
+  applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS, SYNC_OPTS_KEY,
 
 type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
 // APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
@@ -8,7 +8,7 @@ import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { f
   kind: string;
   desc: string;
   createdAt: string;
-  status: 'antre' | 'terkirim' | 'gagal';}const LS_OPTS = 'genfity.sync.opts';/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). S8:
+  status: 'antre' | 'terkirim' | 'gagal';}/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). S8:
  * kind deposit/shift/voucher/member memakai kunci kamus + identifier. */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string; dep: string; shift: string; voucher: string; member: string }): string {
 
 const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `${String(p.method ?? labels.sale)} - ${rp(Number(p.total ?? 0))}`; if (o.kind === 'receipt') return `Email ${String(p.email ?? '')} - ${String(p.no ?? '')}`; if (o.kind === 'attendance') return labels.attendance;
@@ -96,8 +96,8 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [tick]);
 
   const level = Number.isFinite(daysAgo) ? syncWarnLevel(Date.now() - daysAgo * 86400000) : syncWarnLevel();
-  const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(LS_OPTS, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
-    void setJSON(LS_OPTS, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
+  const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
+    void setJSON(SYNC_OPTS_KEY, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
   // Toggle sync otomatis benar-benar menjadwalkan push berkala (5 mnt) via
   // applyAutoSyncPrefs; sebelumnya toggle hanya tersimpan tanpa efek.
   useEffect(() => {

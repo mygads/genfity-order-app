@@ -15,7 +15,7 @@ import { getLang, tr } from './i18n';
 import { fmtDateInTz, fmtTimeInTz } from './datefmt';
 import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
-import { getItem, setItem } from './storage';
+import { getItem, setItem, getJSON } from './storage';
 import { logoutRevoke } from './terminalApi';
 import { uuidv7 } from './uuidv7';
 import {
@@ -1635,6 +1635,13 @@ export function syncWarnLevel(lastMs?: number): 'ok' | 'warn3' | 'block7' {
 // tersimpan tanpa efek). Interval 5 menit, diam-diam: pushAll() + menelan
 // galat (bukan Custom env / offline = lewati). wifiOnly = cek tipe jaringan
 // via expo-network bila tersedia.
+//
+// SYNC-03 (C12, batas jujur — BUKAN background sync): timer ini HANYA hidup
+// saat app foreground (JS timer suspend saat layar mati; repo ini SENGAJA
+// tanpa TaskManager/BackgroundFetch — tak ada klaim "sync saat screen mati").
+// Timing jujur: lastSyncMs HANYA ditulis pushAll yang sukses (pullMaster tak
+// menyentuh); notifikasi/teks sukses HANYA bila sent>0 (notifyPushSyncSuccess
+// di bawah); umur sync dihitung dari sumber yang sama (SyncScreen).
 // ---------------------------------------------------------------------------
 
 let autoTimer: ReturnType<typeof setInterval> | null = null;
@@ -1682,4 +1689,27 @@ export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): 
       }
     })();
   }, 5 * 60 * 1000);
+}
+
+/** Kunci preferensi sync otomatis (satu sumber — dipakai SyncScreen). */
+export const SYNC_OPTS_KEY = 'genfity.sync.opts';
+
+/**
+ * SYNC-02 (C12, SESI-C): pulihkan timer auto-sync dari preferensi tersimpan.
+ * Sebelumnya timer HANYA dinyalakan saat SyncScreen dibuka — pasca-restart
+ * auto-sync mati diam-diam meski toggle ON. Panggil sekali saat boot (App.tsx,
+ * setelah restore sesi) + tiap login sukses (LoginScreen, samping
+ * startRealtime) agar interval 5 menit benar-benar berjalan. Idempoten
+ * (applyAutoSyncPrefs membersihkan timer lama). Best-effort, tak melempar.
+ */
+export async function restoreAutoSyncPrefs(): Promise<void> {
+  try {
+    const o = await getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(
+      SYNC_OPTS_KEY,
+      { autoSync: true, syncOnWifi: false },
+    );
+    applyAutoSyncPrefs({ auto: o.autoSync !== false, wifiOnly: o.syncOnWifi === true });
+  } catch {
+    /* preferensi tak terbaca — timer tetap mati, SyncScreen yang menyalakan */
+  }
 }

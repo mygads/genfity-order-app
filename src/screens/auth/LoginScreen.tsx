@@ -35,7 +35,7 @@ import {
 } from '../../session';
 import { ApiPath, apiPost } from '../../config/server';
 import { startRealtime } from '../../lib/realtime';
-import { flushPendingRevokes } from '../../lib/sync';
+import { flushPendingRevokes, restoreAutoSyncPrefs } from '../../lib/sync';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
 import { pinVerifyTerminalPin } from '../../lib/terminalApi';
@@ -711,6 +711,8 @@ async function completeOnline(
   }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
+  // SYNC-02 (C12): timer auto-sync ikut login online (bukan hanya buka SyncScreen).
+  try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
 }
 
@@ -762,6 +764,8 @@ async function completeOffline(
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   await ensureLocalPinHash(userId, pin);
   try { startRealtime(); } catch { /* abaikan */ }
+  // SYNC-02 (C12): timer auto-sync ikut login offline-grant (bukan hanya buka SyncScreen).
+  try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
 }
 
@@ -1033,6 +1037,8 @@ export default function LoginScreen({ navigation }: Props) {
     // pengguna membuka layar Dapur/ESB/Display). Foreground service
     // best-effort di dev-client/APK agar WS hidup saat layar mati.
     try { startRealtime(); } catch { /* abaikan */ }
+    // SYNC-02 (C12): pulihkan timer auto-sync tersimpan tiap login sukses.
+    try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
     try { void setWsForeground(true); } catch { /* abaikan */ }
     // S18: kirim utang revoke logout (fire-and-forget; login sukses = momen
     // online yang tepat, best-effort tanpa memblokir kasir). flushPendingRevokes
