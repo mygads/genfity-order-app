@@ -10,7 +10,7 @@
  */
 import { ApiPath, apiPost, getCustomBaseUrl, getServerEnv, getTerminal } from '../config/server';
 import { apiFetch } from './apiSource';
-import { all, markClean, markDirty, queryFirst, run } from './db';
+import { all, initDb, markClean, markDirty, queryFirst, run } from './db';
 import { getLang, tr } from './i18n';
 import { fmtDateInTz, fmtTimeInTz } from './datefmt';
 import { getCachedMerchantType, normalizeMerchantType } from './posModes';

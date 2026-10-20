@@ -228,7 +228,6 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           <Text style={styles.qTime}>{q.createdAt}</Text>
         </View>
       ))}
-
       {/* Simulasi hanya di build dev: di produksi tombol disembunyikan agar
         banner peringatan sync tak bisa dipalsukan kasir. */}
       {__DEV__ ? (
