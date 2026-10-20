@@ -108,6 +108,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   // TableTimerScreen ikut melihat durasi terbaru; best-effort, tak memblokir tick.
   // Toleransi +1 menit: tick Tables kasar (bulat) - jangan timpa presisi tick
   // 10-detik TableTimerScreen tiap menit; hanya perbaiki bila store basi/tertinggal.
+  // EFF-09 dievaluasi: tick durasi duduk 60 dtk DIPERTAHANKAN — hitung lokal
+  // murni (tanpa network/DB/poll server), presisi menit sesuai tampilan menit.
   useEffect(() => {
     const timer = setInterval(() => {
       // C11 EFF-09: skip tick+snapshot saat background (hemat storage writes;

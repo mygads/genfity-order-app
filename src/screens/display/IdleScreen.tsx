@@ -81,12 +81,14 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
     })();
     return () => { live = false; };
   }, []);
-  /** D12: refresh hitungan antrean tiap 30 dtk. M9 dipertahankan: '' =
-   * unbound (tanpa fallback B001) — hitungan dilewati agar tak menampilkan
-   * antrean cabang lain; banner unbound tampil di bawah. */
+  /** D12+EFF-09: refresh hitungan antrean tiap 30 dtk, di-gate online +
+   * bound (offline/unbound = lewati query, banner stale yang bicara). M9
+   * dipertahankan: '' = unbound (tanpa fallback B001). */
   useEffect(() => {
     let live = true;
     const loadCount = async () => {
+      // EFF-09 gate: offline = jangan query (angka lama + penanda stale).
+      if (online === false) return;
       try {
         let branchId = '';
         try { branchId = getBranchId(); } catch { branchId = ''; }
@@ -106,7 +108,8 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
     // display selalu foreground saat dipakai — AppState gate best-effort).
     const timer = setInterval(() => { try { if (AppState.currentState !== 'active') return; } catch { /* lanjut */ } void loadCount(); }, 30000);
     return () => { live = false; clearInterval(timer); };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
   /** Notice gerbang shift saat ketuk kembali order (shift tutup → ke layar Shift). */
   const [gateNotice, setGateNotice] = useState('');
 
@@ -122,6 +125,8 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
     })();
   };
 
+  // EFF-09 dievaluasi: rotasi slide 5 dtk DIPERTAHANKAN — animasi UI lokal
+  // murni (tanpa network/DB), bukan poll data; bukan bagian anggaran interval.
   const promos = dbPromos.length > 0 ? dbPromos : [{ id: 'shop', title: shopName, desc: t('idle_welcome') }]; useEffect(() => {
     const timer = setInterval(() => setIdx((i) => (i + 1) % promos.length), 5000);
     return () => clearInterval(timer);
