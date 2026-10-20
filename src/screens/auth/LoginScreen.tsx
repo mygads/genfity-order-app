@@ -1107,9 +1107,13 @@ export default function LoginScreen({ navigation }: Props) {
         // Offline/unconfigured: gate grant jujur — tanpa silent local login.
         // S4-APP-313: AKAR HANG — lookupLocalUserId = query expo-sqlite TANPA
         // timeout; SQLite wedged = promise tak pernah settle = "Verifying..."
-        // selamanya (finally tak jalan). Batas 3 dtk (query lokal normal
-        // <50 mdtk); timeout → '' → 'no-grant' → pesan need_be jujur.
-        const userId = await withTimeout(lookupLocalUserId(uname), 3000).catch(() => '');
+        // selamanya (finally tak jalan). Batas 60 dtk (BUKAN 3 dtk: bukti
+        // runtime 2026-10-20 — query legit antri di belakang seed-write
+        // wa-sqlite ~40 dtk di first-run web; batas agresif = login offline
+        // valid gagal-palsu jadi need_be). Timeout → '' → 'no-grant' →
+        // pesan need_be jujur. Total worst-case submit tetap terbatas
+        // (~8+5+5+12+60 dtk), tak pernah gantung selamanya.
+        const userId = await withTimeout(lookupLocalUserId(uname), 60000).catch(() => '');
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
         if (problem === 'grant-expired') {
           setBlocked({ kind: 'grant-expired' });
