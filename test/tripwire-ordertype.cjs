@@ -53,13 +53,9 @@ function run() {
     'sync: toGoPosRequest mengembalikan penanda unsupported; pushLightItem BLOCKED fail-once');
   ok(/sync\.orderTypeUnsupported/.test(readRaw('lib/i18n.ts')),
     'i18n: kunci catatan BLOCKED orderType ada (ID/EN)');
-  // C2: daftar mode per merchant-type ada (label UI bentuk spasi, sesuai
-  // posModesForMerchant — dinormalisasi ke underscore oleh goPosOrderType).
-  const mt = read('lib/merchantType.ts');
-  ok(/IN STORE PICKUP/.test(mt) && /HOME SERVICE/.test(mt) && /IN STORE SERVICE/.test(mt),
-    'merchantType: daftar mode PRODUCT/SERVICE eksplisit');
-  ok(/RESTAURANT/.test(mt) && /fallback|default/i.test(readRaw('lib/merchantType.ts')),
-    'merchantType: tak-dikenal default restaurant (ASUMSI terdokumentasi)');
+  // C2/R2: daftar mode per merchant-type milik main (posModes.ts kanonis —
+  // merchantType.ts sc DITOLAK/DIHAPUS); cakupan mode PRODUCT/SERVICE kini di
+  // tripwire-pos-modes.cjs (merchant-aware), bukan di sini.
 
   return { checks, failures };
 }

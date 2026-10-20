@@ -15,7 +15,8 @@ const path = require('path');
 
 const SRC = path.join(__dirname, '..', 'src');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
-const read = (p) => strip(fs.readFileSync(path.join(SRC, p), 'utf8'));
+const readRaw = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
+const read = (p) => strip(readRaw(p));
 
 function run() {
   const failures = [];
@@ -48,6 +49,34 @@ function run() {
     'C8: group-payment tanpa orderId/shareId → null (ke guard, bukan 400)');
   ok(/LOCAL_OPS\.has\(op\) \|\| LOCAL_OPS\.has\(tp\) \|\| DEPOSIT_LOCAL_KINDS\.has\(k\)/.test(sync),
     'C8: cermin-lokal/deposit-lokal tetap skipped-terkirim (tak tersentuh)');
+
+  // 5. SC port C8 (dilipat dari tripwire-drain-no-counterpart.cjs — bukan file
+  //    baru): kaki group-payment TANPA padanan Go (!compat) = BLOCKED jujur
+  //    fail-once pola S10 + tak trip breaker; SyncScreen merender catatan.
+  ok(/gop === 'group-payment'/.test(sync) && /sync\.groupLegNoCounterpart/.test(sync),
+    'sync: group-payment tanpa padanan → catatan sync.groupLegNoCounterpart');
+  const grp = (sync.match(/gop === 'group-payment'[\s\S]{0,600}?if \(!path\)/) || [''])[0];
+  ok(/item\.status = 'gagal'/.test(grp) && /if \(item\.status === 'gagal'\) return 'skipped'/.test(grp) && /return 'failed'/.test(grp),
+    'sync: kaki grup fail-once S10 (gagal SEKALI, berikut skipped)');
+  ok(/!compat && item\.kind === 'order'/.test(sync),
+    'sync: gerbang grup = !compat (tanpa padanan Go), sebelum pemakaian path');
+  const drain = (sync.match(/let consecFails = 0;[\s\S]{0,1500}?await sleepMs\(150\)/) || [''])[0];
+  ok(/outcome === 'failed'[\s\S]{0,120}?consecFails \+= 1/.test(drain) && !/skipped[\s\S]{0,60}?consecFails/.test(drain),
+    'drain: breaker hanya hitung failed — skipped (legs grup lanjutan) tak trip');
+  ok(/const depositKey = table === 'tr_memberdeposit'/.test(sync) && /const physCid = depositKey \|\| row\.id/.test(sync),
+    'sync: fisik deposit = kunci-tunggal orderID (dep-…) lestari');
+  ok(/const lightCid = saleCid \|\| depositRowId/.test(sync),
+    'sync: ringan deposit = saleCid || depositRowId lestari');
+  ok(/DEPOSIT_LOCAL_KINDS\.has\(k\)/.test(sync),
+    'sync: deposit-lokal tetap cermin-lokal (tak tersentuh C8)');
+  const i18n = readRaw('lib/i18n.ts');
+  ok(/'sync\.groupLegNoCounterpart':\s*\{\s*id:\s*'[^']+',\s*en:\s*'[^']+'/.test(i18n),
+    'i18n: sync.groupLegNoCounterpart ID+EN ada');
+  const scr = read('screens/settings/SyncScreen.tsx');
+  ok(/note:\s*String\(o\.note/.test(scr),
+    'syncscreen: QueueItem dipetakan dari o.note');
+  ok(/\{q\.note \? <Text/.test(scr),
+    'syncscreen: catatan fail-once dirender jujur di kartu antrean');
 
   return { failures, checks };
 }
