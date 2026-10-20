@@ -95,6 +95,91 @@ export function setCachedMerchantType(raw: unknown): PosMerchantType {
   return cachedMerchantType;
 }
 
+/**
+ * R1 (SC-QA3 rekonsiliasi, putusan owner A): flag delivery-enabled merchant.
+ * SEARCH FACT (2026-10-21, kutip baris-per-baris):
+ * - BE `GET /api/merchant/profile` MENGEMBALIKAN flag ini:
+ *   services/.../handlers/merchant_profile.go:1285
+ *   `"isDeliveryEnabled": row.IsDeliveryEnabled,` (kolom merchants.
+ *   is_delivery_enabled, default false; migration 00001:412,547).
+ * - BE POS-create TAK PERNAH membaca flag ini (orders_pos_create.go: NOL
+ *   kemunculan is_delivery_enabled; gate = enum :196-197 + per-tipe :223-237).
+ *   Flag mengatur storefront-delivery/pricing/zona (delivery_pricing.go,
+ *   customer_reservations.go:604 `if !isDeliveryEnabled`), BUKAN
+ *   penerimaan POS-create.
+ * - APP TAK membaca flag ini (grep src NOL isDelivery/is_delivery) — rantai
+ *   profil di bawah (api/merchant/profile, dipakai syncMerchantTypeFromProfile)
+ *   hanya mengupas merchantType.
+ * GATE JUJUR (flag ada → gate + tripwire): runtuh DELIVERY/agregator→TAKEAWAY
+ * RESTAURANT di goPosOrderType hanya bila flag true; false eksplisit =
+ * UNSUPPORTED (BLOCKED fail-once + alasan, pola S10) — pesanan delivery yang
+ * dicatat diam-diam sebagai takeaway = data tak jujur (tanpa alamat/kurir;
+ * domain kurir-vs-gosend/grab + ongkir API = PARKED, bukan dibangun di sini).
+ * Daftar UI (POS_MODES_BY_TYPE) TAK berubah — tanpa label DELIVERY di daftar
+ * mana pun (ikut main). Default true = perilaku lama lestari bila flag belum
+ * pernah tersinkron (offline/BE lama): hanya opt-out eksplisit merchant yang
+ * menggerbang ([ASUMSI] R1, didokumentasi di sini, bukan dikarang diam-diam).
+ */
+let cachedDeliveryEnabled: boolean = true;
+
+/** Baca cache flag delivery sesi (default true = legacy lestari, lihat atas). */
+export function getCachedDeliveryEnabled(): boolean {
+  return cachedDeliveryEnabled;
+}
+
+/** Tulis cache eksplisit (boolean() longgar: 'false'/0/false → false). */
+export function setCachedDeliveryEnabled(raw: unknown): boolean {
+  if (typeof raw === 'string') {
+    const k = raw.trim().toLowerCase();
+    cachedDeliveryEnabled = !(k === '' || k === 'false' || k === '0' || k === 'no' || k === 'off');
+  } else {
+    cachedDeliveryEnabled = raw == null ? true : Boolean(raw);
+  }
+  return cachedDeliveryEnabled;
+}
+
+/** Kupas field flag dari payload profil (toleran dua bentuk envelope). */
+function readDeliveryEnabledFromProfile(data: Record<string, unknown>): unknown {
+  for (const key of ['isDeliveryEnabled', 'is_delivery_enabled']) {
+    if (key in data) return data[key];
+  }
+  for (const nest of ['merchant', 'branch', 'profile', 'data']) {
+    const inner = data[nest];
+    if (inner && typeof inner === 'object') {
+      const rec = inner as Record<string, unknown>;
+      for (const key of ['isDeliveryEnabled', 'is_delivery_enabled']) {
+        if (key in rec) return rec[key];
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Persist cache ke ms_setting(Merchant, Delivery) ('1'/'0'). */
+async function persistDeliveryEnabled(on: boolean): Promise<void> {
+  await initDb();
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Delivery', ?, ?)` +
+      ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+    [on ? '1' : '0', ''],
+  );
+}
+
+/** Muat flag dari baris lokal (true bila tak ada baris = legacy lestari). */
+async function loadDeliveryEnabledLocal(): Promise<boolean> {
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Delivery' LIMIT 1`,
+    );
+    const raw = (row?.value1 ?? '').trim();
+    if (!raw) return true;
+    return raw !== '0';
+  } catch {
+    return true;
+  }
+}
+
 /** Kupas field tipe dari payload profil (toleran dua bentuk envelope). */
 function readMerchantTypeFromProfile(data: Record<string, unknown>): string {
   for (const key of ['merchantType', 'merchant_type', 'type']) {
@@ -129,10 +214,21 @@ async function persistMerchantType(code: PosMerchantType): Promise<void> {
  * RESTAURANT. Best-effort tanpa throw (cermin syncCurrencyFromProfile).
  */
 export async function syncMerchantTypeFromProfile(): Promise<PosMerchantType> {
+  // R1: baseline flag delivery dari baris lokal; server menimpa bila ada.
+  cachedDeliveryEnabled = await loadDeliveryEnabledLocal();
   try {
     const r = await apiFetch('api/merchant/profile', { method: 'GET' });
     if (r.ok && !r.fromDummy) {
       const { data } = unwrap<Record<string, unknown>>(r.data);
+      const flagRaw = readDeliveryEnabledFromProfile(data ?? {});
+      if (flagRaw !== undefined) {
+        const on = setCachedDeliveryEnabled(flagRaw);
+        try {
+          await persistDeliveryEnabled(on);
+        } catch {
+          /* persist gagal: cache tetap di-set */
+        }
+      }
       const raw = readMerchantTypeFromProfile(data ?? {});
       if (raw.trim()) {
         const code = normalizeMerchantType(raw);
