@@ -3,6 +3,9 @@
 //  1. AttendanceScreen OFFLINE-ONLY eksplisit (tanpa POST clock BE; banner jujur).
 //  2. Gerbang absensi buka-shift (paritas gerbang tutup-shift).
 //  3. Ganti PIN tetap jujur (server bila online + antre bila offline).
+// Putusan owner 20-Okt: offline-only = FINAL (PP-010 PARTIAL-by-design).
+// Wiring BE (clock-in/out+GPS+attendance_enabled) DIPARKIR — prereq hilang:
+// B1 token-compat, B2 on-behalf binding, B3 expo-location. Jangan wire parsial.
 const fs = require('fs');
 const path = require('path');
 
