@@ -601,6 +601,15 @@ async function verifyOwnerOverridePin(pin: string, stageToken?: string): Promise
       }
     }
     // Tak terjangkau → jatuh ke hash lokal di bawah (offline honesty).
+    // C6 (SESI-C, PARKIR — BUKAN dihapus): jalur verifikasi PIN hanya-hash-
+    // lokal di bawah SENGAJA dipertahankan untuk login offline (kasir tak boleh
+    // mati saat BE putus). Pengaman berlapis: throttle 5x/60 dtk (pin.ts) +
+    // gerbang owner-only requireEscalationAccess (access.ts) + server-menang-
+    // bila-terjangkau (cabang di atas). Penghapusan total menunggu keputusan
+    // kebijakan offline dari owner — owner-need E29: apakah login offline boleh
+    // tetap ada, atau wajib online-penuh (grant-only)? Sampai diputus, cabang
+    // ini dilindungi tripwire (tripwire-pin-escalation-parkir.cjs) — jangan
+    // "dibersihkan" sebagai dead-code.
   }
   let v: { ok: boolean | null; userId?: string };
   try {
