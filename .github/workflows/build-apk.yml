@@ -147,7 +147,7 @@ jobs:
           cat release.json
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: genfity-order-apk
           path: dist/
