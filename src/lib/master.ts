@@ -200,7 +200,7 @@ const DOMAINS: Domain[] = [
     key: 'sales',
     path: ApiPath.pullSales,    table: 'tr_saleshead',
     cols: ['salesNum', 'client_id', 'branchId', 'terminalId', 'userId', 'salesDate', 'salesMode', 'tableNo',
-      'customerName', 'subtotal', 'discount', 'tax', 'serviceCharge', 'voucherAmount', 'voucherCode',
+      'customerName', 'subtotal', 'discount', 'tax', 'serviceCharge', 'tip', 'voucherAmount', 'voucherCode',
       'platformFee', 'rounding', 'grandTotal', 'paidAmount', 'changeAmount', 'paymentMethod',
       'ongkir', 'status', 'memberId', 'shiftId', 'queueNumber'],
     map: (r) => {
@@ -214,6 +214,9 @@ const DOMAINS: Domain[] = [
       no, cid || no, str(r.branchId), str(r.terminalId), str(r.userId),
       str(r.salesDate), str(r.salesMode), str(r.tableNo), str(r.customerName),
       num(r.subtotal), num(r.discount), num(r.tax), num(r.serviceCharge),
+      // Tip v1 (kolom pull 2026-10): server lama tak mengirim = 0 via num();
+      // baris tip dari server lain (online order) ikut tersimpan untuk struk.
+      num((r.tip ?? r.tipAmount)),
       num(r.voucherAmount), str(r.voucherCode), num(r.platformFee), num(r.rounding),
       num(r.grandTotal), num(r.paidAmount), num(r.changeAmount), str(r.paymentMethod),
       num(r.ongkir), str(r.status) ?? 'paid',

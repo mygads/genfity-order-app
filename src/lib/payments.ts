@@ -61,6 +61,10 @@ export interface SaleInput {
   discountTotal?: number;
   vatTotal?: number;
   serviceTotal?: number;
+  /** Tip/gratuity pelanggan (nominal Rp utuh) — opsional; 0/absen = tanpa tip.
+   * Diputuskan saat bayar (PayScreen), dibawa ke BE sebagai `tipAmount`
+   * (kolom orders.tip_amount; cap = subtotal, ditegakkan server). */
+  tipTotal?: number;
   /** Fee platform order ESB/marketplace → payload kontrak §5: platformFee. */
   feeESB?: number;
   cash?: number;
@@ -181,6 +185,9 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     discountTotal: r(s.discountTotal ?? 0),
     ...(s.vatTotal !== undefined ? { vatTotal: r(s.vatTotal) } : {}),
     ...(s.serviceTotal !== undefined ? { serviceTotal: r(s.serviceTotal) } : {}),
+    // Tip diteruskan apa adanya (server memvalidasi: cap subtotal, kunci usai
+    // lunas). Nol/absen = tanpa tip — payload lama tak berubah.
+    ...(s.tipTotal !== undefined && r(s.tipTotal) > 0 ? { tipAmount: r(s.tipTotal) } : {}),
     ...(s.feeESB !== undefined && s.feeESB > 0 ? { platformFee: r(s.feeESB) } : {}),
     ...(s.rounding !== undefined && s.rounding !== 0 ? { rounding: r(s.rounding) } : {}),
     grandTotal: r(s.grandTotal),

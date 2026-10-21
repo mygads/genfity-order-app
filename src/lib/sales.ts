@@ -203,6 +203,26 @@ export async function getSaleClientId(salesNum: string): Promise<string | null> 
 }
 
 /**
+ * Ambil tip tersimpan satu head (fitur tip v1, 2026-10): dipakai layar riwayat
+ * agar cetak-ulang struk menampilkan baris Tip (cermin getSaleClientId di atas).
+ * 0 bila head tak ada / kolom belum migrasi di instalasi lama.
+ */
+export async function getSaleTip(salesNum: string): Promise<number> {
+  const no = String(salesNum ?? '').trim();
+  if (!no) return 0;
+  try {
+    await initDb();
+    const row = await queryFirst<{ tip: number | null }>(
+      'SELECT tip FROM tr_saleshead WHERE salesNum = ? LIMIT 1',
+      [no],
+    );
+    return Math.max(0, Math.round(Number(row?.tip) || 0));
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Nomor antrean display dari suffix NNNN salesNum (TRX-{BR}-{TM}-{YMD}-{NNNN}[-A|B]).
  * Nomor non-segmen (SEED-xxx, TRX-{timestamp}) → null (display fallback).
  */
@@ -376,17 +396,17 @@ export async function saveSale(s: SaleInput): Promise<string> {
   const queueNumber = (s.queueNumber ?? '').trim() || queueNoOf(salesNum);
   await run(
     `INSERT INTO tr_saleshead (salesNum, client_id, branchId, terminalId, userId, shiftId, salesDate,
-      salesMode, subtotal, discount, tax, serviceCharge, platformFee, rounding,
+      salesMode, subtotal, discount, tax, serviceCharge, tip, platformFee, rounding,
       voucherAmount, voucherCode,
       grandTotal, paidAmount, changeAmount,
       paymentMethod, memberId, tableNo, customerName, ongkir,
       status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, now,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
       r(subtotal), r(s.discountTotal ?? 0),
-      r(s.vatTotal ?? 0), r(s.serviceTotal ?? 0),
+      r(s.vatTotal ?? 0), r(s.serviceTotal ?? 0), r(s.tipTotal ?? 0),
       r(s.feeESB ?? 0), Math.round(Number(s.rounding) || 0),
       voucherAmt, s.voucherCode ?? null,
       r(s.grandTotal), r(paid),
@@ -1059,6 +1079,8 @@ interface HeadTotals {
   discount: number;
   tax: number;
   serviceCharge: number;
+  /** Tip/gratuity per bill (fitur tip v1): menempel pada bill, tak diprorata. */
+  tip: number;
   platformFee: number;
   rounding: number;
   voucherAmount: number;
@@ -1346,7 +1368,11 @@ export async function moveSaleItems(args: {
   // Ongkir menempel pada bill (bukan item): pindah item tak memindahkan
   // ongkir — bill asal mempertahankannya, bill tujuan memakai ongkirnya
   // sendiri (0 untuk bill baru). Sebelumnya grand dihitung tanpa ongkir.
-  const srcGrand = srcAgg.subtotal - srcAgg.discount + srcTax + srcSvc - n(src.voucherAmount) + srcFee + srcRound + n(src.ongkir);
+  // Tip/gratuity (fitur tip v1) menempel pada bill dengan aturan yang sama:
+  // gratifikasi atas kunjungan, bukan per item — pindah item tak memindahkan
+  // tip; grand kedua bill wajib membawa tip masing-masing agar tip yang sudah
+  // diputuskan di Pay tak hilang diam-diam saat baris dipindah.
+  const srcGrand = srcAgg.subtotal - srcAgg.discount + srcTax + srcSvc - n(src.voucherAmount) + srcFee + srcRound + n(src.ongkir) + n(src.tip);
   // Grand tak boleh negatif: prorata pajak/service dari sumber bersubtotal
   // nol (diskon 100%) bisa mengecilkan sisi asal di bawah nol. Clamp 0 yang
   // jujur (selisih sen akibat pembulatan prorata tetap terlihat di rekap).
@@ -1355,7 +1381,7 @@ export async function moveSaleItems(args: {
     [srcAgg.subtotal, srcAgg.discount, srcTax, srcSvc, srcFee, srcRound, Math.max(0, r(srcGrand)), now, fromSalesNum],
   );
   const destAgg = await headTotals(destNum);
-  const destGrand = destAgg.subtotal - destAgg.discount + dTax + dSvc + dFee + dRound + n(dest?.ongkir ?? 0);
+  const destGrand = destAgg.subtotal - destAgg.discount + dTax + dSvc + dFee + dRound + n(dest?.ongkir ?? 0) + n(dest?.tip ?? 0);
   await run(
     'UPDATE tr_saleshead SET subtotal = ?, discount = ?, tax = ?, serviceCharge = ?, platformFee = ?, rounding = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?',
     [destAgg.subtotal, destAgg.discount, dTax, dSvc, dFee, dRound, r(destGrand), now, destNum],

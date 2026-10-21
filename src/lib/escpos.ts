@@ -24,6 +24,8 @@ export interface EscReceipt {
   discount?: number;
   /** Service charge eksklusif (Rp). Label cetak "Service 5%". */
   service?: number;
+  /** Tip/gratuity pelanggan (Rp) — terusan penuh, bukan komponen total berjalan. */
+  tip?: number;
   /** PPN inklusif 11/111 - info-only, TIDAK menambah total. */
   tax?: number;
   /** Fee platform ESB/marketplace 5% (kontrak §5). */
@@ -242,10 +244,11 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   }
   text(out, '-'.repeat(cols));
   // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
-  // eksklusif → PPN info-only → feeESB → voucher → ongkir → rounding → total.
+  // eksklusif → tip (terusan) → PPN info-only → feeESB → voucher → ongkir → rounding → total.
   row2(out, 'Subtotal', money(r.subtotal), cols);
   if (r.discount) row2(out, 'Diskon', `-${money(r.discount)}`, cols);
   if (r.service) row2(out, 'Service 5%', money(r.service), cols);
+  if (r.tip) row2(out, 'Tip', `+${money(r.tip)}`, cols);
   if (r.tax) row2(out, 'PPN (Inkl.)', money(r.tax), cols);
   if (r.feeESB) row2(out, 'Fee Layanan', money(r.feeESB), cols);
   if (r.voucherCode || r.voucherAmount) {

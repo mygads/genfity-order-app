@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
-  useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
+  useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId, getSaleTip } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
   return colors.orangeDark;}function statusBg(s: TxnStatus) {
@@ -134,11 +134,19 @@ import { useEffect, useMemo, useState } from 'react';import {
           } catch {
             cid = '';
           }
+          // Tip menempel pada bill (kolom tr_saleshead.tip): cetak ulang arsip
+          // membawa tip agar struk/thermal tak kehilangan baris Tip.
+          let tipReprint = 0;
+          try {
+            tipReprint = await getSaleTip(sel.no);
+          } catch {
+            tipReprint = 0;
+          }
           navigation?.navigate('Receipt', {
             no: sel.no,
             total: sel.total ?? 0,
             method: payOf(sel, payOver),
-            items: sel.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: sel.discount ?? 0, mode: sel.mode, ...(sel.table ? { table: sel.table } : {}), ...(cid ? { clientId: cid } : {}), ...(sel.status === 'Void' ? { voided: true } : {}), });
+            items: sel.items.map((it) => ({ id: it.name, name: it.name, basePrice: it.price, qty: it.qty, ...(it.note ? { note: it.note } : {}), })), discount: sel.discount ?? 0, mode: sel.mode, ...(sel.table ? { table: sel.table } : {}), ...(cid ? { clientId: cid } : {}), ...(tipReprint > 0 ? { tip: tipReprint } : {}), ...(sel.status === 'Void' ? { voided: true } : {}), });
         })();
       }
       }

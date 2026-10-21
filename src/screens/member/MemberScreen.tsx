@@ -47,6 +47,8 @@ type OrderCtx = {
   tax?: number;
   rounding?: number;
   feeESB?: number;
+  /** Tip/gratuity pelanggan — teruskan apa adanya agar tak hilang pulang-pergi. */
+  tip?: number;
 };
 type Props = {
   navigation?: Nav;
@@ -719,6 +721,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...(p?.tax != null ? { tax: p.tax } : {}),
       ...(p?.rounding != null ? { rounding: p.rounding } : {}),
       ...(p?.feeESB != null ? { feeESB: p.feeESB } : {}),
+      ...(p?.tip != null ? { tip: p.tip } : {}),
     };
     if (typeof p?.returnTo === 'string' && p.returnTo) {
       navigation?.navigate(p.returnTo, ctx);

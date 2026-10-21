@@ -35,6 +35,7 @@ type Props = {
       table?: string;
       ongkir?: number;
       ongkirCut?: number;
+      tip?: number;
       customer?: string;
       memberId?: string;
     };
@@ -156,6 +157,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
+    const tipParam = Math.max(0, Math.round(Number(p.tip) || 0));
     const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
     const fullTotal = paidBefore + total;
     // Split grup (BillPreview/SplitBill via Pay): kunjungan EDC ikut SATU
@@ -279,6 +281,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
       ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
+      ...(tipParam > 0 ? { tipTotal: tipParam } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
     };
     // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
@@ -325,6 +328,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.table ? { table: p.table } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
       ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
+      ...(tipParam > 0 ? { tip: tipParam } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
     });
   };
@@ -463,6 +467,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.feeESB ? { feeESB: p.feeESB } : {}),
             ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
             ...(p.ongkirCut ? { ongkirCut: p.ongkirCut } : {}),
+            ...(p.tip ? { tip: p.tip } : {}),
             ...(p.tax ? { tax: p.tax } : {}),
             ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
             ...(p.mode ? { mode: p.mode } : {}),

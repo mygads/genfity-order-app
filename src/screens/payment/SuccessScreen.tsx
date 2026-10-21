@@ -30,7 +30,7 @@ type Props = {
       voucherCode?: string; approvalCode?: string; cardLast4?: string;
       bank?: string; terminal?: string; memberId?: string;
       tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
-      rounding?: number; feeESB?: number;
+      rounding?: number; feeESB?: number; tip?: number;
       /** Kunjungan split grup: nominal + metode yang dibayar kunjungan ini. */
       splitPaid?: { amount?: number; method?: string };
     };
@@ -119,6 +119,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
   const rounding = route?.params?.rounding ?? 0;
   const feeESB = route?.params?.feeESB ?? 0;
+  const tip = Math.max(0, Math.round(Number(route?.params?.tip) || 0));
   // Kunjungan split: yang dibayar + sisa grup (sisa dari DB, best-effort).
   const splitPaidParam = route?.params?.splitPaid;
   const splitPaidAmt = Math.max(0, Math.round(Number(splitPaidParam?.amount) || 0));
@@ -223,6 +224,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
     ...(route?.params?.memberId ? { memberId: route.params.memberId } : {}),
     ...(ongkir > 0 ? { ongkir } : {}),
     ...(ongkirCut > 0 ? { ongkirCut } : {}),
+    ...(tip > 0 ? { tip } : {}),
     ...(orderMode ? { mode: orderMode } : {}),
     ...(route?.params?.table ? { table: route.params.table } : {}),
     ...(route?.params?.customer ? { customer: route.params.customer } : {}),
@@ -264,7 +266,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
   // Pratinjau struk: SATU scroll milik layar (tanpa ScrollView bersarang di
   // dalam kartu), semua item tampil, urutan baris SELARAS ReceiptScreen
-  // (diskon → service → feeESB → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
+  // (diskon → service → tip → feeESB → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
   const receipt = (
     <View style={styles.receipt}>
         <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
@@ -292,6 +294,12 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('serviceExcl')}</Text>
             <Text style={styles.value}>{rp(service)}</Text>
+          </View>
+        )}
+        {tip > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('pay_tip_row')}</Text>
+            <Text style={styles.value}>+{rp(tip)}</Text>
           </View>
         )}
         {feeESB > 0 && (

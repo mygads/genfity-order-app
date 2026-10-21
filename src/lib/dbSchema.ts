@@ -37,7 +37,7 @@ export const SCHEMA_STATEMENTS: string[] = [
     salesNum TEXT PRIMARY KEY, client_id TEXT, branchId TEXT, terminalId TEXT, userId TEXT, shiftId TEXT,
     salesDate TEXT, salesMode TEXT, tableNo TEXT, customerName TEXT,
     subtotal REAL DEFAULT 0, discount REAL DEFAULT 0, discountName TEXT,
-    tax REAL DEFAULT 0, serviceCharge REAL DEFAULT 0,
+    tax REAL DEFAULT 0, serviceCharge REAL DEFAULT 0, tip REAL DEFAULT 0,
     voucherAmount REAL DEFAULT 0, voucherCode TEXT, promotionVoucherCode TEXT,
     -- promotionVoucherCode = CADANGAN yang disengaja tak dipakai (audit 2026-10):
     -- kode terapan (voucher kuota maupun promo reusable) tercatat di SATU kolom
@@ -214,6 +214,10 @@ export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE ms_station ADD COLUMN flagAutocut INTEGER DEFAULT 1',
   // #18: atribusi shift per penjualan untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE tr_saleshead ADD COLUMN shiftId TEXT',
+  // Tip pelanggan per sale (fitur tip v1, 2026-10): aditif untuk instalasi
+  // lama (gagal = sudah ada). Grand total sudah termasuk tip sehingga ledger
+  // lama tetap balance; kolom ini untuk rincian struk/riwayat/sync.
+  'ALTER TABLE tr_saleshead ADD COLUMN tip REAL DEFAULT 0',
   // Q7: client_id UUIDv7 aditif untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE tr_saleshead ADD COLUMN client_id TEXT',
   // Q7: client_id NULL-able cadangan di tabel anak sale (gagal = sudah ada).

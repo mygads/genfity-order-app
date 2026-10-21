@@ -16,7 +16,7 @@ import { useLang } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
-import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
+import { lineSubtotal, recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId } from '../../lib/sales';
 import { uuidv7 } from '../../lib/uuidv7';
 import { publishDisplayOrder } from '../../lib/display';
@@ -117,6 +117,8 @@ type Props = {
       rounding?: number;
       /** Fee platform order ESB/marketplace (info-only, kontrak §5: platformFee). */
       feeESB?: number;
+      /** Tip/gratuity terusan (kembali dari Member/EDC agar pilihan tak hilang). */
+      tip?: number;
       /** Nomor struk bawaan (dari Simpan/LoadOrder via kasir) - pakai ulang bila ada. */
       salesNum?: string;
       /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): diterbitkan
@@ -261,6 +263,28 @@ export default function PayScreen({ navigation, route }: Props) {
   const effVoucherCode = boxVoucher?.code ?? orderVoucher?.code ?? '';
   const effDiscount = orderDiscount + boxBelanjaAmt;
   const totalOngkirCut = cutToRecord + (isSplitGroup ? 0 : boxOngkirCut);
+  // Tip/gratuity pelanggan (fitur tip v1, 2026-10): diputuskan di layar ini —
+  // satu-satunya PENAMBAH payable (voucher box hanya mengurangi; total
+  // pemanggil sudah final). Basis = subtotal item (Σ lineSubtotal); tanpa
+  // items = mundur dari total (total − service − fee − rounding − ongkirNet).
+  // Cap = basis (cermin validasi server: tip ≤ subtotal). Split grup DILARANG
+  // bertip (tip kunjungan grup = follow-up; BE v1 mengecualikan bagi-bill):
+  // tipAmount paksa 0. Init dari params (kembali dari Member/EDC membawa tip
+  // pilihan pulang agar tak hilang).
+  const tipItems = route?.params?.items ?? [];
+  const tipBase = tipItems.length > 0
+    ? Math.max(0, tipItems.reduce((a, it) => a + lineSubtotal(it), 0))
+    : Math.max(0, total - serviceParam - feeESBParam - roundingParam - Math.max(0, (Number(ongkir) || 0) - totalOngkirCut));
+  const [tipMode, setTipMode] = useState<'none' | 'p5' | 'p10' | 'p15' | 'custom'>(() => (
+    Math.max(0, Math.round(Number(route?.params?.tip) || 0)) > 0 ? 'custom' : 'none'
+  ));
+  const [tipCustom, setTipCustom] = useState(() => String(Math.max(0, Math.round(Number(route?.params?.tip) || 0)) || ''));
+  const tipPct = tipMode === 'p5' ? 5 : tipMode === 'p10' ? 10 : tipMode === 'p15' ? 15 : 0;
+  const tipCalc = tipMode === 'custom'
+    ? Math.max(0, Math.round(Number(String(tipCustom).replace(/[^0-9]/g, '')) || 0))
+    : Math.round((tipBase * tipPct) / 100);
+  // Cap basis + paksa 0 untuk split grup.
+  const tipAmount = isSplitGroup ? 0 : Math.min(Math.max(0, tipCalc), tipBase);
   // Teks banner voucher bawaan (info saja, tanpa tombol lepas karena sudah di total).
   const orderBannerText = !orderVoucher
     ? ''
@@ -348,7 +372,9 @@ export default function PayScreen({ navigation, route }: Props) {
   // voucher/diskon hanya diteruskan untuk dicatat, bukan dihitung ulang di sini.
   // Satu-satunya pengurang adalah voucher yang dipasang di layar ini: belanja
   // (boxBelanjaAmt) dan — bila kind Ongkir — sisa ongkir (boxOngkirCut).
-  const payable = Math.max(0, total - boxBelanjaAmt - boxOngkirCut);
+  // Satu-satunya penambah = tip/gratuity pelanggan (tipAmount; 0 bila tanpa
+  // tip atau kunjungan split grup).
+  const payable = Math.max(0, total - boxBelanjaAmt - boxOngkirCut + tipAmount);
   const paid = useMemo(() => splits.reduce((s, x) => s + x.amount, 0), [splits]);
   const remaining = Math.max(0, payable - paid);
 
@@ -455,6 +481,21 @@ export default function PayScreen({ navigation, route }: Props) {
   const removeBoxVoucher = () => {
     setBoxVoucher(null);
     setBoxCode('');
+  };
+
+  /**
+   * Ganti mode/nominal tip; payable berubah (naik MAUPUN turun) = split lama
+   * dijepit agar tak over-collect (cermin pola voucher box di atas).
+   */
+  const applyTip = (mode: 'none' | 'p5' | 'p10' | 'p15' | 'custom', custom?: string) => {
+    const pct = mode === 'p5' ? 5 : mode === 'p10' ? 10 : mode === 'p15' ? 15 : 0;
+    const next = isSplitGroup ? 0 : mode === 'custom'
+      ? Math.min(Math.max(0, Math.round(Number(String(custom ?? tipCustom).replace(/[^0-9]/g, '')) || 0)), tipBase)
+      : Math.min(Math.round((tipBase * pct) / 100), tipBase);
+    setTipMode(mode);
+    if (custom !== undefined) setTipCustom(custom);
+    // Payable baru = total − boxBelanja − boxOngkir + tipBaru.
+    clampSplits(Math.max(0, total - boxBelanjaAmt - boxOngkirCut + next));
   };
 
   const addSplit = (label: string, amount: number, method?: string, memberId?: string) => {
@@ -610,6 +651,8 @@ export default function PayScreen({ navigation, route }: Props) {
       grandTotal: payable,
       discountTotal: effDiscount,
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
+      // Tip diteruskan sebagai tipTotal (payload tipAmount; server validasi cap).
+      ...(tipAmount > 0 ? { tipTotal: tipAmount } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
@@ -657,6 +700,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
       ...(saleMemberId ? { memberId: saleMemberId } : {}),
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
+      ...(tipAmount > 0 ? { tip: tipAmount } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
@@ -721,6 +765,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(tableNo ? { table: tableNo } : {}),
         ...(ongkir > 0 ? { ongkir } : {}),
         ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
+        ...(tipAmount > 0 ? { tip: tipAmount } : {}),
         ...(customerName ? { customer: customerName } : {}),
         ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -854,7 +899,7 @@ export default function PayScreen({ navigation, route }: Props) {
    * penjumlahan mana pun sehingga terasa "tidak masuk hitungan".
    */
   const renderSummary = () => {
-    if (orderDiscount <= 0 && !boxVoucher && totalOngkirCut <= 0) return null;
+    if (orderDiscount <= 0 && !boxVoucher && totalOngkirCut <= 0 && tipAmount <= 0) return null;
     return (
       <View style={styles.sumBox}>
         <View style={styles.sumRow}>
@@ -877,6 +922,12 @@ export default function PayScreen({ navigation, route }: Props) {
           <View style={styles.sumRow}>
             <Text style={styles.sumLabel}>{`${t('rc_ongkir_cut')}${boxOngkirCut > 0 && boxVoucher ? ` (${boxVoucher.code})` : ''}`}</Text>
             <Text style={[styles.sumValue, styles.sumCut]}>−{rp(totalOngkirCut)}</Text>
+          </View>
+        )}
+        {tipAmount > 0 && (
+          <View style={styles.sumRow}>
+            <Text style={styles.sumLabel}>{t('pay_tip_row')}</Text>
+            <Text style={styles.sumValue}>+{rp(tipAmount)}</Text>
           </View>
         )}
         <View style={[styles.sumRow, styles.sumDueRow]}>
@@ -976,6 +1027,43 @@ export default function PayScreen({ navigation, route }: Props) {
         </View>
       )}
       {voucherMsg ? <Text style={styles.ctaHint}>{voucherMsg}</Text> : null}
+      {!isSplitGroup && (
+        <View style={styles.tipBox}>
+          <Text style={styles.tipTitle}>{t('pay_tip_title')}</Text>
+          <Text style={styles.tipSub}>{t('pay_tip_sub')}</Text>
+          <View style={styles.tipRow}>
+            <TouchableOpacity
+              style={[styles.tipChip, tipMode === 'none' && styles.tipChipActive]}
+              onPress={() => applyTip('none')}>
+              <Text style={[styles.tipChipText, tipMode === 'none' && styles.tipChipTextActive]}>{t('pay_tip_none')}</Text>
+            </TouchableOpacity>
+            {(['p5', 'p10', 'p15'] as const).map((m) => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.tipChip, tipMode === m && styles.tipChipActive]}
+                onPress={() => applyTip(m)}>
+                <Text style={[styles.tipChipText, tipMode === m && styles.tipChipTextActive]}>{m === 'p5' ? '5%' : m === 'p10' ? '10%' : '15%'}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={[styles.tipChip, tipMode === 'custom' && styles.tipChipActive]}
+              onPress={() => applyTip('custom', tipCustom)}>
+              <Text style={[styles.tipChipText, tipMode === 'custom' && styles.tipChipTextActive]}>{t('pay_tip_custom')}</Text>
+            </TouchableOpacity>
+          </View>
+          {tipMode === 'custom' && (
+            <AppInput
+              value={tipCustom}
+              onChangeText={(v) => applyTip('custom', v)}
+              keyboardType="numeric"
+              placeholder={rp(0)}
+            />
+          )}
+          {tipAmount > 0 && (
+            <Text style={styles.tipAdded}>{t('pay_tip_added').replace('{d}', rp(tipAmount))}</Text>
+          )}
+        </View>
+      )}
     </View>
   );
 
@@ -1189,6 +1277,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(tableNo ? { table: tableNo } : {}),
           ...(ongkir > 0 ? { ongkir } : {}),
           ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
+          ...(tipAmount > 0 ? { tip: tipAmount } : {}),
           ...(customerName ? { customer: customerName } : {}),
           ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
@@ -1308,6 +1397,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(route?.params?.voucher != null ? { voucher: route.params.voucher } : {}),
           ...(route?.params?.voucherCode ? { voucherCode: route.params.voucherCode } : {}),
           ...(route?.params?.discount != null ? { discount: route.params.discount } : {}),
+          ...(tipAmount > 0 ? { tip: tipAmount } : {}),
           service: serviceParam,
           tax: taxParam,
           rounding: roundingParam,
@@ -1539,6 +1629,16 @@ const styles = StyleSheet.create({
   voucherBarText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.navy },
   voucherBarTextActive: { color: colors.white },
   voucherRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  tipTitle: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
+  tipSub: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  tipRow: { flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' },
+  tipChip: { borderWidth: 1, borderColor: colors.line, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.card },
+  tipChipActive: { backgroundColor: colors.greenDark, borderColor: colors.greenDark },
+  tipChipText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
+  tipChipTextActive: { color: colors.white },
+  tipInput: { flex: 1, minWidth: 120 },
+  tipAdded: { fontFamily: fonts.semibold, fontSize: 12, color: colors.greenDark, marginTop: 6 },
+  tipBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8 },
   sumBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8 },
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
   sumLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
