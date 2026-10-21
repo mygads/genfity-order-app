@@ -8,6 +8,9 @@ import { useEffect, useMemo, useState } from 'react';import {
   Text,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
+  SUPERVISOR_ACTION_ORDER_REFUND,
+  SUPERVISOR_ACTION_ORDER_VOID,
+} from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId, getSaleTip } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
@@ -317,7 +320,7 @@ import { useEffect, useMemo, useState } from 'react';import {
       {/* S7: ganti metode bayar via persetujuan supervisor V1 (aksi refund). */}
       <SupervisorApprovalDialog
         visible={approvePayOpen}
-        action="refund"
+        action={SUPERVISOR_ACTION_ORDER_REFUND}
         refId={selected?.id ?? ''}
         fallbackAccessKey="sale.refund"
         onApproved={() => confirmPayApproved()}
@@ -368,7 +371,7 @@ import { useEffect, useMemo, useState } from 'react';import {
       {/* S7: void transaksi via persetujuan supervisor V1 (kontrak BE baru). */}
       <SupervisorApprovalDialog
         visible={approveVoidOpen}
-        action="void"
+        action={SUPERVISOR_ACTION_ORDER_VOID}
         refId={selected?.id ?? ''}
         reasonPreset={voidNote}
         fallbackAccessKey="order.void"

@@ -304,6 +304,20 @@ export const SUPERVISOR_V1_LIMITS = { actionMin: 1, actionMax: 64, refIdMax: 128
 export const SUPERVISOR_ACTION_COMPLIMENT_SETTLE = 'COMPLIMENT_SETTLE';
 
 /**
+ * COND-3 (PP-007 Tahap 0, kunci kontrak): aksi kanonis yang WAJIB dipakai
+ * approval void/refund — persis `ORDER_VOID` / `ORDER_REFUND` (case-sensitive,
+ * pola sama seperti COMPLIMENT_SETTLE di atas). Enforcement BE (W9) hanya
+ * mengenali kedua string ini; approval yang dibuat dengan literal lowercase
+ * (`void`/`refund`) TAKKAN cocok → void/refund staf 403 permanen yang benar.
+ * JANGAN hardcode string ini di layar — impor konstanta.
+ * Scope: HANYA action supervisor-approve V1. Namespace outbox lokal
+ * (`history.ts` action `void`) dan approval `cancel` (Belum ada enforcement
+ * BE; tetap lowercase) TIDAK ikut dikunci tahap ini.
+ */
+export const SUPERVISOR_ACTION_ORDER_VOID = 'ORDER_VOID';
+export const SUPERVISOR_ACTION_ORDER_REFUND = 'ORDER_REFUND';
+
+/**
  * COND-2: refId approval compliment = id-desimal order BE
  * (strconv.FormatInt(orderID, 10) — tanpa nol depan, bukan nomor struk
  * human-readable/salesNum). False = jangan kunci (dialog tetap bisa diisi
@@ -320,7 +334,9 @@ export interface SupervisorV1Input {
   supervisorUserId: number;
   /** PIN workforce milik supervisor (bukan PIN kasir yang login). */
   supervisorPin: string;
-  /** Aksi bebas 1..64 char (preset UI: void|cancel|compliment|refund|...). */
+  /** Aksi bebas 1..64 char. Untuk void/refund WAJIB konstanta kanonis
+   * (SUPERVISOR_ACTION_ORDER_VOID/REFUND — BE hanya cocok persis itu);
+   * `cancel` tetap lowercase (tanpa enforcement BE); `compliment` via konstanta. */
   action: string;
   /** Referensi bebas ≤128 char (cth. order id); boleh kosong — KECUALI
    * untuk COMPLIMENT_SETTLE (OFFLINE-RULE: wajib id-desimal, lihat gate di

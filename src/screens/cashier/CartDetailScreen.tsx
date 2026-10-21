@@ -5,6 +5,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
+import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
@@ -604,7 +605,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       {/* S7: eskalasi void via dialog persetujuan supervisor V1 (kontrak BE baru). */}
       <SupervisorApprovalDialog
         visible={voidTarget !== null}
-        action="void"
+        action={SUPERVISOR_ACTION_ORDER_VOID}
         refId={voidTarget?.id ?? ''}
         fallbackAccessKey="order.void"
         onApproved={() => approveVoid()}

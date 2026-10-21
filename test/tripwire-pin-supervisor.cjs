@@ -136,6 +136,40 @@ function run() {
   ok(/approvedBy = `owner:\$\{ov\.approverUserId\}`/.test(loginRaw) || /approvedBy = `owner:/.test(loginRaw),
     'override: attribution approvedBy owner:<id> dikunci ke sesi (jejak audit lokal)');
 
+  // 10. COND-3 (PP-007 Tahap 0, kunci kontrak): approval void/refund WAJIB
+  //    aksi kanonis ORDER_VOID/ORDER_REFUND (enforcement BE W9 hanya cocok
+  //    persis itu; literal lowercase = 403 permanen). Pin: konstanta kanonis
+  //    ada persis, semua pemanggil dialog memakainya, NOL literal
+  //    action="void"/"refund" tersisa di prop dialog. `cancel` + outbox
+  //    `history.ts` action `void` sengaja DIKECUALIKAN (namespace lain).
+  const supRaw2 = readRaw('lib/supervisor.ts');
+  ok(/export const SUPERVISOR_ACTION_ORDER_VOID = 'ORDER_VOID'/.test(supRaw2),
+    'supervisor: konstanta aksi kanonis ORDER_VOID persis');
+  ok(/export const SUPERVISOR_ACTION_ORDER_REFUND = 'ORDER_REFUND'/.test(supRaw2),
+    'supervisor: konstanta aksi kanonis ORDER_REFUND persis');
+  const voidCallers = [
+    'screens/history/HistoryScreen.tsx',
+    'screens/cashier/CashierScreen.tsx',
+    'screens/cashier/CartDetailScreen.tsx',
+  ];
+  const noCanon = voidCallers.filter((f) => !/SUPERVISOR_ACTION_ORDER_VOID/.test(readRaw(f)));
+  ok(noCanon.length === 0,
+    'screens: void pakai konstanta kanonis ORDER_VOID' + (noCanon.length ? ' (' + noCanon.join(',') + ')' : ''));
+  ok(/SUPERVISOR_ACTION_ORDER_REFUND/.test(readRaw('screens/history/HistoryScreen.tsx')),
+    'screens: refund pakai konstanta kanonis ORDER_REFUND');
+  const dlgProps = [
+    'screens/history/HistoryScreen.tsx',
+    'screens/cashier/CashierScreen.tsx',
+    'screens/cashier/CartDetailScreen.tsx',
+    'screens/bill/CancelScreen.tsx',
+    'screens/booking/BookingScreen.tsx',
+    'screens/payment/ExtraPaySection.tsx',
+    'components/SupervisorApprovalDialog.tsx',
+  ];
+  const lowerLit = dlgProps.filter((f) => /action="void"|action="refund"|action=\{['"]void['"]\}|action=\{['"]refund['"]\}/.test(readRaw(f)));
+  ok(lowerLit.length === 0,
+    'dialog: NOL literal action void/refund lowercase di prop dialog' + (lowerLit.length ? ' (' + lowerLit.join(',') + ')' : ''));
+
   return { checks, failures };
 }
 

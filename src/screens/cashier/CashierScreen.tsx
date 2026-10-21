@@ -17,6 +17,7 @@ import { useLang } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
+import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
@@ -900,7 +901,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const renderVoidDialog = () => (
     <SupervisorApprovalDialog
       visible={voidTarget !== null}
-      action="void"
+      action={SUPERVISOR_ACTION_ORDER_VOID}
       refId={voidTarget?.id ?? ''}
       fallbackAccessKey="order.void"
       onApproved={() => approveVoid()}
