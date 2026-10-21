@@ -199,6 +199,113 @@ function readDeliveryEnabledFromProfile(data: Record<string, unknown>): unknown 
   return undefined;
 }
 
+/**
+ * Tip/gratuity pelanggan opt-in (app-tip-gate, 2026-10): merchant.tip_enabled
+ * (BE default FALSE; profil: merchant_profile.go "tipEnabled": row.TipEnabled).
+ * Cermin FE defensive gate (POSPaymentModal: `merchant?.tipEnabled === true`,
+ * customer payment page: `tipEnabled === true`, keduanya default-closed).
+ * BEDA dengan flag delivery (default true = legacy lestari): tip default
+ * CLOSED (false) bila tak diketahui — menawarkan tip ke merchant tip-OFF =
+ * pelanggan kena BE 400 INVALID_TIP. Gate = offer-time only di PayScreen
+ * (sembunyikan kotak tip + paksa tipAmount 0); payload/sync tak berubah
+ * (tipAmount 0 → spread `...(tipAmount > 0 ...)` menghilangkan tip).
+ */
+
+type TipFlagListener = (on: boolean) => void;
+const tipFlagListeners = new Set<TipFlagListener>();
+
+/**
+ * Langganan perubahan flag tip (PayScreen me-render ulang saat profil
+ * tersinkron SESUDAH layar dibuka — cermin subscribeDeliveryFlag).
+ */
+export function subscribeTipFlag(fn: TipFlagListener): () => void {
+  tipFlagListeners.add(fn);
+  return () => {
+    tipFlagListeners.delete(fn);
+  };
+}
+
+function notifyTipFlag(on: boolean): void {
+  tipFlagListeners.forEach((fn) => {
+    try {
+      fn(on);
+    } catch {
+      /* listener tak boleh melempar */
+    }
+  });
+}
+
+/** Default CLOSED: false bila flag belum pernah tersinkron (lihat atas). */
+let cachedTipEnabled: boolean = false;
+
+/** Baca cache flag tip sesi (default false = gate tertutup, lihat atas). */
+export function getCachedTipEnabled(): boolean {
+  return cachedTipEnabled;
+}
+
+/**
+ * Tulis cache eksplisit, STRICT default-closed: hanya true boolean / string
+ * truthy eksplisit ('true'/'1'/'yes'/'on') yang membuka; null/undefined/''
+ * /'false'/'0' → false. Boolean() longgar TIDAK dipakai agar string 'false'
+ * dari server lama tak membuka gate secara tak sengaja.
+ */
+export function setCachedTipEnabled(raw: unknown): boolean {
+  let next: boolean;
+  if (typeof raw === 'string') {
+    const k = raw.trim().toLowerCase();
+    next = k === 'true' || k === '1' || k === 'yes' || k === 'y' || k === 'on';
+  } else {
+    next = raw == null ? false : Boolean(raw);
+  }
+  if (next !== cachedTipEnabled) {
+    cachedTipEnabled = next;
+    notifyTipFlag(next);
+  }
+  return cachedTipEnabled;
+}
+
+/** Kupas field flag tip dari payload profil (toleran dua bentuk envelope). */
+function readTipEnabledFromProfile(data: Record<string, unknown>): unknown {
+  for (const key of ['tipEnabled', 'tip_enabled']) {
+    if (key in data) return data[key];
+  }
+  for (const nest of ['merchant', 'branch', 'profile', 'data']) {
+    const inner = data[nest];
+    if (inner && typeof inner === 'object') {
+      const rec = inner as Record<string, unknown>;
+      for (const key of ['tipEnabled', 'tip_enabled']) {
+        if (key in rec) return rec[key];
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Persist cache ke ms_setting(Merchant, Tip) ('1'/'0'). */
+async function persistTipEnabled(on: boolean): Promise<void> {
+  await initDb();
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Tip', ?, ?)` +
+      ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+    [on ? '1' : '0', ''],
+  );
+}
+
+/** Muat flag tip dari baris lokal (false bila tak ada baris = gate tertutup). */
+async function loadTipEnabledLocal(): Promise<boolean> {
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Tip' LIMIT 1`,
+    );
+    const raw = (row?.value1 ?? '').trim();
+    if (!raw) return false;
+    return raw !== '0';
+  } catch {
+    return false;
+  }
+}
+
 /** Persist cache ke ms_setting(Merchant, Delivery) ('1'/'0'). */
 async function persistDeliveryEnabled(on: boolean): Promise<void> {
   await initDb();
@@ -260,6 +367,8 @@ async function persistMerchantType(code: PosMerchantType): Promise<void> {
 export async function syncMerchantTypeFromProfile(): Promise<PosMerchantType> {
   // R1: baseline flag delivery dari baris lokal; server menimpa bila ada.
   cachedDeliveryEnabled = await loadDeliveryEnabledLocal();
+  // app-tip-gate: baseline flag tip (default-closed) dari baris lokal.
+  cachedTipEnabled = await loadTipEnabledLocal();
   try {
     const r = await apiFetch('api/merchant/profile', { method: 'GET' });
     if (r.ok && !r.fromDummy) {
@@ -269,6 +378,15 @@ export async function syncMerchantTypeFromProfile(): Promise<PosMerchantType> {
         const on = setCachedDeliveryEnabled(flagRaw);
         try {
           await persistDeliveryEnabled(on);
+        } catch {
+          /* persist gagal: cache tetap di-set */
+        }
+      }
+      const tipRaw = readTipEnabledFromProfile(data ?? {});
+      if (tipRaw !== undefined) {
+        const on = setCachedTipEnabled(tipRaw);
+        try {
+          await persistTipEnabled(on);
         } catch {
           /* persist gagal: cache tetap di-set */
         }

@@ -23,6 +23,7 @@ import { publishDisplayOrder } from '../../lib/display';
 import { validateVoucherCode } from '../../lib/apiSource';
 import { syncWarnLevel } from '../../lib/sync';
 import { initDb, query as queryDb } from '../../lib/db';
+import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -283,8 +284,14 @@ export default function PayScreen({ navigation, route }: Props) {
   const tipCalc = tipMode === 'custom'
     ? Math.max(0, Math.round(Number(String(tipCustom).replace(/[^0-9]/g, '')) || 0))
     : Math.round((tipBase * tipPct) / 100);
-  // Cap basis + paksa 0 untuk split grup.
-  const tipAmount = isSplitGroup ? 0 : Math.min(Math.max(0, tipCalc), tipBase);
+  // Gate tip-enabled merchant (app-tip-gate, cermin FE POSPaymentModal
+  // `tipEnabled === true`, default-closed): merchant tip-OFF → tipAmount
+  // paksa 0 (seperti split grup) agar tak kena BE 400 INVALID_TIP. Reaktif
+  // via subscribeTipFlag bila profil tersinkron setelah layar dibuka.
+  const [tipEnabled, setTipEnabled] = useState(getCachedTipEnabled());
+  useEffect(() => subscribeTipFlag(setTipEnabled), []);
+  // Cap basis + paksa 0 untuk split grup MAUPUN merchant tip-OFF.
+  const tipAmount = (!tipEnabled || isSplitGroup) ? 0 : Math.min(Math.max(0, tipCalc), tipBase);
   // Teks banner voucher bawaan (info saja, tanpa tombol lepas karena sudah di total).
   const orderBannerText = !orderVoucher
     ? ''
@@ -1027,7 +1034,7 @@ export default function PayScreen({ navigation, route }: Props) {
         </View>
       )}
       {voucherMsg ? <Text style={styles.ctaHint}>{voucherMsg}</Text> : null}
-      {!isSplitGroup && (
+      {!isSplitGroup && tipEnabled && (
         <View style={styles.tipBox}>
           <Text style={styles.tipTitle}>{t('pay_tip_title')}</Text>
           <Text style={styles.tipSub}>{t('pay_tip_sub')}</Text>
