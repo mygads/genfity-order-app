@@ -6,6 +6,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { useLang } from '../../lib/i18n';
+import { getCachedCurrency } from '../../lib/currency';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
@@ -348,7 +349,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               )}
               {editingId === c.id && !c.voided && (
                 <View style={styles.editor}>
-                  <Text style={styles.editorLabel}>{t('unitPriceRp')}</Text>
+                  <Text style={styles.editorLabel}>{t(getCachedCurrency().code === 'AUD' ? 'unitPriceAud' : 'unitPriceRp')}</Text>
                   <AppInput
                     boxStyle={styles.editorInput}
                     style={styles.fieldText}

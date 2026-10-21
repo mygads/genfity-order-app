@@ -7,12 +7,13 @@ import { ApiPath } from '../config/server';
 import { getSession } from '../session';
 import { initDb, markClean, query, queryFirst, run } from './db';
 import { enqueueOutbox, enqueueSync, postImmediate } from './sync';
-import { fmtSalesDate } from './datefmt';
+import { fmtSalesDateInTz } from './datefmt';
 import { uuidv7 } from './uuidv7';
 import type { Transaction, TxnStatus } from '../data/mock';
 
-/** Formatter tanggal kanonik pindah ke lib/datefmt (locale-aware id/en). */
-export { fmtSalesDate };
+/** Formatter tanggal kanonik pindah ke lib/datefmt (locale-aware id/en,
+ *  sadar-zona-merchant PW-4). */
+export { fmtSalesDateInTz };
 
 /** salesMode kontrak (DINE_IN/…) → label kartu ('Dine In', …). */
 export function modeLabel(salesMode?: string | null): string {
@@ -94,7 +95,8 @@ export async function loadHistory(limit = 300): Promise<Transaction[]> {
       } catch {
         /* abaikan */
       }
-      const { date, time } = fmtSalesDate(h.salesDate ?? '');
+      // PW-4: tanggal riwayat ikut zona merchant (dulu jam perangkat).
+      const { date, time } = fmtSalesDateInTz(h.salesDate ?? '');
       out.push({
         id: h.salesNum,
         no: h.salesNum,

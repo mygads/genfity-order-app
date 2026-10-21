@@ -13,7 +13,7 @@ import {
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
-import { fmtDate } from '../../lib/datefmt';
+import { fmtDateInTz } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath, getBranchId, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
@@ -562,7 +562,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...rw,
       [mid]: [
         // Riwayat mencatat nominal top up-nya, bukan saldo akhir.
-        { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: t('mem_topup_full'), nominal: typeof topup === 'number' ? topup : baru },
+        { id: `r-${Date.now()}`, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_full'), nominal: typeof topup === 'number' ? topup : baru },
         ...(rw[mid] ?? []),
       ],
     }));
@@ -671,7 +671,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       setRiwayat((rw) => ({
         ...rw,
         [mid]: [
-          { id: `r-${Date.now()}`, tanggal: fmtDate(new Date(), lang), keterangan: t('mem_topup_quick'), nominal: n },
+          { id: `r-${Date.now()}`, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_quick'), nominal: n },
           ...(rw[mid] ?? []),
         ],
       }));

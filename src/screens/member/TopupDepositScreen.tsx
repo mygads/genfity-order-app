@@ -17,6 +17,7 @@ import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { useLang } from '../../lib/i18n';
+import { getCachedCurrency } from '../../lib/currency';
 import { hasOpenShift } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
@@ -26,11 +27,15 @@ type Props = {
   route?: { params?: { memberId?: string; nama?: string; saldo?: number } };
 };
 
-const QUICK = [50000, 100000, 200000, 500000, 1000000];
+// PW-4: nominal cepat + minimum top-up ikut currency cabang (chip IDR
+// 50rb–1jt / min Rp10rb tak masuk akal untuk merchant AUD).
+const QUICK_IDR = [50000, 100000, 200000, 500000, 1000000];
+const QUICK_AUD = [20, 50, 100, 200, 500];
 const METHODS = ['Tunai', 'QRIS', 'EDC', 'Transfer'];
 // Label tampil per bahasa; nilai METHODS tetap kanonis (paymentMethod kontrak §5.2).
 const METHOD_LABELS = ['pay_method_cash', 'pay_method_qris', 'pay_method_edc', 'pay_method_transfer'];
-const MIN_TOPUP = 10000;
+const MIN_TOPUP_IDR = 10000;
+const MIN_TOPUP_AUD = 10;
 
 /**
  * Simpan top up deposit ikut kontrak §5.2: POST member-deposit-withdrawal/topup
@@ -106,6 +111,10 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
+  // PW-4: chip + minimum ikut currency cabang.
+  const audTopup = getCachedCurrency().code === 'AUD';
+  const QUICK = audTopup ? QUICK_AUD : QUICK_IDR;
+  const MIN_TOPUP = audTopup ? MIN_TOPUP_AUD : MIN_TOPUP_IDR;
   // Tanpa memberId param = layar dibuka di luar alur (deep-link/dev) — JANGAN
   // tulis ke member contoh. Guard hasMember menonaktifkan submit di bawah.
   const hasMember = !!(route?.params?.memberId && route?.params?.memberId.trim());
@@ -280,7 +289,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             ))}
           </View>
           <AppInput
-            label={t('top_custom_label')}
+            label={t(getCachedCurrency().code === 'AUD' ? 'top_custom_label_aud' : 'top_custom_label')}
             keyboardType="number-pad"
             placeholder="0"
             value={nominalNum ? numGrouping(nominalNum) : ''}

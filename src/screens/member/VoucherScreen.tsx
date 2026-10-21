@@ -11,7 +11,7 @@ import {
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
-import { dbNowLocal, fmtDate } from '../../lib/datefmt';
+import { dbNowLocal, fmtDateInTz } from '../../lib/datefmt';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
@@ -89,7 +89,7 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
     let hingga = String(r.validTo ?? '').slice(0, 10);
     try {
       const d = new Date(String(r.validTo ?? ''));
-      if (!Number.isNaN(d.getTime())) hingga = fmtDate(d, lang);
+      if (!Number.isNaN(d.getTime())) hingga = fmtDateInTz(d, lang);
     } catch {
       /* pakai potongan tanggal mentah */
     }
@@ -221,7 +221,7 @@ export default function VoucherScreen({ navigation }: Props) {
           try {
             const d = new Date(String(it.validTo ?? ''));
             if (!Number.isNaN(d.getTime())) {
-              hingga = fmtDate(d, lang);
+              hingga = fmtDateInTz(d, lang);
             }
           } catch {
             /* pakai potongan tanggal mentah */
@@ -230,7 +230,7 @@ export default function VoucherScreen({ navigation }: Props) {
             id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
             kode,
             nama: String(it.name ?? kode),
-            jenis: t('vou_kind_discount'),
+            jenis: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
             nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
             minBelanja: 0,
             berlakuHingga: hingga,
@@ -388,7 +388,7 @@ export default function VoucherScreen({ navigation }: Props) {
       voucher: {
         code: kode,
         amount: Math.max(0, Math.round(amount)),
-        kind: 'Diskon (Rp)',
+        kind: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
         ...(opts?.minSpend ? { minSpend: opts.minSpend } : {}),
         ...(opts?.rate != null ? { rate: opts.rate } : {}),
         ...(opts?.maxAmount != null ? { maxAmount: opts.maxAmount } : {}),

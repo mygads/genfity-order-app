@@ -5,7 +5,15 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';
+import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang —
+ *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
+const MAX_KAS_AWAL_IDR = 10000000;
+const MAX_KAS_AWAL_AUD = 10000;
+/** Nominal cepat kas awal (PW-4: chip IDR 50rb–1jt tak masuk akal untuk A$). */
+const QUICK_NOMINAL_IDR = [50000, 100000, 200000, 500000, 1000000];
+const QUICK_NOMINAL_AUD = [20, 50, 100, 200, 500];
+const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -19,13 +27,15 @@ import React, { useEffect, useRef, useState } from 'react';import {
     if (x < 1000000000) return `${sebut(Math.floor(x / 1000000))} juta ${sebut(x % 1000000)}`.trim();
     return `${sebut(Math.floor(x / 1000000000))} miliar ${sebut(x % 1000000000)}`.trim();
   };
-  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Batas kas awal sesuai hint chip di bawah. */
-const MAX_KAS_AWAL = 10000000;
-/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift — sadar-bahasa (id/en)
+  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift — sadar-bahasa (id/en)
  * + sadar-zona-merchant (PW-4/S3; dulu id-ID-only + jam perangkat). */const fmtShift = (iso: string | null, lang: 'id' | 'en' = 'id', timeZone?: string): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const locale = lang === 'id' ? 'id-ID' : 'en-AU'; const tz = (timeZone ?? '').trim() || getCachedTimezone(); let tgl: string; let jam: string; try { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: tz }).replace(/\./g, ':'); } catch { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); } return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t, lang } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [kasAwal, setKasAwal] = useState('');
+  const { t, lang } = useLang();
+  // PW-4: chip + maks kas awal ikut currency cabang.
+  const audShift = getCachedCurrency().code === 'AUD';
+  const QUICK_NOMINAL = audShift ? QUICK_NOMINAL_AUD : QUICK_NOMINAL_IDR;
+  const MAX_KAS_AWAL = audShift ? MAX_KAS_AWAL_AUD : MAX_KAS_AWAL_IDR; const [drawerOpen, setDrawerOpen] = useState(false); const [kasAwal, setKasAwal] = useState('');
   const [catatan, setCatatan] = useState('');
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
@@ -243,7 +253,7 @@ const MAX_KAS_AWAL = 10000000;
           </View>
         ) : null}
         <TouchableOpacity onPress={() => navigation?.navigate?.('Attendance')}>
-          <Text style={s.link}>Belum absen? Catat kehadiran dulu → Absensi</Text>
+          <Text style={s.link}>{t('shf_att_link')}</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -271,7 +281,7 @@ const MAX_KAS_AWAL = 10000000;
         <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('shf_pin_title')}</Text>
-            <Text style={s.modalHint}>PIN kasir untuk membuka shift</Text>
+            <Text style={s.modalHint}>{t('shf_pin_hint')}</Text>
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />
