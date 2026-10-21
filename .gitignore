@@ -31,7 +31,19 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# local env files (plain .env MUST stay untracked - secrets)
+.env
 .env*.local
 
 # typescript
