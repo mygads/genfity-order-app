@@ -5,6 +5,11 @@
 # Auto-build signed APK setiap push ke main (disimpan sebagai Actions artifact,
 # retensi 30 hari) + GitHub Release permanen setiap push tag v* (mis. v1.0.1).
 #
+# Pull request TIDAK menjalankan signed build: GitHub menahan secrets pada
+# event pull_request sehingga keystore selalu kosong dan build pasti gagal
+# ~17 menit kemudian di :app:packageRelease. PR hanya menjalankan job
+# validate-pr (install + typecheck + prebuild, tanpa secrets).
+#
 # Pola meniru job android_apk di genfity-order-main (local Gradle build di
 # runner, bukan EAS cloud) supaya konsisten dengan CCD yang sudah ada.
 #
@@ -46,9 +51,23 @@ permissions:
 jobs:
   build-apk:
     name: Build signed APK
+    # T-164: secrets (keystore) tidak tersedia pada event pull_request, jadi
+    # signed build hanya jalan di push (main/tag) dan workflow_dispatch.
+    # Validasi PR ditangani job validate-pr di bawah (tanpa secrets).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
+      - name: Fail fast when keystore secret is empty
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo '::error::ANDROID_KEYSTORE_BASE64 kosong. Isi repo secret ANDROID_KEYSTORE_BASE64 (+ PASSWORD/ALIAS/KEY_PASSWORD) di Settings → Secrets and variables → Actions, lalu jalankan ulang workflow. Signed build dibatalkan sebelum Gradle dimulai.'
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -153,6 +172,35 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+  validate-pr:
+    name: Validate PR (no signing)
+    # T-164: pengganti build-apk untuk pull_request. Tanpa secrets, tanpa
+    # keystore, tanpa Gradle — hanya memastikan dependensi terinstal,
+    # typecheck lolos, dan expo prebuild mampu men-generate proyek android/.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Expo prebuild (generate android/)
+        env:
+          EXPO_PUBLIC_API_BASE_URL: ${{ vars.EXPO_PUBLIC_API_BASE_URL }}
+        run: npx expo prebuild --platform android --non-interactive --clean
 
   release:
     name: Publish GitHub Release
