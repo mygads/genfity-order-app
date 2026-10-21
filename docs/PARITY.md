@@ -19,7 +19,8 @@ dicek simbolnya di kode; langkah ini hanya ubah .md, tanpa ubah src/).
 - Clone: Expo ~57.0.28, React Native 0.86.3, React Navigation 7
   [TERVERIFIKASI-KODE package.json], 55 entri route di `src/navigation/types.ts`
   [TERVERIFIKASI-KODE] (dokumen lama menyebut 54; selisih 1 entri `QrHow`),
-  56 file layar di `src/screens` [TERVERIFIKASI-KODE].
+  59 file layar di `src/screens` [TERVERIFIKASI-KODE]
+  (58 `*Screen.tsx` + 1 seksi bersama `payment/ExtraPaySection.tsx`; recount 2026-10-21).
 - Tanggal matriks: 2026-10-16.
 - Bukti visual: `docs/ss-poslite/` 47 PNG APK asli [TERVERIFIKASI-KODE],
   `docs/ss-clone/` 56 PNG phone clone [TERVERIFIKASI-KODE], `refs/` 9 PNG
