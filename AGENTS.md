@@ -1,7 +1,7 @@
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
-> Proyek ini = clone RN ESB POSLite. Baca `DOKUMENTASI.md` dulu - sumber
-> kebenaran status, skor, gap APK 83-vs-29, dan TODO.
+> Proyek ini = clone RN ESB POSLite. Baca `docs/DOKUMENTASI.md` dulu - sumber
+> kebenaran status, skor, gap APK 83-vs-29, dan TODO. (Dipindah ke `docs/` 2026-10-22.)
 
 ## Expo has changed - do not trust your training data
 
@@ -58,18 +58,18 @@ Docs: https://docs.expo.dev/eas/index.md
 6. Route baru: daftarkan di `src/navigation/types.ts` + `App.tsx`, pastikan
    ada inbound `navigate` dari UI (orphan yang diketahui: DineIn, Voucher,
    QrScan, EsbOrder, Settings, Edc).
-7. Jangan tiru PIN-lokal-only APK (lihat DOKUMENTASI.md §4).
+7. Jangan tiru PIN-lokal-only APK (lihat docs/DOKUMENTASI.md §4).
 
 ## Definisi selesai (DoD) per tugas
 
 - [ ] `npx tsc --noEmit` lolos.
 - [ ] Screenshot Playwright phone (±390) + tablet (±820) di `verify/final/`.
 - [ ] Tablet ≥8: konten terpusat (`wideCenter*`) atau 2-panel.
-- [ ] Update `DOKUMENTASI.md` §1 (skor) + §6 (status temuan).
+- [ ] Update `docs/DOKUMENTASI.md` §1 (skor) + §6 (status temuan).
 
 ## Prioritas backlog
 
-`DOKUMENTASI.md` §7.1: (1) tablet 2-panel login/receipt/success/member/booking,
+`docs/DOKUMENTASI.md` §7.1: (1) tablet 2-panel login/receipt/success/member/booking,
 (2) label Order Fee/Ongkir (`CashierScreen.tsx:253`), (3) orphan routes +
 EdcScreen, (4) gap APK (install/klaim → split-bill → recap/expense → printer →
 deposit), (5) cetak nyata + logout menyeluruh.
