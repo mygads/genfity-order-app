@@ -44,6 +44,7 @@ export const W1_OP_CLOCK_OUT = 'be-clock-out';
 export const W1_OP_CASH_OPEN = 'be-cash-open';
 export const W1_OP_CASH_MOVE = 'be-cash-move';
 export const W1_OP_CASH_CLOSE = 'be-cash-close';
+export const W1_OP_CASH_APPROVE = 'be-cash-approve';
 export const W1_OP_EOD_CLOSE = 'be-eod-close';
 
 /** Timeout immediate-first W1 (cermin posWire, tanpa impor sync). */
@@ -294,6 +295,50 @@ export async function clearCashSessionId(): Promise<void> {
   cashSessionMem = null;
   try {
     await setItem(LS_CASH_SESSION, '');
+  } catch {
+    /* abaikan */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sesi menunggu review manager: diset saat tutup-kas menjawab
+// pendingManagerReview, dibaca ShiftScreen sebagai kartu approve, dibersihkan
+// saat approve sukses (atau replay REVIEW_NOT_PENDING).
+// ---------------------------------------------------------------------------
+const LS_PENDING_REVIEW = 'genfity.be.pendingReviewSid';
+
+let pendingReviewMem: string | null = null;
+
+export async function getPendingReviewSid(): Promise<string | null> {
+  if (pendingReviewMem) return pendingReviewMem;
+  try {
+    const v = await getItem(LS_PENDING_REVIEW);
+    const s = String(v ?? '').trim();
+    if (isServerSessionId(s)) {
+      pendingReviewMem = s;
+      return s;
+    }
+  } catch {
+    /* abaikan */
+  }
+  return null;
+}
+
+export async function setPendingReviewSid(id: string | number): Promise<void> {
+  const s = String(id ?? '').trim();
+  if (!isServerSessionId(s)) return;
+  pendingReviewMem = s;
+  try {
+    await setItem(LS_PENDING_REVIEW, s);
+  } catch {
+    /* abaikan */
+  }
+}
+
+export async function clearPendingReviewSid(): Promise<void> {
+  pendingReviewMem = null;
+  try {
+    await setItem(LS_PENDING_REVIEW, '');
   } catch {
     /* abaikan */
   }
@@ -638,6 +683,77 @@ export function cashClosePayload(actualCash: number, note?: string): Record<stri
   const n = String(note ?? '').trim();
   if (n) p.note = n.slice(0, 500);
   return p;
+}
+
+// ---------------------------------------------------------------------------
+// Approve sesi kas (manager KEDUA; closer tak boleh approve sesi sendiri —
+// server menjawab 403 INDEPENDENT_REVIEW_REQUIRED = 'rejected' jujur).
+// Catatan wajib 1–500 char (aturan server). PIN tak pernah ikut.
+// ---------------------------------------------------------------------------
+export interface CashApproveResult {
+  sessionId: number;
+  status: string;
+  approvedBy: string;
+  replayed: boolean;
+}
+
+export async function cashApproveBe(
+  sessionId: string | number,
+  note: string,
+): Promise<WfResult<CashApproveResult>> {
+  if (!isServerSessionId(sessionId)) {
+    return { ok: false, reason: 'blocked', message: wfTr('blocked') };
+  }
+  const n = String(note ?? '').trim();
+  if (!n) {
+    return { ok: false, reason: 'blocked', message: wfTr('blocked') };
+  }
+  const sid = parseInt(String(sessionId).trim(), 10);
+  const call = await postWithStampRetry(pathWithSession(ApiPath.merchantCashApprove, sid), {
+    note: n.slice(0, 500),
+  });
+  if (!('res' in call)) return offlineResult();
+  const { res } = call;
+  if (res.ok) {
+    const { data } = unwrap<Record<string, unknown>>(res.data);
+    const d = (data ?? {}) as Record<string, unknown>;
+    try {
+      await clearPendingReviewSid();
+    } catch {
+      /* abaikan */
+    }
+    return {
+      ok: true,
+      data: {
+        sessionId: sid,
+        status: strOf(d.status) || 'CLOSED',
+        approvedBy: strOf(d.approvedBy ?? d.approved_by),
+        replayed: false,
+      },
+    };
+  }
+  const be = beErrorOf(res.data);
+  if (res.status === 409 && be.code === 'REVIEW_NOT_PENDING') {
+    // Sudah di-approve (retry ganda) = keadaan target.
+    try {
+      await clearPendingReviewSid();
+    } catch {
+      /* abaikan */
+    }
+    return { ok: true, data: { sessionId: sid, status: 'CLOSED', approvedBy: '', replayed: true } };
+  }
+  if (res.status >= 500 || res.status === 429) {
+    return { ok: false, reason: 'error', code: be.code || `HTTP_${res.status}`, message: be.message || wfTr('offline'), status: res.status };
+  }
+  return rejected(res.status, res.data);
+}
+
+export function cashApprovePayload(sessionId: string | number, note: string): Record<string, unknown> {
+  return {
+    op: W1_OP_CASH_APPROVE,
+    serverSessionId: String(sessionId ?? '').trim(),
+    note: String(note ?? '').trim().slice(0, 500),
+  };
 }
 
 /** Layak diantrekan ke sync (offline/5xx/429) vs error jujur final (4xx deterministik). */

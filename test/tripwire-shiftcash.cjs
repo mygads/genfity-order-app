@@ -9,6 +9,8 @@
 //  W1-04: layar — Shift/EndShift/Cashier/PettyCashForm memanggil kontrak W1
 //         fire-and-forget SETELAH lokal menang; PIN tak ikut.
 //  W1-05: file W2 tak tersentuh (posWire/history/apiSource/layar W2/tripwire W2).
+//  W1-06: approve sesi kas — transport cashApproveBe + payload antrean +
+//         drain REVIEW_NOT_PENDING + kartu approve ShiftScreen (manager kedua).
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -44,13 +46,14 @@ function run() {
   const wf = read('lib/beWorkforce.ts');
   const wfRaw = raw('lib/beWorkforce.ts');
   for (const e of ['W1_OP_CLOCK_IN', 'W1_OP_CLOCK_OUT', 'W1_OP_CASH_OPEN',
-    'W1_OP_CASH_MOVE', 'W1_OP_CASH_CLOSE', 'W1_OP_EOD_CLOSE',
+    'W1_OP_CASH_MOVE', 'W1_OP_CASH_CLOSE', 'W1_OP_CASH_APPROVE', 'W1_OP_EOD_CLOSE',
     'BE_WF_TIMEOUT_MS', 'stripPin', 'terminalStamp', 'clockInBe', 'clockOutBe',
-    'cashOpenBe', 'cashMoveBe', 'cashCloseBe', 'eodPreviewBe', 'eodCloseBe',
+    'cashOpenBe', 'cashMoveBe', 'cashCloseBe', 'cashApproveBe', 'eodPreviewBe', 'eodCloseBe',
     'getCashSessionId', 'setCashSessionId', 'clearCashSessionId',
+    'getPendingReviewSid', 'setPendingReviewSid', 'clearPendingReviewSid',
     'loadPendingCashCloses', 'recordPendingCashClose', 'dropPendingCashClose',
     'flushPendingCashCloses', 'clockInPayload', 'clockOutPayload',
-    'cashOpenPayload', 'cashMovePayload', 'cashClosePayload', 'shouldQueueW1',
+    'cashOpenPayload', 'cashMovePayload', 'cashClosePayload', 'cashApprovePayload', 'shouldQueueW1',
     'isServerSessionId', 'isW1Online', 'mapArusToMoveType']) {
     ok(new RegExp(`\\b${e}\\b`).test(wf), `W1-02: beWorkforce mengekspor ${e}`);
   }
@@ -74,7 +77,7 @@ function run() {
   const syncRaw = raw('lib/sync.ts');
   ok(/from '\.\/beWorkforce'/.test(syncRaw), 'W1-03: sync mengimpor op W1 dari beWorkforce');
   for (const op of ['W1_OP_CLOCK_IN', 'W1_OP_CLOCK_OUT', 'W1_OP_CASH_OPEN',
-    'W1_OP_CASH_MOVE', 'W1_OP_CASH_CLOSE', 'W1_OP_EOD_CLOSE']) {
+    'W1_OP_CASH_MOVE', 'W1_OP_CASH_CLOSE', 'W1_OP_CASH_APPROVE', 'W1_OP_EOD_CLOSE']) {
     ok(new RegExp(`\\b${op}\\b`).test(sync), `W1-03: drain memakai ${op}`);
   }
   ok(/function goWorkforceOp/.test(sync), 'W1-03: penerjemah goWorkforceOp ada (terpisah dari goMerchantOp W2)');
@@ -85,6 +88,8 @@ function run() {
   ok(/OPEN_POS_ORDERS/.test(sync) && /recordPendingCashClose/.test(sync),
     'W1-03: 409 OPEN_POS_ORDERS dialihkan ke pending-close (bukan hilang)');
   ok(/merchantEodClose/.test(sync), 'W1-03: op EOD-close terkuras ke merchantEodClose');
+  ok(/merchantCashApprove/.test(sync) && /REVIEW_NOT_PENDING/.test(sync),
+    'W1-03: op be-cash-approve terkuras ke merchantCashApprove + 409 REVIEW_NOT_PENDING = replay');
   ok(/registerId: 0/.test(sync), 'W1-03: cash-open antrean registerId 0');
   ok(/opW1|be-/.test(sync) && /goWorkforceOp/.test(sync),
     'W1-03: op be-* dirutekan eksplisit ke drain W1 (bukan endpoint salah)');
@@ -107,6 +112,26 @@ function run() {
     'W1-04: PettyCashFormScreen cermin movement kas');
   for (const [nm, src] of [['ShiftScreen', shift], ['EndShiftScreen', end], ['PettyCashFormScreen', petty]]) {
     ok(/void \(async/.test(src), `W1-04: ${nm} fire-and-forget (tak blokir alur lokal)`);
+  }
+
+  // W1-06: approve sesi kas (manager kedua; closer = 403 jujur server).
+  ok(/cashApproveBe/.test(wf) && /cashApprovePayload/.test(wf),
+    'W1-06: transport + payload builder approve ada');
+  ok(/REVIEW_NOT_PENDING/.test(wf),
+    'W1-06: 409 REVIEW_NOT_PENDING = approve-replay (sudah di-approve)');
+  ok(/getPendingReviewSid/.test(wf) && /setPendingReviewSid/.test(wf) && /clearPendingReviewSid/.test(wf),
+    'W1-06: stash sid menunggu-review (storage-backed, cermin sesi kas)');
+  ok(/setPendingReviewSid/.test(end) && /pendingManagerReview/.test(end),
+    'W1-06: EndShiftScreen stash sid saat tutup menjawab pendingManagerReview');
+  const shiftAppr = read('screens/shift/ShiftScreen.tsx');
+  ok(/cashApproveBe/.test(shiftAppr) && /cashApprovePayload/.test(shiftAppr) && /getPendingReviewSid/.test(shiftAppr),
+    'W1-06: ShiftScreen kartu approve (immediate-first + antrean be-cash-approve)');
+  ok(/submitApprove/.test(shiftAppr) && /enqueueSync\('other', cashApprovePayload/.test(shiftAppr),
+    'W1-06: ShiftScreen antrekan approve saat offline/error (4xx = jujur)');
+  const i18nRaw = raw('lib/i18n.ts');
+  for (const k of ['appr_title', 'appr_desc', 'appr_note_ph', 'appr_btn', 'appr_sending',
+    'appr_need_note', 'appr_ok', 'appr_queued', 'appr_failed']) {
+    ok(new RegExp(`\\b${k}\\b`).test(i18nRaw), `W1-06: i18n memuat ${k}`);
   }
 
   // W1-05: file W2 tak tersentuh (git: hanya tambah-baris di sync.ts/server.ts

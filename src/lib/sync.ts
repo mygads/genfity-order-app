@@ -34,6 +34,7 @@ import {
 // (arah impor sync -> beWorkforce, cermin posWire; beWorkforce TAK mengimpor
 // sync agar tak ada siklus). Hanya INSERT di file ini — baris W2 tak diubah.
 import {
+  W1_OP_CASH_APPROVE,
   W1_OP_CASH_CLOSE,
   W1_OP_CASH_MOVE,
   W1_OP_CASH_OPEN,
@@ -620,7 +621,7 @@ function goMerchantOp(
 //   strict-createdAt); tanpa id sesi DAN tanpa open tertunda = {blocked}
 //   fail-once jujur (S10, bukan antre-selamanya).
 // - 409 replay W1 (SHIFT_ALREADY_OPEN / SHIFT_ALREADY_CLOSED / NO_OPEN_SHIFT /
-//   SESSION_CLOSED) = 'terkirim' idempoten (ditangani cabang drain di bawah —
+//   SESSION_CLOSED / REVIEW_NOT_PENDING) = 'terkirim' idempoten (ditangani cabang drain di bawah —
 //   isReplaySuccess W2 tak mengenal kode-kode ini).
 // - Tutup-kas membawa isCashClose + sessionId agar 409 OPEN_POS_ORDERS bisa
 //   dialihkan ke daftar pending-close (bukan hilang).
@@ -629,7 +630,7 @@ function goMerchantOp(
 // ---------------------------------------------------------------------------
 
 /** 409 = "sudah dalam keadaan target" untuk domain shift/kas W1. */
-const W1_REPLAY_RE = /^(SHIFT_ALREADY_OPEN|SHIFT_ALREADY_CLOSED|NO_OPEN_SHIFT|SESSION_CLOSED)$/;
+const W1_REPLAY_RE = /^(SHIFT_ALREADY_OPEN|SHIFT_ALREADY_CLOSED|NO_OPEN_SHIFT|SESSION_CLOSED|REVIEW_NOT_PENDING)$/;
 
 export interface GoWorkforceOp {
   path: string;
@@ -652,7 +653,8 @@ async function goWorkforceOp(
   const op = String(p.op ?? '');
   if (
     op !== W1_OP_CLOCK_IN && op !== W1_OP_CLOCK_OUT && op !== W1_OP_CASH_OPEN &&
-    op !== W1_OP_CASH_MOVE && op !== W1_OP_CASH_CLOSE && op !== W1_OP_EOD_CLOSE
+    op !== W1_OP_CASH_MOVE && op !== W1_OP_CASH_CLOSE && op !== W1_OP_CASH_APPROVE &&
+    op !== W1_OP_EOD_CLOSE
   ) {
     return null;
   }
@@ -716,6 +718,22 @@ async function goWorkforceOp(
     return {
       path: ApiPath.merchantCashMove.replace('{sessionId}', encodeURIComponent(sid)),
       body: { type, amount, reason: reason.slice(0, 500) },
+      method: 'POST',
+      idemKey,
+      sessionId: sid,
+    };
+  }
+  // W1_OP_CASH_APPROVE (manager kedua; closer sendiri = 403 jujur di bawah).
+  // Catatan wajib 1–500 char (aturan server); tanpa catatan valid = blocked.
+  // 409 REVIEW_NOT_PENDING = sudah di-approve = replay-sukses (W1_REPLAY_RE).
+  if (op === W1_OP_CASH_APPROVE) {
+    const approveNote = String(p.note ?? '').trim();
+    if (!approveNote) {
+      return { blocked: 'beWorkforce: approve butuh note 1-500 char (aturan server)' };
+    }
+    return {
+      path: ApiPath.merchantCashApprove.replace('{sessionId}', encodeURIComponent(sid)),
+      body: { note: approveNote.slice(0, 500) },
       method: 'POST',
       idemKey,
       sessionId: sid,

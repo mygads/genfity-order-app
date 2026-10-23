@@ -12,6 +12,7 @@ import React, { useEffect, useState } from 'react';import {
   flushPendingCashCloses,
   getCashSessionId,
   recordPendingCashClose,
+  setPendingReviewSid,
   shouldQueueW1,
 } from '../../lib/beWorkforce';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
@@ -143,6 +144,14 @@ import React, { useEffect, useState } from 'react';import {
               note: catatan.trim() ? catatan.trim().slice(0, 500) : null,
               at: new Date().toISOString(),
             });
+          }
+        } else if (close.data.pendingManagerReview) {
+          // Sesi butuh review manager kedua: stash sid agar ShiftScreen
+          // menampilkan kartu approve (transport cashApproveBe + drain W1).
+          try {
+            await setPendingReviewSid(close.data.sessionId);
+          } catch {
+            /* abaikan */
           }
         }
       } catch {

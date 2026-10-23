@@ -6,10 +6,13 @@ import React, { useEffect, useRef, useState } from 'react';import {
   TouchableOpacity,
   View,
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+  cashApproveBe,
+  cashApprovePayload,
   cashOpenBe,
   cashOpenPayload,
   clockInBe,
   clockInPayload,
+  getPendingReviewSid,
   shouldQueueW1,
 } from '../../lib/beWorkforce';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
@@ -39,8 +42,51 @@ const MAX_KAS_AWAL = 10000000;
   const openingRef = useRef(false); // cegah ketuk ganda tombol OK selama verifikasi async berjalan
 
   const [lastShift, setLastShift] = useState<LastShift | null>(null);
+  // Sesi kas menunggu review manager kedua (diset EndShiftScreen saat tutup
+  // menjawab pendingManagerReview; dibersihkan saat approve sukses/replay).
+  const [pendingSid, setPendingSid] = useState<string | null>(null);
+  const [approveNote, setApproveNote] = useState('');
+  const [approveBusy, setApproveBusy] = useState(false);
+  const [approveMsg, setApproveMsg] = useState('');
   // Shift terakhir dari SQLite (tr_shiftlog), bukan hardcoded.
   useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE status IN (\'open\', \'closed\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1', [getBranchId()]); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || '-', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
+  // Muat sid menunggu-review tiap mount (persist di storage).
+  useEffect(() => { let on = true; (async () => { try { const sid = await getPendingReviewSid(); if (on) setPendingSid(sid); } catch { /* abaikan */ } })(); return () => { on = false; }; }, []);
+
+  const submitApprove = async () => {
+    if (!pendingSid || approveBusy) return;
+    const note = approveNote.trim();
+    if (!note) {
+      setApproveMsg(t('appr_need_note'));
+      return;
+    }
+    setApproveBusy(true);
+    setApproveMsg('');
+    // Immediate-first cermin clock-in/cash-open; offline/5xx/429 = antrekan
+    // op be-cash-approve (drain mem-POST note + REVIEW_NOT_PENDING = replay).
+    // 403 (penutup approve sendiri) = error jujur, tak diantre.
+    try {
+      const r = await cashApproveBe(pendingSid, note);
+      if (r.ok) {
+        setPendingSid(null);
+        setApproveNote('');
+        setApproveMsg(t('appr_ok'));
+      } else if (shouldQueueW1(r)) {
+        try {
+          enqueueSync('other', cashApprovePayload(pendingSid, note));
+          setApproveMsg(t('appr_queued'));
+        } catch {
+          setApproveMsg(r.message || t('appr_failed'));
+        }
+      } else {
+        setApproveMsg(r.message || t('appr_failed'));
+      }
+    } catch {
+      setApproveMsg(t('appr_failed'));
+    } finally {
+      setApproveBusy(false);
+    }
+  };
 
   const openPin = () => {
     if (kasAwalNum <= 0) {
@@ -231,6 +277,28 @@ const MAX_KAS_AWAL = 10000000;
             <Text style={s.shiftValue}>{lastShift ? fmtShift(lastShift.closed, lang, getCachedTimezone()) : '-'}</Text>
           </View>
         </View>
+
+        {pendingSid ? (
+          <View style={s.card}>
+            <Text style={s.cardTitle}>{t('appr_title')}</Text>
+            <Text style={s.hint}>{t('appr_desc').replace('{s}', pendingSid)}</Text>
+            <AppInput
+              placeholder={t('appr_note_ph')}
+              multiline
+              value={approveNote}
+              onChangeText={setApproveNote}
+              boxStyle={{ height: 'auto', minHeight: 70, alignItems: 'flex-start', marginTop: 8 }}
+              style={{ textAlignVertical: 'top' }}
+            />
+            {approveMsg ? <Text style={s.hint}>{approveMsg}</Text> : null}
+            <AppButton
+              title={approveBusy ? t('appr_sending') : t('appr_btn')}
+              disabled={approveBusy || !approveNote.trim()}
+              style={{ marginTop: 8 }}
+              onPress={() => void submitApprove()}
+            />
+          </View>
+        ) : null}
 
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_cash_open')}</Text>
