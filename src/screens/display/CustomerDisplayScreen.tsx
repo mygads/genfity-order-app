@@ -79,7 +79,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     }
   }, [uiTick]);
   const staleAgeSec = lastDataAt === null ? null : Math.max(0, Math.round((Date.now() - lastDataAt) / 1000));
-  const staleAgeLabel = staleAgeSec === null ? null : staleAgeSec < 120 ? `${staleAgeSec}s` : `${Math.floor(staleAgeSec / 60)}m`;
+  const staleAgeLabel = staleAgeSec === null ? null : staleAgeSec < 120 ? t('disp_age_s').replace('{n}', String(staleAgeSec)) : t('disp_age_m').replace('{n}', String(Math.floor(staleAgeSec / 60)));
   /** D3: banner basi bila feed primer tak live ATAU jam live basi — kaki WS
    * tak menyembunyikan staleness poll. D4: jam live hanya dari kaki live. */
   const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);

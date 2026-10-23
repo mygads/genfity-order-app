@@ -231,8 +231,8 @@ export default function QueueViewScreen() {
     staleAgeSec === null
       ? null
       : staleAgeSec < 120
-        ? `${staleAgeSec}s`
-        : `${Math.floor(staleAgeSec / 60)}m`;
+        ? t('disp_age_s').replace('{n}', String(staleAgeSec))
+        : t('disp_age_m').replace('{n}', String(Math.floor(staleAgeSec / 60)));
   /** D3: basi bila feed primer tak live ATAU jam live basi. D4: jam live
    * hanya dari kaki live (poll menulis lastPollAt, bukan lastDataAt). */
   const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);

@@ -1150,7 +1150,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                 scrollToChip(c.name);
               }}>
               <Text style={[styles.catText, active && styles.catTextActive]} numberOfLines={1}>
-                {c.name} ({catCount(c.name)}pcs)
+                {(c.name === 'Favorit' ? t('cat_fav') : c.name)} ({catCount(c.name)}pcs)
               </Text>
               {inCart > 0 && (
                 <View style={styles.catCartBadge}>
