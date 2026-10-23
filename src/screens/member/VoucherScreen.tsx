@@ -385,10 +385,12 @@ export default function VoucherScreen({ navigation }: Props) {
     }
     navigation?.navigate('Cashier', {
       // U1: teruskan minSpend/rate/maxAmount agar totals.ts bisa pakai.
+      // S4: label jenis ikut currency cabang — totals.ts hanya baca
+      // 'Ongkir'/'%', jadi kind di sini inert, tapi label IDR salah di AUD.
       voucher: {
         code: kode,
         amount: Math.max(0, Math.round(amount)),
-        kind: 'Diskon (Rp)',
+        kind: tOf(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount', lang),
         ...(opts?.minSpend ? { minSpend: opts.minSpend } : {}),
         ...(opts?.rate != null ? { rate: opts.rate } : {}),
         ...(opts?.maxAmount != null ? { maxAmount: opts.maxAmount } : {}),
