@@ -46,6 +46,27 @@ export function getCachedTimezone(): string {
   return cachedTz;
 }
 
+/**
+ * Singkatan zona untuk label jam operasional (DUAL-CURRENCY §4c — pengganti
+ * 'WIB' hardcode di idle_hours_val/help.contact). Peta eksplisit agar
+ * deterministik di semua engine; zona tak dikenal = tampil nama zonanya
+ * sendiri (jujur, bukan WIB yang salah).
+ */
+const TZ_SHORT: Record<string, string> = {
+  'Asia/Jakarta': 'WIB',
+  'Asia/Makassar': 'WITA',
+  'Asia/Jayapura': 'WIT',
+  'Australia/Perth': 'AWST',
+  'Australia/Sydney': 'AEST',
+  'Australia/Melbourne': 'AEST',
+  UTC: 'UTC',
+};
+
+export function getTimezoneShort(timeZone?: string): string {
+  const z = (timeZone ?? '').trim() || getCachedTimezone();
+  return TZ_SHORT[z] ?? z;
+}
+
 /** Tulis cache secara eksplisit (mis. setelah pilih branch). Tak pernah melempar. */
 export function setCachedTimezone(tz: string): string {
   const v = normalizeTz(tz) ?? fallbackForCurrency();

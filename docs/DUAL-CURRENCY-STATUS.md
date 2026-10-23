@@ -48,22 +48,67 @@ DB lokal hanya memegang SATU cabang aktif (tak ada tabel `ms_branch`).
 Catatan: setting eksplisit `ms_setting(Tax, PPN)` / `ms_setting(Rounding, …)`
 selalu menang atas default per currency di atas.
 
-## 4. Yang BELUM (backlog eksplisit)
+## 4. Backlog §4 — SELESAI (gelombang-15 SESI-APP-DUALCUR, 2026-10-23)
 
-1. **Gating metode bayar per currency** — `ms_paymentmethod` seed (Tunai,
-   QRIS, Transfer, EDC) tampil untuk semua cabang tanpa filter currency.
-   Cabang AUD seharusnya menyembunyikan QRIS/EDC/wallet-ID. Butuh kolom
-   currency di metode bayar + filter UI.
-2. **Label i18n `(Rp)`** — ~10 kunci `lib/i18n.ts` hardcode `(Rp)`, bahkan di
-   string `en`: `price`, `mem_nominal_label`, `vou_kind_discount`,
-   `top_custom_label`, `ongkirNominal`, `discItemRp`, `unitPriceRp`,
-   `menu.price` (en: `Price (Rp)`). Butuh label sadar-currency.
-3. **`WIB` di struk** — `ReceiptScreen.tsx` hardcode `WIB`; kunci
-   `idle_hours_val` (id) dan `help.contact` hardcode `WIB`. Cabang AUD perlu
-   zona sendiri (AEST/AEDT) per cabang, bukan hardcode.
-4. **Pajak per-cabang** — `Tax PPN` satu baris global; dua cabang beda pajak
-   tak bisa hidup berdampingan offline. Helper uji menimpa global.
-5. **Locale tanggal/waktu ikut bahasa UI** (`datefmt.ts`: `id-ID`/`en-GB`),
-   bukan currency cabang — jam Sydney tampil format Jakarta bila UI `id`.
-6. **Order contoh seed hanya IDR** — `seedCanon` hardcode `taxRate: 11`;
-   belum ada order contoh AUD untuk baseline History/Dashboard cabang AUD.
+Verifikasi ulang tiap item di kode + perbaikan ikut pola existing
+(profil currency live dari BE; format per-currency; timezone cabang).
+
+1. **Gating metode bayar per currency — DONE.**
+   Verifikasi: UI Pay memakai tab hardcode (`PayScreen.tsx`: `SIDEBAR_IDS`,
+   `WALLETS`, `CARDS`), tabel `ms_paymentmethod` seed (Tunai/QRIS/Transfer/EDC)
+   tak dikonsumsi UI mana pun — kolom currency di tabel = data mati, SENGAJA
+   tak ditambah. Gerbang hidup di `PayScreen.tsx` (`isAudBranch` dari
+   `getCachedCurrency()`): cabang AUD menyembunyikan tab `nontunai` (EDC/kartu
+   BCA/OCBC) + `online` (OVO/GoPay/DANA/QRIS/ShopeePay); usulan metode ID
+   (mis. SplitBill QRIS) jatuh ke `tunai`. Tunai/member-deposit/tender
+   (transfer/kompliment/non-penjualan) netral-currency, tetap tampil.
+2. **Label i18n `(Rp)` — DONE (8 kunci).**
+   Verifikasi: `lib/i18n.ts` hardcode `(Rp)` di `price`, `mem_nominal_label`,
+   `vou_kind_discount`, `top_custom_label`, `ongkirNominal`, `discItemRp`,
+   `unitPriceRp`, `menu.price` (termasuk varian `en`). Perbaikan: 8 varian
+   `*_aud` (`(A$)`) + helper `tCur(base)` (fallback kunci dasar bila varian
+   tak ada — tak pernah blank; pola pasangan mengikuti
+   `vou_kind_disc_idr/aud`). Call-site beralih ke `tCur`: CustomMenuScreen,
+   MemberScreen, VoucherScreen, TopupDepositScreen, CartDetailScreen (2),
+   CashierScreen (2), MenuManagementScreen (2).
+3. **`WIB` di struk — DONE.**
+   Verifikasi: `ReceiptScreen.tsx` SUDAH bersih (header tanggal memakai
+   `fmtDateInTz`/`fmtTimeInTz`, tanpa sufiks zona — dikerjakan lane S4).
+   Sisa hardcode: `idle_hours_val` (id) + `help.contact` (id+en).
+   Perbaikan: kedua kunci memakai placeholder `{tz}` +
+   `getTimezoneShort()` baru di `lib/timezone.ts` (Jakarta→WIB,
+   Perth→AWST, Sydney→AEST, fallback jujur = nama zona); call-site
+   IdleScreen + HelpScreen me-replace `{tz}`. `switchSeedBranchForTest`
+   kini ikut menulis baris `Branch/Timezone` (IDR→Asia/Jakarta,
+   AUD→Australia/Perth) + `setCachedTimezone()` tanpa perlu restart.
+4. **Pajak per-cabang — DONE.**
+   Verifikasi: `Tax PPN` satu baris global; helper uji menimpa global.
+   Perbaikan: `getTaxRate(currency?, branchId?)` di `lib/totals.ts` menang
+   berurut — `ms_setting('Tax','PPN_<branchId>')` → global `Tax/PPN` →
+   default currency (11/10). Helper uji menulis kedua tarif
+   (`PPN_B001=11`, `PPN_B004=10`) sehingga hidup berdampingan; global tetap
+   cermin cabang aktif (kompatibel pembaca lama). Tanpa baris per-cabang =
+   perilaku lama persis.
+5. **Locale tanggal vs currency — DONE.**
+   Verifikasi: `fmtDateInTz` memakai locale bahasa UI (`id→id-ID`), sehingga
+   cabang AUD + UI `id` tampil format Jakarta. Perbaikan: `branchLocale()`
+   baru di `lib/datefmt.ts` — cabang AUD selalu `en-AU`, selain itu peta lama
+   (tanpa ubah `fmtDate`/`fmtSalesDate` device-time). Pemakai InTz
+   (Receipt, SyncScreen, sync.ts) otomatis ikut. Asumsi: kasir Sydney melihat
+   nama bulan Inggris (revert mudah bila owner mau ikut bahasa UI).
+6. **Seed order AUD — DONE.**
+   Verifikasi: `seedCanon` hardcode `taxRate: 11`; belum ada order AUD.
+   Perbaikan: `SeedOrderSpec` +`taxRate?`/`branchId?`; `seedCanon` memakai
+   keduanya (`roundStep` 1 untuk B004 — perlu karena `totals()` integer);
+   `seedSaleDirect` memakai `branchId` spec (dulu literal `'B001'`).
+   `SEED-AUD-001` (Jack, TAKE AWAY cash, Ayam Bakar 25×1 + Kopi 5×2 = 35,
+   GST 10 → pajak 3, service 2, total A$37.00) di-seed HANYA dari
+   `switchSeedBranchForTest('AUD')` (idempoten via cek salesNum) — instalasi
+   segar tetap IDR murni. `totals()` +`roundStep?` opsional (default 100,
+   kompatibel).
+
+   Tap-flow: instalasi segar (IDR: `Rp 15.000`, PPN 11) → panggil
+   `switchSeedBranchForTest('AUD')` → label `(A$)` + `A$` 2-desimal,
+   tab QRIS/EDC hilang, jam `AWST`/tanggal `en-AU`, pajak GST 10,
+   `SEED-AUD-001` tampil di History → kembali `switchSeedBranchForTest('IDR')`.
+   Gate: `npm run typecheck` + `npm test` hijau (tanpa emulator).

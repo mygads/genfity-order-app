@@ -5,7 +5,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
-import { useLang } from '../../lib/i18n';
+import { useLang, tCur } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { enqueueOutbox } from '../../lib/sync';
@@ -371,7 +371,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
         <View style={styles.addForm}>
           <AppInput label={t('menu.menuName')} value={newName} onChangeText={setNewName} placeholder={t('menu.menuName')} />
           <AppInput
-            label={t('menu.price')}
+            label={tCur('menu.price')}
             value={newPrice ? rpNum(Number(newPrice.replace(/\D/g, '')) || 0) : ''}
             onChangeText={(v) => setNewPrice(v.replace(/\D/g, '').slice(0, 9))}
             placeholder="0"
@@ -423,7 +423,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
             <View style={styles.editor}>
               <AppInput label={t('menu.menuName')} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} />
               <AppInput
-                label={t('menu.price')}
+                label={tCur('menu.price')}
                 value={draftPrice ? rpNum(Number(draftPrice.replace(/\D/g, '')) || 0) : ''}
                 onChangeText={(v) => setDraftPrice(v.replace(/\D/g, '').slice(0, 9))}
                 placeholder="0"

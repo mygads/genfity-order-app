@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { getItem, setItem } from './storage';
+import { getCachedCurrency } from './currency';
 
 export type Lang = 'id' | 'en';
 
@@ -523,7 +524,7 @@ const STR: Record<string, Entry> = {
   disp_hint: { id: 'Tampilan sekunder (presentation display) butuh dev-client - pratinjau di atas tersinkron antar layar otomatis.', en: 'Secondary display (presentation display) needs dev-client - the preview above syncs across screens automatically.' },
   idle_welcome: { id: 'Selamat datang - silakan order di kasir', en: 'Welcome - please order at the cashier' },
   idle_hours: { id: 'Jam Buka', en: 'Open Hours' },
-  idle_hours_val: { id: '08.00 - 22.00 WIB', en: '08.00 - 22.00' },
+  idle_hours_val: { id: '08.00 - 22.00 {tz}', en: '08.00 - 22.00 {tz}' },
   idle_wifi: { id: 'Wi-Fi', en: 'Wi-Fi' },
   idle_queue: { id: 'Antrean', en: 'Queue' },
   idle_queue_suffix: { id: 'disiapkan', en: 'in preparation' },
@@ -1114,7 +1115,7 @@ const STR: Record<string, Entry> = {
   'help.title': { id: 'Bantuan', en: 'Help' },
   'help.sub': { id: 'FAQ dan panduan singkat operasional', en: 'FAQ and short operations guide' },
   'help.more': { id: 'Butuh bantuan lebih lanjut?', en: 'Need more help?' },
-  'help.contact': { id: 'Hubungi admin cabang atau tim support Genfity (jam operasional 08.00-21.00 WIB).', en: 'Contact the branch admin or Genfity support (operating hours 08.00-21.00 WIB).' },
+  'help.contact': { id: 'Hubungi admin cabang atau tim support Genfity (jam operasional 08.00-21.00 {tz}).', en: 'Contact the branch admin or Genfity support (operating hours 08.00-21.00 {tz}).' },
   scan_short: { id: 'Kode terlalu pendek - minimal 3 karakter.', en: 'Code too short - at least 3 characters.' },
 
   // ---- install (klaim terminal - cabang - PIN) ----
@@ -1807,6 +1808,18 @@ const STR: Record<string, Entry> = {
   bok_edited: { id: '● Diedit…', en: '● Edited…' },
   bok_edit: { id: '✎ Edit', en: '✎ Edit' },
   bok_del: { id: '🗑 Batal/Hapus', en: '🗑 Cancel/Delete' },
+
+  // ---- DUAL-CURRENCY §4(b): varian label nominal cabang AUD (dipilih via
+  // tCur di bawah; pola pasangan _idr/_aud mengikuti vou_type_disc_idr/aud).
+  // Tanpa varian _aud, tCur jatuh ke kunci dasar (label IDR) — tak pernah blank.
+  price_aud: { id: 'Harga (A$)', en: 'Price (A$)' },
+  mem_nominal_label_aud: { id: 'Nominal deposit (A$)', en: 'Deposit amount (A$)' },
+  vou_kind_discount_aud: { id: 'Diskon (A$)', en: 'Discount (A$)' },
+  top_custom_label_aud: { id: 'Nominal top up (A$)', en: 'Top up amount (A$)' },
+  ongkirNominal_aud: { id: 'Nominal (A$)', en: 'Amount (A$)' },
+  discItemRp_aud: { id: 'Diskon item (A$)', en: 'Item discount (A$)' },
+  unitPriceRp_aud: { id: 'Harga satuan (A$)', en: 'Unit price (A$)' },
+  'menu.price_aud': { id: 'Harga (A$) *', en: 'Price (A$) *' },
 };
 
 const missingWarned = new Set<string>();
@@ -1830,6 +1843,24 @@ export function tOf(key: string, lang?: Lang): string {
 
 /** Alias tOf untuk impor bernama tr di titik yang butuh tanpa hook. */
 export const tr = tOf;
+
+/**
+ * Label nominal sadar-currency cabang (DUAL-CURRENCY §4b): cabang AUD memakai
+ * varian `<base>_aud` bila ada, selain itu kunci dasar (label IDR — perilaku
+ * lama). Baca cache sinkron (pola rp() di theme); currency disinkronkan saat
+ * login/pilih cabang sehingga layar yang me-remount selalu benar. Tanpa
+ * varian _aud = fallback dasar, tak pernah blank.
+ */
+export function tCur(base: string, lang?: Lang): string {
+  try {
+    if (getCachedCurrency().code === 'AUD' && STR[`${base}_aud`]) {
+      return tOf(`${base}_aud`, lang);
+    }
+  } catch {
+    /* cache belum siap: fallback dasar */
+  }
+  return tOf(base, lang);
+}
 
 export function useLang(): {
   lang: Lang;

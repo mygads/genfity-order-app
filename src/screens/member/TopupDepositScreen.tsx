@@ -16,7 +16,7 @@ import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
-import { useLang } from '../../lib/i18n';
+import { useLang, tCur } from '../../lib/i18n';
 import { hasOpenShift } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
@@ -280,7 +280,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             ))}
           </View>
           <AppInput
-            label={t('top_custom_label')}
+            label={tCur('top_custom_label')}
             keyboardType="number-pad"
             placeholder="0"
             value={nominalNum ? numGrouping(nominalNum) : ''}

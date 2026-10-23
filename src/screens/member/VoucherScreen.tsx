@@ -16,7 +16,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query, queryFirst, run } from '../../lib/db';
-import { tOf, useLang } from '../../lib/i18n';
+import { tOf, useLang, tCur } from '../../lib/i18n';
 import { getCachedCurrency } from '../../lib/currency';
 import type { Lang } from '../../lib/i18n';
 import { verifyLocalEscalation } from '../../lib/supervisor';
@@ -230,7 +230,7 @@ export default function VoucherScreen({ navigation }: Props) {
             id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
             kode,
             nama: String(it.name ?? kode),
-            jenis: t('vou_kind_discount'),
+            jenis: tCur('vou_kind_discount'),
             nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
             minBelanja: 0,
             berlakuHingga: hingga,

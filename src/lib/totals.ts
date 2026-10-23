@@ -90,15 +90,25 @@ export function defaultOngkirForMode(mode?: string): number {
 }
 
 /**
- * Baca tarif pajak dari ms_setting(Tax, PPN) (dummy: value1 '11').
- * Setting eksplisit SELALU menang; bila tak ada/tak valid pakai default per
- * currency: IDR = TAX_DEFAULT (11 PPN), AUD = 10 (GST). Tanpa argumen =
- * perilaku lama persis (eksplisit atau 11). Tanpa infrastruktur
- * baru: memakai pola queryFirst yang sudah ada (lih. ExpenseScreen loadCoa).
+ * Baca tarif pajak dari ms_setting (DUAL-CURRENCY §4d: per-cabang).
+ * Urutan menang: eksplisit per-cabang ms_setting('Tax', 'PPN_<branchId>')
+ * → eksplisit global ms_setting('Tax', 'PPN') → default per currency
+ * (IDR = TAX_DEFAULT 11 PPN, AUD = 10 GST). Tanpa baris per-cabang =
+ * perilaku lama persis. branchId default = cabang aktif
+ * (ms_setting('Branch','Name').value2 — B001/B004 di alur seed).
  */
-export async function getTaxRate(currency?: string): Promise<number> {
+export async function getTaxRate(currency?: string, branchId?: string): Promise<number> {
   try {
     await initDb();
+    const bid = (branchId ?? '').trim() || (await getActiveBranchId());
+    if (bid) {
+      const per = await queryFirst<{ value1: string | null }>(
+        `SELECT value1 FROM ms_setting WHERE key1 = 'Tax' AND key2 = ? LIMIT 1`,
+        [`PPN_${bid}`],
+      );
+      const pn = Number(per?.value1);
+      if (Number.isFinite(pn) && pn >= 0 && pn <= 100) return pn;
+    }
     const row = await queryFirst<{ value1: string | null }>(
       "SELECT value1 FROM ms_setting WHERE key1 = 'Tax' AND key2 = 'PPN'",
     );
@@ -109,6 +119,19 @@ export async function getTaxRate(currency?: string): Promise<number> {
   }
   if ((currency ?? '').trim().toUpperCase() === 'AUD') return 10;
   return TAX_DEFAULT;
+}
+
+/** ID cabang aktif dari ms_setting('Branch','Name').value2 ('' bila tak ada). */
+export async function getActiveBranchId(): Promise<string> {
+  try {
+    await initDb();
+    const row = await queryFirst<{ value2: string | null }>(
+      `SELECT value2 FROM ms_setting WHERE key1 = 'Branch' AND key2 = 'Name' LIMIT 1`,
+    );
+    return (row?.value2 ?? '').trim();
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -154,6 +177,10 @@ export type TotalsInput = {
   esbOrder?: boolean;
   /** Tarif pajak persen; default TAX_DEFAULT (11 = PPN). */
   taxRate?: number;
+  /** Langkah pembulatan grand total; default FEE_DEFAULTS.roundStep (100 =
+   * rupiah). Cabang AUD memakai 1 (sen) — diisi pemanggil dari
+   * getRoundStep() atau eksplisit per order (seed AUD). */
+  roundStep?: number;
 };
 
 /** Mode agregator/online yang kena fee platform (GOFOOD/GRABFOOD/SHOPEEFOOD/ESB). */
@@ -192,7 +219,7 @@ export type TotalsResult = {
   feeESB: number;
   /** subtotal + service + ongkirNet + feeESB (tak membulat). */
   bruto: number;
-  /** bruto dibulatkan ke Rp 100. */
+  /** bruto dibulatkan ke kelipatan langkah (default Rp 100; AUD = 1). */
   total: number;
   /** total - bruto. */
   rounding: number;
@@ -260,8 +287,10 @@ export function totals(input: TotalsInput): TotalsResult {
   /** Fee platform khusus order ESB/marketplace (kontrak §5: platformFee). */
   const feeESB = input.esbOrder ? Math.round(subtotal * FEE_DEFAULTS.platformFeeRate) : 0;
   const bruto = subtotal + service + ongkirNet + feeESB;
-  /** Pembulatan ke kelipatan Rp 100 terdekat. */
-  const total = Math.round(bruto / FEE_DEFAULTS.roundStep) * FEE_DEFAULTS.roundStep;
+  /** Pembulatan ke kelipatan langkah (default Rp 100; AUD = 1 via roundStep). */
+  const stepRaw = Number(input.roundStep);
+  const step = Number.isFinite(stepRaw) && stepRaw > 0 ? Math.round(stepRaw) : FEE_DEFAULTS.roundStep;
+  const total = Math.round(bruto / step) * step;
   const rounding = total - bruto;
   return {
     subtotalGross: gross,

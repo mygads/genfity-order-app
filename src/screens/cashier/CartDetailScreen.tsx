@@ -6,7 +6,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
-import { useLang } from '../../lib/i18n';
+import { useLang, tCur } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
@@ -349,7 +349,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               )}
               {editingId === c.id && !c.voided && (
                 <View style={styles.editor}>
-                  <Text style={styles.editorLabel}>{t('unitPriceRp')}</Text>
+                  <Text style={styles.editorLabel}>{tCur('unitPriceRp')}</Text>
                   <AppInput
                     boxStyle={styles.editorInput}
                     style={styles.fieldText}
@@ -570,7 +570,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         <View style={styles.modalBg}>
           <View style={styles.modalCard}>
             <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('ongkirTitle')}</Text>
-            <Text style={styles.modalLabel}>{t('ongkirNominal')}</Text>
+            <Text style={styles.modalLabel}>{tCur('ongkirNominal')}</Text>
             <AppInput
               boxStyle={styles.modalInput}
               style={styles.fieldText}

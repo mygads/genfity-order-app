@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useFocusEffect } from '@react-navigation/native';
-import { useLang } from '../../lib/i18n';
+import { useLang, tCur } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
@@ -863,7 +863,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       <View style={styles.dialogOverlay}>
         <View style={styles.dialogCard}>
           <Text style={styles.dialogTitle}>{t('ongkirTitle')}</Text>
-          <Text style={styles.dialogSub}>{t('ongkirNominal')}</Text>
+          <Text style={styles.dialogSub}>{tCur('ongkirNominal')}</Text>
           <AppInput
             boxStyle={styles.dialogInput}
             style={styles.fieldText}
@@ -1000,7 +1000,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           onChangeText={setNoteDraft}
           placeholder={t('notePh')}
         />
-        <Text style={styles.editorLabel}>{t('discItemRp')}</Text>
+        <Text style={styles.editorLabel}>{tCur('discItemRp')}</Text>
         <AppInput
           boxStyle={styles.editorInput}
           style={styles.fieldText}

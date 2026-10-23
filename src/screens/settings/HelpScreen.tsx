@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** 8 FAQ lewat key kamus (help_faqN_q/a) agar ikut bahasa aktif. */const FAQS: { q: string; a: string }[] = [
+import { useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/timezone';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };/** 8 FAQ lewat key kamus (help_faqN_q/a) agar ikut bahasa aktif. */const FAQS: { q: string; a: string }[] = [
   { q: 'help_faq1_q', a: 'help_faq1_a' },
   { q: 'help_faq2_q', a: 'help_faq2_a' },
   { q: 'help_faq3_q', a: 'help_faq3_a' },
@@ -34,7 +34,7 @@ import { useState } from 'react';import { Image, Pressable, ScrollView, StyleShe
       })}
       <View style={styles.card}>
         <Text style={styles.q}>{t('help.more')}</Text>
-        <Text style={styles.a}>{t('help.contact')}</Text>
+        <Text style={styles.a}>{t('help.contact').replace('{tz}', getTimezoneShort())}</Text>
       </View>
       </ScrollView>
     </View>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';import { AppState, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { DISPLAY_STALE_MS } from '../../lib/display';import { useLang,
 
-type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
+type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/timezone';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -162,7 +162,7 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
       <View style={styles.infoRow}>
         <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
           <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_hours')}</Text>
-          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val')}</Text>
+          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val').replace('{tz}', getTimezoneShort())}</Text>
         </View>
         {wifiSsid ? (
           <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>

@@ -24,6 +24,7 @@ import { validateVoucherCode } from '../../lib/apiSource';
 import { syncWarnLevel } from '../../lib/sync';
 import { initDb, query as queryDb } from '../../lib/db';
 import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
+import { getCachedCurrency } from '../../lib/currency';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -211,13 +212,25 @@ export default function PayScreen({ navigation, route }: Props) {
   }, [lang]);
   // Tab awal mengikuti metode usulan pemanggil (mis. SplitBill kirim Tunai/QRIS/EDC).
   const methodParam = (route?.params?.method ?? '').trim().toLowerCase();
+  // DUAL-CURRENCY §4a: QRIS/EDC/dompet-ID hanya untuk cabang IDR. Gerbang
+  // dibaca dari profil currency live (disinkron saat login); tab ID disembunyikan
+  // + usulan metode ID jatuh ke Tunai. Tunai/member/tender netral-currency.
+  // (ms_paymentmethod seed tak dikonsumsi UI — tab hardcode ini satu-satunya
+  // sumber daftar metode, sehingga gerbang hidup di sini, bukan kolom DB mati.)
+  const isAudBranch = getCachedCurrency().code === 'AUD';
   const [tab, setTab] = useState<Tab>(() => {
-    if (/qris|ovo|gopay|dana|shopee|online|wallet/.test(methodParam)) return 'online';
-    if (/edc|debit|kredit|kartu|card|non/.test(methodParam)) return 'nontunai';
-    if (/deposit|member/.test(methodParam)) return 'member';
-    if (/pluxee|ultra|tender|lainnya/.test(methodParam)) return 'lainnya';
-    return 'tunai';
+    let initial: Tab = 'tunai';
+    if (/qris|ovo|gopay|dana|shopee|online|wallet/.test(methodParam)) initial = 'online';
+    else if (/edc|debit|kredit|kartu|card|non/.test(methodParam)) initial = 'nontunai';
+    else if (/deposit|member/.test(methodParam)) initial = 'member';
+    else if (/pluxee|ultra|tender|lainnya/.test(methodParam)) initial = 'lainnya';
+    if (isAudBranch && (initial === 'online' || initial === 'nontunai')) return 'tunai';
+    return initial;
   });
+  /** Tab yang tampil untuk currency cabang aktif (AUD = tanpa nontunai/online). */
+  const visibleTabs: Tab[] = isAudBranch
+    ? SIDEBAR_IDS.filter((id) => id !== 'nontunai' && id !== 'online')
+    : SIDEBAR_IDS;
   const [drawer, setDrawer] = useState(CASH_DRAWERS[0]);
 
   const [voucherOpen, setVoucherOpen] = useState(false);
@@ -1076,13 +1089,14 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const renderTabs = () => {
     if (isTablet) return null;
-    const tabs: { id: Tab; label: string }[] = [
+    const allTabs: { id: Tab; label: string }[] = [
       { id: 'tunai', label: t('pay_tab_cash') },
       { id: 'nontunai', label: t('pay_tab_card') },
       { id: 'online', label: t('pay_tab_online') },
       { id: 'member', label: t('pay_tab_deposit') },
       { id: 'lainnya', label: t('pay_tab_tender') },
     ];
+    const tabs = allTabs.filter((x) => visibleTabs.includes(x.id));
     return (
       <ScrollView
         horizontal
@@ -1489,7 +1503,7 @@ export default function PayScreen({ navigation, route }: Props) {
     return (
       <View style={styles.tabletSplit}>
         <View style={styles.sidebar}>
-          {SIDEBAR_IDS.map((id) => {
+          {visibleTabs.map((id) => {
             const active = tab === id;
             const s = sideText(id);
             return (

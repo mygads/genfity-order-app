@@ -21,7 +21,7 @@ import { initDb, query, queryFirst, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
-import { tOf, useLang } from '../../lib/i18n';
+import { tOf, useLang, tCur } from '../../lib/i18n';
 import type { Lang } from '../../lib/i18n';
 import { getSession } from '../../session';
 import { hasOpenShift } from '../../lib/shiftGuard';
@@ -996,7 +996,7 @@ export default function MemberScreen({ navigation, route }: Props) {
               </Text>
             ) : null}
             <AppInput
-              label={t('mem_nominal_label')}
+              label={tCur('mem_nominal_label')}
               keyboardType="number-pad"
               placeholder="0"
               value={depositNominal ? rpNum(Number(depositNominal)) : ''}
