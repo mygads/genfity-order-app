@@ -8,7 +8,7 @@
  * `tr_esoprocessqueue`. Persistensi ringan (outbox JSON + last-sync)
  * memakai lib/storage.ts agar work di web + native.
  */
-import { ApiPath, apiPost, getCustomBaseUrl, getServerEnv, getTerminal } from '../config/server';
+import { ApiPath, apiPost, apiPut, getCustomBaseUrl, getServerEnv, getTerminal } from '../config/server';
 import { apiFetch } from './apiSource';
 import { all, initDb, markClean, markDirty, queryFirst, run } from './db';
 import { getLang, tr } from './i18n';
@@ -19,6 +19,17 @@ import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
 import { logoutRevoke } from './terminalApi';
 import { uuidv7 } from './uuidv7';
+import {
+  ALLOWED_BE_TRANSITIONS,
+  GO_OP_CANCEL,
+  GO_OP_REFUND,
+  GO_OP_RESV_CANCEL,
+  GO_OP_SETTLE,
+  GO_OP_STATUS,
+  GO_OP_VOID,
+  beErrorOf,
+  isReplaySuccess,
+} from './posWire';
 import {
   clearPendingRevoke as clearSessionPendingRevoke,
   getPendingRevoke as getSessionPendingRevoke,
@@ -475,10 +486,111 @@ function toGoPosRequest(
 }
 
 /**
+ * W2 (wiring-2): terjemahan op merchant Go (kind 'other') → {path, body,
+ * method} siap drain. null = bukan op W2 (lanjut routing ESB lama).
+ * {blocked} = tanpa id server desimal / target status invalid → BLOCKED
+ * jujur fail-once (S10), bukan retry buta ke endpoint yang salah. Body hanya
+ * membawa field kontrak BE (orderId numerik di path/body — salesNum/TRX
+ * lokal TAK PERNAH dipakai sebagai id).
+ */
+export interface GoMerchantOp {
+  path: string;
+  body: Record<string, unknown>;
+  method: 'POST' | 'PUT';
+  idemKey: string;
+}
+
+function goMerchantOp(
+  item: SyncItem,
+): GoMerchantOp | { blocked: string } | null {
+  const p = (item.payload ?? {}) as Record<string, unknown>;
+  if (item.kind !== 'other') return null;
+  const op = String(p.op ?? '');
+  const W2_OPS = [GO_OP_SETTLE, GO_OP_REFUND, GO_OP_CANCEL, GO_OP_VOID, GO_OP_STATUS, GO_OP_RESV_CANCEL];
+  if (!W2_OPS.includes(op)) return null;
+  const sidRaw = String(p.serverId ?? '').trim();
+  if (!/^[0-9]+$/.test(sidRaw)) {
+    return { blocked: 'posWire: tanpa id order server (BLOCKED, bukan kirim buta)' };
+  }
+  const serverId = parseInt(sidRaw, 10);
+  const reason = String(p.reason ?? '').trim();
+  const withReason = reason ? { reason: reason.slice(0, 500) } : {};
+  if (op === GO_OP_SETTLE) {
+    const method = String(p.method ?? '').trim().toUpperCase();
+    const amount = Math.max(0, Math.round(Number(p.amountPaid ?? p.amount) || 0));
+    if (!['CASH_ON_COUNTER', 'CARD_ON_COUNTER', 'QRIS', 'SPLIT', 'COMPLIMENT'].includes(method) || amount <= 0) {
+      return { blocked: 'posWire: settle butuh method enum BE + nominal > 0' };
+    }
+    return {
+      path: ApiPath.merchantPosPayment,
+      body: {
+        orderId: serverId,
+        paymentMethod: method,
+        amountPaid: amount,
+        ...(p.changeAmount !== undefined ? { changeAmount: Math.round(Number(p.changeAmount) || 0) } : {}),
+        ...(p.tipAmount ? { tipAmount: Math.round(Number(p.tipAmount) || 0) } : {}),
+        ...(p.voucherCode ? { voucherCode: String(p.voucherCode).slice(0, 64) } : {}),
+      },
+      method: 'POST',
+      idemKey: String(p.clientId ?? item.id),
+    };
+  }
+  if (op === GO_OP_REFUND) {
+    return {
+      path: ApiPath.merchantPosRefund,
+      body: {
+        orderId: serverId,
+        ...withReason,
+        ...(Number(p.amount) > 0 ? { amount: Math.round(Number(p.amount)) } : {}),
+        idempotencyKey: item.id,
+      },
+      method: 'POST',
+      idemKey: item.id,
+    };
+  }
+  if (op === GO_OP_CANCEL) {
+    return {
+      path: ApiPath.merchantOrderCancel.replace('{id}', encodeURIComponent(String(serverId))),
+      body: { ...withReason },
+      method: 'POST',
+      idemKey: item.id,
+    };
+  }
+  if (op === GO_OP_VOID) {
+    return {
+      path: ApiPath.merchantOrderVoid.replace('{id}', encodeURIComponent(String(serverId))),
+      body: { ...withReason },
+      method: 'POST',
+      idemKey: item.id,
+    };
+  }
+  if (op === GO_OP_RESV_CANCEL) {
+    return {
+      path: ApiPath.merchantResvCancel.replace('{id}', encodeURIComponent(String(serverId))),
+      body: { ...withReason },
+      method: 'PUT',
+      idemKey: item.id,
+    };
+  }
+  // GO_OP_STATUS: target wajib enum BE dikenal + bukan CANCELLED (endpoint
+  // status menolaknya; cancel lewat GO_OP_CANCEL). Pagar cermin BE di sini
+  // agar item invalid fail-once cepat, bukan 400 berulang.
+  const target = String(p.target ?? '').trim().toUpperCase();
+  if (target === 'CANCELLED' || ALLOWED_BE_TRANSITIONS[target] === undefined) {
+    return { blocked: `posWire: target status invalid (${target || '?'})` };
+  }
+  return {
+    path: ApiPath.merchantOrderStatus.replace('{id}', encodeURIComponent(String(serverId))),
+    body: { status: target, ...(p.note ? { note: String(p.note).slice(0, 500) } : {}) },
+    method: 'PUT',
+    idemKey: item.id,
+  };
+}
+
+/**
  * S20: pastikan restore boot selesai sebelum persist agar enqueue pertama
  * sesudah boot tak menimpa item tersimpan di AsyncStorage.
- */
-async function ensureRestored(): Promise<void> {
+ */async function ensureRestored(): Promise<void> {
   hydrate();
   if (restorePromise) {
     try {
@@ -921,6 +1033,33 @@ async function apiPostWithTimeout(
 }
 
 /**
+ * W2: PUT antrean dengan timeout abort eksplisit (cermin apiPostWithTimeout)
+ * untuk op merchant Go ber-metode PUT (resv-cancel, pos-status). Drain
+ * POST-only sebelumnya tak bisa mengurasnya — tanpa ini retry offline
+ * PUT macet selamanya.
+ */
+async function apiPutWithTimeout(
+  path: string,
+  body: Record<string, unknown>,
+  opts: { idempotencyKey: string },
+  ms = IMMEDIATE_TIMEOUT_MS,
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try {
+      ctrl.abort();
+    } catch {
+      /* abaikan */
+    }
+  }, Math.max(1000, Math.floor(ms)));
+  try {
+    return await apiPut(path, body, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * S6 (immediate-first): coba POST langsung dengan timeout singkat. True hanya
  * bila server NYATA menjawab ok (dummy/offline/timeout = false → pemanggil
  * mengantrekan twin). Tak pernah melempar.
@@ -1181,6 +1320,85 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       item.local = true;
       item.note = tr(op || tp ? 'sync.localOnly' : 'sync.depositLocal');
       return 'skipped';
+    }
+    // W2 (wiring-2): op merchant Go punya drain sendiri (POST via
+    // apiPostWithTimeout, PUT via apiPutWithTimeout). 409 replay/sudah-ada =
+    // 'terkirim' (idempoten); 4xx berkode = final fail-once (S10, tak trip
+    // breaker); jaringan/5xx/timeout = 'failed' (retry). 'gagal' jujur
+    // membawa kode agar SyncScreen menampilkan alasan.
+    const goWrap = goMerchantOp(item);
+    if (goWrap && 'blocked' in goWrap) {
+      if (item.status === 'gagal') return 'skipped';
+      item.status = 'gagal';
+      item.note = goWrap.blocked;
+      return 'failed-once';
+    }
+    if (goWrap) {
+      const go = goWrap as GoMerchantOp;
+      let goRes: Response;
+      try {
+        goRes = go.method === 'PUT'
+          ? await apiPutWithTimeout(go.path, go.body, { idempotencyKey: go.idemKey })
+          : await apiPostWithTimeout(go.path, go.body, { idempotencyKey: go.idemKey });
+      } catch {
+        item.status = 'gagal';
+        item.note = 'posWire: jaringan/timeout (retry)';
+        return 'failed';
+      }
+      if (goRes.status === 409) {
+        const cb = await readConflictBody(goRes);
+        if (isReplaySuccess(cb)) {
+          item.status = 'terkirim';
+          item.note = 'posWire: replay/sudah-ada (idempoten)';
+          try {
+            const sNo = String(((item.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '').trim();
+            if (sNo) await markCleanSale(sNo);
+          } catch {
+            /* abaikan */
+          }
+          try {
+            await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+          } catch {
+            /* abaikan */
+          }
+          return 'sent';
+        }
+        const be409 = beErrorOf(cb);
+        item.status = 'gagal';
+        item.note = `posWire: 409 ${be409.code || be409.message || 'konflik'}`.slice(0, 160);
+        return 'failed-once';
+      }
+      if (goRes.ok) {
+        item.status = 'terkirim';
+        item.note = '';
+        try {
+          const sNo = String(((item.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '').trim();
+          if (sNo) await markCleanSale(sNo);
+        } catch {
+          /* abaikan */
+        }
+        try {
+          await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+        } catch {
+          /* abaikan */
+        }
+        return 'sent';
+      }
+      if (goRes.status >= 500 || goRes.status === 429 || goRes.status === 0) {
+        item.status = 'gagal';
+        item.note = `posWire: HTTP ${goRes.status} (retry)`;
+        return 'failed';
+      }
+      let beBody: unknown = null;
+      try {
+        beBody = (await goRes.json()) as unknown;
+      } catch {
+        beBody = null;
+      }
+      const be = beErrorOf(beBody);
+      item.status = 'gagal';
+      item.note = `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`.slice(0, 160);
+      return 'failed-once';
     }
     // S10: kind 'other' tanpa endpoint (kontrak BE menyusul) — finalkan
     // 'gagal' SEKALI dengan catatan, bukan antre-selamanya. Siklus berikut

@@ -25,6 +25,7 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPut,
   getTerminal,
   setCustomBaseUrl,
   setServerEnv,
@@ -98,13 +99,13 @@ export interface ApiResult<T = unknown> {
 }
 
 export interface FetchOpts {
-  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH';
+  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   params?: Record<string, string | number>;
   body?: unknown;
   idempotencyKey?: string;
   token?: string;
   /** S4-APP-313/GAP-1/5: sinyal abort pemanggil (timeout per-attempt /
-   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch. */
+   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch/apiPut. */
   signal?: AbortSignal;
 }
 
@@ -325,7 +326,13 @@ export async function apiFetch<T = unknown>(
                   token: opts?.token,
                   signal: opts?.signal,
                 })
-              : await apiPost(path, opts?.body ?? {}, {
+              : method === 'PUT'
+                ? await apiPut(path, opts?.body ?? {}, {
+                    idempotencyKey: opts?.idempotencyKey,
+                    token: opts?.token,
+                    signal: opts?.signal,
+                  })
+                : await apiPost(path, opts?.body ?? {}, {
                   idempotencyKey: opts?.idempotencyKey,
                   token: opts?.token,
                   signal: opts?.signal,

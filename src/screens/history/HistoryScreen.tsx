@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, mergeHistoryTxns, persistPayChangeDb, persistVoidDb, pullServerHistoryTxns } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
   SUPERVISOR_ACTION_ORDER_REFUND,
   SUPERVISOR_ACTION_ORDER_VOID,
 } from '../../lib/supervisor';import {
@@ -47,7 +47,11 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  /** Baris DB riil; kosong → empty-state (tanpa fallback mock). */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live) setDbTxns(rows); }); return () => { live = false; }; }, []); const base: Transaction[] = dbTxns ?? []; const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
+  /** Baris DB riil; kosong → empty-state (tanpa fallback mock). */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live) setDbTxns(rows); }); return () => { live = false; }; }, []);
+  /** W2: baris riwayat server (read-only mirror; SQLite tetap cache). */
+  const [serverTxns, setServerTxns] = useState<Transaction[]>([]);
+  useEffect(() => { let live = true; void pullServerHistoryTxns(100).then((rows) => { if (live && rows.length > 0) setServerTxns(rows); }); return () => { live = false; }; }, [online]);
+  const base: Transaction[] = mergeHistoryTxns(dbTxns ?? [], serverTxns); const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
   const payments = useMemo(() => [...new Set(base.map((tr) => tr.payment))], [base]);
 
   const list = useMemo(() => {

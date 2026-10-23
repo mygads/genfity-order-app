@@ -11,13 +11,20 @@ import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
+import {
+  cancelServerReservation,
+  mapResvStatusToLocal,
+  pullServerReservations,
+  GO_OP_RESV_CANCEL,
+  type ServerResv,
+} from '../../lib/posWire';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
 type Status = 'Terjadwal' | 'Datang' | 'Selesai';
-interface Resv { id: string; name: string; tamu: number; table: string; phone: string; note: string; date: string; time: string; status: Status; }
+interface Resv { id: string; name: string; tamu: number; table: string; phone: string; note: string; date: string; time: string; status: Status; serverId?: number; }
 
 /** Samarkan nomor HP di daftar reservasi (privasi customer). */
 function maskHp(hp: string): string {
@@ -71,6 +78,71 @@ function tableLabel(tb: { no: string; section: string; kap: number }): string {
 
 const TABLES_FREE = CANON_TABLES.map(tableLabel);
 
+/** W2: ISO hari lokal (YYYY-MM-DD) utk memadankan label 'Hari ini'/'Besok'
+ *  dengan tanggal server. */
+function isoDayLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** W2: label tanggal lokal -> ISO server ('Hari ini'/'Besok'/mentah). */
+function resvDateToIso(date: string): string {
+  const t = date.trim();
+  if (t === 'Hari ini') return isoDayLocal(new Date());
+  if (t === 'Besok') return isoDayLocal(new Date(Date.now() + 86400000));
+  return t;
+}
+
+/** W2: ISO server (YYYY-MM-DD) -> label lokal bila cocok hari ini/besok. */
+function resvIsoToLabel(iso: string): string {
+  const t = iso.trim();
+  if (t === isoDayLocal(new Date())) return 'Hari ini';
+  if (t === isoDayLocal(new Date(Date.now() + 86400000))) return 'Besok';
+  return t;
+}
+
+/** W2: gabung baris server ke daftar lokal (lokal dulu, server menempel).
+ *  Baris lokal yang cocok persis (nama+jam+meja+tanggal) ditauthkan serverId
+ *  agar pembatalannya merambat ke BE; sisanya ditempel sebagai baris `srv-*`.
+ *  Murni (tanpa I/O) agar mudah diuji. */
+export function mergeServerResvs(
+  local: Resv[],
+  server: ServerResv[],
+): Resv[] {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const keyOf = (name: string, time: string, table: string, dateIso: string) =>
+    [norm(name), time.trim(), norm(table), dateIso.trim()].join('|');
+  const used = new Set<number>();
+  const next: Resv[] = local.map((row) => {
+    if (row.serverId != null) return row;
+    const k = keyOf(row.name, row.time, canonTableNo(row.table), resvDateToIso(row.date));
+    const hit = server.find((s) => !used.has(s.id)
+      && keyOf(s.name, s.time, canonTableNo(s.table || ''), (s.date || '').trim()) === k);
+    if (!hit) return row;
+    used.add(hit.id);
+    return { ...row, serverId: hit.id };
+  });
+  for (const s of server) {
+    if (used.has(s.id)) continue;
+    if (next.some((r) => r.serverId === s.id || r.id === `srv-${s.id}`)) continue;
+    const localStatus = mapResvStatusToLocal(s.status, s.displayStatus);
+    if (!localStatus) continue; // CANCELLED/NO_SHOW/EXPIRED/lewat: jangan tampil ganda
+    next.push({
+      id: `srv-${s.id}`,
+      name: s.name || '-',
+      tamu: s.partySize > 0 ? s.partySize : 2,
+      table: canonTableNo(s.table || '') || s.table || '-',
+      phone: s.phone || '-',
+      note: s.note || '-',
+      date: resvIsoToLabel(s.date || ''),
+      time: (s.time || '').slice(0, 5),
+      status: localStatus,
+      serverId: s.id,
+    });
+  }
+  return next;
+}
+
 /** Booking / reservasi - form + daftar, tersimpan di perangkat dan sinkron ke denah. */
 export default function BookingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -119,6 +191,17 @@ export default function BookingScreen({ navigation }: Props) {
         return canonSet.has(code) ? { ...r, table: code } : r;
       });
       setList(migrated);
+      // W2: cermin reservasi server (read-only mirror) bila online; baris lokal
+      // tetap dulu, baris server menempel + tautan fuzzy pasang serverId.
+      void (async () => {
+        try {
+          const r = await pullServerReservations(100);
+          if (!on || !r.ok) return;
+          setList((prev) => mergeServerResvs(prev, r.data));
+        } catch {
+          /* abaikan: daftar lokal tetap kebenaran */
+        }
+      })();
     });
     return () => {
       on = false;
@@ -302,6 +385,33 @@ export default function BookingScreen({ navigation }: Props) {
     setConfirmDel(null);
     setGateNotice('');
     if (editingId === r.id) resetForm();
+    // W2: baris tertaut server -> batalkan dulu ke BE. Offline = antrekan
+    // GO_OP_RESV_CANCEL (drain PUT); ditolak BE = baris dikembalikan + pesan jujur.
+    if (typeof r.serverId === 'number') {
+      const rowId = r.id;
+      const sid = r.serverId;
+      const snapshot = r;
+      void (async () => {
+        const res = await cancelServerReservation(
+          sid, `Batal reservasi ${r.name} meja ${r.table}`.slice(0, 120),
+        );
+        if (res.ok) return; // hapus lokal sudah jalan di bawah
+        if (res.reason === 'offline') {
+          try {
+            enqueueSync('other', {
+              op: GO_OP_RESV_CANCEL, serverId: sid,
+              reason: `Batal reservasi ${r.name} meja ${r.table}`.slice(0, 120),
+              at: new Date().toISOString(),
+            });
+          } catch {
+            /* antrean belum siap */
+          }
+          return;
+        }
+        setGateNotice(res.message || '');
+        setList((prev) => (prev.some((x) => x.id === rowId) ? prev : [...prev, snapshot]));
+      })();
+    }
     persist(list.filter((x) => x.id !== r.id));
     try {
       enqueueSync('other', {

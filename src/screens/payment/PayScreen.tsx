@@ -21,7 +21,13 @@ import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClie
 import { uuidv7 } from '../../lib/uuidv7';
 import { publishDisplayOrder } from '../../lib/display';
 import { validateVoucherCode } from '../../lib/apiSource';
-import { syncWarnLevel } from '../../lib/sync';
+import { enqueueSync, syncWarnLevel } from '../../lib/sync';
+import {
+  getServerOrderIdForSale,
+  mapPayMethodToBe,
+  settlePosPayment,
+  GO_OP_SETTLE,
+} from '../../lib/posWire';
 import { initDb, query as queryDb } from '../../lib/db';
 import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import { getCachedCurrency } from '../../lib/currency';
@@ -542,6 +548,40 @@ export default function PayScreen({ navigation, route }: Props) {
    * dipakai saveSale + push + Success + Receipt (sebelumnya Success/Receipt
    * memakai L-timestamp yang beda dari yang tersimpan di DB).
    */
+/** W2: cermin pelunasan ke BE (/pos/payment) bila sale tertaut order server.
+ *  Tanpa id server / tanpa padanan enum = BLOCKED (diam, lokal tetap sah).
+ *  Immediate gagal (offline/ditolak) = antre GO_OP_SETTLE agar drain
+ *  memfinalisasi (retry saat offline, 'gagal'+catatan saat 4xx) — jujur di
+ *  SyncScreen, tanpa Success palsu dan tanpa kirim buta. Tak pernah melempar. */
+  const mirrorSettleToServer = (
+    salesNum: string, methodLabel: string, amount: number,
+    tip: number, voucherCode: string | undefined, clientId: string | undefined,
+  ) => {
+    void (async () => {
+      try {
+        const serverId = await getServerOrderIdForSale(salesNum);
+        if (serverId == null) return;
+        const beMethod = mapPayMethodToBe(methodLabel);
+        if (!beMethod) return;
+        const res = await settlePosPayment({
+          serverId, method: beMethod, amountPaid: amount,
+          ...(tip > 0 ? { tipAmount: tip } : {}),
+          ...(voucherCode ? { voucherCode } : {}),
+          ...(clientId ? { idempotencyKey: clientId } : {}),
+        });
+        if (res.ok || res.reason === 'blocked') return;
+        try {
+          enqueueSync('other', {
+            op: GO_OP_SETTLE, serverId, method: beMethod, amountPaid: amount,
+            ...(tip > 0 ? { tipAmount: tip } : {}),
+            ...(voucherCode ? { voucherCode } : {}),
+            ...(clientId ? { clientId } : {}),
+            salesNum, at: new Date().toISOString(),
+          });
+        } catch { /* antrean belum siap */ }
+      } catch { /* abaikan: sale lokal tetap sah */ }
+    })();
+  };
   const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
     // Guard ketuk-ganda (#8/#21): tiap goSuccess menerbitkan nomor + tulis
     // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
@@ -613,6 +653,8 @@ export default function PayScreen({ navigation, route }: Props) {
           // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
           await saveSale(gInput);
           recordSale(gInput);
+          // W2: cermin lunas grup ke BE bila tertaut order server.
+          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -711,6 +753,8 @@ export default function PayScreen({ navigation, route }: Props) {
     }
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
     recordSale(input);
+    // W2: cermin lunas ke BE bila tertaut order server.
+    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,

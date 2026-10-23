@@ -188,6 +188,20 @@ export const ApiPath = {
   supervisorApproveV1: 'api/v1/terminals/{id}/supervisor-approve',
   // E28: tanpa endpoint — policy max_offline_grant_days via pull-terminal-settings
   // (lihat offlineGrantPolicyKey di bawah).
+  // ---- W2 (wiring-2): kontrak merchant Go untuk reservasi / status order /
+  // riwayat + settle POS (router.go grup /api/merchant, MerchantAuth).
+  // '{id}' diganti caller via .replace('{id}', encodeURIComponent(id)) ala
+  // terminalApi.ts:109. create reservasi merchant TIDAK ADA (hanya public
+  // POST /reservations + PUT accept/cancel merchant) → create tetap lokal.
+  merchantResvList: 'api/merchant/reservations', // GET list (?limit)
+  merchantResvCancel: 'api/merchant/reservations/{id}/cancel', // PUT {reason?}
+  merchantOrdersActive: 'api/merchant/orders/active', // GET order aktif
+  merchantOrderStatus: 'api/merchant/orders/{id}/status', // PUT {status,...}
+  merchantOrderCancel: 'api/merchant/orders/{id}/cancel', // POST {pin?,reason?}
+  merchantOrderVoid: 'api/merchant/orders/{id}/void', // POST {pin?,reason?}
+  merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
+  merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
+  merchantPosRefund: 'api/merchant/orders/pos/refund', // POST refund
 } as const;
 
 /** E28: kunci policy grant offline (server-wins via terminal-settings, default 7 hari). */
@@ -427,7 +441,13 @@ export async function apiPost(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
   if (t.branchId) headers['X-Branch-Id'] = t.branchId;
-  if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+  if (opts?.idempotencyKey) {
+    headers['Idempotency-Key'] = opts.idempotencyKey;
+    // W2: backend Go membaca `X-Idempotency-Key` (orders_pos_payment.go) —
+    // kirim DUA ejaan agar ledger idempotensi Go + kompat ESB lama jalan
+    // bersamaan. Aditif: header lama tetap dikirim.
+    headers['X-Idempotency-Key'] = opts.idempotencyKey;
+  }
   // Bearer: token eksplisit menang; bila absen dan path kontrak-Go, pakai
   // token sesi (compat push MerchantAuth) — path ESB tetap header-free.
   const postToken = opts?.token
@@ -496,6 +516,39 @@ export async function apiPatch(
   if (patchToken) headers['Authorization'] = `Bearer ${patchToken}`;
   return fetch(apiUrl(path), {
     method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+    ...(opts?.signal ? { signal: opts.signal } : {}),
+  });
+}
+
+/**
+ * D (W2 wiring-2): PUT dengan body JSON — pasangan apiPatch untuk endpoint
+ * kontrak-Go merchant yang memakai PUT (reservasi cancel, order status).
+ * Bearer/idempotency + header kontrak ala apiPost, termasuk DUA ejaan
+ * idempotency key (BE Go membaca `X-Idempotency-Key`).
+ */
+export async function apiPut(
+  path: string,
+  body: unknown,
+  opts?: { idempotencyKey?: string; token?: string; signal?: AbortSignal },
+): Promise<Response> {
+  const t = getTerminal();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+  if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+  if (opts?.idempotencyKey) {
+    headers['Idempotency-Key'] = opts.idempotencyKey;
+    headers['X-Idempotency-Key'] = opts.idempotencyKey;
+  }
+  const putToken = opts?.token
+    ? opts.token
+    : needsSessionBearer(path)
+      ? resolveSessionToken()
+      : '';
+  if (putToken) headers['Authorization'] = `Bearer ${putToken}`;
+  return fetch(apiUrl(path), {
+    method: 'PUT',
     headers,
     body: JSON.stringify(body),
     ...(opts?.signal ? { signal: opts.signal } : {}),

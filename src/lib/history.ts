@@ -9,6 +9,20 @@ import { initDb, markClean, query, queryFirst, run } from './db';
 import { enqueueOutbox, enqueueSync, postImmediate } from './sync';
 import { fmtSalesDate } from './datefmt';
 import { uuidv7 } from './uuidv7';
+import {
+  getServerOrderIdForSale,
+  isDecimalId,
+  pullServerHistory as pullServerHistoryRaw,
+  registerServerTxnKey,
+  cancelMerchantOrder,
+  serverIdForTxnKey,
+  refundPosPayment,
+  voidMerchantOrder,
+  GO_OP_CANCEL,
+  GO_OP_REFUND,
+  GO_OP_VOID,
+  type ServerHistoryEntry,
+} from './posWire';
 import type { Transaction, TxnStatus } from '../data/mock';
 
 /** Formatter tanggal kanonik pindah ke lib/datefmt (locale-aware id/en). */
@@ -403,11 +417,66 @@ export async function persistVoidDb(salesNum: string, reason: string, approvedBy
       /* abaikan */
     }
   }
+  // W2: cermin void ke BE bila sale tertaut order server (onlineOrderId //
+  // registry srv-*). Kebijakan per settled-state: cancel dulu (order masih
+  // aktif); bila BE menolak karena order sudah tertutup/lunas -> void.
+  // Tanpa id server = BLOCKED (diam). Gagal = antre (drain finalisasi di
+  // SyncScreen). Tak pernah melempar; void lokal tetap sah.
+  try {
+    const sid = serverIdForTxnKey(salesNum) ?? (await getServerOrderIdForSale(salesNum));
+    if (sid != null) {
+      const c = await cancelMerchantOrder(sid, reason || undefined);
+      if (!c.ok) {
+        const closed = c.reason === 'rejected' && /CLOSED|COMPLETED|SETTLED|PAID|ALREADY/i.test(c.code ?? '');
+        if (closed) {
+          const v = await voidMerchantOrder(sid, reason || undefined);
+          if (v.ok) return;
+          if (v.reason !== 'blocked') {
+            // Order lunas tercapture: void saja tak mengembalikan dana ->
+            // refund (uang kembali). Satu kunci idempotensi dipakai immediate
+            // + antrean (item.id) agar timeout-tetap-tercatat tak refund ganda.
+            // Kode lain = antre void, drain finalisasi.
+            const needRefund = /REFUND|CAPTURED|SETTLED|PAID|PAYMENT/i.test(v.code ?? '');
+            if (needRefund) {
+              const rfKey = uuidv7();
+              const rf = await refundPosPayment(sid, reason || undefined, undefined, rfKey);
+              if (!rf.ok && rf.reason !== 'blocked') {
+                try {
+                  enqueueSync('other', {
+                    op: GO_OP_REFUND, serverId: sid,
+                    ...(reason ? { reason } : {}),
+                    salesNum, at: new Date().toISOString(),
+                  }, rfKey);
+                } catch { /* abaikan */ }
+              }
+            } else {
+              try {
+                enqueueSync('other', {
+                  op: GO_OP_VOID, serverId: sid,
+                  ...(reason ? { reason } : {}),
+                  salesNum, at: new Date().toISOString(),
+                });
+              } catch { /* abaikan */ }
+            }
+          }
+        } else if (c.reason !== 'blocked') {
+          try {
+            enqueueSync('other', {
+              op: GO_OP_CANCEL, serverId: sid,
+              ...(reason ? { reason } : {}),
+              salesNum, at: new Date().toISOString(),
+            });
+          } catch { /* abaikan */ }
+        }
+      }
+    }
+  } catch {
+    /* abaikan: void lokal tetap sah */
+  }
 }
 
 /** Ganti metode bayar: payment + head ikut terupdate + outbox/sync/server. */
-export async function persistPayChangeDb(salesNum: string, method: string): Promise<void> {
-  // Bill split (multi-baris tr_salespayment): jangan timpa rincian split
+export async function persistPayChangeDb(salesNum: string, method: string): Promise<void> {  // Bill split (multi-baris tr_salespayment): jangan timpa rincian split
   // menjadi satu metode (bug G6) — cukup head yang ikut metode terakhir.
   try {
     await initDb();
@@ -457,4 +526,86 @@ export async function persistPayChangeDb(salesNum: string, method: string): Prom
       /* abaikan */
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// W2 wiring-2: pull riwayat POS server (GET /orders/pos/history) bila online.
+// READ-ONLY: hasil tak pernah ditulis ke SQLite (SQLite tetap cache);
+// penggabungan milik mergeHistoryTxns di bawah (dipakai HistoryScreen).
+// Kosong bila offline/local/dummy — layar memakai daftar lokal + empty-state.
+// ---------------------------------------------------------------------------
+function serverPayLabel(raw: string): string {
+  const m = raw.trim().toUpperCase();
+  if (m === 'CASH_ON_COUNTER' || m === 'CASH' || m === 'TUNAI') return 'Tunai';
+  if (m === 'CARD_ON_COUNTER' || m === 'CARD' || m === 'KARTU') return 'Kartu';
+  if (m === 'QRIS') return 'QRIS';
+  if (m === 'SPLIT') return 'Split';
+  if (m === 'COMPLIMENT') return 'Kompliment';
+  return raw.trim() || 'Tunai';
+}
+
+function serverTxnStatus(e: ServerHistoryEntry): TxnStatus {
+  const s = `${e.status} ${e.paymentStatus}`.toUpperCase();
+  if (/VOID/.test(s)) return 'Void';
+  if (/CANCEL|BATAL|REFUND/.test(s)) return 'Batal';
+  return 'Selesai';
+}
+
+export function mapServerHistoryEntry(e: ServerHistoryEntry): Transaction {
+  const numeric = isDecimalId(e.id) ? parseInt(e.id.trim(), 10) : NaN;
+  const id = Number.isFinite(numeric) ? `srv-${numeric}` : `srv-${e.orderNumber}`;
+  if (Number.isFinite(numeric)) {
+    // Daftarkan no→id agar aksi void baris server bisa resolve id numerik BE
+    // (void/cancel butuh {orderId} path, bukan orderNumber).
+    registerServerTxnKey(e.orderNumber, numeric as number);
+    registerServerTxnKey(id, numeric as number);
+  }
+  const { date, time } = fmtSalesDate(e.paidAt || e.createdAt);
+  return {
+    id,
+    no: e.orderNumber,
+    date,
+    time,
+    cashier: e.customerName || 'Server',
+    ...(e.tableNumber ? { table: e.tableNumber } : {}),
+    mode: modeLabel(e.orderType),
+    items: e.items.map((it) => ({
+      name: it.name,
+      qty: it.qty,
+      price: it.price,
+      ...(it.note ? { note: it.note } : {}),
+    })),
+    subtotal: e.subtotal,
+    discount: e.discount,
+    tax: e.tax,
+    total: e.total,
+    payment: serverPayLabel(e.paymentMethod),
+    status: serverTxnStatus(e),
+  };
+}
+
+/** Pull riwayat server → Transaction[] (read-only). Tak pernah melempar. */
+export async function pullServerHistoryTxns(limit = 100): Promise<Transaction[]> {
+  try {
+    const r = await pullServerHistoryRaw(limit);
+    if (!r.ok) return [];
+    return r.data.map(mapServerHistoryEntry);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Gabung daftar lokal + server (read-only mirror): lokal dulu (kebenaran),
+ * lalu baris server yang `no`-nya tak ada di lokal (dedupe eksak — lokal
+ * menang). Tak menyentuh SQLite.
+ */
+export function mergeHistoryTxns(local: Transaction[], server: Transaction[]): Transaction[] {
+  if (!server.length) return local;
+  const localNos = new Set(local.map((t) => String(t.no ?? '').trim()).filter(Boolean));
+  const extra = server.filter((t) => {
+    const no = String(t.no ?? '').trim();
+    return no && !localNos.has(no);
+  });
+  return extra.length ? [...local, ...extra] : local;
 }

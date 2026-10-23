@@ -5,7 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox } from '../../lib/sync';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type KitchenItem, type KitchenStatus, type KitchenTicket } from '../../data/mock';import { autoSync, enqueueOutbox, enqueueSync } from '../../lib/sync';
+import {
+  beStatusForLocal,
+  getServerOrderIdForSale,
+  pushOrderStatus,
+  GO_OP_STATUS,
+} from '../../lib/posWire';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';
 /* APP-EVENTS: impor beda-baris agar edit beda lane tak konflik. */
 import { subscribeLocalSale } from '../../lib/display';import { appAlert } from '../../lib/appAlert';import { getSession } from '../../session';
 import { getSaleClientId } from '../../lib/sales';import { useIsFocused } from '@react-navigation/native';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga per baris (R15): utamakan harga bawaan baris (tr_salesmenu.price /
@@ -261,10 +267,38 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
 
   const counts = useMemo(() => { const c: Record<KitchenStatus, number> = { Baru: 0, Diproses: 0, Selesai: 0 }; for (const tk of tickets) { const s = moved[tk.id] ?? tk.status; c[s] += 1; } return c; }, [tickets, moved]); const elapsedOf = (tk: KitchenTicket): { text: string; sla: boolean } => { const mins = minutesSince(tk.time, now); if (mins === null) return { text: tk.elapsed, sla: false }; return { text: fmtElapsed(mins, t), sla: mins >= 30 && (moved[tk.id] ?? tk.status) !== 'Selesai' }; }; const advance = (tk: KitchenTicket) => {
     const next = NEXT[moved[tk.id] ?? tk.status];
+    const prev = moved[tk.id] ?? tk.status;
     if (!next) return;
     setMoved((m) => ({ ...m, [tk.id]: next }));
     setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: next } : sel));
     void persistKitchenStatus(tk, next);
+    // W2: cermin status ke BE bila tiket tertaut order server. Tanpa id server
+    // = BLOCKED (lokal-only, tanpa kirim buta). Optimistik dipertahankan agar
+    // dapur tetap jalan; drain menyusul saat offline; konflik transisi =
+    // server menang (override lokal dihapus) + notice jujur.
+    void (async () => {
+      try {
+        const salesNum = String((tk as { salesNum?: unknown }).salesNum ?? '');
+        if (!salesNum) return;
+        const sid = await getServerOrderIdForSale(salesNum);
+        if (sid == null) return;
+        const target = beStatusForLocal(next);
+        if (!target) return;
+        const res = await pushOrderStatus(sid, target);
+        if (res.ok) return;
+        try {
+          enqueueSync('other', {
+            op: GO_OP_STATUS, serverId: sid, target, salesNum,
+            at: new Date().toISOString(),
+          });
+        } catch { /* antrean belum siap */ }
+        if (res.reason === 'rejected' && /TRANSITION|VALIDATION|CLOSED/i.test(res.code ?? '')) {
+          setMoved((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+          setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: prev } : sel));
+        }
+        if (res.reason === 'rejected') setLiveNotice(res.message || '');
+      } catch { /* abaikan: status lokal tetap sah */ }
+    })();
   };
 
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
