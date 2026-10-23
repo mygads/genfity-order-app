@@ -728,3 +728,120 @@ export async function pullServerHistory(limit = 100): Promise<GoResult<ServerHis
     return { ok: false, reason: 'offline', message: wireTr('offline') };
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// M1 (loyalty): member/loyalty + struk email via kontrak merchant Go.
+// - searchCustomers: GET api/merchant/customers/search (?q,take) → baris
+//   {id,name,email,phone,orderCount,totalSpent,pointsBalance,loyaltyMember}.
+//   Poin = pointsBalance SERVER (server-wins); overlay lokal tak mencetak poin.
+// - invoiceEmailEnabled: GET api/merchant/email-delivery-settings → gerbang
+//   tombol kirim-struk (sendInvoiceEmail). Cache per sesi (pengaturan jarang
+//   berubah; gagal fetch = null = pemanggil pakai jalur antrean lama).
+// - sendPosReceiptEmail: POST api/merchant/orders/{id}/send-receipt {email}
+//   (isPosInvoice, antrean completed-email). Tanpa serverId desimal = BLOCKED.
+// TANPA PIN baru (tak perlu — lihat ApiPath merchantOrderSendReceipt).
+// ---------------------------------------------------------------------------
+export interface ServerCustomer {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  orderCount: number;
+  totalSpent: number;
+  pointsBalance: number;
+  loyaltyMember: boolean;
+}
+
+export async function searchServerCustomers(q: string, take = 20): Promise<GoResult<ServerCustomer[]>> {
+  const query = String(q ?? '').trim();
+  if (!query) return { ok: true, data: [] };
+  if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
+  try {
+    const res = await withTimeoutMs(
+      apiFetch(ApiPath.merchantCustomerSearch, {
+        method: 'GET',
+        params: { q: query, take: Math.max(1, Math.min(50, Math.round(take) || 20)) },
+      }),
+    );
+    if (res.fromDummy || res.status === 0) {
+      return { ok: false, reason: 'offline', message: wireTr('offline') };
+    }
+    if (!res.ok) {
+      const be = beErrorOf(res.data ?? null);
+      return { ok: false, reason: 'rejected', code: be.code || String(res.status), message: wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` }) };
+    }
+    const { data } = unwrap<unknown>(res.data);
+    const rows = Array.isArray(data) ? data : [];
+    const out: ServerCustomer[] = [];
+    for (const r of rows) {
+      if (!r || typeof r !== 'object') continue;
+      const o = r as Record<string, unknown>;
+      if (!isDecimalId(o.id)) continue;
+      out.push({
+        id: parseInt(String(o.id).trim(), 10),
+        name: strOf(o.name),
+        email: strOf(o.email),
+        phone: strOf(o.phone),
+        orderCount: numOf(o.orderCount ?? o.order_count),
+        totalSpent: numOf(o.totalSpent ?? o.total_spent),
+        pointsBalance: Math.max(0, numOf(o.pointsBalance ?? o.points_balance)),
+        loyaltyMember: (o.loyaltyMember ?? o.loyalty_member) === true,
+      });
+    }
+    return { ok: true, data: out };
+  } catch {
+    return { ok: false, reason: 'offline', message: wireTr('offline') };
+  }
+}
+
+let invoiceEmailCache: boolean | null = null;
+
+export async function isInvoiceEmailEnabled(): Promise<boolean | null> {
+  if (invoiceEmailCache !== null) return invoiceEmailCache;
+  if (!isOnlineMode()) return null;
+  try {
+    const res = await withTimeoutMs(apiFetch(ApiPath.merchantEmailDeliverySettings, { method: 'GET' }));
+    if (res.fromDummy || !res.ok) return null;
+    const { data } = unwrap<{ emailDeliverySettings?: { sendInvoiceEmail?: unknown } }>(res.data);
+    const flag = (data as { emailDeliverySettings?: { sendInvoiceEmail?: unknown } })?.emailDeliverySettings?.sendInvoiceEmail === true;
+    invoiceEmailCache = flag;
+    return flag;
+  } catch {
+    return null;
+  }
+}
+
+export function resetInvoiceEmailCache(): void {
+  invoiceEmailCache = null;
+}
+
+export async function sendPosReceiptEmail(
+  serverId: number,
+  email: string,
+): Promise<GoResult<{ queued: boolean }>> {
+  if (!Number.isFinite(serverId) || serverId <= 0) {
+    return { ok: false, reason: 'blocked', message: wireTr('blocked') };
+  }
+  const mail = String(email ?? '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(mail)) {
+    return { ok: false, reason: 'blocked', message: wireTr('blocked') };
+  }
+  if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
+  try {
+    const res = await withTimeoutMs(
+      apiFetch(String(ApiPath.merchantOrderSendReceipt).replace('{orderId}', encodeURIComponent(String(serverId))), {
+        body: { email: mail },
+      }),
+    );
+    if (res.fromDummy || res.status === 0) {
+      return { ok: false, reason: 'offline', message: wireTr('offline') };
+    }
+    const { data } = unwrap<unknown>(res.data);
+    if (res.ok) return { ok: true, data: { queued: true } };
+    const be = beErrorOf(data ?? res.data);
+    return { ok: false, reason: 'rejected', code: be.code || String(res.status), message: wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` }) };
+  } catch {
+    return { ok: false, reason: 'offline', message: wireTr('offline') };
+  }
+}

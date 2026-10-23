@@ -91,6 +91,8 @@ const STR: Record<string, Entry> = {
   hist_mail_send: { id: 'Kirim', en: 'Send' },
   hist_mail_bad: { id: 'Alamat email tidak valid.', en: 'Invalid email address.' },
   hist_mail_queued: { id: 'Struk masuk antrean kirim - terkirim saat online.', en: 'Receipt queued - sent when online.' },
+  hist_mail_sent: { id: 'Struk terkirim via email.', en: 'Receipt sent via email.' },
+  hist_mail_off: { id: 'Kirim struk via email belum diaktifkan merchant - masuk antrean biasa.', en: 'Email receipt is not enabled for this merchant - queued normally.' },
   hist_empty: { id: 'Belum Ada Transaksi', en: 'No Transactions Yet' },
   hist_empty_sub: { id: 'Transaksi yang selesai akan tercatat di sini', en: 'Completed transactions appear here' },
   hist_pick_hint: { id: 'Pilih transaksi untuk melihat detail', en: 'Select a transaction to see detail' },
@@ -150,7 +152,7 @@ const STR: Record<string, Entry> = {
 
   // ---- member ----
   mem_title: { id: 'Member', en: 'Members' },
-  mem_search_ph: { id: 'Masukkan Member ID / Nama / No. HP', en: 'Enter Member ID / Name / Phone' },
+  mem_search_ph: { id: 'Masukkan Member ID / Nama / No. HP / Email', en: 'Enter Member ID / Name / Phone / Email' },
   mem_search_label: { id: 'Cari member', en: 'Search member' },
   mem_registered: { id: 'member terdaftar', en: 'registered members' },
   mem_new: { id: '+ Baru', en: '+ New' },
@@ -162,6 +164,9 @@ const STR: Record<string, Entry> = {
   mem_cancel_add: { id: 'Batal Menambahkan Member', en: 'Cancel Adding Member' },
   mem_name_label: { id: 'Nama member', en: 'Member name' },
   mem_phone_label: { id: 'Nomor HP', en: 'Phone number' },
+  mem_email_label: { id: 'Email', en: 'Email' },
+  mem_email_ph: { id: 'nama@email.com (opsional)', en: 'name@email.com (optional)' },
+  mem_email_bad: { id: 'Alamat email tidak valid.', en: 'Invalid email address.' },
   mem_dob_label: { id: 'Tanggal lahir', en: 'Birth date' },
   mem_deposit: { id: 'Deposit / Top Up', en: 'Deposit / Top Up' },
   mem_apply: { id: 'Terapkan Member', en: 'Apply Member' },

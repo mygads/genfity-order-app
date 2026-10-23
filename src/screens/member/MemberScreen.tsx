@@ -20,6 +20,8 @@ import { ApiPath, getBranchId, getTerminal } from '../../config/server';import {
 import { initDb, query, queryFirst, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { newDepositKey, postDepositOnce } from '../../lib/deposit';
+import { searchServerCustomers } from '../../lib/posWire';
+import { isValidEmail } from '../../lib/payments';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { tOf, useLang, tCur } from '../../lib/i18n';
 import type { Lang } from '../../lib/i18n';
@@ -59,24 +61,30 @@ type Member = {
   id: string;
   nama: string;
   noHp: string;
+  email: string;
   tipe: string;
   saldo: number;
   poin: number;
+  /** true bila server menandai loyaltyMember (hasil /customers/search). */
+  loyalty: boolean;
 };
 
 type Riwayat = { id: string; tanggal: string; keterangan: string; nominal?: number; poin?: number };
 
-/** Baris ms_member SQLite (skema db.ts): id, memberName, phone,
- * depositBalance. Tanpa kolom tier/poin - tipe default Regular, poin 0. */
+/** Baris ms_member SQLite (skema db.ts): id, memberName, phone, email (M1),
+ * depositBalance. Tanpa kolom tier — tipe default Regular. */
 type MemberRow = {
   id: string | null;
   memberName: string | null;
   phone: string | null;
+  email: string | null;
   depositBalance: number | null;
 };
 
-/** Overlay poin member per perangkat (tanpa ubah skema ms_member yang tak punya
- * kolom poin): 1 poin per Rp1.000 topup, bertahan saat aplikasi dibuka ulang. */
+/** Cache baca poin SERVER per member (AsyncStorage): ditulis HANYA dari data
+ * server (/customers/search, inquiry, pull) agar offline tetap tampil angka
+ * terakhir yang sah. M1: overlay lokal TAK mencetak poin (earn 1pt/Rp1000
+ * DIHAPUS — poin milik loyalty server, server-wins). */
 const POINTS_KEY = 'genfity.member.points';
 async function loadPoints(): Promise<Record<string, number>> {
   try {
@@ -86,24 +94,29 @@ async function loadPoints(): Promise<Record<string, number>> {
     return {};
   }
 }
-/** Tambah poin + kembalikan total overlay (maks dengan nilai server bila ada).
- * Delta negatif diizinkan (calon redeem) tetapi total tak pernah minus. */
-async function addPoints(memberId: string, delta: number): Promise<number> {
+/** Simpan nilai poin server apa adanya (server-wins, bukan maks/earn). */
+async function cacheServerPoints(memberId: string, points: number): Promise<void> {
   try {
     const cur = await loadPoints();
-    const next = Math.max(0, Math.round(Number(cur[memberId]) || 0) + Math.round(Number(delta) || 0));
+    const next = Math.max(0, Math.round(Number(points) || 0));
+    if (Math.round(Number(cur[memberId]) || 0) === next) return;
     await setJSON(POINTS_KEY, { ...cur, [memberId]: next });
-    return next;
   } catch {
-    return Math.max(0, Math.round(delta));
+    /* abaikan */
   }
 }
+/** Samakan digit HP untuk pencocokan lokal↔server (08… vs +62… vs 62…). */
+function phoneKey(hp: string): string {
+  const d = String(hp ?? '').replace(/[^0-9]/g, '');
+  return d.length >= 7 ? d.slice(-9) : d;
+}
 /** Baca koleksi nyata dari SQLite ms_member (hasil seed/pull/koleksi kasir).
- * Kosong = belum ada member (pemanggil tampilkan empty-state). */
+ * Kosong = belum ada member (pemanggil tampilkan empty-state). Poin = cache
+ * terakhir dari server (M1: tanpa earn lokal). */
 async function loadMembersFromSqlite(): Promise<Member[]> {
   await initDb();
   const rows = await query<MemberRow>(
-    'SELECT id, memberName, phone, depositBalance FROM ms_member ORDER BY memberName',
+    'SELECT id, memberName, phone, email, depositBalance FROM ms_member ORDER BY memberName',
   );
   const pts = await loadPoints();
   const out: Member[] = [];
@@ -115,9 +128,11 @@ async function loadMembersFromSqlite(): Promise<Member[]> {
       id,
       nama,
       noHp: (r.phone ?? '').trim(),
+      email: (r.email ?? '').trim(),
       tipe: 'Regular',
       saldo: Math.max(0, Math.round(Number(r.depositBalance) || 0)),
       poin: Math.max(0, Math.round(Number(pts[id]) || 0)),
+      loyalty: false,
     });
   }
   return out;
@@ -210,20 +225,22 @@ function maskHp(hp: string): string {
 
 /** Member baru: catat ke outbox + antrean sync (offline-first), lalu POST ke
  * endpoint register-member saat online. Offline apiFetch jatuh ke dummy lokal
- * dan data tetap antre via outbox untuk push berikutnya. */
-async function persistMember(id: string, nama: string, noHp: string): Promise<void> {
+ * dan data tetap antre via outbox untuk push berikutnya. Email (M1) ikut
+ * payload bila diisi; server yang tak kenal field mengabaikannya. */
+async function persistMember(id: string, nama: string, noHp: string, email?: string): Promise<void> {
+  const mail = String(email ?? '').trim();
   try {
     await enqueueOutbox('ms_member', id, 'insert');
   } catch {
     /* abaikan */
   }
   try {
-    enqueueSync('other', { kind: 'member-register', memberId: id, nama, noHp });
+    enqueueSync('other', { kind: 'member-register', memberId: id, nama, noHp, ...(mail ? { email: mail } : {}) });
   } catch {
     /* abaikan */
   }
   try {
-    await apiFetch(ApiPath.registerMember, { body: { memberId: id, name: nama, phone: noHp } });
+    await apiFetch(ApiPath.registerMember, { body: { memberId: id, name: nama, phone: noHp, ...(mail ? { email: mail } : {}) } });
   } catch {
     /* offline - terkirim via push berikutnya */
   }
@@ -366,50 +383,29 @@ export default function MemberScreen({ navigation, route }: Props) {
         const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data);
         const items = Array.isArray(data?.items) ? data.items : [];
         if (!live || items.length === 0) return;
-        // Overlay poin lokal: pull tak boleh menimpa earn perangkat dengan
-        // angka server yang lebih kecil (pakai maks keduanya).
-        const overlay = await loadPoints();
+        // M1: poin = nilai server apa adanya (server-wins). Overlay lokal
+        // tak mencetak poin; cache hanya ditulis dari angka server.
         const mapped: Member[] = [];
         for (const [idx, it] of items.entries()) {
           const nama = String(it.name ?? it.memberName ?? '').trim();
           const id = String(it.memberId ?? it.id ?? '').trim() || `M${String(idx + 1).padStart(3, '0')}`;
           if (!id || !nama) continue;
           const tierRaw = String(it.tier ?? 'Regular');
+          const pts = Math.max(0, Math.round(Number(it.points ?? 0) || 0));
           mapped.push({
             id,
             nama,
             noHp: String(it.phone ?? ''),
+            email: String(it.email ?? ''),
             tipe: tierRaw.charAt(0).toUpperCase() + tierRaw.slice(1).toLowerCase(),
             saldo: Math.max(0, Math.round(Number(it.balance ?? it.depositBalance ?? 0) || 0)),
-            // Poin = maks(server, overlay lokal): earn sesi lalu / perangkat
-            // ini tak boleh hilang saat pull. (Belum ada alur redeem; saat
-            // redeem dibangun, maks ini harus ditinjau ulang agar poin yang
-            // sudah ditukar tak bangkit lagi.)
-            poin: Math.max(
-              Math.max(0, Math.round(Number(it.points ?? 0) || 0)),
-              Math.max(0, Math.round(Number(overlay[id]) || 0)),
-            ),
+            poin: pts,
+            loyalty: false,
           });
+          void cacheServerPoints(id, pts);
         }
         if (!live || mapped.length === 0) return;
         setMembers(mapped);
-        // Tulis balik maks ke overlay agar tahan muat ulang offline.
-        void (async () => {
-          try {
-            const cur = await loadPoints();
-            let dirty = false;
-            const next = { ...cur };
-            for (const m of mapped) {
-              if (Math.round(Number(cur[m.id]) || 0) < m.poin) {
-                next[m.id] = m.poin;
-                dirty = true;
-              }
-            }
-            if (dirty) await setJSON(POINTS_KEY, next);
-          } catch {
-            /* abaikan */
-          }
-        })();
         setSelected((sb) => (sb ? mapped.find((m) => m.id === sb.id) ?? sb : sb));
       } catch {
         /* offline - koleksi SQLite tetap dipakai */
@@ -417,6 +413,100 @@ export default function MemberScreen({ navigation, route }: Props) {
     })();
     return () => { live = false; };
   }, []);
+
+  // M1: pencarian server via /customers/search (GET ?q,take, debounce 400ms,
+  // hanya saat online + kata kunci tak kosong). Baris server dicocokkan ke
+  // koleksi lokal via id materialisasi (MC{id}), digit HP, atau email; cocok =
+  // gabung (email/poin/loyalty dari server, server-wins); tak cocok =
+  // materialisasi ke ms_member (id `MC{id}`) agar alur deposit/terapkan tetap
+  // memakai identitas lokal. Gagal/offline = koleksi lokal tetap dipakai.
+  useEffect(() => {
+    const keyword = q.trim();
+    if (keyword.length === 0 || !online) return;
+    let live = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await searchServerCustomers(keyword, 20);
+          if (!live || !res.ok) return;
+          const rows = res.data;
+          if (rows.length === 0) return;
+          await initDb();
+          const local = await loadMembersFromSqlite();
+          const byId = new Map(local.map((m) => [m.id, m]));
+          const byPhone = new Map<string, Member>();
+          const byEmail = new Map<string, Member>();
+          for (const m of local) {
+            const pk = phoneKey(m.noHp);
+            if (pk && !byPhone.has(pk)) byPhone.set(pk, m);
+            const ek = m.email.trim().toLowerCase();
+            if (ek && !byEmail.has(ek)) byEmail.set(ek, m);
+          }
+          const merged: Member[] = [...local];
+          let dirty = false;
+          for (const r of rows) {
+            const rName = String(r.name ?? '').trim();
+            if (!rName) continue;
+            const rPhone = String(r.phone ?? '').trim();
+            const rEmail = String(r.email ?? '').trim();
+            const hit =
+              byId.get(`MC${r.id}`) ??
+              (rPhone ? byPhone.get(phoneKey(rPhone)) : undefined) ??
+              (rEmail ? byEmail.get(rEmail.toLowerCase()) : undefined);
+            if (hit) {
+              const next: Member = {
+                ...hit,
+                nama: rName || hit.nama,
+                noHp: rPhone || hit.noHp,
+                email: rEmail || hit.email,
+                poin: r.pointsBalance,
+                loyalty: r.loyaltyMember || hit.loyalty,
+              };
+              const idx = merged.findIndex((m) => m.id === hit.id);
+              if (idx >= 0) merged[idx] = next;
+              void cacheServerPoints(hit.id, r.pointsBalance);
+              if (rEmail && rEmail !== hit.email) {
+                try {
+                  await run('UPDATE ms_member SET email = ?, syncDate = NULL WHERE id = ?', [rEmail, hit.id]);
+                } catch {
+                  /* abaikan */
+                }
+              }
+              dirty = true;
+            } else {
+              const nid = `MC${r.id}`;
+              if (byId.has(nid)) continue;
+              const nm = { id: nid, nama: rName, noHp: rPhone, email: rEmail, tipe: 'Regular', saldo: 0, poin: r.pointsBalance, loyalty: r.loyaltyMember };
+              try {
+                await run(
+                  'INSERT OR IGNORE INTO ms_member (id, memberName, phone, email, depositBalance, syncDate) VALUES (?, ?, ?, ?, 0, NULL)',
+                  [nid, rName, rPhone || null, rEmail || null],
+                );
+              } catch {
+                /* abaikan - state memori tetap jalan */
+              }
+              merged.push(nm);
+              byId.set(nid, nm);
+              void cacheServerPoints(nid, r.pointsBalance);
+              dirty = true;
+            }
+          }
+          if (live && dirty) {
+            merged.sort((a, b) => a.nama.localeCompare(b.nama));
+            setMembers(merged);
+            setSelected((sb) => (sb ? merged.find((m) => m.id === sb.id) ?? sb : sb));
+          }
+        } catch {
+          /* offline/gagal - koleksi lokal tetap dipakai */
+        }
+      })();
+    }, 400);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, online]);
 
   // Saldo inquiry server untuk member terpilih (inquiry-deposit hanya cek saldo,
   // bukan top up). Dummy Mode selalu fromDummy + menggemakan M001 - hanya
@@ -441,23 +531,14 @@ export default function MemberScreen({ navigation, route }: Props) {
         const saldo = Number(data.saldo ?? data.balance ?? NaN);
         if (!live || !Number.isFinite(saldo)) return;
         const poin = Number(data.poin ?? data.points ?? NaN);
+        // M1: poin server menang; tanpa angka server = cache lokal tetap.
         const poinEff = Number.isFinite(poin) ? Math.max(0, Math.round(poin)) : localPoin;
         setInquiry({
           saldo: Math.max(0, Math.round(saldo)),
           poin: poinEff,
         });
-        // Poin server ikut disimpan ke overlay (maks) agar tak kalah dengan cache lama saat muat ulang.
         if (Number.isFinite(poin)) {
-          void (async () => {
-            try {
-              const cur = await loadPoints();
-              if (poinEff > Math.round(Number(cur[mid]) || 0)) {
-                await setJSON(POINTS_KEY, { ...cur, [mid]: poinEff });
-              }
-            } catch {
-              /* abaikan */
-            }
-          })();
+          void cacheServerPoints(mid, poinEff);
         }
       } catch {
         /* offline - kartu memakai cache lokal */
@@ -551,13 +632,8 @@ export default function MemberScreen({ navigation, route }: Props) {
     if (!mid || typeof baru !== 'number') return;
     setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, saldo: baru } : m)));
     setSelected((sb) => (sb && sb.id === mid ? { ...sb, saldo: baru } : sb));
-    // Paritas deposit cepat: topup penuh ikut earn 1 poin per Rp1.000 (overlay).
-    if (typeof topup === 'number' && topup > 0) {
-      void addPoints(mid, Math.floor(topup / 1000)).then((total) => {
-        setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
-        setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
-      });
-    }
+    // M1: tanpa earn poin lokal — poin milik loyalty server (muncul via pull /
+    // search / inquiry berikutnya). Param topupNominal warisan diabaikan.
     setRiwayat((rw) => ({
       ...rw,
       [mid]: [
@@ -572,6 +648,7 @@ export default function MemberScreen({ navigation, route }: Props) {
   // Form tambah member
   const [nama, setNama] = useState('');
   const [noHp, setNoHp] = useState('');
+  const [email, setEmail] = useState('');
   const [tglLahir, setTglLahir] = useState('');
 
   const hasil =
@@ -581,6 +658,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           (m) =>
             m.nama.toLowerCase().includes(q.toLowerCase()) ||
             m.noHp.includes(q) ||
+            m.email.toLowerCase().includes(q.toLowerCase()) ||
             m.id.toLowerCase().includes(q.toLowerCase()),
         );
 
@@ -594,30 +672,37 @@ export default function MemberScreen({ navigation, route }: Props) {
       setAddErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
       return;
     }
+    // M1: email opsional, tetapi bila diisi harus valid (dipakai struk email).
+    const mail = email.trim();
+    if (mail && !isValidEmail(mail)) {
+      setAddErr(t('mem_email_bad'));
+      return;
+    }
     setAddErr('');
     if (nama.trim() && noHp.trim()) {
       const id = `M${String(Date.now()).slice(-6)}`;
       const nm = nama.trim();
       const hp = noHp.trim();
-      void persistMember(id, nm, hp);
+      void persistMember(id, nm, hp, mail || undefined);
       // Simpan koleksi nyata ke SQLite ms_member agar bertahan offline.
       void (async () => {
         try {
           await initDb();
           await run(
-            'INSERT OR REPLACE INTO ms_member (id, memberName, phone, depositBalance, syncDate) VALUES (?, ?, ?, 0, NULL)',
-            [id, nm, hp],
+            'INSERT OR REPLACE INTO ms_member (id, memberName, phone, email, depositBalance, syncDate) VALUES (?, ?, ?, ?, 0, NULL)',
+            [id, nm, hp, mail || null],
           );
         } catch {
           /* abaikan - state memori tetap jalan */
         }
       })();
-      setMembers((ms) => [...ms, { id, nama: nm, noHp: hp, tipe: 'Regular', saldo: 0, poin: 0 }]);
+      setMembers((ms) => [...ms, { id, nama: nm, noHp: hp, email: mail, tipe: 'Regular', saldo: 0, poin: 0, loyalty: false }]);
       setRiwayat((rw) => ({ ...rw, [id]: [] }));
     }
     setAddVisible(false);
     setNama('');
     setNoHp('');
+    setEmail('');
     setTglLahir('');
   };
 
@@ -650,16 +735,11 @@ export default function MemberScreen({ navigation, route }: Props) {
         return;
       }
       setDepositErr('');
-      const poin = Math.floor(n / 1000); // 1 poin per Rp1.000
       const mid = selected.id;
       // SATU jalur tulis (persistDeposit): lokal + fisik + direct-or-one-light
       // dengan satu kunci bersama. Blok ledger inline ganda DIHAPUS.
+      // M1: tanpa earn poin lokal — poin milik loyalty server.
       await persistDeposit(mid, n, 'cepat');
-      // Poin bertahan di perangkat via overlay (dulu memori saja, hilang saat muat ulang).
-      void addPoints(mid, poin).then((total) => {
-        setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, poin: total } : m)));
-        setSelected((sb) => (sb && sb.id === mid ? { ...sb, poin: total } : sb));
-      });
       setMembers((ms) =>
         ms.map((m) =>
           m.id === mid ? { ...m, saldo: m.saldo + n } : m,
@@ -765,6 +845,9 @@ export default function MemberScreen({ navigation, route }: Props) {
                 <Text style={s.cardMeta}>
                   {m.id} - {maskHp(m.noHp)}
                 </Text>
+                {m.email ? (
+                  <Text style={s.cardMeta} numberOfLines={1}>{m.email}</Text>
+                ) : null}
                 <Text style={[s.cardTipe, m.tipe === 'Gold' ? s.cardTipeGold : s.cardTipeReg]}>{m.tipe} Member{m.tipe === 'Gold' ? ' ★' : ''}</Text>
               </View>
             </View>
@@ -800,6 +883,9 @@ export default function MemberScreen({ navigation, route }: Props) {
           <Text style={s.detailMeta}>
             {selected.id} - {maskHp(selected.noHp)}
           </Text>
+          {selected.email ? (
+            <Text style={s.detailMeta}>{selected.email}</Text>
+          ) : null}
           <View style={s.detailStats}>
             <View style={s.detailStat}>
               <Text style={s.detailStatLabel}>{t('mem_balance')}</Text>
@@ -967,6 +1053,14 @@ export default function MemberScreen({ navigation, route }: Props) {
               keyboardType="phone-pad"
               value={noHp}
               onChangeText={setNoHp}
+            />
+            <AppInput
+              label={t('mem_email_label')}
+              placeholder={t('mem_email_ph')}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
             />
             <AppInput
               label={t('mem_dob_label')}

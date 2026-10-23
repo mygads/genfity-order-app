@@ -119,7 +119,7 @@ export const SCHEMA_STATEMENTS: string[] = [
     flagActive INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0,
     voucherCategoryID TEXT, voucherSourceID TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_member (
-    id TEXT PRIMARY KEY, memberName TEXT, phone TEXT,
+    id TEXT PRIMARY KEY, memberName TEXT, phone TEXT, email TEXT,
     depositBalance REAL DEFAULT 0, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_voucher (
     id TEXT PRIMARY KEY, voucherCode TEXT, voucherName TEXT, amount REAL DEFAULT 0,
@@ -239,4 +239,6 @@ export const MIGRATION_STATEMENTS: string[] = [
   // backfill menyalin salesNum (PK, unik). Gagal = sudah ada.
   `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
+  // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE ms_member ADD COLUMN email TEXT',
 ];

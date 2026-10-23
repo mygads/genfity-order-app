@@ -220,6 +220,15 @@ export const ApiPath = {
   merchantCashApprove: 'api/merchant/cash-registers/sessions/{sessionId}/approve', // POST {note?} manager
   merchantEodPreview: 'api/merchant/end-of-day', // GET (?date)
   merchantEodClose: 'api/merchant/end-of-day/close', // POST {date?}
+  // ---- M1 (loyalty): kontrak merchant Go untuk member/loyalty + struk email
+  // (router.go grup /api/merchant, MerchantAuth — token sesi terminal E01
+  // membawa MerchantID, cermin W1/W2; Bearer otomatis via needsSessionBearer
+  // karena prefix `api/`). '{orderId}' diganti caller via .replace() ala
+  // terminalApi.ts:109. TANPA PIN baru (tak perlu: gerbang bound terminal +
+  // shift buka sudah fail-closed; PIN tetap milik aksi uang-keluar U10).
+  merchantCustomerSearch: 'api/merchant/customers/search', // GET (?q,take,cursor) → {data:[{id,name,email,phone,orderCount,totalSpent,pointsBalance,loyaltyMember}]}
+  merchantEmailDeliverySettings: 'api/merchant/email-delivery-settings', // GET → {data:{emailDeliverySettings:{sendInvoiceEmail,...}}}
+  merchantOrderSendReceipt: 'api/merchant/orders/{orderId}/send-receipt', // POST {email} → antrean completed-email (isPosInvoice)
 } as const;
 
 /** E28: kunci policy grant offline (server-wins via terminal-settings, default 7 hari). */

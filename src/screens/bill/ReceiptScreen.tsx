@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { getCachedCurrency } from '../../lib/currency';import { fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { getCachedCurrency } from '../../lib/currency';import { fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run, all } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getServerOrderIdForSale, isInvoiceEmailEnabled, sendPosReceiptEmail, serverIdForTxnKey } from '../../lib/posWire';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); // Tanpa params = nilai kosong yang jujur (bukan TRX/#148/QRIS/Bawa Pulang karangan).
@@ -135,12 +135,55 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  const sendMail = () => {
-    if (!isValidEmail(mailTo)) {
+  // M1: prefill email dari member transaksi ini (ms_member.email) bila ada.
+  const routeMemberId = (route?.params?.memberId ?? '').trim();
+  useEffect(() => {
+    if (!routeMemberId || mailTo) return;
+    void (async () => {
+      try {
+        await initDb();
+        const rows = await all<{ email?: string | null }>(
+          'SELECT email FROM ms_member WHERE id = ? LIMIT 1',
+          [routeMemberId],
+        );
+        const em = (rows[0]?.email ?? '').trim();
+        if (em) setMailTo(em);
+      } catch {
+        /* abaikan - input manual tetap jalan */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeMemberId]);
+
+  // M1: kirim struk via server bila invoice-email aktif (BE gated by
+  // SendInvoiceEmail); fallback antrean ESB lama bila offline/setting mati.
+  const sendMail = async () => {
+    const mail = mailTo.trim();
+    if (!isValidEmail(mail)) {
       setMailMsg(t('hist_mail_bad'));
       return;
     }
-    recordReceiptEmail(mailTo, no, total, method);
+    const cid = (route?.params?.clientId ?? '').trim() || no;
+    const sid = serverIdForTxnKey(cid) ?? getServerOrderIdForSale(no);
+    const gate = await isInvoiceEmailEnabled();
+    if (gate === false) {
+      recordReceiptEmail(mail, no, total, method);
+      setMailMsg(t('hist_mail_off'));
+      return;
+    }
+    if (typeof sid === 'number' && sid > 0) {
+      const res = await sendPosReceiptEmail(sid, mail);
+      if (res.ok) {
+        setMailMsg(t('hist_mail_sent'));
+        return;
+      }
+      if (res.reason === 'rejected') {
+        setMailMsg(t('hist_mail_off'));
+        return;
+      }
+      // blocked/offline/error → jatuh ke antrean ESB lama di bawah.
+    }
+    recordReceiptEmail(mail, no, total, method);
     setMailMsg(t('hist_mail_queued'));
   };
 
@@ -172,7 +215,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
           {mailMsg ? <Text style={styles.mailMsg}>{mailMsg}</Text> : null}
           <View style={styles.dBtns}>
             <AppButton title={t('c_close')} variant="secondary" onPress={() => setMailOpen(false)} fullWidth={false} size="md" style={[styles.actionBtn, styles.dBtnFlex]} />
-            <AppButton title={t('hist_mail_send')} onPress={sendMail} fullWidth={false} size="md" style={[styles.actionBtn, styles.dBtnFlex]} />
+            <AppButton title={t('hist_mail_send')} onPress={() => void sendMail()} fullWidth={false} size="md" style={[styles.actionBtn, styles.dBtnFlex]} />
           </View>
         </View>
       </View>
