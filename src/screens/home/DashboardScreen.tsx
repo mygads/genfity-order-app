@@ -311,7 +311,7 @@ export default function DashboardScreen({ navigation }: Props) {
   return (
     <View style={styles.root}>
       <ScreenHeader
-        title={s?.outlet ?? 'Genfity Cabang Poris'}
+        title={s?.outlet ?? t('outlet_fallback')}
         sub={`${t('nav_cashier')} ${s?.name ?? t('fallback_user')} · ${s?.shift ?? t('fallback_shift')}`}
         left={
           <TouchableOpacity
