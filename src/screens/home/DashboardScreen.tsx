@@ -312,7 +312,7 @@ export default function DashboardScreen({ navigation }: Props) {
     <View style={styles.root}>
       <ScreenHeader
         title={s?.outlet ?? 'Genfity Cabang Poris'}
-        sub={`${t('nav_cashier')} ${s?.name ?? 'Gista'} · ${s?.shift ?? t('fallback_shift')}`}
+        sub={`${t('nav_cashier')} ${s?.name ?? t('fallback_user')} · ${s?.shift ?? t('fallback_shift')}`}
         left={
           <TouchableOpacity
             onPress={() => setDrawerOpen(true)}
