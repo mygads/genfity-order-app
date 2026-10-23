@@ -1251,6 +1251,10 @@ export default function PayScreen({ navigation, route }: Props) {
         onChangeText={(v) => setEdcCode(v.replace(/[^0-9]/g, '').slice(0, 6))}
         maxLength={6}
       />
+      {/* D7: tombol Ubah ala ref tablet - reset kode EDC untuk input ulang. */}
+      {edcCode.length > 0 && (
+        <AppButton title={t('editAction')} variant="secondary" onPress={() => setEdcCode('')} fullWidth={false} size="sm" style={styles.footerBtn} />
+      )}
 
       {renderSplits()}
 
