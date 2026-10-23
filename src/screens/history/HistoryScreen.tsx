@@ -440,7 +440,8 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
                   </Text>
                 </View>
               </View>
-              <Text style={styles.cardNo}>{item.no}</Text>
+              <Text style={styles.cardNo}>{t('hist_col_trxno')}: {item.no}</Text>
+              <Text style={styles.cardNo}>{t('hist_col_billno')}: {billNo(item)}</Text>
               <View style={styles.cardBottom}>
                 <Text style={styles.cardMeta}>{item.payment}</Text>
                 <Text style={styles.cardTotal}>{rp(item.total)}</Text>
