@@ -823,3 +823,49 @@ export async function fetchOccupant(
     fromDummy: false,
   };
 }
+
+/** S-READINESS: kesiapan terminal (SPEC-TERMINAL-SESSION §11 baris S-READINESS).
+ * GET /api/v1/terminals/{id}/readiness {deviceId?} → {needsShift, needsCash,
+ * shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
+ * member-only; deviceId opsional — tanpanya grant dilaporkan valid:false).
+ * Fail-open jujur: {ok:false}/dummy/offline = status TAK DIKETAHUI —
+ * pemanggil JANGAN blokir (gerbang shift lokal App.tsx tetap berlaku);
+ * gate 'Shift' hanya bila server eksplisit menjawab needsShift/needsCash.
+ * Pola cermin fetchOccupant (GET + withId + unwrap + fail jujur). */
+export interface TerminalReadiness {
+  needsShift: boolean;
+  needsCash: boolean;
+  shiftOpen: boolean;
+  cashOpen: boolean;
+  grantValid: boolean;
+}
+
+export async function fetchTerminalReadiness(
+  terminalId: string,
+  opts?: { deviceId?: string },
+): Promise<TerminalApiResult<TerminalReadiness>> {
+  const dev = (opts?.deviceId ?? '').trim();
+  const r = await apiFetch(withId(ApiPath.terminalReadiness, terminalId), {
+    method: 'GET',
+    ...(dev ? { params: { deviceId: dev } } : {}),
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<TerminalReadiness>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const shift = (data.shift ?? {}) as Record<string, unknown>;
+  const cash = (data.cash ?? {}) as Record<string, unknown>;
+  const grant = (data.grant ?? {}) as Record<string, unknown>;
+  return {
+    ok: true,
+    data: {
+      needsShift: data.needsShift === true,
+      needsCash: data.needsCash === true,
+      shiftOpen: shift.open === true,
+      cashOpen: cash.open === true,
+      grantValid: grant.valid === true,
+    },
+    fromDummy: false,
+  };
+}
+

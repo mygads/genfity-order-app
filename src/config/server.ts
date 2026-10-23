@@ -167,6 +167,10 @@ export const ApiPath = {
   terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2) — MISSING-BE (pasangan qr-issue/qr-consume SUDAH ADA dan ter-wire; E25-login-qr endpoint terpisah bila masih dibutuhkan)
   terminalEvents: 'api/v1/terminals/{id}/events', // E26 GET SSE feed per terminal
   queueEvents: 'api/v1/branches/{id}/queue-events', // E27 GET SSE antrean per branch
+  // S-READINESS: GET kesiapan terminal {deviceId?} → {needsShift, needsCash,
+  // shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
+  // router.go:1173, member-only; SPEC-TERMINAL-SESSION §11 baris S-READINESS).
+  terminalReadiness: 'api/v1/terminals/{id}/readiness',
   // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
   terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
   terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}

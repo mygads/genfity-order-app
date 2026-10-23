@@ -28,6 +28,7 @@ import {
   saveGrant as saveSessionGrant,
   saveSession,
   setMaxOfflineGrantDays,
+  setPostLoginRoute,
   subscribeSession,
   verifyGrantPin,
   type Binding as SessionBinding,
@@ -38,7 +39,7 @@ import { startRealtime } from '../../lib/realtime';
 import { flushPendingRevokes, restoreAutoSyncPrefs } from '../../lib/sync';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
-import { pinVerifyTerminalPin } from '../../lib/terminalApi';
+import { pinVerifyTerminalPin, fetchTerminalReadiness } from '../../lib/terminalApi';
 import {
   getContractDeviceId,
   loadBinding,
@@ -693,6 +694,33 @@ async function completeOnline(
   // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
   if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
+  // S-READINESS: gerbang shift server-side (SPEC-TERMINAL-SESSION §11).
+  // Pasca-saveSession (bearer sesi tersedia untuk apiFetch kontrak-Go):
+  // tanya BE readiness best-effort; bila server eksplisit needsShift/needsCash
+  // → rute pasca-login sekali-pakai ke 'Shift' (pola setPostLoginRoute yang
+  // dikonsumsi GuardedStacks di App.tsx; JANGAN navigate manual dari stack
+  // tamu — navigator tamu tak mengenal rute authed). Tak terjangkau/dummy/
+  // kontrak-tak-valid = fail-open (gerbang shift lokal App.tsx tetap berlaku),
+  // BUKAN blokir login. Offline tak lewat sini (completeOffline terpisah).
+  try {
+    const pTerm = (payload.terminal ?? {}) as Record<string, unknown>;
+    const pGrant = (payload.grant ?? {}) as Record<string, unknown>;
+    const readinessTermId = str(pTerm.terminalId ?? pGrant.terminalId) || ctx.terminalId;
+    if (readinessTermId.trim()) {
+      const rr = await withTimeout(
+        fetchTerminalReadiness(
+          readinessTermId.trim(),
+          deviceId.trim() ? { deviceId: deviceId.trim() } : undefined,
+        ),
+        8000,
+      ).catch(() => null);
+      if (rr && rr.ok && !rr.fromDummy && (rr.data.needsShift || rr.data.needsCash)) {
+        setPostLoginRoute('Shift');
+      }
+    }
+  } catch {
+    /* fail-open: gerbang shift lokal yang memutuskan */
+  }
   // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
   // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
