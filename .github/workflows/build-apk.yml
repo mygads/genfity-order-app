@@ -22,6 +22,8 @@
 #     https://order.genfity.com/downloads/ (job publish-vps). Tanpa ini, APK
 #     tetap tersedia via Actions artifact + GitHub Releases, dan kartu unduh
 #     di website otomatis pakai link GitHub sampai manifest VPS tersedia.
+#   - VPS_KNOWN_HOSTS (opsional, disarankan) : pin known_hosts VPS agar Setup
+#     SSH tak perlu ssh-keyscan runtime (rapuh dari egress IP runner).
 #
 # Variables (opsional, Settings → Secrets and variables → Actions → Variables):
 #   - EXPO_PUBLIC_API_BASE_URL   : URL backend (kosong = Local Mode/offline SQLite)
@@ -271,15 +273,24 @@ jobs:
 
       - name: Setup SSH
         if: steps.gate.outputs.enabled == 'true'
+        env:
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          rm -f ~/.ssh/known_hosts
+          if [ -n "${VPS_KNOWN_HOSTS:-}" ]; then
+            # Pin known_hosts dari secret (hindari ssh-keyscan runtime yang
+            # rapuh terhadap drop koneksi baru dari egress IP runner).
+            printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            echo "known_hosts dari secret VPS_KNOWN_HOSTS"
+          else
           # ssh-keyscan ke VPS kadang timeout karena koneksi SSH baru di-drop
           # saat traffic CI paralel sedang tinggi (terbukti: repo main pun
           # pernah gagal di step yang sama lalu sukses di run berikutnya).
           # Coba ulang dengan backoff + timeout lebih panjang.
-          rm -f ~/.ssh/known_hosts
           for i in 1 2 3 4 5; do
             if ssh-keyscan -T 20 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>keyscan.err && [ -s ~/.ssh/known_hosts ]; then
               rm -f keyscan.err
@@ -295,6 +306,7 @@ jobs:
             fi
             sleep $((i * 15))
           done
+          fi
 
       - name: Publish to downloads folder
         if: steps.gate.outputs.enabled == 'true'
