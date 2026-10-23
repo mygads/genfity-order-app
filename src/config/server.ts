@@ -90,8 +90,9 @@ export const ApiPath = {
   pushShiftClose: 'v1/push/shift',
   // [FAKTA] APK: v1/push/branch-expenses (REA-18).
   pushExpense: 'v1/push/branch-expenses',
-  // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
-  pushRegister: 'device/register-push',
+  // W1-followup BE 8a5ed0f: POST /api/merchant/pos/device/register-push
+  // (MerchantAuth; prefix api/ = bearer otomatis via apiFetch).
+  pushRegister: 'api/merchant/pos/device/register-push',
   receiptEmail: 'sales/receipt-email',
   voucherLock: 'posv1/esb-voucher/lock',
   voucherUnlock: 'posv1/esb-voucher/unlock',
