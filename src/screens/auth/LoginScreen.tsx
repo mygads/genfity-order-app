@@ -88,7 +88,7 @@ const ICONS = {
   hide: require('../../../assets/icons/password_hide.webp'),
   fail: require('../../../assets/icons/fail_red.webp'),
   waQr: require('../../../assets/images/whatsapp_qr.webp'),
-  logo: require('../../../assets/images/esb_logo.webp'),
+  logo: require('../../../assets/genfity-logo.png'),
 };
 
 /**
@@ -1948,7 +1948,7 @@ export default function LoginScreen({ navigation }: Props) {
         </View>
 
         <Image
-          source={require('../../../assets/images/esb_logo.webp')}
+          source={require('../../../assets/genfity-logo.png')}
           style={styles.logo}
           resizeMode="contain"
         />

@@ -43,7 +43,7 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
       } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
       <View style={styles.hero}>{/* Tablet: hero full-bleed, isi dibatasi 1024. */}<View style={isTablet ? styles.heroInner : undefined}>
-        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
+        <Image source={require('../../../assets/genfity-logo-dark.png')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
         <Text style={styles.version}>{t('about.version')}</Text>
         <Text style={styles.heroSub}>{t('about.heroSub')}</Text>

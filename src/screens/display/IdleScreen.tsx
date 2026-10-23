@@ -145,7 +145,7 @@ type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/ti
         <Text style={styles.offlineBannerText}>{t('terminal_unbound_hint')}</Text>
       </View>
       ) : null}<View style={styles.hero}>
-        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
+        <Image source={require('../../../assets/genfity-logo-dark.png')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
         <Text style={[styles.shop, isTablet && styles.shopBig]}>{shopName}</Text>
         <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>
       </View>
