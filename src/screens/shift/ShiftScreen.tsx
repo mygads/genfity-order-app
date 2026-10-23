@@ -5,7 +5,13 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+  cashOpenBe,
+  cashOpenPayload,
+  clockInBe,
+  clockInPayload,
+  shouldQueueW1,
+} from '../../lib/beWorkforce';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -150,6 +156,37 @@ const MAX_KAS_AWAL = 10000000;
         note: catatan.trim() || null,
         at: nowIso,
       });
+      // W1 (SESI-FIX-APPW1): cermin clock-in + buka sesi kas ke BE — immediate-
+      // first fire-and-forget SETELAH lokal menang di atas. Offline/error =
+      // antrekan op be-* (drain sync mem-POST tanpa stamp/PIN); 4xx deterministik
+      // = error jujur (tak diantre). PIN tak pernah ikut (verifikasi PIN sudah
+      // selesai di atas; beWorkforce memoles body via stripPin).
+      void (async () => {
+        try {
+          const ci = await clockInBe();
+          if (shouldQueueW1(ci)) {
+            try {
+              enqueueSync('other', clockInPayload());
+            } catch {
+              /* abaikan */
+            }
+          }
+        } catch {
+          /* abaikan */
+        }
+        try {
+          const co = await cashOpenBe(kasAwalNum, catatan.trim() || undefined);
+          if (!co.ok && shouldQueueW1(co)) {
+            try {
+              enqueueSync('other', cashOpenPayload(kasAwalNum, catatan.trim() || undefined));
+            } catch {
+              /* abaikan */
+            }
+          }
+        } catch {
+          /* abaikan */
+        }
+      })();
     } catch {
       setError(t('shf_open_failed'));
       return;

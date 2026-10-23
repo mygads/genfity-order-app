@@ -30,6 +30,22 @@ import {
   beErrorOf,
   isReplaySuccess,
 } from './posWire';
+// W1 (SESI-FIX-APPW1): nama op + helper sesi-kas satu sumber di beWorkforce
+// (arah impor sync -> beWorkforce, cermin posWire; beWorkforce TAK mengimpor
+// sync agar tak ada siklus). Hanya INSERT di file ini — baris W2 tak diubah.
+import {
+  W1_OP_CASH_CLOSE,
+  W1_OP_CASH_MOVE,
+  W1_OP_CASH_OPEN,
+  W1_OP_CLOCK_IN,
+  W1_OP_CLOCK_OUT,
+  W1_OP_EOD_CLOSE,
+  clearCashSessionId,
+  getCashSessionId,
+  isServerSessionId,
+  recordPendingCashClose,
+  setCashSessionId,
+} from './beWorkforce';
 import {
   clearPendingRevoke as clearSessionPendingRevoke,
   getPendingRevoke as getSessionPendingRevoke,
@@ -186,6 +202,12 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     return ApiPath.clockIn;
   }
   if (kind === 'other') {
+    // W1 (SESI-FIX-APPW1): op be-* SENGAJA jatuh ke null di sini — bukan
+    // endpoint salah, melainkan dikuras drain-time oleh goWorkforceOp di bawah
+    // (substitusi {sessionId} dari id sesi server tersimpan + replay-code W1
+    // sendiri). Namespace 'be-' dijamin tak tabrakan op W2/ESB (beWorkforce).
+    const opW1 = String(payload?.op ?? '');
+    if (opW1 === W1_OP_CLOCK_IN || opW1 === W1_OP_CLOCK_OUT || opW1 === W1_OP_CASH_OPEN || opW1 === W1_OP_CASH_MOVE || opW1 === W1_OP_CASH_CLOSE || opW1 === W1_OP_EOD_CLOSE) return null;
     // Shift punya endpoint sendiri (dummy push/v1-push-shift sudah ada):
     // JANGAN dilempar ke pushOrderFinish (endpoint salah).
     const op = String(payload?.op ?? '');
@@ -584,6 +606,141 @@ function goMerchantOp(
     body: { status: target, ...(p.note ? { note: String(p.note).slice(0, 500) } : {}) },
     method: 'PUT',
     idemKey: item.id,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W1 (SESI-FIX-APPW1, gas mode, aditif): penerjemah antrean shift/clock +
+// sesi kas + tutup-hari ke kontrak merchant Go. Murni INSERT — goMerchantOp
+// (W2) di atas tak tersentuh. Beda dari W2:
+// - {sessionId} disubstitusi saat DRAIN dari id sesi server tersimpan
+//   (getCashSessionId; payload antrean SENGAJA tanpa id/stamp agar tak basi
+//   saat retry; absent = sah di server). Tanpa id sesi TAPI open masih antre
+//   = {retry} (tunggu giliran FIFO — open selalu lebih dulu diantar drain
+//   strict-createdAt); tanpa id sesi DAN tanpa open tertunda = {blocked}
+//   fail-once jujur (S10, bukan antre-selamanya).
+// - 409 replay W1 (SHIFT_ALREADY_OPEN / SHIFT_ALREADY_CLOSED / NO_OPEN_SHIFT /
+//   SESSION_CLOSED) = 'terkirim' idempoten (ditangani cabang drain di bawah —
+//   isReplaySuccess W2 tak mengenal kode-kode ini).
+// - Tutup-kas membawa isCashClose + sessionId agar 409 OPEN_POS_ORDERS bisa
+//   dialihkan ke daftar pending-close (bukan hilang).
+// - PIN tak pernah lewat sini: body antrean sudah dipoles stripPin di
+//   beWorkforce; drain mem-POST apa adanya.
+// ---------------------------------------------------------------------------
+
+/** 409 = "sudah dalam keadaan target" untuk domain shift/kas W1. */
+const W1_REPLAY_RE = /^(SHIFT_ALREADY_OPEN|SHIFT_ALREADY_CLOSED|NO_OPEN_SHIFT|SESSION_CLOSED)$/;
+
+export interface GoWorkforceOp {
+  path: string;
+  body: Record<string, unknown>;
+  method: 'POST';
+  idemKey: string;
+  /** Dipanggil best-effort sekali saat 2xx/replay (mis. simpan id sesi hasil open). */
+  onSent?: (body: unknown) => Promise<void> | void;
+  /** true = tutup-kas (butuh alih pending-close bila OPEN_POS_ORDERS). */
+  isCashClose?: boolean;
+  /** Id sesi kas numerik yang dipakai di path (untuk alih pending-close). */
+  sessionId?: string;
+}
+
+async function goWorkforceOp(
+  item: SyncItem,
+): Promise<GoWorkforceOp | { blocked: string } | { retry: string } | null> {
+  const p = (item.payload ?? {}) as Record<string, unknown>;
+  if (item.kind !== 'other') return null;
+  const op = String(p.op ?? '');
+  if (
+    op !== W1_OP_CLOCK_IN && op !== W1_OP_CLOCK_OUT && op !== W1_OP_CASH_OPEN &&
+    op !== W1_OP_CASH_MOVE && op !== W1_OP_CASH_CLOSE && op !== W1_OP_EOD_CLOSE
+  ) {
+    return null;
+  }
+  const idemKey = item.id;
+  if (op === W1_OP_CLOCK_IN) {
+    return { path: ApiPath.merchantClockIn, body: {}, method: 'POST', idemKey };
+  }
+  if (op === W1_OP_CLOCK_OUT) {
+    return { path: ApiPath.merchantClockOut, body: {}, method: 'POST', idemKey };
+  }
+  if (op === W1_OP_CASH_OPEN) {
+    const cash = Math.round(Number(p.openingCash) || 0);
+    if (!Number.isFinite(cash) || cash < 0) {
+      return { blocked: 'beWorkforce: cash-open butuh openingCash >= 0' };
+    }
+    const note = String(p.note ?? '').trim();
+    return {
+      path: ApiPath.merchantCashOpen,
+      body: { registerId: 0, openingCash: cash, ...(note ? { note: note.slice(0, 500) } : {}) },
+      method: 'POST',
+      idemKey,
+      onSent: async (body) => {
+        try {
+          const inner = ((body as Record<string, unknown>)?.data ?? body) as Record<string, unknown>;
+          const id = Math.round(Number(inner?.id) || 0);
+          if (id > 0) await setCashSessionId(id);
+        } catch {
+          /* abaikan */
+        }
+      },
+    };
+  }
+  if (op === W1_OP_EOD_CLOSE) {
+    const date = String(p.date ?? '').trim();
+    return {
+      path: ApiPath.merchantEodClose,
+      body: date ? { date } : {},
+      method: 'POST',
+      idemKey,
+    };
+  }
+  // MOVE + CLOSE butuh id sesi kas server (drain-time lookup; payload antrean
+  // tanpa id agar tak basi). Hint eksplisit payload didahulukan bila valid.
+  const sidHint = String(p.serverSessionId ?? '').trim();
+  const sid = isServerSessionId(sidHint) ? sidHint : await getCashSessionId();
+  if (!sid) {
+    const openPending = outbox.some(
+      (o) => o.status !== 'terkirim' && o.kind === 'other' &&
+        String(((o.payload ?? {}) as Record<string, unknown>).op ?? '') === W1_OP_CASH_OPEN,
+    );
+    if (openPending) return { retry: 'beWorkforce: menunggu sesi kas hasil open (retry)' };
+    return { blocked: 'beWorkforce: tanpa id sesi kas server + tanpa open tertunda' };
+  }
+  if (op === W1_OP_CASH_MOVE) {
+    const type = String(p.type ?? '').trim().toUpperCase();
+    const amount = Math.round(Number(p.amount) || 0);
+    const reason = String(p.reason ?? '').trim();
+    if ((type !== 'PAID_IN' && type !== 'PAID_OUT' && type !== 'CASH_DROP') || amount <= 0 || !reason) {
+      return { blocked: 'beWorkforce: move butuh type enum + amount > 0 + reason' };
+    }
+    return {
+      path: ApiPath.merchantCashMove.replace('{sessionId}', encodeURIComponent(sid)),
+      body: { type, amount, reason: reason.slice(0, 500) },
+      method: 'POST',
+      idemKey,
+      sessionId: sid,
+    };
+  }
+  // W1_OP_CASH_CLOSE.
+  const actual = Math.round(Number(p.actualCash) || 0);
+  if (!Number.isFinite(actual) || actual < 0) {
+    return { blocked: 'beWorkforce: cash-close butuh actualCash >= 0' };
+  }
+  const closeNote = String(p.note ?? '').trim();
+  return {
+    path: ApiPath.merchantCashClose.replace('{sessionId}', encodeURIComponent(sid)),
+    body: { actualCash: actual, ...(closeNote ? { note: closeNote.slice(0, 500) } : {}) },
+    method: 'POST',
+    idemKey,
+    isCashClose: true,
+    sessionId: sid,
+    onSent: async () => {
+      try {
+        await clearCashSessionId();
+      } catch {
+        /* abaikan */
+      }
+    },
   };
 }
 
@@ -1398,6 +1555,109 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       const be = beErrorOf(beBody);
       item.status = 'gagal';
       item.note = `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`.slice(0, 160);
+      return 'failed-once';
+    }
+    // W1 (SESI-FIX-APPW1): drain shift/kas/tutup-hari. Pola hasil cermin W2
+    // di atas; beda: replay-code W1 sendiri (W1_REPLAY_RE) + alih 409
+    // OPEN_POS_ORDERS pada tutup-kas ke pending-close (bukan hilang — kasir
+    // selesaikan order dulu, flushPendingCashCloses() mengulanginya) +
+    // {retry} tanpa-sesi = 'failed' (tunggu open FIFO, bukan fail-once).
+    const wfWrap = await goWorkforceOp(item);
+    if (wfWrap && ('blocked' in wfWrap || 'retry' in wfWrap)) {
+      if (item.status === 'gagal') return 'skipped';
+      item.status = 'gagal';
+      if ('retry' in wfWrap) {
+        item.note = (wfWrap as { retry: string }).retry;
+        return 'failed';
+      }
+      item.note = (wfWrap as { blocked: string }).blocked;
+      return 'failed-once';
+    }
+    if (wfWrap) {
+      const wf = wfWrap as GoWorkforceOp;
+      let wfRes: Response;
+      try {
+        wfRes = await apiPostWithTimeout(wf.path, wf.body, { idempotencyKey: wf.idemKey });
+      } catch {
+        item.status = 'gagal';
+        item.note = 'beWorkforce: jaringan/timeout (retry)';
+        return 'failed';
+      }
+      if (wfRes.status === 409) {
+        const cb = await readConflictBody(wfRes);
+        if (isReplaySuccess(cb) || W1_REPLAY_RE.test(beErrorOf(cb).code)) {
+          item.status = 'terkirim';
+          item.note = 'beWorkforce: replay/sudah-ada (idempoten)';
+          try {
+            if (wf.onSent) await wf.onSent(cb);
+          } catch {
+            /* abaikan */
+          }
+          try {
+            await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+          } catch {
+            /* abaikan */
+          }
+          return 'sent';
+        }
+        const be409 = beErrorOf(cb);
+        if (wf.isCashClose && be409.code === 'OPEN_POS_ORDERS') {
+          // Alih ke pending-close: order belum lunas di sesi ini. Item fail-once
+          // ber-note (bukan antre-selamanya); tutup diulang eksplisit via flush.
+          try {
+            const bp = (item.payload ?? {}) as Record<string, unknown>;
+            await recordPendingCashClose({
+              sessionId: wf.sessionId ?? '',
+              actualCash: Math.max(0, Math.round(Number(bp.actualCash) || 0)),
+              note: typeof bp.note === 'string' && bp.note.trim() ? bp.note.trim().slice(0, 500) : null,
+              at: new Date().toISOString(),
+            });
+          } catch {
+            /* abaikan */
+          }
+          item.status = 'gagal';
+          item.note = 'beWorkforce: 409 OPEN_POS_ORDERS -> pending-close (selesaikan order dulu)';
+          return 'failed-once';
+        }
+        item.status = 'gagal';
+        item.note = `beWorkforce: 409 ${be409.code || be409.message || 'konflik'}`.slice(0, 160);
+        return 'failed-once';
+      }
+      if (wfRes.ok) {
+        let sentBody: unknown = null;
+        try {
+          sentBody = (await wfRes.json()) as unknown;
+        } catch {
+          sentBody = null;
+        }
+        try {
+          if (wf.onSent) await wf.onSent(sentBody);
+        } catch {
+          /* abaikan */
+        }
+        item.status = 'terkirim';
+        item.note = '';
+        try {
+          await setWatermark(itemTable || item.kind, { push: new Date().toISOString() });
+        } catch {
+          /* abaikan */
+        }
+        return 'sent';
+      }
+      if (wfRes.status >= 500 || wfRes.status === 429 || wfRes.status === 0) {
+        item.status = 'gagal';
+        item.note = `beWorkforce: HTTP ${wfRes.status} (retry)`;
+        return 'failed';
+      }
+      let wfBody: unknown = null;
+      try {
+        wfBody = (await wfRes.json()) as unknown;
+      } catch {
+        wfBody = null;
+      }
+      const wbe = beErrorOf(wfBody);
+      item.status = 'gagal';
+      item.note = `beWorkforce: ${wbe.code || wfRes.status}${wbe.message ? ' - ' + wbe.message : ''}`.slice(0, 160);
       return 'failed-once';
     }
     // S10: kind 'other' tanpa endpoint (kontrak BE menyusul) — finalkan

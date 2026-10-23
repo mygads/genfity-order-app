@@ -29,7 +29,7 @@ import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import type { NavVoucher } from '../../navigation/types';
-import { syncWarnLevel } from '../../lib/sync';
+import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
 import { nextSalesNum } from '../../lib/sales';
 
 type Nav = {
@@ -200,6 +200,18 @@ export default function CashierScreen({ navigation, route }: Props) {
    * via collapse legacy (pesanan lama tak di-BLOCKED oleh flag). */
   const [deliveryOn, setDeliveryOn] = useState(getCachedDeliveryEnabled());
   useEffect(() => subscribeDeliveryFlag(setDeliveryOn), []);
+  // W1 (SESI-FIX-APPW1): ulangi tutup-kas tertunda tiap layar kasir dibuka
+  // (efek terpisah — langganan delivery di atas tak tersentuh). Best-effort,
+  // tak pernah melempar; offline = tetap pending untuk mount berikut.
+  useEffect(() => {
+    void (async () => {
+      try {
+        await flushPendingCashCloses();
+      } catch {
+        /* abaikan */
+      }
+    })();
+  }, []);
   const MODES = (() => {
     const all = posModesFor(getBinding()?.merchantType);
     return deliveryOn ? all : all.filter((m) => !isDeliveryChannelLabel(m));

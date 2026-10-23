@@ -202,6 +202,23 @@ export const ApiPath = {
   merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
   merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
   merchantPosRefund: 'api/merchant/orders/pos/refund', // POST refund
+  // ---- W1 (wiring-1): kontrak merchant Go untuk shift/clock + sesi kas +
+  // tutup-hari (grup /api/merchant, MerchantAuth — token sesi cermin W2).
+  // '{sessionId}' diganti caller via .replace('{sessionId}',
+  // encodeURIComponent(id)) ala terminalApi.ts:109. PIN TAK PERNAH dikirim
+  // (lib/beWorkforce.ts memoles body tanpa PIN; server yang mewajibkan PIN
+  // menjawab PIN_REQUIRED = error jujur, bukan antrean buta).
+  merchantClockIn: 'api/merchant/workforce/shifts/clock-in', // POST {terminalId?}
+  merchantClockOut: 'api/merchant/workforce/shifts/clock-out', // POST {terminalId?}
+  merchantManagerClock: 'api/merchant/workforce/manager-clock', // POST {userId,action,note,terminalId?}
+  merchantCurrentShift: 'api/merchant/workforce/current-shift', // GET shift milik sendiri
+  merchantPosCashSessions: 'api/merchant/pos/cash-sessions', // GET sesi kas OPEN
+  merchantCashOpen: 'api/merchant/cash-registers/sessions', // POST {registerId,openingCash,note?,terminalId?}
+  merchantCashMove: 'api/merchant/cash-registers/sessions/{sessionId}/movements', // POST {type,amount,reason}
+  merchantCashClose: 'api/merchant/cash-registers/sessions/{sessionId}/close', // POST {actualCash,note?}
+  merchantCashApprove: 'api/merchant/cash-registers/sessions/{sessionId}/approve', // POST {note?} manager
+  merchantEodPreview: 'api/merchant/end-of-day', // GET (?date)
+  merchantEodClose: 'api/merchant/end-of-day/close', // POST {date?}
 } as const;
 
 /** E28: kunci policy grant offline (server-wins via terminal-settings, default 7 hari). */
