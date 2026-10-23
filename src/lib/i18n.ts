@@ -595,7 +595,6 @@ const STR: Record<string, Entry> = {
   badge_online: { id: 'Online', en: 'Online' },
   // Persona demo terpisah per-bagian (hook t() tanpa param interpolasi;
   // call-site DrawerMenu tetap pakai drawer_demo_user di bawah).
-  drawer_demo_name: { id: 'Gista', en: 'Gista' },
   drawer_demo_user: { id: 'Gista | Shift Buka', en: 'Gista | Shift Open' },
   fallback_shift: { id: 'Shift Pagi', en: 'Morning Shift' },
   fallback_user: { id: 'Pengguna', en: 'User' },
