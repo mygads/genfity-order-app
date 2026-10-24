@@ -1048,7 +1048,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const renderHeader = () => (
     <View style={styles.header}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
+        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
@@ -1709,13 +1709,20 @@ export default function CashierScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  /* Header khusus kasir: metrik disamakan ScreenHeader (minHeight 56,
+   *  paddingHorizontal 12, paddingBottom 12, hitSlop 12) agar tinggi navy
+   *  identik semua layar. Beda disengaja: judul rata kiri (outlet + shift),
+   *  tombol burger (layar akar tanpa back), badge koneksi kanan.
+   *  HP-E2E 2026-10-24. */
   header: {
     backgroundColor: colors.navy,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+    minHeight: 56,
   },
   headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
   hamburgerIcon: { width: 22, height: 22 },
