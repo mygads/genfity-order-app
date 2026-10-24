@@ -12,15 +12,18 @@ import { uuidv7 } from './uuidv7';
 import {
   getServerOrderIdForSale,
   isDecimalId,
+  isPinRequiredRejection,
   pullServerHistory as pullServerHistoryRaw,
   registerServerTxnKey,
   cancelMerchantOrder,
   serverIdForTxnKey,
   refundPosPayment,
   voidMerchantOrder,
+  withManagerPin,
   GO_OP_CANCEL,
   GO_OP_REFUND,
   GO_OP_VOID,
+  type ManagerPinProvider,
   type ServerHistoryEntry,
 } from './posWire';
 import type { Transaction, TxnStatus } from '../data/mock';
@@ -144,7 +147,12 @@ export async function loadHistory(limit = 300): Promise<Transaction[]> {
  * verifyLocalEscalation); fallback = sesi kasir. Tanpa ini jejak audit selalu
  * menuduh kasir padahal supervisor yang menyetujui.
  */
-export async function persistVoidDb(salesNum: string, reason: string, approvedBy?: string): Promise<void> {
+export async function persistVoidDb(
+  salesNum: string,
+  reason: string,
+  approvedBy?: string,
+  getPin?: ManagerPinProvider,
+): Promise<void> {
   const now = new Date().toISOString();
   // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
   // Utamakan penyetuju eskalasi yang diketahui, bukan sesi kasir.
@@ -425,11 +433,22 @@ export async function persistVoidDb(salesNum: string, reason: string, approvedBy
   try {
     const sid = serverIdForTxnKey(salesNum) ?? (await getServerOrderIdForSale(salesNum));
     if (sid != null) {
-      const c = await cancelMerchantOrder(sid, reason || undefined);
+      // P1-1b: rantai cancel → void → refund; tiap panggilan live diulang
+      // SEKALI dengan PIN manajer bila BE menuntutnya (400 PIN_REQUIRED,
+      // transport-only via withManagerPin — antrean di bawah tetap tanpa PIN).
+      const c = await withManagerPin(
+        (pin) => cancelMerchantOrder(sid, reason || undefined, pin),
+        isPinRequiredRejection,
+        getPin,
+      );
       if (!c.ok) {
         const closed = c.reason === 'rejected' && /CLOSED|COMPLETED|SETTLED|PAID|ALREADY/i.test(c.code ?? '');
         if (closed) {
-          const v = await voidMerchantOrder(sid, reason || undefined);
+          const v = await withManagerPin(
+            (pin) => voidMerchantOrder(sid, reason || undefined, pin),
+            isPinRequiredRejection,
+            getPin,
+          );
           if (v.ok) return;
           if (v.reason !== 'blocked') {
             // Order lunas tercapture: void saja tak mengembalikan dana ->
@@ -439,7 +458,11 @@ export async function persistVoidDb(salesNum: string, reason: string, approvedBy
             const needRefund = /REFUND|CAPTURED|SETTLED|PAID|PAYMENT/i.test(v.code ?? '');
             if (needRefund) {
               const rfKey = uuidv7();
-              const rf = await refundPosPayment(sid, reason || undefined, undefined, rfKey);
+              const rf = await withManagerPin(
+                (pin) => refundPosPayment(sid, reason || undefined, undefined, rfKey, pin),
+                isPinRequiredRejection,
+                getPin,
+              );
               if (!rf.ok && rf.reason !== 'blocked') {
                 try {
                   enqueueSync('other', {

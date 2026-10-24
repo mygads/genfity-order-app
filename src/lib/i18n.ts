@@ -1647,6 +1647,8 @@ const STR: Record<string, Entry> = {
   login_pin_title: { id: 'PIN Staff', en: 'Staff PIN' },
   login_pin_hint: { id: 'Masukkan PIN staff Anda untuk lanjut masuk.', en: 'Enter your staff PIN to continue signing in.' },
   login_pin_owner_hint: { id: 'PIN owner dapat dipakai sebagai pengganti,dicatat sebagai persetujuan owner.', en: 'An owner PIN can be used instead,logged as owner approval.' },
+  mgr_pin_title: { id: 'PIN Manajer', en: 'Manager PIN' },
+  mgr_pin_hint: { id: 'Merchant mewajibkan PIN manajer untuk aksi ini. PIN hanya dikirim ke server, tak disimpan.', en: 'This merchant requires the manager PIN for this action. The PIN is sent to the server only, never stored.' },
   queue_title: { id: 'Antrean', en: 'Queue' },
   queue_branch: { id: 'Cabang', en: 'Branch' },
   queue_empty: { id: 'Belum ada antrean', en: 'No queue yet' },

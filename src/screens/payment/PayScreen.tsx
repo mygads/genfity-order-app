@@ -30,6 +30,8 @@ import {
 } from '../../lib/posWire';
 import { initDb, query as queryDb } from '../../lib/db';
 import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
+import ManagerPinPrompt from '../../components/ManagerPinPrompt';
+import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
 
 type Nav = {
@@ -331,6 +333,11 @@ export default function PayScreen({ navigation, route }: Props) {
   const fwdMemberId = memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
   /** Guard ketuk-ganda goSuccess (dideklarasi di sini agar di atas goSuccess). */
   const goRef = useRef(false);
+  // P1-1b: prompt PIN manajer transport-only — dibuka hanya bila merchant
+  // mewajibkan PIN payment DAN sale tertaut order server; batal = bayar
+  // dibatalkan (paritas FE: gate memblokir konfirmasi).
+  const [mgrPinOpen, setMgrPinOpen] = useState(false);
+  const pinRetryRef = useRef<{ method: string; cash: number; change: number; detail?: { approvalCode?: string; memberId?: string; approvedBy?: string } } | null>(null);
 
   // Tunai
   const [cashSel, setCashSel] = useState<number | null>(null);
@@ -558,6 +565,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const mirrorSettleToServer = (
     salesNum: string, methodLabel: string, amount: number,
     tip: number, voucherCode: string | undefined, clientId: string | undefined,
+    pin?: string,
   ) => {
     void (async () => {
       try {
@@ -570,6 +578,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(tip > 0 ? { tipAmount: tip } : {}),
           ...(voucherCode ? { voucherCode } : {}),
           ...(clientId ? { idempotencyKey: clientId } : {}),
+          ...(pin ? { pin } : {}),
         });
         if (res.ok || res.reason === 'blocked') return;
         try {
@@ -584,7 +593,7 @@ export default function PayScreen({ navigation, route }: Props) {
       } catch { /* abaikan: sale lokal tetap sah */ }
     })();
   };
-  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
+  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }, pin?: string) => {
     // Guard ketuk-ganda (#8/#21): tiap goSuccess menerbitkan nomor + tulis
     // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
     if (goRef.current) return;
@@ -656,7 +665,7 @@ export default function PayScreen({ navigation, route }: Props) {
           await saveSale(gInput);
           recordSale(gInput);
           // W2: cermin lunas grup ke BE bila tertaut order server.
-          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId);
+          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -756,7 +765,7 @@ export default function PayScreen({ navigation, route }: Props) {
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
     recordSale(input);
     // W2: cermin lunas ke BE bila tertaut order server.
-    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId);
+    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
@@ -781,6 +790,39 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   // ---- Tunai actions ----
+  // P1-1b: gerbang PIN manajer (paritas FE DeletePinModal): bila merchant
+  // mewajibkan PIN payment DAN sale tertaut order server, kumpulkan PIN dulu
+  // lalu teruskan ke goSuccess → mirror live; batal = bayar dibatalkan.
+  const goSuccessGated = (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
+    void (async () => {
+      try {
+        // Tanpa padanan enum BE = BLOCKED diam (deposit/member): tanpa prompt.
+        if (!mapPayMethodToBe(method)) {
+          void goSuccess(method, cash, change, detail);
+          return;
+        }
+        const sid = paramSalesNum ? await getServerOrderIdForSale(paramSalesNum) : null;
+        if (sid == null || !(await requiresPosPin('payment'))) {
+          void goSuccess(method, cash, change, detail);
+          return;
+        }
+        pinRetryRef.current = { method, cash, change, detail };
+        setMgrPinOpen(true);
+      } catch {
+        void goSuccess(method, cash, change, detail);
+      }
+    })();
+  };
+  const submitManagerPin = (pin: string) => {
+    setMgrPinOpen(false);
+    const r = pinRetryRef.current;
+    pinRetryRef.current = null;
+    if (r) void goSuccess(r.method, r.cash, r.change, r.detail, pin);
+  };
+  const cancelManagerPin = () => {
+    setMgrPinOpen(false);
+    pinRetryRef.current = null;
+  };
   const onCashTambah = () => {
     if (tendered <= 0) return;
     addSplit(t('suc_m_cash'), Math.min(tendered, remaining), 'cash');
@@ -792,7 +834,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const onCashLanjut = () => {
     const grand = paid + tendered;
     if (grand < payable || payable <= 0) return;
-    void goSuccess('cash', grand, Math.max(0, grand - payable));
+    void goSuccessGated('cash', grand, Math.max(0, grand - payable));
   };
 
   // ---- Non-tunai actions ----
@@ -801,7 +843,7 @@ export default function PayScreen({ navigation, route }: Props) {
     const amt = remaining;
     const grand = paid + amt;
     if (grand >= payable) {
-      void goSuccess(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
+      void goSuccessGated(card, grand, Math.max(0, grand - payable), edcCode.length === 6 ? { approvalCode: edcCode } : undefined);
     } else {
       addSplit(CARDS.find((c) => c.id === card)?.name ?? 'Non Tunai', amt, card);
       setEdcCode('');
@@ -853,7 +895,7 @@ export default function PayScreen({ navigation, route }: Props) {
       return;
     }
     const grand = paid + (remaining);
-    void goSuccess(wallet, grand, 0);
+    void goSuccessGated(wallet, grand, 0);
   };
 
   // ---- Deposit member actions (live ms_member; nol-baris = empty-state pay_dep_empty) ----
@@ -870,7 +912,7 @@ export default function PayScreen({ navigation, route }: Props) {
     const pakai = Math.min(memberPicked.saldo, remaining);
     const grand = paid + pakai;
     if (grand >= payable) {
-      void goSuccess('deposit', grand, 0, { memberId: memberPicked.id });
+      void goSuccessGated('deposit', grand, 0, { memberId: memberPicked.id });
     } else {
       addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit', memberPicked.id);
       setMemberSel(null);
@@ -915,7 +957,7 @@ export default function PayScreen({ navigation, route }: Props) {
     if (!tenderReady || payable <= 0) return;
     if (!(await checkTender())) return;
     const grand = paid + Math.min(tenderNum, remaining);
-    if (grand >= payable) void goSuccess(tenderKind.toLowerCase(), grand, 0, { approvalCode: tenderCode.trim().toUpperCase() });
+    if (grand >= payable) void goSuccessGated(tenderKind.toLowerCase(), grand, 0, { approvalCode: tenderCode.trim().toUpperCase() });
     else {
       addSplit(`${tenderKind} ${tenderCode.trim().toUpperCase()}`, Math.min(tenderNum, remaining), tenderKind.toLowerCase());
       setTenderCode('');
@@ -1565,6 +1607,12 @@ export default function PayScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
+      {/* P1-1b: PIN manajer transport-only — hanya bila gerbang payment aktif. */}
+      <ManagerPinPrompt
+        visible={mgrPinOpen}
+        onSubmit={submitManagerPin}
+        onCancel={cancelManagerPin}
+      />
       {hasTotal ? (
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         {renderBanner()}
@@ -1595,7 +1643,7 @@ export default function PayScreen({ navigation, route }: Props) {
           const detail: { approvalCode?: string; approvedBy?: string } = {};
           if (ref) detail.approvalCode = ref;
           if (approver) detail.approvedBy = approver;
-          void goSuccess(method, payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
+          void goSuccessGated(method, payable, 0, Object.keys(detail).length > 0 ? detail : undefined);
         }} />)}
       </ScrollView>
       ) : (

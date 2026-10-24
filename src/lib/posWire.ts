@@ -60,6 +60,36 @@ export type GoResult<T> =
   | { ok: true; data: T }
   | { ok: false; reason: GoReason; code?: string; message?: string };
 
+/** P1-1b: 400 PIN_REQUIRED seragam (payment/refund/void/cancel) → pemanggil
+ * boleh minta PIN manajer lalu ulangi live SEKALI (transport-only; antrean
+ * sync TAK pernah membawa PIN — lihat goMerchantOp di sync.ts). */
+export function isPinRequiredRejection(r: GoResult<unknown>): boolean {
+  return !r.ok && r.reason === 'rejected' && r.code === 'PIN_REQUIRED';
+}
+
+/** Penyedia PIN interaktif (modal) — null/batal = pakai hasil pertama. */
+export type ManagerPinProvider = () => Promise<string | null>;
+
+/** Ulangi panggilan live SEKALI dengan PIN bila BE menuntutnya (400
+ * PIN_REQUIRED); tanpa provider = hasil pertama apa adanya. */
+export async function withManagerPin<T>(
+  call: (pin?: string) => Promise<T>,
+  isPinRequired: (r: T) => boolean,
+  getPin?: ManagerPinProvider,
+): Promise<T> {
+  const first = await call();
+  if (!getPin || !isPinRequired(first)) return first;
+  let pin: string | null = null;
+  try {
+    pin = await getPin();
+  } catch {
+    pin = null;
+  }
+  const clean = String(pin ?? '').trim();
+  if (!clean) return first;
+  return call(clean);
+}
+
 /** Id desimal BE (int64 serial sebagai angka/“123”). Non-desimal = bukan id server. */
 export function isDecimalId(v: unknown): boolean {
   return /^[0-9]+$/.test(String(v ?? '').trim());
