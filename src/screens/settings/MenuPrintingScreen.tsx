@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
   id: string;
   group: string;
   items: number;
@@ -119,7 +119,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
 }export default function MenuPrintingScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
+  const { t } = useLang(); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
   const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS);
   // M9/R53: '' = unbound — banner jujur (tulis DB ditolak persistRoutes).
   const unboundBranch = (() => {
@@ -182,13 +182,9 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   // dipertahankan + ikut tersimpan (persistRoutes/ms_setting) tanpa UI.
   const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');
 
-  const go = (route: string) => navigation?.navigate(route); return (
+  return (
     <View style={styles.root}>
-      <ScreenHeader title={t('mprint.title')} sub={t('mprint.sub')} left={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('mprint.title')} sub={t('mprint.sub')} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       {/* Tablet: kartu routing 2 kolom; phone tetap 1 kolom (wadah transparan). */}
       <View style={isTablet ? styles.gridTablet : undefined}>

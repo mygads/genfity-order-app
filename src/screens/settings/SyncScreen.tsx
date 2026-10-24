@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { getLang, useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
+import { useCallback, useEffect, useMemo, useState } from 'react';import { Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { useFocusEffect } from '@react-navigation/native';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { getLang, useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getLastSync, getLastSyncMs, listOutbox, pendingCount, pushAll, countDirtyRows, countPhysicalQueue, getPendingRevoke, listLocalOnly,
   applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS, SYNC_OPTS_KEY,
 
 type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
@@ -39,7 +39,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
  * mengimplementasikan ambang sendiri. daysAgo hari → ms untuk demo/dev. */export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t, lang } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false); const [autoSync, setAutoSync] = useState(true);
+  const { t, lang } = useLang(); const [autoSync, setAutoSync] = useState(true);
   const [syncOnWifi, setSyncOnWifi] = useState(false);
   const [lastPush, setLastPush] = useState(() => getLastSync() || t('sync_never'));
   const [lastPull, setLastPull] = useState(t('sync_never'));
@@ -98,7 +98,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [tick]);
 
   const level = Number.isFinite(daysAgo) ? syncWarnLevel(Date.now() - daysAgo * 86400000) : syncWarnLevel();
-  const go = (route: string) => navigation?.navigate(route); useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
+  useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
     void setJSON(SYNC_OPTS_KEY, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
   // Toggle sync otomatis benar-benar menjadwalkan push berkala (5 mnt) via
   // applyAutoSyncPrefs; sebelumnya toggle hanya tersimpan tanpa efek.
@@ -145,11 +145,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} left={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('sync.title')} sub={t('sync.sub')} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       {level !== 'ok' ? (
         <View style={[styles.alert, level === 'block7' ? styles.alertBlock : styles.alertWarn]}>

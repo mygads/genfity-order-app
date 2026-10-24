@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
   id: string;
   name: string;
   group: string;
@@ -9,7 +9,6 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] =  useState(false);
   const [opts, setOpts] = useState<StockOpts>(DEFAULT_OPTS);
   const [items, setItems] = useState<StockItem[]>([]);
   const [queryText, setQueryText] = useState('');
@@ -24,15 +23,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
 
   const changed = next.find((x) => x.id === id); if (changed) void persistItemStock(changed.id, changed.stock, changed.online, { track: changed.track, trackStock: opts.trackStock, allowSellEmpty: opts.allowSellEmpty }); return next; }); }; const setOpt = <K extends keyof StockOpts>(k: K, v: StockOpts[K]) => setOpts((o) => ({ ...o, [k]: v })); const q = queryText.trim().toLowerCase();
   const lowNum = Number(opts.lowLimit) || 0; const list = items.filter((x) => !q || x.name.toLowerCase().includes(q) || x.group.toLowerCase().includes(q));
-  const lowCount = items.filter((x) => x.stock <= lowNum).length; const go = (route: string) => navigation?.navigate(route);
+  const lowCount = items.filter((x) => x.stock <= lowNum).length;
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} left={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('stock.tracking')}</Text>
