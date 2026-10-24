@@ -178,6 +178,11 @@ export const ApiPath = {
   // member-only UserAuth + requireTerminalMember; terminal JWT tak lolos
   // MerchantAuth). Timer menumpang schemaless di pos_behavior_settings.
   terminalPosConfig: 'api/v1/terminals/{id}/pos-config',
+  // Opname-lite kasir (audit-5d80): DRAFT create/current + item submit;
+  // finalize/cancel tetap owner-only MerchantAuth (BE terminal_stock_count.go).
+  terminalStockCountCreate: 'api/v1/terminals/{id}/stock-counts', // POST {note}
+  terminalStockCountCurrent: 'api/v1/terminals/{id}/stock-counts/current', // GET DRAFT berjalan
+  terminalStockCountItems: 'api/v1/terminals/{id}/stock-counts/{countId}/items', // GET items + PUT submit {itemType,itemId,countedQty}
   // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
   terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
   terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}

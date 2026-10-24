@@ -891,8 +891,7 @@ function cleanPosConfigInt(v: unknown, fallback: number): number {
 
 export async function fetchTerminalPosConfig(
   terminalId: string,
-): Promise<TerminalApiResult<TerminalPosConfig>> {
-  const r = await apiFetch(withId(ApiPath.terminalPosConfig, terminalId), {
+): Promise<TerminalApiResult<TerminalPosConfig>> {  const r = await apiFetch(withId(ApiPath.terminalPosConfig, terminalId), {
     method: 'GET',
   });
   if (!r.ok || r.fromDummy) {
@@ -913,5 +912,110 @@ export async function fetchTerminalPosConfig(
     },
     fromDummy: false,
   };
+}
+
+/** Opname-lite kasir (audit-5d80): DRAFT create/current + item submit.
+ * Finalize/cancel tetap owner-only MerchantAuth (BE terminal_stock_count.go).
+ * ID lokal APP (string ESB) ≠ bigint server → pemanggil cocokkan via nama.
+ * Fail jujur: {ok:false} = status TAK DIKETAHUI, pemanggil tampilkan pesan. */
+export interface StockCountDraft {
+  id: number;
+  note: string;
+  startedAt: string;
+}
+
+export interface StockCountItem {
+  itemType: string;
+  itemId: number;
+  name: string;
+  snapshotQty: number;
+  countedQty: number | null;
+}
+
+function withIdAndCount(path: string, id: string, countId: string | number): string {
+  return withId(path, id).replace('{countId}', encodeURIComponent(String(countId)));
+}
+
+function numId(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+export async function fetchStockCountCurrent(
+  terminalId: string,
+): Promise<TerminalApiResult<StockCountDraft | null>> {
+  const r = await apiFetch(withId(ApiPath.terminalStockCountCurrent, terminalId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountDraft | null>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown> | null>(r.data);
+  if (!data) return { ok: true, data: null, fromDummy: false };
+  return {
+    ok: true,
+    data: { id: numId(data.id), note: str(data.note), startedAt: str(data.startedAt) },
+    fromDummy: false,
+  };
+}
+
+export async function createStockCount(
+  terminalId: string,
+  note: string,
+): Promise<TerminalApiResult<StockCountDraft>> {
+  const r = await apiFetch(withId(ApiPath.terminalStockCountCreate, terminalId), {
+    method: 'POST',
+    body: { note },
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountDraft>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { id: numId(data.id), note: '', startedAt: str(data.startedAt) },
+    fromDummy: false,
+  };
+}
+
+export async function fetchStockCountItems(
+  terminalId: string,
+  countId: number,
+): Promise<TerminalApiResult<StockCountItem[]>> {
+  const r = await apiFetch(withIdAndCount(ApiPath.terminalStockCountItems, terminalId, countId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountItem[]>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const raw = (data.items ?? []) as Array<Record<string, unknown>>;
+  return {
+    ok: true,
+    data: raw.map((it) => ({
+      itemType: str(it.itemType),
+      itemId: numId(it.itemId),
+      name: str(it.name),
+      snapshotQty: numId(it.snapshotQty),
+      countedQty: it.countedQty === null || it.countedQty === undefined ? null : numId(it.countedQty),
+    })),
+    fromDummy: false,
+  };
+}
+
+export async function submitStockCountItem(
+  terminalId: string,
+  countId: number,
+  item: { itemType: string; itemId: number; countedQty: number },
+): Promise<TerminalApiResult<{ countedQty: number }>> {
+  const r = await apiFetch(withIdAndCount(ApiPath.terminalStockCountItems, terminalId, countId), {
+    method: 'PUT',
+    body: { itemType: item.itemType, itemId: item.itemId, countedQty: item.countedQty },
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<{ countedQty: number }>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return { ok: true, data: { countedQty: numId(data.countedQty) }, fromDummy: false };
 }
 
