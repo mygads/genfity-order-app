@@ -1,16 +1,18 @@
 {
   "expo": {
-    "name": "Genfity Order",
+    "name": "Genfity POS",
     "slug": "genfity-order-app",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "id.genfity.pos"
     },
     "android": {
-      "package": "id.genfity.posclone",
+      "package": "id.genfity.pos",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -31,8 +33,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Izinkan Genfity Order mengakses galeri untuk melampirkan foto bukti kas kecil.",
-          "cameraPermission": "Izinkan Genfity Order memakai kamera untuk memotret bukti kas kecil."
+          "photosPermission": "Izinkan Genfity POS mengakses galeri untuk melampirkan foto bukti kas kecil.",
+          "cameraPermission": "Izinkan Genfity POS memakai kamera untuk memotret bukti kas kecil."
         }
       ],
       "./modules/genfity-printer/app.plugin.js"

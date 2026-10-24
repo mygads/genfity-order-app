@@ -37,7 +37,7 @@ const JAVA_FILES = [
   'GenfityPrinterPackage.java',
   'GenfityWsService.java',
 ];
-const JAVA_PKG_DIR = path.join('id', 'genfity', 'posclone');
+const JAVA_PKG_DIR = path.join('id', 'genfity', 'pos');
 
 function withGenfityPrinter(config) {
   config = withAndroidManifest(config, (mod) => {
@@ -60,12 +60,12 @@ function withGenfityPrinter(config) {
     if (app) {
       if (!app.service) app.service = [];
       const hasSvc = app.service.some(
-        (s) => s.$?.['android:name'] === 'id.genfity.posclone.GenfityWsService',
+        (s) => s.$?.['android:name'] === 'id.genfity.pos.GenfityWsService',
       );
       if (!hasSvc) {
         app.service.push({
           $: {
-            'android:name': 'id.genfity.posclone.GenfityWsService',
+            'android:name': 'id.genfity.pos.GenfityWsService',
             'android:foregroundServiceType': 'dataSync',
             'android:exported': 'false',
           },
@@ -83,7 +83,7 @@ function withGenfityPrinter(config) {
       // Template Kotlin (Expo SDK 49+): tambah import + register di getPackages().
       let out = src.replace(
         'import com.facebook.react.ReactApplication',
-        'import com.facebook.react.ReactApplication\nimport id.genfity.posclone.GenfityPrinterPackage',
+        'import com.facebook.react.ReactApplication\nimport id.genfity.pos.GenfityPrinterPackage',
       );
       if (out !== src) {
         // Template Expo modern: PackageList(this).packages.apply { ... }.
@@ -113,7 +113,7 @@ function withGenfityPrinter(config) {
     // Template Java lama.
     let out = src.replace(
       'import com.facebook.react.ReactApplication;',
-      'import com.facebook.react.ReactApplication;\nimport id.genfity.posclone.GenfityPrinterPackage;',
+      'import com.facebook.react.ReactApplication;\nimport id.genfity.pos.GenfityPrinterPackage;',
     );
     out = out.replace(
       /(packages\.add\(new [^)]+\)\s*)/,
@@ -124,7 +124,7 @@ function withGenfityPrinter(config) {
       out = src
         .replace(
           'import com.facebook.react.ReactApplication;',
-          'import com.facebook.react.ReactApplication;\nimport id.genfity.posclone.GenfityPrinterPackage;',
+          'import com.facebook.react.ReactApplication;\nimport id.genfity.pos.GenfityPrinterPackage;',
         )
         .replace(
           /return packages;/,

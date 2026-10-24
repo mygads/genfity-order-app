@@ -61,7 +61,7 @@ if (!feats.some((f) => f.$?.['android:name'] === 'android.hardware.usb.host')) {
 }
 ok('uses-feature usb.host');
 const svc = (manifest.manifest.application[0].service || [])[0]?.$ || {};
-if (svc['android:name'] !== 'id.genfity.posclone.GenfityWsService') fail('service WS tak terdaftar');
+if (svc['android:name'] !== 'id.genfity.pos.GenfityWsService') fail('service WS tak terdaftar');
 ok('service GenfityWsService');
 
 // 3. MainApplication Kotlin — tiru template Expo modern ASLI (blok .apply).
@@ -82,7 +82,7 @@ class MainApplication : Application(), ReactApplication {
 const ktMod = { modResults: { contents: ktIn, path: 'MainApplication.kt' }, modRequest: {} };
 captured.app(ktMod);
 const ktOut = ktMod.modResults.contents;
-if (!ktOut.includes('import id.genfity.posclone.GenfityPrinterPackage')) fail('import Kotlin hilang');
+if (!ktOut.includes('import id.genfity.pos.GenfityPrinterPackage')) fail('import Kotlin hilang');
 if (!ktOut.includes('add(GenfityPrinterPackage())')) fail('registrasi Kotlin hilang');
 ok('patch MainApplication.kt');
 
@@ -113,7 +113,7 @@ const [platform, fn] = captured.dangerous;
 if (platform !== 'android') fail('dangerous mod bukan android');
 fn({ modRequest: { projectRoot: tmp }, modResults: {} });
 for (const f of ['GenfityPrinterModule.java', 'GenfityPrinterPackage.java', 'GenfityWsService.java']) {
-  const dst = path.join(tmp, 'android', 'app', 'src', 'main', 'java', 'id', 'genfity', 'posclone', f);
+  const dst = path.join(tmp, 'android', 'app', 'src', 'main', 'java', 'id', 'genfity', 'pos', f);
   if (!fs.existsSync(dst)) fail(`salinan ${f} tidak sampai`);
   const body = fs.readFileSync(dst, 'utf8');
   if (f === 'GenfityPrinterModule.java' && !body.includes('requestUsbPermission')) {

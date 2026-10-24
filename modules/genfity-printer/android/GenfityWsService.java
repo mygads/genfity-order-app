@@ -1,4 +1,4 @@
-package id.genfity.posclone;
+package id.genfity.pos;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
