@@ -73,3 +73,32 @@ export async function ensureShiftOpen(
   navigation?.navigate('Shift');
   return false;
 }
+
+/* --- Pemancar perubahan shift (HP-E2E 2026-10-24) ---
+ * Latar: soft-guard `shiftClosed` di App.tsx hanya dihitung saat login.
+ * Setelah shift dibuka, strip kuning basi tetap tampil di SEMUA layar authed
+ * (menggeser navy header ke bawah → gap tak konsisten antar-layar).
+ * Layar Shift/EndShift memanggil notifyShiftChanged() setelah tulis lokal
+ * sukses; App berlangganan dan menghitung ulang guard. Tanpa impor App
+ * (anti-siklus). */
+
+type ShiftListener = () => void;
+
+const shiftListeners = new Set<ShiftListener>();
+
+export function subscribeShiftGuard(fn: ShiftListener): () => void {
+  shiftListeners.add(fn);
+  return () => {
+    shiftListeners.delete(fn);
+  };
+}
+
+export function notifyShiftChanged(): void {
+  for (const fn of [...shiftListeners]) {
+    try {
+      fn();
+    } catch {
+      /* abaikan */
+    }
+  }
+}

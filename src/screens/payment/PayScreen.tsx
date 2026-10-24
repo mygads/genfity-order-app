@@ -154,7 +154,10 @@ const extraLabelToMethod = (label: string): string => {
   return label;
 };
 
-const CASH_DRAWERS = ['Laci 1', 'Laci 2', 'Laci 3'];
+// HP-E2E-FIX-DRAWER (2026-10-24): 1 terminal = 1 drawer default. Dulu ada
+// pilihan Laci 1/2/3 (CASH_DRAWERS) — dihapus: kasir/owner/full-access tak
+// lagi memilih drawer; pembayaran tunai selalu ke drawer default terminal.
+// Kunci i18n pay_drawer_* dipertahankan (tak dipakai lagi, tanpa referensi).
 
 const CARDS = [
   { id: 'debit-bca', name: 'Debit BCA' },
@@ -237,7 +240,6 @@ export default function PayScreen({ navigation, route }: Props) {
   const visibleTabs: Tab[] = isAudBranch
     ? SIDEBAR_IDS.filter((id) => id !== 'nontunai' && id !== 'online')
     : SIDEBAR_IDS;
-  const [drawer, setDrawer] = useState(CASH_DRAWERS[0]);
 
   const [voucherOpen, setVoucherOpen] = useState(false);
   // Voucher bawaan order (CartDetail/BillPreview/SplitBill): total pemanggil sudah
@@ -1182,20 +1184,6 @@ export default function PayScreen({ navigation, route }: Props) {
   const renderTunai = () => (
     <View>
       <Text style={styles.panelTitle}>{t('pay_cash_title')}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.subTabs}>
-        {CASH_DRAWERS.map((d) => (
-          <TouchableOpacity
-            key={d}
-            style={styles.subTab}
-            onPress={() => setDrawer(d)}
-            accessibilityState={{ selected: drawer === d }}>
-            <Text style={[styles.subTabText, drawer === d && styles.subTabTextActive]}>
-              {t(`pay_drawer_${CASH_DRAWERS.indexOf(d) + 1}`)}
-            </Text>
-            {drawer === d && <View style={styles.subTabUnderline} />}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
       <View style={styles.grid}>
         <TouchableOpacity
@@ -1755,11 +1743,6 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.muted, textAlign: 'center' },
   tabTextActive: { color: colors.white },
   panelTitle: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, marginTop: 12 },
-  subTabs: { flexDirection: 'row', marginTop: 8 },
-  subTab: { marginRight: 18, paddingBottom: 6 },
-  subTabText: { fontFamily: fonts.medium, fontSize: 13, color: colors.faint },
-  subTabTextActive: { color: colors.text, fontFamily: fonts.semibold },
-  subTabUnderline: { height: 2, backgroundColor: colors.orange, marginTop: 4, borderRadius: 1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   gridCard: {
     width: '48%',

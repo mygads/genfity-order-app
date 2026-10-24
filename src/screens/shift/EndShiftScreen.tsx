@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashCloseBe,
   clockOutBe,
   clockOutPayload,
@@ -14,7 +14,7 @@ import React, { useEffect, useState } from 'react';import {
   recordPendingCashClose,
   setPendingReviewSid,
   shouldQueueW1,
-} from '../../lib/beWorkforce';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
 /** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -118,7 +118,11 @@ import React, { useEffect, useState } from 'react';import {
     void (async () => {
       try {
         const co = await clockOutBe();
-        if (!co.ok && shouldQueueW1(co)) {
+        if (co.ok) {
+          // HP-E2E-FIX-2: clock-out tercatat di server = kontak sukses
+          // (gate E00044 membaca lastSyncMs modul sync).
+          try { noteServerContact(); } catch { /* abaikan */ }
+        } else if (shouldQueueW1(co)) {
           try {
             enqueueSync('other', clockOutPayload());
           } catch {
@@ -134,6 +138,10 @@ import React, { useEffect, useState } from 'react';import {
         // belum terkirim — drain open dulu via FIFO, tutup menyusul).
         if (!sid) return;
         const close = await cashCloseBe(sid, kasFisikNum, catatan.trim() || undefined);
+        if (close.ok) {
+          // HP-E2E-FIX-2: tutup-kas tercatat di server = kontak sukses.
+          try { noteServerContact(); } catch { /* abaikan */ }
+        }
         if (!close.ok) {
           const keepPending = close.reason === 'offline' || close.reason === 'error' ||
             (close.reason === 'rejected' && close.code === 'OPEN_POS_ORDERS');
@@ -165,6 +173,8 @@ import React, { useEffect, useState } from 'react';import {
     })();
     setPinVisible(false);
     setPin('');
+    // HP-E2E-FIX-HEADER: shift lokal tertutup → guard App hitung ulang.
+    try { notifyShiftChanged(); } catch { /* abaikan */ }
     navigation?.navigate?.('Shift');
   };
 

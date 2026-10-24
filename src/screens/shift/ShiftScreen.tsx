@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashApproveBe,
   cashApprovePayload,
   cashOpenBe,
@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
-} from '../../lib/beWorkforce';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -68,6 +68,7 @@ const MAX_KAS_AWAL = 10000000;
     try {
       const r = await cashApproveBe(pendingSid, note);
       if (r.ok) {
+        try { noteServerContact(); } catch { /* abaikan */ }
         setPendingSid(null);
         setApproveNote('');
         setApproveMsg(t('appr_ok'));
@@ -210,7 +211,11 @@ const MAX_KAS_AWAL = 10000000;
       void (async () => {
         try {
           const ci = await clockInBe();
-          if (shouldQueueW1(ci)) {
+          if (ci.ok) {
+            // HP-E2E-FIX-2: kontak server sukses = bukti kontak terakhir
+            // (gate E00044 membaca lastSyncMs modul sync).
+            try { noteServerContact(); } catch { /* abaikan */ }
+          } else if (shouldQueueW1(ci)) {
             try {
               enqueueSync('other', clockInPayload());
             } catch {
@@ -222,7 +227,10 @@ const MAX_KAS_AWAL = 10000000;
         }
         try {
           const co = await cashOpenBe(kasAwalNum, catatan.trim() || undefined);
-          if (!co.ok && shouldQueueW1(co)) {
+          if (co.ok) {
+            // HP-E2E-FIX-2: sesi kas TERCATAT di server = kontak sukses.
+            try { noteServerContact(); } catch { /* abaikan */ }
+          } else if (shouldQueueW1(co)) {
             try {
               enqueueSync('other', cashOpenPayload(kasAwalNum, catatan.trim() || undefined));
             } catch {
@@ -241,6 +249,9 @@ const MAX_KAS_AWAL = 10000000;
     }
     setPinVisible(false);
     setPin('');
+    // HP-E2E-FIX-HEADER: shift lokal tercatat → guard App hitung ulang
+    // (rute awal + tanpa strip basi di semua layar).
+    try { notifyShiftChanged(); } catch { /* abaikan */ }
     navigation?.navigate?.('Cashier');
   };
 
