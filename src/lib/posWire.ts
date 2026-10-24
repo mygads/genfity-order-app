@@ -183,6 +183,7 @@ export const GO_OP_CANCEL = 'pos-cancel';
 export const GO_OP_VOID = 'pos-void';
 export const GO_OP_STATUS = 'pos-status';
 export const GO_OP_RESV_CANCEL = 'booking-server-cancel';
+export const GO_OP_MOVE_TABLE = 'move-table-go';
 
 // ---------------------------------------------------------------------------
 // Tautan sale lokal ↔ order server.

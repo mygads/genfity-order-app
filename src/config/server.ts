@@ -211,6 +211,7 @@ export const ApiPath = {
   merchantOrderStatus: 'api/merchant/orders/{id}/status', // PUT {status,...}
   merchantOrderCancel: 'api/merchant/orders/{id}/cancel', // POST {pin?,reason?}
   merchantOrderVoid: 'api/merchant/orders/{id}/void', // POST {pin?,reason?}
+  merchantOrderMoveTable: 'api/merchant/orders/{id}/move-table', // POST {tableNumber} (DINE_IN aktif)
   merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
   merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
   merchantPosRefund: 'api/merchant/orders/pos/refund', // POST refund

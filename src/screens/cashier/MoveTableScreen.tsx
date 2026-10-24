@@ -5,6 +5,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { GO_OP_MOVE_TABLE, getServerOrderIdForSale } from '../../lib/posWire';
 import { initDb, query, run } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -169,6 +170,21 @@ export default function MoveTableScreen({ navigation, route }: Props) {
               await enqueueOutbox('tr_saleshead', m.salesNum, 'update');
             } catch {
               /* abaikan per baris */
+            }
+            // P0-3 audit paritas: sale yang sudah punya order server ikut
+            // dipindah di BE (POST move-table); tanpa onlineOrderId = lokal
+            // saja (jujur: BE tak tahu bill ini).
+            try {
+              const serverId = await getServerOrderIdForSale(m.salesNum);
+              if (serverId !== null) {
+                enqueueSync('other', {
+                  op: GO_OP_MOVE_TABLE, serverId: String(serverId),
+                  to: destCode, salesNum: m.salesNum,
+                  at: new Date().toISOString(),
+                });
+              }
+            } catch {
+              /* antrean belum siap - pindah lokal di atas tetap sah */
             }
           }
         } catch {

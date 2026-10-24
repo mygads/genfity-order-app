@@ -24,6 +24,7 @@ import {
   GO_OP_CANCEL,
   GO_OP_REFUND,
   GO_OP_RESV_CANCEL,
+  GO_OP_MOVE_TABLE,
   GO_OP_SETTLE,
   GO_OP_STATUS,
   GO_OP_VOID,
@@ -551,7 +552,7 @@ function goMerchantOp(
   const p = (item.payload ?? {}) as Record<string, unknown>;
   if (item.kind !== 'other') return null;
   const op = String(p.op ?? '');
-  const W2_OPS = [GO_OP_SETTLE, GO_OP_REFUND, GO_OP_CANCEL, GO_OP_VOID, GO_OP_STATUS, GO_OP_RESV_CANCEL];
+  const W2_OPS = [GO_OP_SETTLE, GO_OP_REFUND, GO_OP_CANCEL, GO_OP_VOID, GO_OP_STATUS, GO_OP_RESV_CANCEL, GO_OP_MOVE_TABLE];
   if (!W2_OPS.includes(op)) return null;
   const sidRaw = String(p.serverId ?? '').trim();
   if (!/^[0-9]+$/.test(sidRaw)) {
@@ -607,6 +608,22 @@ function goMerchantOp(
       body: { ...withReason },
       method: 'POST',
       idemKey: item.id,
+    };
+  }
+  // P0-3 audit paritas: pindah meja diteruskan ke BE Go
+  // (POST api/merchant/orders/{id}/move-table {tableNumber}) agar status
+  // meja server tak basi (risiko double-seating). DINE_IN aktif saja (pagar
+  // BE); 409 ORDER_CLOSED = replay-sukses via isReplaySuccess di drain.
+  if (op === GO_OP_MOVE_TABLE) {
+    const to = String(p.to ?? p.tableNumber ?? '').trim().slice(0, 20);
+    if (!to) {
+      return { blocked: 'posWire: move-table butuh meja tujuan' };
+    }
+    return {
+      path: ApiPath.merchantOrderMoveTable.replace('{id}', encodeURIComponent(String(serverId))),
+      body: { tableNumber: to },
+      method: 'POST',
+      idemKey: `${item.id}:move:${to}`,
     };
   }
   if (op === GO_OP_RESV_CANCEL) {
