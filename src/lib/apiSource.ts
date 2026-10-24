@@ -26,6 +26,8 @@ import {
   apiPatch,
   apiPost,
   apiPut,
+  getCustomBaseUrl,
+  getServerEnv,
   getTerminal,
   setCustomBaseUrl,
   setServerEnv,
@@ -77,15 +79,30 @@ if (ENV_URL) {
 
 /**
  * Mode aktif saat ini:
- * - 'real' bila EXPO_PUBLIC_API_BASE_URL terisi (backend sendiri);
+ * - 'real' bila EXPO_PUBLIC_API_BASE_URL terisi (backend sendiri) ATAU
+ *   server custom dikonfigurasi saat runtime (Tools → URL server, persist
+ *   genfity.server.env=custom + genfity.server.custom);
  * - 'dummy' bila URL kosong DAN EXPO_PUBLIC_DUMMY === '1' (eksplisit
  *   untuk screenshot/demo);
  * - 'local' untuk selain itu (default offline-first tanpa server:
  *   tanpa dial network, tanpa JSON dummy).
+ *
+ * HP-E2E-FIX-5 (2026-10-24, E2E HP Xiaomi): SEBELUM fix ini, klausa runtime
+ * TAK ADA — build dev tanpa EXPO_PUBLIC_API_BASE_URL SELALU 'local' walau
+ * user sudah set server custom di Tools. Akibat: callStaffLogin short-circuit
+ * {reached:false} TANPA dial (curl device→BE 8095 terbukti 200), login mati
+ * dengan need_be "(7-day grant)" padahal grant + server.valid. Hanya env
+ * 'custom' yang dihitung (prod/dev/staging warisan ESB TIDAK — dilarang
+ * dial server pihak ketiga diam-diam); dummy eksplisit tetap menang.
  */
 export function getApiMode(): ApiMode {
   if (readEnvBaseUrl()) return 'real';
   if (readEnvDummy() === '1') return 'dummy';
+  try {
+    if (getServerEnv() === 'custom' && getCustomBaseUrl().trim()) return 'real';
+  } catch {
+    /* abaikan — jatuh ke local */
+  }
   return 'local';
 }
 
