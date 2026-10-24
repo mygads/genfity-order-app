@@ -549,6 +549,9 @@ export interface GoMerchantOp {
 function goMerchantOp(
   item: SyncItem,
 ): GoMerchantOp | { blocked: string } | null {
+  // P1-1 pagar PIN: body dibangun eksplisit per-field di bawah dan TAK
+  // pernah memuat pin — PIN supervisor hanya live via settlePosPayment /
+  // refundPosPayment / postOrderVerdict (param fungsi, tak dipersist).
   const p = (item.payload ?? {}) as Record<string, unknown>;
   if (item.kind !== 'other') return null;
   const op = String(p.op ?? '');
@@ -1653,7 +1656,13 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       }
       const be = beErrorOf(beBody);
       item.status = 'gagal';
-      item.note = `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`.slice(0, 160);
+      // P1-1: PIN supervisor live-only — antrean tak pernah membawa PIN
+      // (goMerchantOp membangun body per-field tanpa pin). Bila server
+      // menuntut PIN untuk op antrean (setelan berubah tengah antre),
+      // gagalkan jujur sekali: kasir ulangi aksi secara live + PIN.
+      item.note = (/^(PIN_REQUIRED|SUPERVISOR_PIN_)/.test(be.code)
+        ? `posWire: ${be.code} — butuh PIN supervisor, ulangi live`
+        : `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`).slice(0, 160);
       return 'failed-once';
     }
     // W1 (SESI-FIX-APPW1): drain shift/kas/tutup-hari. Pola hasil cermin W2

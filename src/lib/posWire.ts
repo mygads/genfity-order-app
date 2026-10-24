@@ -478,16 +478,18 @@ async function postOrderVerdict(
   serverId: number,
   reason: string | undefined,
   idemKey: string | undefined,
+  pin?: string,
 ): Promise<GoResult<{ replayed: boolean }>> {
   if (!Number.isFinite(serverId) || serverId <= 0) {
     return { ok: false, reason: 'blocked', message: wireTr('blocked') };
   }
   if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
+  const pinClean = String(pin ?? '').trim();
   try {
     const res = await withTimeoutMs(
       apiFetch(pathWithId(tmpl, serverId), {
         method: 'POST',
-        body: { ...(reason ? { reason } : {}) },
+        body: { ...(reason ? { reason } : {}), ...(pinClean ? { pin: pinClean } : {}) },
         ...(idemKey ? { idempotencyKey: idemKey } : {}),
       }),
     );
@@ -511,12 +513,12 @@ async function postOrderVerdict(
   }
 }
 
-export function cancelMerchantOrder(serverId: number, reason?: string): Promise<GoResult<{ replayed: boolean }>> {
-  return postOrderVerdict(ApiPath.merchantOrderCancel, serverId, reason, undefined);
+export function cancelMerchantOrder(serverId: number, reason?: string, pin?: string): Promise<GoResult<{ replayed: boolean }>> {
+  return postOrderVerdict(ApiPath.merchantOrderCancel, serverId, reason, undefined, pin);
 }
 
-export function voidMerchantOrder(serverId: number, reason?: string): Promise<GoResult<{ replayed: boolean }>> {
-  return postOrderVerdict(ApiPath.merchantOrderVoid, serverId, reason, uuidv7());
+export function voidMerchantOrder(serverId: number, reason?: string, pin?: string): Promise<GoResult<{ replayed: boolean }>> {
+  return postOrderVerdict(ApiPath.merchantOrderVoid, serverId, reason, uuidv7(), pin);
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +554,8 @@ export interface SettleInput {
   voucherCode?: string;
   notes?: string;
   idempotencyKey?: string;
+  /** P1-1: PIN supervisor transport-only (live; tak pernah dipersist). */
+  pin?: string;
 }
 
 export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ replayed: boolean }>> {
@@ -560,6 +564,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
   }
   if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
   const key = inp.idempotencyKey && inp.idempotencyKey.trim() ? inp.idempotencyKey.trim() : uuidv7();
+  const pinClean = String(inp.pin ?? '').trim();
   try {
     const res = await withTimeoutMs(
       apiFetch(ApiPath.merchantPosPayment, {
@@ -572,6 +577,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
           ...(inp.tipAmount ? { tipAmount: Math.round(inp.tipAmount) } : {}),
           ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
           ...(inp.notes ? { notes: inp.notes.slice(0, 500) } : {}),
+          ...(pinClean ? { pin: pinClean } : {}),
         },
         idempotencyKey: key,
       }),
@@ -601,11 +607,13 @@ export async function refundPosPayment(
   reason?: string,
   amount?: number,
   idempotencyKey?: string,
+  pin?: string,
 ): Promise<GoResult<{ replayed: boolean }>> {
   if (!Number.isFinite(serverId) || serverId <= 0) {
     return { ok: false, reason: 'blocked', message: wireTr('blocked') };
   }
   if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
+  const pinClean = String(pin ?? '').trim();
   try {
     const res = await withTimeoutMs(
       apiFetch(ApiPath.merchantPosRefund, {
@@ -614,6 +622,7 @@ export async function refundPosPayment(
           orderId: serverId,
           ...(reason ? { reason } : {}),
           ...(amount !== undefined && amount > 0 ? { amount: Math.round(amount) } : {}),
+          ...(pinClean ? { pin: pinClean } : {}),
           idempotencyKey: idempotencyKey && idempotencyKey.trim() ? idempotencyKey.trim() : uuidv7(),
         },
       }),
