@@ -32,7 +32,7 @@ interface Props {
 }
 
 export default function DrawerMenu({ visible, onClose, navigate, outlet, user, shiftOpen: shiftOpenProp }: Props) {
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang, t, isLocked } = useLang();
   const navigation = useNavigation();
   // Route aktif untuk highlight menu — baca aman, fallback undefined bila di luar navigator.
   // Hook dipanggil tanpa syarat di atas early-return agar urutan hooks stabil.
@@ -222,6 +222,8 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
               );
             })}
           </ScrollView>
+          {/* Cabang Australia (AUD): bahasa dikunci Inggris, pemilih disembunyikan. */}
+          {isLocked ? null : (
           <View style={styles.langRow}>
             {(['id', 'en'] as const).map((l) => (
               <Pressable
@@ -234,6 +236,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
               </Pressable>
             ))}
           </View>
+          )}
           <Pressable
             style={[styles.logout, isTablet && styles.logoutTablet]}
             onPress={() => {

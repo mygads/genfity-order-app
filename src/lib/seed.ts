@@ -34,6 +34,7 @@ import { normalizeMethod } from './payments';
 import { isMarketplaceMode, totals, FEE_DEFAULTS } from './totals';
 import type { TotalsResult } from './totals';
 import { setCachedCurrency } from './currency';
+import { applyBranchLanguagePolicy } from './i18n';
 import { setCachedTimezone } from './timezone';
 import { uuidv7 } from './uuidv7';
 import { trimTestUsers } from './seedUsers';
@@ -1097,6 +1098,7 @@ export async function switchSeedBranchForTest(which: 'IDR' | 'AUD'): Promise<voi
   const tz = active.find(([k1, k2]) => k1 === 'Branch' && k2 === 'Timezone');
   try {
     if (cur) setCachedCurrency(cur[2], cur[3]);
+    applyBranchLanguagePolicy();
     if (tz) setCachedTimezone(tz[2]);
   } catch {
     /* cache gagal: baris DB tetap benar, dibaca ulang saat restart */

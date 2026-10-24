@@ -17,15 +17,7 @@ const LS_LANG = 'genfity.lang';
 let current: Lang = 'en';
 const listeners = new Set<() => void>();
 
-export function getLang(): Lang {
-  return current;
-}
-
-export function setLang(next: Lang): void {
-  if (next === current) return;
-  current = next;
-  // Persist pilihan bahasa agar dipakai lagi setelah restart (fire-and-forget).
-  void setItem(LS_LANG, next).catch(() => undefined);
+function emit(): void {
   listeners.forEach((fn) => {
     try {
       fn();
@@ -33,6 +25,60 @@ export function setLang(next: Lang): void {
       /* abaikan */
     }
   });
+}
+
+/**
+ * Kunci bahasa Inggris untuk merchant Australia (currency AUD).
+ * Selama terkunci, setLang() diabaikan dan pemilih bahasa disembunyikan.
+ */
+let langLocked = false;
+
+export function isLangLocked(): boolean {
+  return langLocked;
+}
+
+export function lockLangEn(): void {
+  langLocked = true;
+  if (current !== 'en') {
+    current = 'en';
+    void setItem(LS_LANG, 'en').catch(() => undefined);
+  }
+  emit();
+}
+
+export function unlockLang(): void {
+  if (!langLocked) return;
+  langLocked = false;
+  emit();
+}
+
+/**
+ * Kebijakan bahasa per cabang: cabang AUD (Australia) dikunci Inggris.
+ * Dipanggil tiap useLang() mount + setelah login/pilih cabang.
+ */
+export function applyBranchLanguagePolicy(): void {
+  try {
+    if (getCachedCurrency().code === 'AUD') {
+      lockLangEn();
+    } else {
+      unlockLang();
+    }
+  } catch {
+    /* abaikan */
+  }
+}
+
+export function getLang(): Lang {
+  return current;
+}
+
+export function setLang(next: Lang): void {
+  if (langLocked) return;
+  if (next === current) return;
+  current = next;
+  // Persist pilihan bahasa agar dipakai lagi setelah restart (fire-and-forget).
+  void setItem(LS_LANG, next).catch(() => undefined);
+  emit();
 }
 
 type Entry = { id: string; en: string };
@@ -1890,6 +1936,7 @@ export function useLang(): {
   lang: Lang;
   setLang: (l: Lang) => void;
   t: (key: string) => string;
+  isLocked: boolean;
 } {
   const [, bump] = useState(0);
   useEffect(() => {
@@ -1898,9 +1945,14 @@ export function useLang(): {
       if (alive) bump((x) => x + 1);
     };
     listeners.add(fn);
+    // Tegakkan kebijakan cabang (AUD → kunci Inggris) sebelum pulihkan simpanan.
+    applyBranchLanguagePolicy();
+    if (alive) bump((x) => x + 1);
     // Pulihkan pilihan bahasa terakhir dari storage (default Inggris bila belum ada).
+    // Dilewati bila bahasa dikunci (cabang Australia tetap Inggris).
     void getItem(LS_LANG).then((v) => {
       if (!alive) return;
+      if (langLocked) return;
       if ((v === 'id' || v === 'en') && v !== current) {
         current = v;
         bump((x) => x + 1);
@@ -1911,5 +1963,5 @@ export function useLang(): {
       listeners.delete(fn);
     };
   }, []);
-  return { lang: current, setLang, t: (k: string) => tOf(k) };
+  return { lang: current, setLang, t: (k: string) => tOf(k), isLocked: langLocked };
 }

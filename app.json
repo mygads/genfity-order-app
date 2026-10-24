@@ -25,7 +25,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-splash-screen",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./assets/splash-genfity.png",
+          "imageWidth": 200
+        }
+      ],
       "expo-sqlite",
       "expo-secure-store",
       "expo-notifications",

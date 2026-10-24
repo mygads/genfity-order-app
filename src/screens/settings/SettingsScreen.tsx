@@ -27,7 +27,7 @@ const AUTOCUT_KEY = 'genfity.settings.autocut';
 export default function SettingsScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t, lang, setLang } = useLang();
+  const { t, lang, setLang, isLocked } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [soundNewOrder, setSoundNewOrder] = useState(() => getNotif().soundNewOrder);
   const [customerDisplay, setCustomerDisplay] = useState(() => getNotif().customerDisplay);
@@ -292,6 +292,8 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
+      {/* Cabang Australia (AUD): bahasa dikunci Inggris, baris pemilih disembunyikan. */}
+      {isLocked ? null : (
       <MenuRow
         title={t('settings.language')}
         sub={lang === 'id' ? 'Indonesia' : 'English'}
@@ -305,6 +307,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         }
       />
+      )}
       <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
       <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 

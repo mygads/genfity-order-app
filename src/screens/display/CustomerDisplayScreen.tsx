@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, ScrollView, 
 type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ViewMode = 'queue' | 'order' | 'success';/** Order nyata via bus display/event WS; kosong jujur bila tak ada data (tanpa mock). */type LiveItem = { name: string; qty: number; price: number };const EMPTY_ITEMS: LiveItem[] = [];const EMPTY_TICKETS: string[] = [];/** Promo live dari ms_promotion (flagActive=1); null = banner disembunyikan. */type LivePromo = { code: string; name: string; value: number };/** * Layar tampilan pelanggan (customer display) fullscreen. * Keputusan eksplisit: tanpa ScreenHeader by design karena layar ini * dimirror ke tampilan pelanggan; operator pratinjau via tab mode di dalam layar. */export default function CustomerDisplayScreen(_props: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang(); const [mode, setMode] = useState<ViewMode>('queue');
+  const { lang, setLang, t, isLocked } = useLang(); const [mode, setMode] = useState<ViewMode>('queue');
   /** APP-EVENTS: kunci satu halaman per tag view (SPEC §10) —
    * view_pelanggan = cart + QR live; view_queue = papan antrean saja.
    * Tab mode, tombol call-next, dan simulasi bayar adalah pratinjau operator
@@ -391,7 +391,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           <Text style={[styles.promoT, isTablet && styles.promoTBig]}> {`${t('disp_promo_pre')}${promo.code} · ${promo.name} (${formatCurrency(promo.value, currency)})${t('disp_promo_post')}`} </Text>
         </View>
       ) : null}
-      <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>{isLockedView ? null : (<View style={styles.modeRow}>
+      {isLocked ? null : (<View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>)}{isLockedView ? null : (<View style={styles.modeRow}>
         {(['queue', 'order', 'success'] as ViewMode[]).map((m) => (
           <TouchableOpacity key={m} onPress={() => setMode(m)} style={[styles.modeTab, mode === m && styles.modeTabActive, isTablet && styles.modeTabTablet]}>
             <Text style={[styles.modeText, mode === m && styles.modeTextActive, isTablet && styles.modeTextBig]}>
