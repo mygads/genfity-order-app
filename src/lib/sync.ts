@@ -29,6 +29,7 @@ import {
   GO_OP_VOID,
   beErrorOf,
   isReplaySuccess,
+  mapPayMethodToBe,
 } from './posWire';
 // W1 (SESI-FIX-APPW1): nama op + helper sesi-kas satu sumber di beWorkforce
 // (arah impor sync -> beWorkforce, cermin posWire; beWorkforce TAK mengimpor
@@ -50,6 +51,7 @@ import {
 import {
   clearPendingRevoke as clearSessionPendingRevoke,
   getPendingRevoke as getSessionPendingRevoke,
+  getSession as getCurrentSession,
 } from '../session';
 
 export type SyncStatus = 'antre' | 'terkirim' | 'gagal';
@@ -93,6 +95,26 @@ function mergeStored(items: SyncItem[]): void {
   for (const s of items) {
     if (!outbox.some((o) => o.id === s.id)) outbox.push(s);
   }
+}
+
+/**
+ * Catat kontak server yang BERHASIL di luar jalur drain (mis. W1 immediate
+ * clock-in/cash-open/clock-out/cash-close dari layar shift) sebagai bukti
+ * kontak terakhir. Tanpa ini gate E00044 (syncWarnLevel dari module
+ * lastSyncMs, yang hanya ditulis touchSuccess di dalam pushAll) tak bisa
+ * bersih walau W1 immediate sukses — padahal server SUDAH dihubungi dan
+ * baris shift/sesi kas SUDAH tercatat di sana.
+ * HP-E2E-FIX-2 (2026-10-24): dipanggil dari ShiftScreen/EndShiftScreen,
+ * bukan dari beWorkforce.ts (arah impor satu-arah sync→beWorkforce dijaga).
+ */
+export function noteServerContact(): void {
+  lastSyncMs = Date.now();
+  const d = new Date(lastSyncMs);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  lastSync =
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  persist();
 }
 
 /** M13: janji restore boot. pushAll menunggu ini sebelum drain (re-drive)
@@ -1009,6 +1031,14 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
   // Master (ms_*) local-only (M9-3): backend Go tak punya endpoint push
   // master dan pull server-wins menimpa edit lokal. Jangan kirim.
   if (!table || table.startsWith('ms_')) return 'skipped';
+  // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): tr_shiftlog tanpa padanan Go —
+  // absensi offline-only eksplisit (S9/PP-010, AttendanceScreen); data shift
+  // dibawa W1 be-cash-open/be-cash-close ke endpoint Go workforce. Transport
+  // ESB legacy (v1/push/shift) 404 vs Go + masuk hitungan breaker S4 (3 gagal
+  // beruntun menjeda drain → antrean sale ikut starvasi). 'skipped' TANPA
+  // transport → drain memfinalkan 'lokal' pola M9-3 di bawah (bukan antre,
+  // bukan gagal; baris tetap tampil di Sync sebagai "Hanya di perangkat ini").
+  if (table === 'tr_shiftlog') return 'skipped';
   const path = tablePushPath(table);
   if (!path) return 'skipped';
   try {
@@ -1347,7 +1377,12 @@ export async function pushAll(): Promise<PushResult> {
       } else if (outcome === 'failed') {
         failed += 1;
         consecFails += 1;
-      } else if (String(e.row.tableName ?? '').startsWith('ms_')) {
+      } else if (
+        String(e.row.tableName ?? '').startsWith('ms_') ||
+        // HP-E2E-FIX (2026-10-24): tr_shiftlog ikut difinalkan 'lokal'
+        // (lihat pushPhysicalRow — absensi offline-only, shift dibawa W1).
+        String(e.row.tableName ?? '') === 'tr_shiftlog'
+      ) {
         // Cermin master local-only (M9-3, tanpa endpoint push): finalkan
         // status 'lokal', BUKAN antre/gagal dan BUKAN delete-diam-diam.
         // 'lokal' = status terminal: keluar dari jendela LIMIT 200 (tak ada
@@ -1356,7 +1391,8 @@ export async function pushAll(): Promise<PushResult> {
         // ("Hanya di perangkat ini") via listLocalOnly. Mutasi DB-nya tetap
         // kotor (syncDate NULL) + pull server tetap menang via REPLACE —
         // semantik ini dinyatakan jujur di UI (master.localOnlyNote).
-        // Tabel non-ms_ tanpa endpoint dibiarkan antre (kontrak BE menyusul).
+        // Tabel non-ms_ LAIN tanpa endpoint tetap dibiarkan antre
+        // (kontrak BE menyusul) — hanya tr_shiftlog yang dikecualikan di atas.
         try {
           await run("UPDATE tr_esoprocessqueue SET status = 'lokal' WHERE id = ?", [e.row.id]);
         } catch {
@@ -1451,6 +1487,34 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // deposit-lokal (tandai terkirim, bukan antre selamanya) dari yang
   // benar-benar menunggu endpoint (tetap antre + tercatat fisik).
   const rawPayloadEarly = (item.payload ?? {}) as Record<string, unknown>;
+  // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): absensi + shift-legacy TANPA
+  // padanan Go → finalkan lokal pola LOCAL_OPS/'terkirim' (bukan antre,
+  // bukan gagal, tak trip breaker S4):
+  // - kind 'attendance' (clock-in/out): offline-only eksplisit S9/PP-010 —
+  //   endpoint BE clock-in/out mencatat AUTH-USER (titip-absen tak terpetakan)
+  //   + grup /api/merchant memakai MerchantAuth (bukan token sesi kasir).
+  //   Legacy ESB employee-attendance/* 404 vs Go.
+  // - kind 'other' op 'shift-*' (shift-open/shift-close legacy): data shift
+  //   dibawa W1 be-cash-open/be-cash-close ke Go workforce; item legacy ini
+  //   ganda + ESB-nya (v1/push/shift) 404 vs Go.
+  // 'skipped' + flag local → SyncScreen menampilkannya sebagai lokal
+  // ("Hanya di perangkat ini"); drain lanjut ke item berikut (sale, W1/W2)
+  // sehingga lastSyncMs bisa segar kembali dan gate E00044 terbuka jujur.
+  if (
+    item.kind === 'attendance' ||
+    (item.kind === 'other' && String(rawPayloadEarly.op ?? '').startsWith('shift-')) ||
+    (item.kind === 'other' &&
+      String((rawPayloadEarly as { table?: unknown }).table ?? '') === 'tr_shiftlog')
+  ) {
+    // HP-E2E-FIX-2: twin ringan tr_shiftlog dari enqueueOutbox (payload
+    // {table:'tr_shiftlog', op:'insert', ...}) tak punya padanan Go (shift
+    // dibawa W1 ke workforce/cash-sessions; jalur fisiknya 404/skipped) —
+    // finalkan lokal agar tak 'gagal' TIAP push.
+    item.status = 'terkirim';
+    item.local = true;
+    item.note = tr('sync.localOnly');
+    return 'skipped';
+  }
   // GO-POS COMPAT: sale-create diterjemahkan ke body bentuk-POS
   // (orderType/items/clientId-displayNo) menuju api/merchant/orders/pos;
   // group-payment dengan identitas server menuju group-bill/payments.
@@ -1804,6 +1868,77 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     // (bukan 409) → ikut terkirim. Terverifikasi: tak perlu cabang khusus.
     item.status = 'terkirim';
     item.note = '';
+    // HP-E2E-SETTLE (2026-10-25): tautkan order server kembali ke sale lokal.
+    // Sebelumnya create 'terkirim' TANPA menyimpan id server → tautan
+    // getServerOrderIdForSale() null selamanya → mirrorSettleToServer BLOCKED
+    // → order BE PENDING walau kasir sudah lunas. Kini: tulis onlineOrderId +
+    // antre GO_OP_SETTLE SEKALI (idempoten: idemKey = clientId sale; replay
+    // 409 BE = 'terkirim'). Best-effort: gagal taut = create tetap terkirim.
+    try {
+      const lp = (item.payload ?? {}) as {
+        op?: unknown; salesNum?: unknown; method?: unknown;
+        grandTotal?: unknown; total?: unknown; tipTotal?: unknown;
+        voucherCode?: unknown;
+      };
+      const linkNo = String(lp.salesNum ?? '').trim();
+      if (item.kind === 'order' && !String(lp.op ?? '') && linkNo) {
+        let linkId = 0;
+        try {
+          const raw = (await res.json()) as { data?: unknown } | null;
+          const inner =
+            raw && typeof raw === 'object'
+              ? ((raw.data ?? raw) as Record<string, unknown>)
+              : ({} as Record<string, unknown>);
+          const cand =
+            inner.id ?? inner.orderId ?? (inner.order as { id?: unknown } | undefined)?.id;
+          const n = typeof cand === 'number' ? cand : parseInt(String(cand ?? ''), 10);
+          if (Number.isFinite(n) && n > 0) linkId = n;
+        } catch {
+          /* abaikan */
+        }
+        if (linkId > 0) {
+          try {
+            await run('UPDATE tr_saleshead SET onlineOrderId = ? WHERE salesNum = ?', [
+              String(linkId),
+              linkNo,
+            ]);
+          } catch {
+            /* abaikan */
+          }
+          const beMethod = mapPayMethodToBe(lp.method);
+          const amt = Math.max(0, Math.round(Number(lp.grandTotal ?? lp.total) || 0));
+          if (beMethod && amt > 0) {
+            const hasSettle = outbox.some(
+              (o) =>
+                o.status !== 'terkirim' &&
+                String(((o.payload ?? {}) as { op?: unknown }).op ?? '') === GO_OP_SETTLE &&
+                String(((o.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '') === linkNo,
+            );
+            if (!hasSettle) {
+              try {
+                const tipN = Math.round(Number(lp.tipTotal) || 0);
+                const vch = String(lp.voucherCode ?? '').trim();
+                enqueueSync('other', {
+                  op: GO_OP_SETTLE,
+                  serverId: linkId,
+                  method: beMethod,
+                  amountPaid: amt,
+                  ...(tipN > 0 ? { tipAmount: tipN } : {}),
+                  ...(vch ? { voucherCode: vch.slice(0, 64) } : {}),
+                  ...(lightCid ? { clientId: lightCid } : {}),
+                  salesNum: linkNo,
+                  at: new Date().toISOString(),
+                });
+              } catch {
+                /* abaikan */
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      /* abaikan */
+    }
     // Head sale ikut bersih bila payload-nya audited order/group-payment;
     // kaki fisik (bila ada) dibersihkan jalurnya sendiri per baris.
     try {
@@ -2011,10 +2146,40 @@ export async function flushPendingRevokes(): Promise<void> {
     }
     let sessionSid = '';
     let sessionUid = '';
+    let sessionMarkMs = 0;
     try {
       const sp = getSessionPendingRevoke();
       sessionSid = sp?.sessionId ?? '';
       sessionUid = sp?.userId ?? '';
+      const mk = Date.parse(String(sp?.markedAt ?? ''));
+      if (Number.isFinite(mk)) sessionMarkMs = mk;
+      // HP-E2E-FIX-4 (2026-10-24, E2E HP Xiaomi): tanda revoke milik sesi LAMA
+      // (ditandai sebelum login sesi berjalan) TIDAK BOLEH di-flush dengan
+      // token sesi BARU — BE terminal-logout mengabaikan field
+      // sessionId/userId dan me-revoke sesi BEARER (terminalApi.ts), sehingga
+      // flush basi = bunuh diri sesi baru (login→flush→revoke→kick→tandai
+      // lagi = lockout login permanen; terbukti id5 ACTIVE→REVOKED 1 detik
+      // sesudah pin-verify). Tanda basi dibuang tanpa panggil jaringan: sesi
+      // lama (bila masih ACTIVE server-side) bocor sampai kedaluwarsa — trade-
+      // off diterima dan dicatat; pencabutan saat logout online (DrawerMenu E31
+      // best-effort) tetap jalan bila jaringan tersedia saat itu. Tanpa sesi
+      // berjalan (current null, mis. flush pushAll pasca-logout) guard nonaktif
+      // — tanpa token tak ada bunuh diri yang mungkin (401 jujur, tetap pending).
+      try {
+        const cur = getCurrentSession();
+        const loginMs = Date.parse(String(cur?.loginAt ?? ''));
+        if (cur && Number.isFinite(loginMs) && sessionMarkMs > 0 && sessionMarkMs < loginMs) {
+          try {
+            clearSessionPendingRevoke();
+          } catch {
+            /* abaikan */
+          }
+          sessionSid = '';
+          sessionUid = '';
+        }
+      } catch {
+        /* abaikan — anggap tidak basi, perilaku lama dipertahankan */
+      }
       if (sessionSid && !jobs.some((j) => j.sessionId === sessionSid)) {
         jobs.push({ sessionId: sessionSid });
       }
