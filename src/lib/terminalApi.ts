@@ -869,3 +869,49 @@ export async function fetchTerminalReadiness(
   };
 }
 
+/** S-POSCONFIG (audit-5d80): konfigurasi POS merchant per terminal.
+ * GET /api/v1/terminals/{id}/pos-config → {posBehaviorSettings,
+ * stock{alertEnabled,defaultLowStockThreshold},
+ * timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
+ * member-only; pola cermin fetchTerminalReadiness: GET + withId + unwrap +
+ * fail jujur — pemanggil seed best-effort, JANGAN blokir login bila gagal).
+ * Angka disanitasi ke default BE (threshold 5, timer 90/10). */
+export interface TerminalPosConfig {
+  stockAlertEnabled: boolean;
+  defaultLowStockThreshold: number;
+  timerDefaultLimitMin: number;
+  timerWarnBeforeMin: number;
+  posBehavior: Record<string, unknown>;
+}
+
+function cleanPosConfigInt(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback;
+}
+
+export async function fetchTerminalPosConfig(
+  terminalId: string,
+): Promise<TerminalApiResult<TerminalPosConfig>> {
+  const r = await apiFetch(withId(ApiPath.terminalPosConfig, terminalId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<TerminalPosConfig>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const stock = (data.stock ?? {}) as Record<string, unknown>;
+  const timer = (data.timer ?? {}) as Record<string, unknown>;
+  const posBehavior = (data.posBehaviorSettings ?? {}) as Record<string, unknown>;
+  return {
+    ok: true,
+    data: {
+      stockAlertEnabled: stock.alertEnabled !== false,
+      defaultLowStockThreshold: cleanPosConfigInt(stock.defaultLowStockThreshold, 5),
+      timerDefaultLimitMin: cleanPosConfigInt(timer.defaultLimitMin, 90),
+      timerWarnBeforeMin: cleanPosConfigInt(timer.warnBeforeMin, 10),
+      posBehavior,
+    },
+    fromDummy: false,
+  };
+}
+

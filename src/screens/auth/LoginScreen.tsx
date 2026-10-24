@@ -40,6 +40,7 @@ import { flushPendingRevokes, restoreAutoSyncPrefs } from '../../lib/sync';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
 import { pinVerifyTerminalPin, fetchTerminalReadiness } from '../../lib/terminalApi';
+import { syncPosConfigFromServer } from '../../lib/posConfigSync';
 import {
   getContractDeviceId,
   loadBinding,
@@ -716,6 +717,12 @@ async function completeOnline(
       ).catch(() => null);
       if (rr && rr.ok && !rr.fromDummy && (rr.data.needsShift || rr.data.needsCash)) {
         setPostLoginRoute('Shift');
+      }
+      // S-POSCONFIG (audit-5d80): seed threshold stok + default timer dari
+      // server best-effort (server-wins bila lokal masih default; kasir yang
+      // sudah kustom tak ditimpa). Fail-silent — login tak diblokir.
+      if (readinessTermId.trim()) {
+        try { void syncPosConfigFromServer(readinessTermId.trim()).catch(() => {}); } catch { /* abaikan */ }
       }
     }
   } catch {

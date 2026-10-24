@@ -172,6 +172,12 @@ export const ApiPath = {
   // shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
   // router.go:1173, member-only; SPEC-TERMINAL-SESSION §11 baris S-READINESS).
   terminalReadiness: 'api/v1/terminals/{id}/readiness',
+  // S-POSCONFIG (audit-5d80): GET konfigurasi POS merchant untuk terminal —
+  // {posBehaviorSettings, stock{alertEnabled,defaultLowStockThreshold},
+  // timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
+  // member-only UserAuth + requireTerminalMember; terminal JWT tak lolos
+  // MerchantAuth). Timer menumpang schemaless di pos_behavior_settings.
+  terminalPosConfig: 'api/v1/terminals/{id}/pos-config',
   // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
   terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
   terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}
