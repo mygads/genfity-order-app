@@ -21,6 +21,7 @@ import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
+import { getJSON } from '../../lib/storage';
 import { dbNowLocal } from '../../lib/datefmt';
 import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
@@ -357,6 +358,17 @@ export default function CashierScreen({ navigation, route }: Props) {
    * PRODUCTS const hanya last-resort bila query DB sendiri melempar. */
   const [dbProducts, setDbProducts] = useState<Product[] | null>(null);
   const [dbFailed, setDbFailed] = useState(false);
+  // Audit-5d80 stock wiring: hormati opt allowSellEmpty layar Stok
+  // (LS_OPTS 'genfity.stock.opts'). Muat ulang tiap fokus agar perubahan
+  // di layar Stok langsung berlaku tanpa restart kasir.
+  const [sellEmpty, setSellEmpty] = useState(false);
+  useFocusEffect(useCallback(() => {
+    let on = true;
+    void getJSON<{ allowSellEmpty?: boolean }>('genfity.stock.opts', {}).then((o) => {
+      if (on) setSellEmpty(o?.allowSellEmpty === true);
+    });
+    return () => { on = false; };
+  }, []));
 
   useEffect(() => {
     let alive = true;
@@ -706,7 +718,8 @@ export default function CashierScreen({ navigation, route }: Props) {
     name === 'Favorit' ? catalog.filter((p) => p.fav).length : catalog.filter((p) => p.category === name).length;
 
   const addToCart = (p: Product) => {
-    if (p.soldOut) return;
+    // allowSellEmpty = staf boleh jual item kosong (badge habis tetap tampil).
+    if (p.soldOut && !sellEmpty) return;
     setCart((prev) => {
       const found = prev.find((c) => c.id === p.id);
       if (found)
@@ -1222,7 +1235,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         if (isWide) {
           return (
             <View style={[styles.card, item.soldOut && styles.cardSoldOut]}>
-              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} disabled={item.soldOut}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} disabled={item.soldOut && !sellEmpty}>
                 <MenuThumb size={isWide ? 80 : 64} />
                 <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                 <View style={styles.cardFoot}>
@@ -1262,7 +1275,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         return (
           <View>
             <View style={[styles.row, item.soldOut && styles.rowSoldOut]}>
-              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} style={styles.rowMain} disabled={item.soldOut}>
+              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} style={styles.rowMain} disabled={item.soldOut && !sellEmpty}>
                 <MenuThumb size={48} />
                 <View style={styles.rowInfo}>
                   <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>

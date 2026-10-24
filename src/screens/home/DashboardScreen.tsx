@@ -4,6 +4,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import { getSession, logout } from '../../session';
 import { getBranchId, getTerminal } from '../../config/server';
 import { initDb, query, queryFirst } from '../../lib/db';
+import { getJSON } from '../../lib/storage';
 import { getLastSync, pendingCount } from '../../lib/sync';
 import DrawerMenu from '../../components/DrawerMenu';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -174,11 +175,15 @@ export default function DashboardScreen({ navigation }: Props) {
         if (alive && tRows.length > 0) {
           setTables(tRows.map((r) => ({ id: r.tableNo || r.id, s: mapStatus(r.status ?? '') })));
         }
+        // Audit-5d80 stock wiring: ambang low-stock ikut opt layar Stok
+        // (default 5 = sama dengan default BE default_low_stock_threshold).
+        const stockOpts = await getJSON<{ lowLimit?: string }>('genfity.stock.opts', {});
+        const lowLim = Math.max(0, Math.round(Number(stockOpts?.lowLimit) || 5));
         const lRows = await query<{ id: string | null; name: string | null; left: number | null }>(
           `SELECT b.menuId AS id, COALESCE(m.menuName, b.menuId) AS name, b.qty AS left
              FROM ms_branchmenu b LEFT JOIN ms_menu m ON m.id = b.menuId
-             WHERE b.branchId = ? AND b.flagSoldOut = 0 AND b.qty <= 8 ORDER BY b.qty ASC LIMIT 5`,
-          [getBranchId()],
+             WHERE b.branchId = ? AND b.flagSoldOut = 0 AND b.qty <= ? ORDER BY b.qty ASC LIMIT 5`,
+          [getBranchId(), lowLim],
         );
         if (alive && lRows.length > 0) {
           setLowStock(lRows.map((r) => ({ id: r.id ?? '', name: r.name ?? '-', left: Math.round(Number(r.left) || 0) })));
