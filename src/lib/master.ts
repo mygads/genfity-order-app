@@ -8,6 +8,7 @@ import { ApiPath, apiGet, getBaseUrl, getBranchId, getServerEnv } from '../confi
 import { getApiMode } from './apiSource';
 import { initDb, queryFirst, run } from './db';
 import { getWatermark, setWatermark } from './sync';
+import { GoCatalogUnavailable, pullGoCatalog } from './masterGo';
 
 type Row = Record<string, string | number | null>;
 
@@ -407,10 +408,25 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
   }
   await initDb();
-  const targets = !only || only.length === 0
+  // P0-2 audit paritas: domain katalog (menu, branchmenu) diutamakan ke
+  // kontrak Go (/pos/menu) agar harga/stok tak basi vs backend Go. Bila BE
+  // bukan Go (404) → jatuh kembali ke domain ESB di bawah. Watermark
+  // 'menu'/'branchmenu' dipakai bersama oleh kedua jalur.
+  const per: Record<string, number> = {};
+  let targets = !only || only.length === 0
     ? DOMAINS
     : DOMAINS.filter((d) => only.includes(d.key));
-  const per: Record<string, number> = {};
+  const goTargets = targets.filter((d) => d.key === 'menu' || d.key === 'branchmenu');
+  if (goTargets.length > 0) {
+    try {
+      const go = await pullGoCatalog();
+      Object.assign(per, go.per);
+      targets = targets.filter((d) => d.key !== 'menu' && d.key !== 'branchmenu');
+    } catch (e) {
+      if (!(e instanceof GoCatalogUnavailable)) throw e;
+      // Bukan backend Go — lanjut jalur ESB seperti semula.
+    }
+  }
   for (const d of targets) {
     const wm = await getWatermark(d.key);
     const res = await apiGet(d.path, { ...(wm.pull ? { since: wm.pull } : {}), limit: 200 });
