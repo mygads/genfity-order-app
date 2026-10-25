@@ -11,6 +11,7 @@ import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
 import { getGroupPaid } from '../../lib/sales';
 import { enqueueSync } from '../../lib/sync';
+import { postTableTransition } from '../../lib/terminalTable';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -196,6 +197,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
       } catch {
         /* abaikan */
       }
+      // A11: bebaskan meja di server terminal (best-effort; antrean sync di
+      // atas tetap jadi fallback offline).
+      void postTableTransition({ tableRef: tb, status: 'AVAILABLE' });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

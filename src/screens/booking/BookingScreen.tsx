@@ -11,6 +11,7 @@ import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
+import { postTableTransition } from '../../lib/terminalTable';
 import {
   cancelServerReservation,
   mapResvStatusToLocal,
@@ -462,6 +463,9 @@ export default function BookingScreen({ navigation }: Props) {
       } catch {
         /* master belum tersedia */
       }
+      // A11: bebaskan meja di server terminal (best-effort; antrean
+      // booking-cancel di atas tetap jadi fallback offline).
+      void postTableTransition({ tableRef: r.table, status: 'AVAILABLE' });
     })();
   };
 

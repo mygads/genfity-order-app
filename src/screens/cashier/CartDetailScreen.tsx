@@ -14,6 +14,7 @@ import { enqueueSync } from '../../lib/sync';
 import { nextSalesNum } from '../../lib/sales';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
+import { postTableTransition } from '../../lib/terminalTable';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -298,6 +299,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             } catch {
               /* abaikan */
             }
+            // A11: duduki meja di server terminal (best-effort; lokal menang bila
+            // offline/BE-BELUM-ADA; 409 kapasitas → banner via server-note).
+            void postTableTransition({ tableRef: table.trim(), status: 'OCCUPIED' });
           } catch {
             /* abaikan: status meja tetap ikut draft */
           }

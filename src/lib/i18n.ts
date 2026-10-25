@@ -1698,6 +1698,7 @@ const STR: Record<string, Entry> = {
   tbl_warn_exists: { id: 'Meja {no} sudah ada.', en: 'Table {no} already exists.' },
   tbl_warn_not_empty: { id: 'Meja {no} sedang {st} - kosongkan dulu sebelum dihapus.', en: 'Table {no} is {st} - clear it before deleting.' },
   tbl_warn_open_bill_del: { id: 'Meja {no} masih punya bill terbuka - lunasi atau void dulu sebelum dihapus.', en: 'Table {no} still has an open bill - settle or void it before deleting.' },
+  tbl_table_conflict: { id: 'Server menolak perubahan meja (kapasitas terlampaui) - data lokal tetap disimpan, sinkronisasi menyusul.', en: 'Server rejected the table change (capacity exceeded) - local data kept, will sync.' },
   tbl_warn_no: { id: 'Isi nomor meja dulu.', en: 'Enter the table number first.' },
   tbl_warn_cap: { id: 'Isi kapasitas kursi dulu (angka > 0).', en: 'Enter the seat capacity first (number > 0).' },
   tbl_del_fail: { id: 'Gagal menghapus meja - coba lagi.', en: 'Could not delete the table - try again.' },

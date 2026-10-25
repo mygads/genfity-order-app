@@ -7,6 +7,7 @@ import { useLang } from '../../lib/i18n';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { GO_OP_MOVE_TABLE, getServerOrderIdForSale } from '../../lib/posWire';
 import { initDb, query, run } from '../../lib/db';
+import { postTableTransition } from '../../lib/terminalTable';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { from?: string } } };
@@ -196,6 +197,10 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         try {
           await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', destCode]);
         } catch { /* master meja opsional */ }
+        // A11: pindah meja di server terminal (best-effort; antrean GO_OP_MOVE_TABLE
+        // + tulis lokal di atas tetap jadi fallback offline).
+        void postTableTransition({ tableRef: src.table, status: 'AVAILABLE' });
+        void postTableTransition({ tableRef: destCode, status: 'OCCUPIED' });
       } catch {
         /* SQLite belum siap - antrean sync di atas tetap jalan */
       }
