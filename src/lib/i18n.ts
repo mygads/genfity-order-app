@@ -1603,6 +1603,9 @@ const STR: Record<string, Entry> = {
   // ---- FIX-3 printers status hardcode ----
   'printers.btFound': { id: '{n} printer BT bonded terdeteksi.', en: '{n} bonded BT printers found.' },
   'printers.btNone': { id: 'Tak ada printer BT bonded terdeteksi - perlu dev-client + izin Bluetooth.', en: 'No bonded BT printers found - needs a dev-client + Bluetooth permission.' },
+  // E2E-HP (2026-10-26, APP-4): izin runtime BT (SCAN/CONNECT) ditolak/diabaikan
+  // pengguna → pindai & kirim BT/BLE tak bisa jalan; pesan jujur butuh-izin.
+  'printers.btDenied': { id: 'Izin Bluetooth ditolak - aktifkan di Pengaturan HP agar pindai & cetak BT jalan.', en: 'Bluetooth permission denied - enable it in phone Settings so BT scan & print can run.' },
   'printers.lanInvalid': { id: 'IP/port tidak valid - contoh 192.168.1.50:9100.', en: 'Invalid IP/port - e.g. 192.168.1.50:9100.' },
   'printers.lanCalling': { id: 'Menghubungi {x}...', en: 'Contacting {x}...' },
   'printers.lanOk': { id: 'Terhubung - printer menjawab ({n} byte terkirim).', en: 'Connected - printer answered ({n} bytes sent).' },

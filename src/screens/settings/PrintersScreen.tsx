@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { pollServerPrintJobs } from '../../lib/printBridge';import { fetchBranchTerminals } from '../../lib/terminalApi';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { pollServerPrintJobs } from '../../lib/printBridge';import { fetchBranchTerminals } from '../../lib/terminalApi';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -316,6 +316,13 @@ function backupBindings(ss: Station[]): void {
     const  startPairing = async () => {
     setPairing(true);
     try {
+      // E2E-HP (2026-10-26, APP-4): tanpa BLUETOOTH_CONNECT, daftar bonded
+      // selalu kosong → minta izin DULU agar pesan gagalnya jujur (butuh-izin)
+      // bukan "tidak ditemukan" yang menyesatkan.
+      if (!(await ensureBtPermission())) {
+        setStatusMsg(t('printers.btDenied'));
+        return;
+      }
       // Daftar BT bonded nyata, perlu dev-client + izin; di Expo Go/web hasilnya kosong.
       const found = await listBondedBtPrinters();
       if (found.length > 0) {
@@ -338,6 +345,11 @@ function backupBindings(ss: Station[]): void {
   const startBleScan = async () => {
     setBleScanning(true);
     try {
+      // E2E-HP (2026-10-26, APP-4): sama seperti bonded — izin dulu, pesan jujur.
+      if (!(await ensureBtPermission())) {
+        setStatusMsg(t('printers.btDenied'));
+        return;
+      }
       const found = await listBlePrinters();
       if (found.length > 0) {
         setBonded((bb) => [
@@ -562,7 +574,10 @@ function backupBindings(ss: Station[]): void {
         ? t('printers.testOk').replace('{x}', s.name).replace('{n}', String(res.bytes))
         : res.reason === 'need-dev-client'
           ? t('printers.testPreview').replace('{x}', s.name).replace('{n}', String(bytes.length))
-          : t('printers.testFail').replace('{x}', s.name).replace('{e}', String(res.detail ?? res.reason)),
+          // E2E-HP (2026-10-26, APP-4): marker izin dari printBytes → pesan jujur.
+          : !res.ok && res.detail === 'BT_PERMISSION_DENIED'
+            ? t('printers.btDenied')
+            : t('printers.testFail').replace('{x}', s.name).replace('{e}', String(res.detail ?? res.reason)),
     );
     if (res.ok) {
       setStations((ss) => ss.map((x) => (x.id === s.id ? { ...x, connected: true } : x)));

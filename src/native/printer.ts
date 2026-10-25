@@ -111,10 +111,14 @@ async function printLan(host: string, port: number, data: Uint8Array): Promise<P
   }
 }
 
-/** Daftar printer BT yang sudah di-pair (butuh dev-client; Expo Go → list kosong). */
+/** Daftar printer BT yang sudah di-pair (butuh dev-client; Expo Go → list kosong).
+ * E2E-HP (2026-10-26): tanpa BLUETOOTH_CONNECT, getBondedDevices() kosong /
+ * melempar SecurityException → minta izin DULU. Ditolak = [] (pemanggil
+ * membedakan via ensureBtPermission + pesan printers.btDenied). */
 export async function listBondedBtPrinters(): Promise<Array<{ name: string; mac: string }>> {
   const n = native();
   if (!n?.listBondedBt) return [];
+  if (!(await ensureBtPermission())) return [];
   try {
     return await n.listBondedBt();
   } catch {
@@ -133,8 +137,12 @@ export async function listUsbDevices(): Promise<UsbDeviceInfo[]> {
   }
 }
 
-/** Minta izin pindai BT bila perlu (Android 12+; Android lama: lokasi). */
-async function ensureBleScanPermission(): Promise<boolean> {
+/** Minta izin BT bila perlu (Android 12+: SCAN+CONNECT; Android lama: lokasi).
+ * Dipakai pindai BLE, daftar bonded klasik, DAN kirim BT/BLE — tanpa
+ * BLUETOOTH_CONNECT, getBondedDevices() kosong + RFCOMM melempar
+ * SecurityException (temuan E2E-HP 2026-10-26: granted=false permanen
+ * karena izin tak pernah diminta; pemindaian selalu "tidak ditemukan"). */
+export async function ensureBtPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   try {
     const api = Number(Platform.Version);
@@ -160,7 +168,7 @@ export async function listBlePrinters(): Promise<Array<{ name: string; mac: stri
   if (Platform.OS === 'web') return [];
   const n = native();
   if (!n?.scanBlePrinters) return [];
-  if (!(await ensureBleScanPermission())) return [];
+  if (!(await ensureBtPermission())) return [];
   try {
     return await n.scanBlePrinters();
   } catch {
@@ -188,10 +196,20 @@ export async function printBytes(target: PrinterTarget, data: Uint8Array): Promi
   try {
     const b64 = toBase64(data);
     if (target.transport === 'bt' && target.address && n.printBt) {
+      // E2E-HP (2026-10-26): tanpa BLUETOOTH_CONNECT, RFCOMM melempar
+      // SecurityException → pastikan izin DULU agar pesan gagalnya jujur
+      // (butuh-izin) bukan "connect-failed" misterius. Marker detail
+      // BT_PERMISSION_DENIED dipetakan ke i18n di PrintersScreen.
+      if (!(await ensureBtPermission())) {
+        return { ok: false, reason: 'connect-failed', detail: 'BT_PERMISSION_DENIED' };
+      }
       const bytes = await n.printBt(target.address, b64);
       return { ok: true, bytes };
     }
     if (target.transport === 'ble' && target.address && n.printBle) {
+      if (!(await ensureBtPermission())) {
+        return { ok: false, reason: 'connect-failed', detail: 'BT_PERMISSION_DENIED' };
+      }
       const bytes = await n.printBle(target.address, b64);
       return { ok: true, bytes };
     }
