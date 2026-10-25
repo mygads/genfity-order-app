@@ -3,6 +3,7 @@
  * transfer/external, kompliment, non-penjualan). Implementasi orisinal;
  * pelunasan tetap direkonsiliasi server lewat antrean sync.
  */
+import { parseCustomerId } from './memberRef';
 import { enqueueSync } from './sync';
 
 export type ExtraMethodId = 'transfer' | 'deposit' | 'compliment' | 'nonsales';
@@ -80,6 +81,14 @@ export interface SaleInput {
   approvalCode?: string;
   /** Id user ms_posuser penyetuju eskalasi (kompliment/non-penjualan) — audit. */
   approvedBy?: string;
+  /** Ronde-3 Q1: ref member OTORITATIF = customerId GO (int, dari hasil
+   *  searchServerCustomers yang ditempel). HANYA ini yang disimpan di
+   *  transaksi + dikirim ke BE (payload create/settle/sync). */
+  customerId?: number;
+  /** Pointer ledger deposit lokal (legacy, format `MC{id}` / `M…`).
+   *  DEPRECATED sebagai ref transaksi: saveSale menurunkan ulang dari
+   *  customerId bila ada; kolom ini hanya fallback bila customerId absen
+   *  (data lama). JANGAN kirim ke BE — buildSalePayload tak lagi memakainya. */
   memberId?: string;
   tableId?: string;
   /** Konteks order dari kasir (dine-in/bawa-pulang/delivery, dst). */
@@ -203,7 +212,9 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.voucherCode ? { voucherCode: s.voucherCode } : {}),
     ...(s.approvalCode ? { approvalCode: s.approvalCode } : {}),
     ...(s.approvedBy ? { approvedBy: s.approvedBy } : {}),
-    ...(s.memberId ? { memberId: s.memberId } : {}),
+    // Ronde-3 Q1: HANYA customerId (int GO) yang naik ke BE. memberId
+    // (alias lokal M/MC) SENGAJA tak dikirim — bukan data tersimpan transaksi.
+    ...(parseCustomerId(s.customerId) != null ? { customerId: parseCustomerId(s.customerId) } : {}),
     ...(s.tableId ? { tableId: s.tableId } : {}),
     ...(s.mode ? { mode: normalizeSalesMode(s.mode), salesMode: normalizeSalesMode(s.mode) } : {}),
     ...(s.ongkir !== undefined && s.ongkir > 0 ? { ongkir: r(s.ongkir) } : {}),
