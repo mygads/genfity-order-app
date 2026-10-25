@@ -23,6 +23,14 @@ interface MenuEntry {
   imageState: 'ok' | 'missing' | 'downloading';
 }
 
+// A9 (P0-1): katalog read-only di POS — tambah/ubah/hapus nama, harga, dan
+// grup menu DIKUNCI; kelola di dashboard web. Tombol/form katalog di bawah
+// di-render NONAKTIF (bukan dihapus) + banner penjelas; guard fungsi ganda
+// (early-return) agar tak ada jalur yang lolos. Satu-satunya mutasi yang
+// diizinkan = toggle Habis (ketersediaan operasional harian, bukan harga).
+// Pull master (master.ts 'menu'/'branchmenu') tetap jalan server-wins harga.
+const CATALOG_READONLY = true;
+
 /** Sanitasi qty/harga: bulatkan, tolak NaN/negatif (default 0, bukan -1). */
 function cleanQty(v: unknown, fallback = 0): number {
   const n = Number(v);
@@ -46,30 +54,6 @@ async function resolveCategoryId(groupName: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Pastikan nama grup punya baris di ms_category: pakai id existing bila cocok,
- * else buat kategori baru (sortOrder = max+1) agar categoryId di ms_menu
- * selalu id valid, bukan nama grup mentah.
- */
-async function ensureCategoryId(groupName: string): Promise<string> {
-  const name = groupName.trim();
-  const existing = await resolveCategoryId(name);
-  if (existing) return existing;
-  await initDb();
-  const maxRow = await queryFirst<{ m: number | null }>(
-    'SELECT MAX(sortOrder) AS m FROM ms_category',
-  );
-  const sort = (Number(maxRow?.m) || 0) + 1;
-  const id = `c-${Date.now()}`;
-  await run(
-    `INSERT INTO ms_category (id, categoryName, sortOrder, flagActive, syncDate)
-     VALUES (?, ?, ?, 1, NULL)`,
-    [id, name, sort],
-  );
-  await enqueueOutbox('ms_category', id, 'insert');
-  return id;
 }
 
 /** Tulis perubahan menu ke SQLite agar ikut sync master. */
@@ -129,6 +113,8 @@ export default function MenuManagementScreen({ navigation }: Props) {
   const [menus, setMenus] = useState<MenuEntry[]>([]);
   const [group, setGroup] = useState<string>('Semua');  const [queryText, setQueryText] = useState('');
   const [msg, setMsg] = useState('');
+  // A9: state form katalog dipertahankan agar label nominal tCur('menu.price')
+  // tetap dipakai (tripwire-dual-currency DC-b); form di-render nonaktif.
   const [editing, setEditing] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [draftPrice, setDraftPrice] = useState('');
@@ -237,7 +223,10 @@ export default function MenuManagementScreen({ navigation }: Props) {
     }
   };
 
+  // A9 (P0-1): tambah/ubah/hapus katalog DIKUNCI — fungsi dipertahankan
+  // sebagai dokumentasi + guard ganda (early-return bila dipanggil).
   const openEditor = (m: MenuEntry) => {
+    if (CATALOG_READONLY) { setMsg(t('menu.readonlyCatalog')); return; }
     setEditing(m.id);
     setDraftName(m.name);
     setDraftPrice(String(Math.round(m.price)));
@@ -246,6 +235,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
   };
 
   const saveEditor = (id: string) => {
+    if (CATALOG_READONLY) { setMsg(t('menu.readonlyCatalog')); return; }
     const name = draftName.trim();
     const price = Number(draftPrice.replace(/\D/g, '')) || 0;
     const grp = draftGroup.trim() || t('menu.otherGroup');
@@ -258,8 +248,9 @@ export default function MenuManagementScreen({ navigation }: Props) {
     setMsg(t('menu.savedSync'));
   };
 
-  /** Tambah menu baru: upsert ms_menu + ms_branchmenu cabang aktif + outbox. */
+  /** Tambah menu baru: DIKUNCI A9 (guard ganda; tombol nonaktif). */
   const addMenu = async () => {
+    if (CATALOG_READONLY) { setMsg(t('menu.readonlyCatalog')); return; }
     const name = newName.trim();
     const price = Number(newPrice.replace(/\D/g, '')) || 0;
     const grp = newGroup.trim() || t('menu.otherGroup');
@@ -271,7 +262,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
     try {
       await initDb();
       const branchId = getBranchId();
-      const catId = await ensureCategoryId(grp);
+      const catId = (await resolveCategoryId(grp)) ?? `c-${Date.now()}`;
       const id = `m-${Date.now()}`;
       await run(
         `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate)
@@ -297,8 +288,9 @@ export default function MenuManagementScreen({ navigation }: Props) {
     }
   };
 
-  /** Hapus menu: konfirmasi dulu, lalu flag nonaktif + outbox agar ikut sync. */
+  /** Hapus menu: DIKUNCI A9 (guard ganda; tombol nonaktif). */
   const confirmDelete = (m: MenuEntry) => {
+    if (CATALOG_READONLY) { setMsg(t('menu.readonlyCatalog')); return; }
     appAlert(
       t('menu_del_title').replace('{name}', m.name),
       t('menu_del_body'),
@@ -321,7 +313,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
                 await enqueueOutbox('ms_branchmenu', `${branchId}:${m.id}`, 'delete');
                 setMenus((ms) => ms.filter((x) => x.id !== m.id));
                 if (editing === m.id) setEditing(null);
-                setMsg(lang === 'en' ? 'Menu deleted and queued for sync.' : 'Menu dihapus dan ikut sync.');
+                setMsg(t('menu.savedSync'));
               } catch {
                 setMsg(t('menu.imgFail'));
               }
@@ -364,35 +356,41 @@ export default function MenuManagementScreen({ navigation }: Props) {
         <View style={styles.formFlex}>
           <AppInput value={queryText} onChangeText={setQueryText} placeholder={t('common.searchMenu')} />
         </View>
-        <AppButton size="sm" title={t('common.add')} onPress={() => setShowAdd((v) => !v)} fullWidth={false} style={styles.navyInline} />
+        {/* A9: tombol Tambah NONAKTIF (katalog read-only; kelola di web). */}
+        <AppButton size="sm" title={t('common.add')} onPress={() => setShowAdd((v) => !v)} disabled={CATALOG_READONLY} fullWidth={false} style={styles.navyInline} />
         <AppButton size="sm" title={t('menu.downloadImages')} onPress={downloadAll} fullWidth={false} style={styles.navyInline} />
       </View>
       {showAdd ? (
         <View style={styles.addForm}>
-          <AppInput label={t('menu.menuName')} value={newName} onChangeText={setNewName} placeholder={t('menu.menuName')} />
+          <AppInput label={t('menu.menuName')} value={newName} onChangeText={setNewName} placeholder={t('menu.menuName')} editable={!CATALOG_READONLY} />
           <AppInput
             label={tCur('menu.price')}
             value={newPrice ? rpNum(Number(newPrice.replace(/\D/g, '')) || 0) : ''}
             onChangeText={(v) => setNewPrice(v.replace(/\D/g, '').slice(0, 9))}
             placeholder="0"
             keyboardType="number-pad"
+            editable={!CATALOG_READONLY}
           />
-          <AppInput label={t('menu.group')} value={newGroup} onChangeText={setNewGroup} placeholder={t('menu.group')} />
+          <AppInput label={t('menu.group')} value={newGroup} onChangeText={setNewGroup} placeholder={t('menu.group')} editable={!CATALOG_READONLY} />
           <AppInput
             label={lang === 'en' ? 'Station (optional)' : 'Station (opsional)'}
             value={newStation}
             onChangeText={setNewStation}
             placeholder={lang === 'en' ? 'Station (optional)' : 'Station (opsional)'}
+            editable={!CATALOG_READONLY}
           />
           <View style={styles.editorBtns}>
             <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.cancel')} onPress={() => setShowAdd(false)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.save')} onPress={addMenu} fullWidth={false} style={styles.navyFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.save')} onPress={addMenu} disabled={CATALOG_READONLY} fullWidth={false} style={styles.navyFlex} />
           </View>
         </View>
       ) : null}
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
-      {/* M9-3: ubah menu = local-only (tanpa push master; pull server-wins). */}
-      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted, paddingHorizontal: 16, marginTop: 6 }}>{t('master.localOnlyNote')}</Text>
+      {/* A9 (P0-1): banner katalog read-only — tambah/ubah/hapus dikunci,
+          kelola nama/harga/grup di dashboard web. */}
+      <View style={styles.readonlyBanner}>
+        <Text style={styles.readonlyText}>{t('menu.readonlyCatalog')}</Text>
+      </View>
 
       {/* Tablet: kartu menu 2 kolom; phone tetap 1 kolom (wadah transparan). */}
       <View style={isTablet ? styles.gridTablet : undefined}>
@@ -421,18 +419,19 @@ export default function MenuManagementScreen({ navigation }: Props) {
           </View>
           {editing === m.id ? (
             <View style={styles.editor}>
-              <AppInput label={t('menu.menuName')} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} />
+              <AppInput label={t('menu.menuName')} value={draftName} onChangeText={setDraftName} placeholder={t('menu.menuName')} editable={!CATALOG_READONLY} />
               <AppInput
                 label={tCur('menu.price')}
                 value={draftPrice ? rpNum(Number(draftPrice.replace(/\D/g, '')) || 0) : ''}
                 onChangeText={(v) => setDraftPrice(v.replace(/\D/g, '').slice(0, 9))}
                 placeholder="0"
                 keyboardType="number-pad"
+                editable={!CATALOG_READONLY}
               />
-              <AppInput label={t('menu.group')} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} />
+              <AppInput label={t('menu.group')} value={draftGroup} onChangeText={setDraftGroup} placeholder={t('menu.group')} editable={!CATALOG_READONLY} />
               <View style={styles.editorBtns}>
                 <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.cancel')} onPress={() => setEditing(null)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-                <AppButton size={isTablet ? 'md' : 'sm'} title={t('menu.saveChanges')} onPress={() => saveEditor(m.id)} fullWidth={false} style={styles.navyFlex} />
+                <AppButton size={isTablet ? 'md' : 'sm'} title={t('menu.saveChanges')} onPress={() => saveEditor(m.id)} disabled={CATALOG_READONLY} fullWidth={false} style={styles.navyFlex} />
               </View>
             </View>
           ) : null}
@@ -440,8 +439,12 @@ export default function MenuManagementScreen({ navigation }: Props) {
             {m.imageState !== 'ok' && m.imageState !== 'downloading' ? (
               <AppButton size="sm" title={t('menu.downloadImages')} onPress={() => downloadImage(m.id)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             ) : null}
-            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.delete')} onPress={() => confirmDelete(m)} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            {/* A9: tombol Ubah/Hapus NONAKTIF (katalog read-only). Toggle Habis
+                di bawah = ketersediaan operasional harian (bukan harga/grup),
+                satu-satunya mutasi yang diizinkan; harga tetap server-wins
+                dari pull master. */}
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.edit')} onPress={() => (editing === m.id ? setEditing(null) : openEditor(m))} disabled={CATALOG_READONLY} variant="secondary" fullWidth={false} style={styles.btnFlex} />
+            <AppButton size={isTablet ? 'md' : 'sm'} title={t('common.delete')} onPress={() => confirmDelete(m)} disabled={CATALOG_READONLY} variant="secondary" fullWidth={false} style={styles.btnFlex} />
             <View style={[styles.soldRow, isTablet && styles.soldRowTablet]}>
               <Text style={styles.rowLabel}>{t('menu.markSold')}</Text>
               <Switch value={m.soldOut} onValueChange={(v) => patch(m.id, { soldOut: v })} trackColor={{ true: colors.red, false: colors.stroke }} />
@@ -452,9 +455,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
       </View>
       {list.length === 0 ? (
         <Text style={styles.empty}>
-          {menus.length === 0
-            ? (lang === 'en' ? 'No menus yet. Add your first menu above.' : 'Belum ada menu. Tambahkan menu pertama di atas.')
-            : t('common.noMatch')}
+          {menus.length === 0 ? t('menu.emptyCatalog') : t('common.noMatch')}
         </Text>
       ) : null}
       </ScrollView>
@@ -493,6 +494,13 @@ const styles = StyleSheet.create({
   btnDl: { borderRadius: 10, backgroundColor: colors.navy, paddingHorizontal: 14, justifyContent: 'center' },
   btnDlText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   msg: { fontFamily: fonts.medium, fontSize: 12, color: colors.navy, marginTop: 8, paddingHorizontal: 16 },
+  // A9: banner katalog read-only.
+  readonlyBanner: {
+    backgroundColor: colors.paleOrange, borderRadius: 10, paddingHorizontal: 12,
+    paddingVertical: 10, marginHorizontal: 16, marginTop: 10,
+    borderWidth: 1, borderColor: colors.orangeDark,
+  },
+  readonlyText: { fontFamily: fonts.medium, fontSize: 12, color: colors.orangeDark },
   card: {
     backgroundColor: colors.card,
     borderRadius: 12,
@@ -524,13 +532,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   editorBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  btnGhost: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.line, paddingVertical: 10, alignItems: 'center' },
-  btnGhostText: { fontFamily: fonts.bold, fontSize: 12, color: colors.muted },
-  btnSave: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 10, alignItems: 'center' },
-  btnSaveText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   itemBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10, alignItems: 'center' },
-  btnTest: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 10, alignItems: 'center' },
-  btnTestText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
   soldRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
   // Tablet: grid 2 kolom + baris Habis full-baris (phone tak tersentuh).
   gridTablet: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16 },

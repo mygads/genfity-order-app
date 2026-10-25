@@ -1104,6 +1104,8 @@ const STR: Record<string, Entry> = {
   'menu.imgAllOk': { id: 'Semua gambar menu sudah lengkap.', en: 'All menu images are complete.' },
   'menu.invalidForm': { id: 'Nama min. 3 huruf dan harga harus lebih dari 0.', en: 'Name min. 3 chars and price must be more than 0.' },
   'menu.savedSync': { id: 'Perubahan menu tersimpan dan ikut sync.', en: 'Menu changes saved and queued for sync.' },
+  'menu.readonlyCatalog': { id: 'Katalog read-only di POS — kelola nama, harga, dan grup menu di dashboard web. Toggle Habis tetap aktif untuk operasional harian.', en: 'Catalog is read-only on POS — manage menu names, prices, and groups in the web dashboard. The Sold-out toggle stays on for daily operations.' },
+  'menu.emptyCatalog': { id: 'Belum ada menu. Tarik data atau kelola katalog di dashboard web.', en: 'No menus yet. Pull data or manage the catalog in the web dashboard.' },
   'mprint.title': { id: 'Cetakan Menu', en: 'Menu Printing' },
   'mprint.sub': { id: 'Routing cetak per grup menu ke station dapur/checker', en: 'Per-group print routing to kitchen/checker stations' },
   'mprint.kitchenOpts': { id: 'Opsi Tiket Dapur', en: 'Kitchen Ticket Options' },
