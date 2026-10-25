@@ -1692,6 +1692,7 @@ const STR: Record<string, Entry> = {
   grant_expired: { id: 'Grant login kedaluwarsa,masuk online lagi.', en: 'Login grant expired,sign in online again.' },
   terminal_unbound_title: { id: 'Terminal belum diikat', en: 'Terminal not bound' },
   terminal_unbound_hint: { id: 'Ikat perangkat ke terminal dulu sebelum melanjutkan.', en: 'Bind this device to a terminal first to continue.' },
+  hours_outside_banner: { id: 'Di luar jam order online — kasir tetap melayani', en: 'Outside online order hours — counter still serving' },
   kicked_msg: { id: 'Sesi Anda di terminal ini digantikan login lain.', en: 'Your session on this terminal was replaced by another login.' },
   pick_terminal_title: { id: 'Pilih cabang & terminal', en: 'Choose branch & terminal' },
   pick_terminal_hint: { id: 'Akun cocok di beberapa tempat,pilih terminal untuk lanjut masuk.', en: 'Your account matches several places,pick a terminal to continue signing in.' },

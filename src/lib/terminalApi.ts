@@ -23,6 +23,8 @@ import { parseDeviceRole } from './deviceRole';
 import { parseMemberLookupEnabled } from './memberRef';
 // R4-4: snapshot metode bayar pos-config (murni, tanpa siklus).
 import { parsePaymentMethods, type PaymentMethods } from './paymentMethods';
+// SESI-R5-APP: jam operasional pos-config (murni, tanpa siklus).
+import { parseOpeningHours, type OpeningHour } from './openingHours';
 
 /** Alasan gagal jujur: BE belum dikonfigurasi vs jaringan putus. */
 export type TerminalApiReason = 'need_be' | 'offline';
@@ -911,6 +913,9 @@ export interface TerminalPosConfig {
   memberLookupEnabled: boolean;
   /** R4-4: snapshot metode bayar merchant (absen = semua true = tampil semua). */
   paymentMethods: PaymentMethods;
+  /** SESI-R5-APP: jam operasional order ONLINE (kontrak `openingHours`;
+   * merchant tanpa jam = [] = banner kasir tidak tampil). */
+  openingHours: OpeningHour[];
   /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar (absen = OFF). */
   requirePaymentProof: boolean;
   /** S-F3: jadwal ongkir server (null per field = tak dikonfigurasi). */
@@ -1016,6 +1021,9 @@ export async function fetchTerminalPosConfig(
       // flat+nested+snake_case; EFEKTIF menang per kunci atas MENTAH
       // (deprecated); absen = semua-true = tampil semua).
       paymentMethods: parsePaymentMethods(data),
+      // SESI-R5-APP: jam operasional order ONLINE (kontrak `openingHours`;
+      // toleran flat+nested+snake_case; absen = [] = banner tidak tampil).
+      openingHours: parseOpeningHours(data),
       // SESI-FINAL-APP: requirePaymentProof (absen = OFF = perilaku lama).
       requirePaymentProof: parseRequirePaymentProof(data),
       deliveryFee: {

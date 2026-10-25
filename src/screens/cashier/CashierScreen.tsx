@@ -17,7 +17,7 @@ import { useLang, tCur } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
-import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
+import { SUPERVISOR_ACTION_ORDER_VOID, getBoundSupervisorTerminalId } from '../../lib/supervisor';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
@@ -31,6 +31,8 @@ import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getSe
 import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn, getDeliveryFeeSchedule } from '../../lib/posConfigSync';
+import { fetchTerminalPosConfig } from '../../lib/terminalApi';
+import { isOutsideOnlineHours, type OpeningHour } from '../../lib/openingHours';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
 import { nextSalesNum } from '../../lib/sales';
@@ -384,6 +386,38 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Text style={styles.modeNoteT}>{t('terminal_unbound_title')}</Text>
         <Text style={styles.modeNoteT}>{t('terminal_unbound_hint')}</Text>
         <AppButton title={t('inst_claim_btn')} onPress={() => navigation?.navigate('Install')} />
+      </View>
+    ) : null;
+  /** SESI-R5-APP (putusan owner Q1): jam operasional = buka-tutup order
+   *  ONLINE customer; kasir fleksibel + BANNER info TANPA blokir. Snapshot
+   *  dibaca langsung dari GET pos-config (fetch fokus + TTL 5 mnt, cermin
+   *  posPinGate) — posConfigSync TAK disentuh. Absen/kosong = tak render.
+   *  NOL gate: settle/create/CTA tak membaca state ini. */
+  const [onlineHours, setOnlineHours] = useState<OpeningHour[]>([]);
+  const hoursFetchedAt = useRef(0);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      try {
+        if (Date.now() - hoursFetchedAt.current >= 5 * 60 * 1000) {
+          hoursFetchedAt.current = Date.now();
+          const tid = getBoundSupervisorTerminalId();
+          if (tid) {
+            void fetchTerminalPosConfig(tid)
+              .then((r) => {
+                if (alive && r && r.ok && !r.fromDummy) setOnlineHours(r.data.openingHours ?? []);
+              })
+              .catch(() => { /* best-effort: banner diam bila fetch gagal */ });
+          }
+        }
+      } catch { /* abaikan: banner info-only tak boleh crash kasir */ }
+      return () => { alive = false; };
+    }, []),
+  );
+  const renderHoursBanner = () =>
+    onlineHours.length > 0 && isOutsideOnlineHours(new Date(), onlineHours) ? (
+      <View style={styles.modeNote}>
+        <Text style={styles.modeNoteT}>{t('hours_outside_banner')}</Text>
       </View>
     ) : null;
   useEffect(() => {
@@ -1709,6 +1743,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         {renderHeader()}
         {renderSyncBlock()}
         {renderUnboundNotice()}
+        {renderHoursBanner()}
         <DrawerMenu
           visible={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1769,6 +1804,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       {renderHeader()}
       {renderSyncBlock()}
       {renderUnboundNotice()}
+      {renderHoursBanner()}
       <DrawerMenu
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
