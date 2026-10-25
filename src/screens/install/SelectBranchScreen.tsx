@@ -272,6 +272,14 @@ const DEV_BRANCHES: BranchItem[] = [
           disabled={loading || !branchId || (needBe && branches.length === 0)}
           style={styles.primary}
         />
+        {!binding ? (
+          <TouchableOpacity
+            onPress={() => navigation?.navigate('Login')}
+            hitSlop={12}
+            style={styles.loginLink}>
+            <Text style={styles.loginLinkT}>{t('g_intro_login')}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       {/* GAP-11: modal PIN supervisor/owner untuk keluar-branch (role-change).
        * Pola verifyAttendancePin-loop ada di verifyLocalEscalation
@@ -363,6 +371,8 @@ const DEV_BRANCHES: BranchItem[] = [
     alignItems: 'center', justifyContent: 'center',
   },
   primaryIdle: { backgroundColor: '#F6C28B' },
+  loginLink: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  loginLinkT: { fontFamily: fonts.medium, fontSize: 14, color: colors.navy, textDecorationLine: 'underline' },
   primaryT: { fontFamily: fonts.bold, fontSize: 16, color: '#FFFFFF' },
   /** GAP-11: modal PIN supervisor/owner (overlay + kartu ala LoginScreen). */
   pinOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
