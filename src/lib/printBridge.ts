@@ -123,7 +123,8 @@ export async function ackTerminalPrintJob(
   });
   if (!r.ok) return { ok: false };
   const u = unwrap<Record<string, unknown>>(r.data);
-  const s = (u.data as Record<string, unknown>)?.status;
+  const j = (u.data as Record<string, unknown>)?.job as Record<string, unknown> | undefined;
+  const s = j?.status;
   return { ok: true, status: typeof s === 'string' ? s : undefined };
 }
 
