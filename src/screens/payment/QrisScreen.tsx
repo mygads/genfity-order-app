@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
@@ -245,6 +245,9 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       settledRef.current = false;
       return;
     }
+    // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
+    // grup = drain saja (client_id rantai bersama, hindari settle ganda).
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: 'qris', amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(voucherCode ? { voucherCode } : {}), clientId: saleClientId });
     navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(packagingParam > 0 ? { packaging: packagingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(tipParam > 0 ? { tip: tipParam } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,

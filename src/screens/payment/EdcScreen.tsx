@@ -9,6 +9,7 @@ import { appAlert } from '../../lib/appAlert';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getOrCreatePayChainId } from '../../lib/sales';
+import { mirrorSettleToServer } from '../../lib/settleMirror';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = {
@@ -311,6 +312,9 @@ export default function EdcScreen({ navigation, route }: Props) {
       savedRef.current = false;
       return;
     }
+    // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
+    // grup = drain saja (client_id rantai bersama, hindari settle ganda).
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), clientId: saleClientId });
     navigation?.navigate('Success', {
       total: fullTotal,
       method,
