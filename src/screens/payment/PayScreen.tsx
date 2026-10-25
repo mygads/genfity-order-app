@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   Image,
   ScrollView,
@@ -34,7 +35,9 @@ import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
-import { getPosPromoGate, isPayTabEnabled } from '../../lib/posConfigSync';
+import { getPosPromoGate, isPayTabEnabled, getRequirePaymentProof } from '../../lib/posConfigSync';
+import { uploadExpensePhotoFirst } from '../../lib/terminalExpense';
+import { preparePhoto } from '../../lib/photo';
 import { customerIdFromLocalKey, maskMemberName, parseCustomerId } from '../../lib/memberRef';
 import { recordSettleMemberResult } from '../../lib/memberChangedStore';
 
@@ -434,6 +437,55 @@ export default function PayScreen({ navigation, route }: Props) {
   const [mgrPinOpen, setMgrPinOpen] = useState(false);
   const pinRetryRef = useRef<{ method: string; cash: number; change: number; detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string } } | null>(null);
 
+  // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof,
+  // cache pos-config; absen = OFF = perilaku lama). Berlaku HANYA untuk metode
+  // yang dicerminkan ke GO (mapPayMethodToBe != null): deposit/member/transfer
+  // = ledger lokal + antre ESB tanpa padanan settle → proof tak bisa ditempel
+  // (PARKED jujur, bukan diblokir). proofUrl ditempel ke settle + antrean
+  // GO_OP_SETTLE; tanpa proofUrl = HOLD (tanpa goSuccess palsu).
+  const [requireProof, setRequireProof] = useState(false);
+  const [proofUri, setProofUri] = useState<string | null>(null);
+  const [proofUrl, setProofUrl] = useState('');
+  const [proofBusy, setProofBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void getRequirePaymentProof()
+      .then((v) => { if (alive) setRequireProof(v === true); })
+      .catch(() => { /* absen = OFF */ });
+    return () => { alive = false; };
+  }, []);
+
+  /** Ambil foto bukti (kamera → galeri; resize via preparePhoto, cermin picker
+   *  ExpenseScreen). Tak pernah melempar; batal/gagal = state tak berubah. */
+  const takeProof = async () => {
+    if (proofBusy) return;
+    setProofBusy(true);
+    try {
+      try {
+        const cam = await ImagePicker.launchCameraAsync({ quality: 0.5 });
+        if (!cam.canceled && cam.assets?.[0]?.uri) {
+          const a = cam.assets[0];
+          setProofUri(await preparePhoto(a.uri, a.width, a.height));
+          setProofUrl('');
+          return;
+        }
+      } catch {
+        /* kamera tak tersedia, lanjut ke galeri */
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.5,
+      });
+      if (!res.canceled && res.assets?.[0]?.uri) {
+        const a = res.assets[0];
+        setProofUri(await preparePhoto(a.uri, a.width, a.height));
+        setProofUrl('');
+      }
+    } finally {
+      setProofBusy(false);
+    }
+  };
+
   // Tunai
   const [cashSel, setCashSel] = useState<number | null>(null);
   const [customMode, setCustomMode] = useState(false);
@@ -689,6 +741,9 @@ export default function PayScreen({ navigation, route }: Props) {
         }
         // Ronde-3 Q1: customerId GO (int) bila member ditempel.
         const custId = parseCustomerId(customerId);
+        // SESI-FINAL-APP: proofUrl https≤2048 ditempel aditif (settle jalan
+        // tanpa proof bila kosong — BE menolak jujur via 409 PROOF_REQUIRED).
+        const proofClean = /^https:\/\/.{1,2040}$/i.test(proofUrl.trim()) ? proofUrl.trim().slice(0, 2048) : '';
         const res = await settlePosPayment({
           serverId, method: beMethod, amountPaid: amount,
           ...(tip > 0 ? { tipAmount: tip } : {}),
@@ -697,6 +752,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(custId != null ? { customerId: custId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),
           ...(pin ? { pin } : {}),
+          ...(proofClean ? { proofUrl: proofClean } : {}),
         });
         if (res.ok || res.reason === 'blocked') {
           if (res.ok) {
@@ -730,6 +786,9 @@ export default function PayScreen({ navigation, route }: Props) {
             // Drain meneruskannya ke /pos/payment; PIN salah/berubah =
             // fail-once PIN_REQUIRED jujur (kasir ulangi live + PIN).
             ...(pin ? { pin: String(pin).slice(0, 128) } : {}),
+            // SESI-FINAL-APP: proof ikut antre agar drain memfinalisasi
+            // DENGAN bukti (tanpa ini = 409 PROOF_REQUIRED saat drain jalan).
+            ...(proofClean ? { proofUrl: proofClean } : {}),
             salesNum, at: new Date().toISOString(),
           });
         } catch { /* antrean belum siap */ }
@@ -970,6 +1029,33 @@ export default function PayScreen({ navigation, route }: Props) {
         if (!mapPayMethodToBe(method)) {
           void goSuccess(method, cash, change, detail);
           return;
+        }
+        // SESI-FINAL-APP: merchant mewajibkan bukti bayar → wajibkan foto
+        // SEBELUM goSuccess (upload-dulu; tanpa proofUrl = HOLD + banner,
+        // TANPA goSuccess palsu, TANPA navigasi Success, TANPA tulis lunas).
+        // Upload gagal/offline = tahan sebagai unpaid/hold (kasir ulangi saat
+        // online). Berlaku hanya untuk metode GO-mirrored (cek di atas).
+        if (requireProof) {
+          let url = proofUrl.trim();
+          if (!url && proofUri && !proofBusy) {
+            setProofBusy(true);
+            try {
+              // uploadExpensePhotoFirst generik (pakai binding terminal +
+              // endpoint upload K1; '' = gagal/offline jujur).
+              url = await uploadExpensePhotoFirst(proofUri);
+              if (url) setProofUrl(url);
+            } finally {
+              setProofBusy(false);
+            }
+          }
+          if (!url) {
+            if (proofUri) {
+              appAlert(t('pay_proof_required'), t('pay_proof_upload_fail'));
+            } else {
+              appAlert(t('pay_proof_required'), t('pay_proof_required'));
+            }
+            return;
+          }
         }
         // PIN dulu (tanpa sid): tak-wajib = jalur normal seperti hari ini.
         // Tak-diketahui (exception) = anggap wajib → fail-closed di bawah.
@@ -1782,8 +1868,34 @@ export default function PayScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderBody = () => {
-    if (!isTablet) {
+  // SESI-FINAL-APP: kartu bukti bayar (hanya bila merchant mewajibkan).
+  // Tanpa dep baru: foto via ImagePicker + preparePhoto yang sudah ada;
+  // pratinjau via Image bawaan RN; upload terjadi di gate (upload-dulu).
+  const renderProof = () => {
+    if (!requireProof) return null;
+    return (
+      <View style={styles.proofCard}>
+        <Text style={styles.panelTitle}>{t('pay_proof_title')}</Text>
+        {proofUri ? (
+          <Image source={{ uri: proofUri }} style={styles.proofImg} />
+        ) : (
+          <Text style={styles.ctaHint}>{t('pay_proof_required')}</Text>
+        )}
+        {proofUrl ? <Text style={styles.proofOk}>{`✓ ${t('pay_proof_uploaded')}`}</Text> : null}
+        {proofBusy ? <Text style={styles.ctaHint}>{t('pay_proof_uploading')}</Text> : null}
+        <AppButton
+          title={proofUri ? t('pay_proof_retake') : t('pay_proof_take')}
+          variant="secondary"
+          size="sm"
+          fullWidth={false}
+          disabled={proofBusy}
+          onPress={() => void takeProof()}
+        />
+      </View>
+    );
+  };
+
+  const renderBody = () => {    if (!isTablet) {
       return (
         <>
           {renderTabs()}
@@ -1845,6 +1957,7 @@ export default function PayScreen({ navigation, route }: Props) {
           </View>
         )}
         {renderBody()}
+        {renderProof()}
         {/* G5: block7 = ExtraPay disembunyikan; banner blokir di atas memberi jalan Sync. */}
         {syncBlocked ? null : (
         <ExtraPaySection online={online} onDone={(label, ref, approver) => {
@@ -1965,7 +2078,10 @@ const styles = StyleSheet.create({
   tipInput: { flex: 1, minWidth: 120 },
   tipAdded: { fontFamily: fonts.semibold, fontSize: 12, color: colors.greenDark, marginTop: 6 },
   tipBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8 },
-  sumBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8 },
+  // SESI-FINAL-APP: kartu bukti bayar (merchant requirePaymentProof).
+  proofCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8 },
+  proofImg: { width: '100%', height: 180, borderRadius: 8, marginTop: 8, backgroundColor: colors.line },
+  proofOk: { fontFamily: fonts.semibold, fontSize: 12, color: colors.greenDark, marginTop: 6 },  sumBox: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8 },
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 },
   sumLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
   sumValue: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
