@@ -21,6 +21,11 @@ import { ApiPath } from '../config/server';
 import { apiFetch, getApiMode, unwrap } from './apiSource';
 import { getLang } from './i18n';
 import { initDb, queryFirst } from './db';
+import {
+  parseCustomerId,
+  parseSettleMemberBlock,
+  type ParsedSettleMember,
+} from './memberRef';
 import { uuidv7 } from './uuidv7';
 
 // ---------------------------------------------------------------------------
@@ -585,6 +590,12 @@ export interface SettleInput {
   notes?: string;
   idempotencyKey?: string;
   /**
+   * Ronde-3 Q1/Q2: customerId GO (int) bila member ditempel. Alias ESB
+   * (prefix M/MC) DILARANG — guard di bawah hanya meneruskan int valid;
+   * selain itu dihilangkan (settle jalan tanpa member, bukan kirim buta).
+   */
+  customerId?: number;
+  /**
    * P1-2: id sesi kas W1 yang terbuka (liat beWorkforce.getCashSessionId).
    * Dikirim apa adanya bila diketahui agar BE mengatribusikan setoran ke
    * sesi yang benar; absen = BE me-resolve sendiri (sesi tunggal user/
@@ -595,7 +606,15 @@ export interface SettleInput {
   pin?: string;
 }
 
-export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ replayed: boolean }>> {
+/** Ronde-3 Q2: hasil settle + member block opsional (absen = kompat BE
+ *  lama → pemanggil pakai perilaku lokal seperti hari ini). */
+export interface SettleResult {
+  replayed: boolean;
+  member?: ParsedSettleMember['member'];
+  memberDropped?: string;
+}
+
+export async function settlePosPayment(inp: SettleInput): Promise<GoResult<SettleResult>> {
   if (!Number.isFinite(inp.serverId) || inp.serverId <= 0) {
     return { ok: false, reason: 'blocked', message: wireTr('blocked') };
   }
@@ -603,6 +622,8 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
   const key = inp.idempotencyKey && inp.idempotencyKey.trim() ? inp.idempotencyKey.trim() : uuidv7();
   const pinClean = String(inp.pin ?? '').trim();
   const cashSid = Math.max(0, Math.round(Number(inp.cashSessionId) || 0));
+  // Q1: hanya int GO yang diteruskan; alias/hasil parse gagal = dihilangkan.
+  const custId = parseCustomerId(inp.customerId);
   try {
     const res = await withTimeoutMs(
       apiFetch(ApiPath.merchantPosPayment, {
@@ -615,6 +636,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
           ...(inp.tipAmount ? { tipAmount: Math.round(inp.tipAmount) } : {}),
           ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
           ...(inp.notes ? { notes: inp.notes.slice(0, 500) } : {}),
+          ...(custId != null ? { customerId: custId } : {}),
           ...(pinClean ? { pin: pinClean } : {}),
           ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
         },
@@ -625,9 +647,12 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
       return { ok: false, reason: 'offline', message: wireTr('offline') };
     }
     const { data } = unwrap<unknown>(res.data);
-    if (res.ok) return { ok: true, data: { replayed: isReplaySuccess(data) } };
+    const parsed = parseSettleMemberBlock(data);
+    const withMember = parsed?.member ? { member: parsed.member } : {};
+    const withDropped = parsed?.memberDropped ? { memberDropped: parsed.memberDropped } : {};
+    if (res.ok) return { ok: true, data: { replayed: isReplaySuccess(data), ...withMember, ...withDropped } };
     if (res.status === 409 && isReplaySuccess(data ?? res.data)) {
-      return { ok: true, data: { replayed: true } };
+      return { ok: true, data: { replayed: true, ...withMember, ...withDropped } };
     }
     const be = beErrorOf(data ?? res.data);
     return {

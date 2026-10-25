@@ -10,6 +10,7 @@ import { getSession } from '../../session';
 import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
 import { getGroupPaid } from '../../lib/sales';
+import { getSettleMemberView, takeMemberChanged } from '../../lib/memberChangedStore';
 import { enqueueSync } from '../../lib/sync';
 import { postTableTransition } from '../../lib/terminalTable';
 
@@ -126,6 +127,42 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const splitPaidParam = route?.params?.splitPaid;
   const splitPaidAmt = Math.max(0, Math.round(Number(splitPaidParam?.amount) || 0));
   const splitPaidMethod = typeof splitPaidParam?.method === 'string' ? splitPaidParam.method : '';
+  // Ronde-3 Q3/Q4: block member pasca-settle (disimpan mirror) + flag berubah.
+  // Mirror fire-and-forget → response bisa datang SETELAH mount: cek saat
+  // mount + ulang 2x terjadwal (2 dtk, 5 dtk); berhenti bila view ketemu.
+  // takeMemberChanged = consume-once (banner tak ganda).
+  const [memberChanged, setMemberChanged] = useState(false);
+  const [memberView, setMemberView] = useState<{ name: string; points: number; vouchers: number } | null>(null);
+  useEffect(() => {
+    const no = String(orderNo ?? '').trim();
+    if (!no) return;
+    let alive = true;
+    let tries = 0;
+    const check = () => {
+      void (async () => {
+        try {
+          const [chg, view] = await Promise.all([takeMemberChanged(no), getSettleMemberView(no)]);
+          if (!alive) return;
+          if (chg) setMemberChanged(true);
+          if (view) {
+            setMemberView(view);
+            return;
+          }
+        } catch {
+          /* abaikan: tanpa block = tanpa banner */
+        }
+        tries += 1;
+        if (alive && tries < 3) {
+          setTimeout(check, tries === 1 ? 2000 : 5000);
+        }
+      })();
+    };
+    check();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderNo]);
   const [groupRemain, setGroupRemain] = useState<number | null>(null);
   useEffect(() => {
     if (splitPaidAmt <= 0 && !splitPaidMethod) return;
@@ -217,6 +254,17 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const receiptParams = {
     total, method: methodLabel(method), cash, change,
     no: orderNo, items: route?.params?.items, discount,
+    ...(memberView
+      ? {
+          memberLine: [
+            memberView.name,
+            `${memberView.points} ${t('mem_points')}`,
+            t('mem_go_vouchers').replace('{n}', String(memberView.vouchers)),
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        }
+      : {}),
     ...(service > 0 ? { service } : {}),
     ...(tax > 0 ? { tax } : {}),
     ...(rounding !== 0 ? { rounding } : {}),
@@ -266,6 +314,11 @@ export default function SuccessScreen({ navigation, route }: Props) {
       </View>
       <Text style={styles.title}>{t('ok_title')}</Text>
       <Text style={styles.orderNo}>{orderNo}</Text>
+      {/* Ronde-3 Q4: banner persisten bila data member berubah antara
+          pra-settle vs response pasca-settle (poin/voucher/memberDropped). */}
+      {memberChanged ? (
+        <Text style={styles.changedBanner}>{t('mem_changed_banner')}</Text>
+      ) : null}
       <Text style={styles.dateLine}>{todayId} · {timeId}</Text>
     </>
   );
@@ -381,6 +434,16 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('ok_terminal')}</Text>
             <Text style={styles.value}>{[bank, terminal].filter(Boolean).join(' · ')}</Text>
+          </View>
+        ) : null}
+        {/* Ronde-3 Q3: tampilan minimal member pasca-settle (nama samar +
+            poin + jumlah voucher); JANGAN kontak penuh/riwayat. */}
+        {memberView ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('mem_title')}</Text>
+            <Text style={styles.value}>
+              {[memberView.name, `${memberView.points} ${t('mem_points')}`, t('mem_go_vouchers').replace('{n}', String(memberView.vouchers))].filter(Boolean).join(' · ')}
+            </Text>
           </View>
         ) : null}
         {isCash && (
@@ -511,6 +574,13 @@ const styles = StyleSheet.create({
   value: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   changeValue: { fontFamily: fonts.bold, fontSize: 14, color: colors.green },
   thanks: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center' },
+  // Ronde-3 Q4: banner persisten "data member berubah" (amber, pola banner
+  // existing: teks tengah di atas kartu).
+  changedBanner: {
+    fontFamily: fonts.semibold, fontSize: 13, color: colors.amberDark,
+    backgroundColor: '#FFF6E0', borderRadius: 8, paddingHorizontal: 12,
+    paddingVertical: 6, marginTop: 10, textAlign: 'center', overflow: 'hidden',
+  },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
   // Tablet: bungkus 2x2 agar label panjang tidak terjepit.
   footerTablet: { flexWrap: 'wrap' },

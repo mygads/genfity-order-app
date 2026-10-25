@@ -42,6 +42,8 @@ type Props = {
       memberId?: string;
       /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
       customerId?: number;
+      /** Ronde-3 Q4: poin pra-settle (snapshot pembanding block response). */
+      memberPoin?: number;
     };
   };
 };
@@ -58,6 +60,11 @@ export default function EdcScreen({ navigation, route }: Props) {
   // Tanpa total terusan (dibuka di luar alur bayar) = 0 yang jujur; tombol
   // simpan mati sampai nominal > 0 + approval 6 digit.
   const total = Math.max(0, Math.round(Number(route?.params?.total) || 0));
+  /** Ronde-3 Q4: poin pra-settle (snapshot pembanding block response). */
+  const memberPoinParam =
+    route?.params?.memberPoin == null || !Number.isFinite(Number(route.params.memberPoin))
+      ? null
+      : Math.max(0, Math.round(Number(route.params.memberPoin)));
   const [phase, setPhase] = useState<Phase>('waiting');
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
@@ -327,7 +334,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), clientId: saleClientId });
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), clientId: saleClientId });
     navigation?.navigate('Success', {
       total: fullTotal,
       method,

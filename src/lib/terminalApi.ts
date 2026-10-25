@@ -19,6 +19,8 @@ import { ApiPath } from '../config/server';
 import { apiFetch, getApiMode, getDeviceId, unwrap } from './apiSource';
 // F10: validasi tag BE via parseDeviceRole (standalone, tanpa siklus impor).
 import { parseDeviceRole } from './deviceRole';
+// Ronde-3 Q5: gate memberLookupEnabled dari pos-config (murni, tanpa siklus).
+import { parseMemberLookupEnabled } from './memberRef';
 
 /** Alasan gagal jujur: BE belum dikonfigurasi vs jaringan putus. */
 export type TerminalApiReason = 'need_be' | 'offline';
@@ -882,6 +884,8 @@ export interface TerminalPosConfig {
   timerDefaultLimitMin: number;
   timerWarnBeforeMin: number;
   posBehavior: Record<string, unknown>;
+  /** Ronde-3 Q5: gate lookup/search member (absen = enabled). */
+  memberLookupEnabled: boolean;
 }
 
 function cleanPosConfigInt(v: unknown, fallback: number): number {
@@ -909,6 +913,9 @@ export async function fetchTerminalPosConfig(
       timerDefaultLimitMin: cleanPosConfigInt(timer.defaultLimitMin, 90),
       timerWarnBeforeMin: cleanPosConfigInt(timer.warnBeforeMin, 10),
       posBehavior,
+      // Q5: parse top-level + nested posBehaviorSettings/posBehavior
+      // (absen = enabled); tak pernah crash pada data asing.
+      memberLookupEnabled: parseMemberLookupEnabled(data),
     },
     fromDummy: false,
   };

@@ -17,6 +17,8 @@ import { fetchTerminalPosConfig } from './terminalApi';
 const STOCK_OPTS_KEY = 'genfity.stock.opts';
 const STOCK_DEFAULT_LOW_LIMIT = '5'; // cermin StockScreen DEFAULT_OPTS
 const TIMER_CFG_KEY = 'genfity.tabletimer.config';
+/** Ronde-3 Q5: cache flag gate lookup member. Absen = enabled (boleh lookup). */
+const MEMBER_LOOKUP_KEY = 'genfity.member.lookup';
 
 export async function syncPosConfigFromServer(terminalId: string): Promise<boolean> {
   const id = (terminalId ?? '').trim();
@@ -53,5 +55,25 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   } catch {
     /* best-effort: default TableTimerScreen tetap dipakai */
   }
+
+  // Q5: cache flag gate lookup member (server-wins tiap sync sukses; gagal
+  // sync = cache lama dipakai, belum pernah sync = enabled).
+  try {
+    await setJSON(MEMBER_LOOKUP_KEY, { enabled: r.data.memberLookupEnabled !== false });
+  } catch {
+    /* abaikan */
+  }
   return true;
+}
+
+/** Q5: gate UI lookup/search member. Absen/error = enabled (kontrak). */
+export async function getMemberLookupEnabled(): Promise<boolean> {
+  try {
+    const cur = await getJSON<{ enabled?: unknown } | null>(MEMBER_LOOKUP_KEY, null);
+    if (!cur || cur.enabled === undefined || cur.enabled === null) return true;
+    if (typeof cur.enabled === 'boolean') return cur.enabled;
+    return String(cur.enabled).trim().toLowerCase() !== 'false';
+  } catch {
+    return true;
+  }
 }

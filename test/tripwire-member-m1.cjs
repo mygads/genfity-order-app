@@ -45,8 +45,11 @@ function run() {
   ok(/cacheServerPoints/.test(member), 'M1-03: MemberScreen memakai cacheServerPoints');
   ok(/searchServerCustomers/.test(member), 'M1-03: MemberScreen memanggil searchServerCustomers');
 
-  // M1-04: materialisasi + email.
-  ok(/`MC\$\{/.test(member) || /MC\$\{/.test(member), 'M1-04: MemberScreen materialisasi id MC{customerId}');
+  // M1-04: materialisasi + email. Ronde-3: satu-satunya produsen format
+  // MC{id} = localMemberKeyForCustomer (lib/memberRef); MemberScreen memakai
+  // helper itu, bukan inline `MC${...}`.
+  ok(/localMemberKeyForCustomer\(/.test(member), 'M1-04: MemberScreen materialisasi via localMemberKeyForCustomer');
+  ok(!/`MC\$\{/.test(member), 'M1-04: MemberScreen tanpa inline MC${} (produsen tunggal memberRef)');
   ok(/m\.email|email: /.test(member), 'M1-04: MemberScreen membaca/menulis email');
   const schema = read('lib/dbSchema.ts');
   ok(/ms_member ADD COLUMN email TEXT|email TEXT/.test(schema), 'M1-04: skema ms_member memuat kolom email');

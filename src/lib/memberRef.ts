@@ -154,6 +154,24 @@ export function snapshotFromParsed(p: ParsedSettleMember | null): MemberViewSnap
 }
 
 // ---------------------------------------------------------------------------
+// Q3: tampilan minimal member (nama samar + poin + jumlah voucher).
+// JANGAN tampilkan kontak penuh/riwayat di UI kasir.
+// ---------------------------------------------------------------------------
+/** Nama samar: nama depan utuh + kata berikut disingkat (`Budi Santoso` →
+ *  `Budi S***`). Kata tunggal ≤2 huruf → `***`. */
+export function maskMemberName(name: unknown): string {
+  const parts = String(name ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return '';
+  const head = parts[0];
+  const tail = parts.slice(1).map((w) => `${w.charAt(0)}***`);
+  const masked = [head.length <= 2 ? '***' : head, ...tail].join(' ');
+  return masked;
+}
+
+// ---------------------------------------------------------------------------
 // Q5: gate lookup/search member. Kontrak: pos-config `memberLookupEnabled`
 // (absen = enabled). Baca top-level ATAU nested posBehaviorSettings /
 // posBehavior (BE lama menaruh flag di posBehavior).

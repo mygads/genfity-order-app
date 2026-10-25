@@ -21,6 +21,12 @@ import { initDb, query, queryFirst, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { searchServerCustomers } from '../../lib/posWire';
+import {
+  customerIdFromLocalKey,
+  localMemberKeyForCustomer,
+  parseCustomerId,
+} from '../../lib/memberRef';
+import { getMemberLookupEnabled } from '../../lib/posConfigSync';
 import { isValidEmail } from '../../lib/payments';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { tOf, useLang, tCur } from '../../lib/i18n';
@@ -350,6 +356,14 @@ export default function MemberScreen({ navigation, route }: Props) {
   const [addErr, setAddErr] = useState('');
   // Saldo inquiry server untuk member terpilih (null = belum ada / hanya dummy).
   const [inquiry, setInquiry] = useState<{ saldo: number; poin: number } | null>(null);
+  // Ronde-3 Q1/Q5: peta lokal-id → customerId GO hasil resolve search server.
+  // Terapkan WAJIB resolve via searchCustomers sebelum tempel (attach tanpa
+  // GO id = diblokir + toast, bukan fallback alias).
+  const localToServer = useRef(new Map<string, number>());
+  // Ronde-3 Q5: gate lookup/search server (absen = enabled).
+  const [lookupEnabled, setLookupEnabled] = useState(true);
+  // Ronde-3 Q1: pesan blokir tempel (member tanpa customerId GO).
+  const [applyErr, setApplyErr] = useState('');
   // WIRE REA-3: saldo via erp/member balance-deposit di samping inquiry-deposit
   // (best-effort - null = belum ada / hanya dummy, cache lokal tetap dipakai).
   const [erpBalance, setErpBalance] = useState<number | null>(null);
@@ -369,6 +383,20 @@ export default function MemberScreen({ navigation, route }: Props) {
 
   // Member dari SQLite ms_member dulu (offline-first: seed/pull/koleksi
   // nyata), lalu pengayaan dari server bila ada. Kosong = empty-state.
+  // Ronde-3 Q5: flag gate lookup dibaca sekali saat mount (cache pos-config;
+  // absen = enabled).
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const v = await getMemberLookupEnabled();
+        if (live) setLookupEnabled(v);
+      } catch {
+        /* absen = enabled */
+      }
+    })();
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     let live = true;
     (async () => {
@@ -424,7 +452,8 @@ export default function MemberScreen({ navigation, route }: Props) {
   // memakai identitas lokal. Gagal/offline = koleksi lokal tetap dipakai.
   useEffect(() => {
     const keyword = q.trim();
-    if (keyword.length === 0 || !online) return;
+    // Ronde-3 Q5: lookup server digate pos-config (mati = koleksi lokal saja).
+    if (keyword.length === 0 || !online || !lookupEnabled) return;
     let live = true;
     const timer = setTimeout(() => {
       void (async () => {
@@ -451,11 +480,16 @@ export default function MemberScreen({ navigation, route }: Props) {
             if (!rName) continue;
             const rPhone = String(r.phone ?? '').trim();
             const rEmail = String(r.email ?? '').trim();
+            // Ronde-3 Q1: kunci lokal = turunan deterministik customerId GO
+            // (satu-satunya produsen format MC — JANGAN inline `MC${}`).
+            const mcId = localMemberKeyForCustomer(r.id);
             const hit =
-              byId.get(`MC${r.id}`) ??
+              (mcId ? byId.get(mcId) : undefined) ??
               (rPhone ? byPhone.get(phoneKey(rPhone)) : undefined) ??
               (rEmail ? byEmail.get(rEmail.toLowerCase()) : undefined);
             if (hit) {
+              // Resolve: alias lokal ini = customerId GO r.id.
+              localToServer.current.set(hit.id, r.id);
               const next: Member = {
                 ...hit,
                 nama: rName || hit.nama,
@@ -476,8 +510,11 @@ export default function MemberScreen({ navigation, route }: Props) {
               }
               dirty = true;
             } else {
-              const nid = `MC${r.id}`;
+              if (!mcId) continue;
+              const nid = mcId;
               if (byId.has(nid)) continue;
+              // Resolve: materialisasi lokal = customerId GO r.id.
+              localToServer.current.set(nid, r.id);
               const nm = { id: nid, nama: rName, noHp: rPhone, email: rEmail, tipe: 'Regular', saldo: 0, poin: r.pointsBalance, loyalty: r.loyaltyMember };
               try {
                 await run(
@@ -508,7 +545,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, online]);
+  }, [q, online, lookupEnabled]);
 
   // Saldo inquiry server untuk member terpilih (inquiry-deposit hanya cek saldo,
   // bukan top up). Dummy Mode selalu fromDummy + menggemakan M001 - hanya
@@ -784,8 +821,26 @@ export default function MemberScreen({ navigation, route }: Props) {
    * - standalone (sidebar/dashboard) -> ke Cashier, BUKAN ke Pay. */
   const applyMember = () => {
     if (!selected) return;
+    // Ronde-3 Q1: tempel WAJIB customerId GO hasil resolve search server.
+    // Kunci lokal MC{id} → parse langsung; alias lain → peta resolve; tanpa
+    // keduanya = blokir + pesan (bukan fallback alias ke payload).
+    const customerId =
+      customerIdFromLocalKey(selected.id) ??
+      localToServer.current.get(selected.id) ??
+      parseCustomerId(selected.id);
+    if (customerId == null) {
+      setApplyErr(t('mem_attach_needs_go'));
+      return;
+    }
+    setApplyErr('');
     const p = route?.params;
-    const memberPick = { memberId: selected.id, nama: selected.nama, saldo: selected.saldo };
+    const memberPick = {
+      memberId: selected.id,
+      nama: selected.nama,
+      saldo: selected.saldo,
+      customerId,
+      memberPoin: selected.poin,
+    };
     const ctx = {
       ...memberPick,
       ...(p?.total != null ? { total: p.total } : {}),
@@ -838,7 +893,7 @@ export default function MemberScreen({ navigation, route }: Props) {
           <TouchableOpacity
             key={m.id}
             style={[s.card, selected?.id === m.id && s.cardActive]}
-            onPress={() => setSelected(m)}>
+            onPress={() => { setSelected(m); setApplyErr(''); }}>
             <View style={s.cardTop}>
               <View style={s.avatar}>
                 <Text style={s.avatarTxt}>{m.nama.charAt(0)}</Text>
@@ -935,6 +990,7 @@ export default function MemberScreen({ navigation, route }: Props) {
             onPress={() => setDepositVisible(true)}
           />
           <AppButton size="md" title={t('mem_apply')} onPress={applyMember} />
+          {applyErr ? <Text style={s.minErr}>{applyErr}</Text> : null}
         </ScrollView>
       ) : (
         <View style={s.detailEmpty}>
@@ -997,6 +1053,11 @@ export default function MemberScreen({ navigation, route }: Props) {
               <Text style={s.searchLink}>{t('mem_voucher')} ›</Text>
             </TouchableOpacity>
           </View>
+          {/* Ronde-3 Q5: lookup server dimatikan pos-config = catatan jujur,
+              koleksi lokal tetap bisa dipakai/ditempel bila ter-resolve. */}
+          {lookupEnabled ? null : (
+            <Text style={s.minErr}>{t('mem_lookup_disabled')}</Text>
+          )}
         </View>
       </View>
 
@@ -1035,6 +1096,9 @@ export default function MemberScreen({ navigation, route }: Props) {
                 onPress={applyMember}
               />
             </View>
+          ) : null}
+          {selected && applyErr ? (
+            <Text style={[s.minErr, { textAlign: 'center', paddingHorizontal: 16 }]}>{applyErr}</Text>
           ) : null}
         </>
       )}

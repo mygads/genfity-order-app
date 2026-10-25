@@ -23,7 +23,10 @@ import {
   getServerOrderIdForSale,
   mapPayMethodToBe,
   settlePosPayment,
+  type SettleResult,
 } from './posWire';
+import { parseCustomerId } from './memberRef';
+import { recordSettleMemberResult } from './memberChangedStore';
 import { enqueueSync } from './sync';
 
 export type MirrorSettleInput = {
@@ -33,6 +36,15 @@ export type MirrorSettleInput = {
   tip?: number;
   voucherCode?: string;
   clientId?: string;
+  /** Ronde-3 Q1/Q2: customerId GO (int) bila member ditempel. */
+  customerId?: number;
+  /** Ronde-3 Q4: snapshot tampilan member pra-settle (poin/voucher yang
+   *  dipajang sebelum bayar; null = tak diketahui = banding dilewati). */
+  prevPoints?: number | null;
+  prevVouchers?: number | null;
+  /** Ronde-3 Q4: dipanggil SEKALI saat immediate settle menjawab (2xx/409
+   *  replay = sukses; offline/blocked/ditolak = tak dipanggil). */
+  onSettled?: (r: SettleResult & { memberChanged?: boolean }) => void;
 };
 
 export function mirrorSettleToServer(inp: MirrorSettleInput): void {
@@ -51,16 +63,50 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
       } catch {
         /* abaikan: BE me-resolve */
       }
+      const custId = parseCustomerId(inp.customerId);
       const res = await settlePosPayment({
         serverId,
         method: beMethod,
         amountPaid: inp.amount,
         ...(inp.tip && inp.tip > 0 ? { tipAmount: inp.tip } : {}),
         ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
+        ...(custId != null ? { customerId: custId } : {}),
         ...(inp.clientId ? { idempotencyKey: inp.clientId } : {}),
         ...(cashSid ? { cashSessionId: cashSid } : {}),
       });
-      if (res.ok || res.reason === 'blocked') return;
+      if (res.ok || res.reason === 'blocked') {
+        if (res.ok) {
+          // Q4: snapshot pra vs block pasca → banner persisten; view
+          // minimal Q3 disimpan untuk Success/struk. Fire-and-forget.
+          let changed = false;
+          try {
+            const r = await recordSettleMemberResult(
+              inp.salesNum,
+              res.data,
+              {
+                customerId: custId,
+                pointsBalance:
+                  inp.prevPoints == null || !Number.isFinite(Number(inp.prevPoints))
+                    ? null
+                    : Math.round(Number(inp.prevPoints)),
+                vouchersValid:
+                  inp.prevVouchers == null || !Number.isFinite(Number(inp.prevVouchers))
+                    ? null
+                    : Math.round(Number(inp.prevVouchers)),
+              },
+            );
+            changed = r.changed;
+          } catch {
+            /* best-effort */
+          }
+          try {
+            inp.onSettled?.({ ...res.data, memberChanged: changed });
+          } catch {
+            /* callback UI best-effort */
+          }
+        }
+        return;
+      }
       try {
         enqueueSync('other', {
           op: GO_OP_SETTLE,
@@ -69,6 +115,7 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
           amountPaid: inp.amount,
           ...(inp.tip && inp.tip > 0 ? { tipAmount: inp.tip } : {}),
           ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
+          ...(custId != null ? { customerId: custId } : {}),
           ...(inp.clientId ? { clientId: inp.clientId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),
           salesNum: inp.salesNum,

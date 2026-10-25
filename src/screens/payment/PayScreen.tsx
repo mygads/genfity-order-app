@@ -34,7 +34,8 @@ import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
-import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';
+import { customerIdFromLocalKey, maskMemberName, parseCustomerId } from '../../lib/memberRef';
+import { recordSettleMemberResult } from '../../lib/memberChangedStore';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -117,6 +118,9 @@ type Props = {
       memberId?: string;
       /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
       customerId?: number;
+      /** Ronde-3 Q4: poin pra-settle yang dipajang (dari Member terapkan);
+       * dipakai sebagai snapshot pembanding block response pasca-settle. */
+      memberPoin?: number;
       /** Voucher bawaan order: kode string, objek {code, amount, kind}, atau nominal. */
       voucher?: VoucherIn;
       /** Kode voucher eksplisit bila voucher di atas hanya angka. */
@@ -209,6 +213,11 @@ export default function PayScreen({ navigation, route }: Props) {
   const memberIdParam = route?.params?.memberId;
   /** Ronde-3 Q1: ref GO dari params (ditempel MemberScreen pasca-resolve). */
   const customerIdParam = parseCustomerId(route?.params?.customerId);
+  /** Ronde-3 Q4: poin pra-settle (snapshot pembanding block response). */
+  const memberPoinParam =
+    route?.params?.memberPoin == null || !Number.isFinite(Number(route.params.memberPoin))
+      ? null
+      : Math.max(0, Math.round(Number(route.params.memberPoin)));
   /** Nomor struk bawaan draft (Simpan/LoadOrder): pakai ulang agar struk = arsip. */
   const paramSalesNum = (route?.params?.salesNum ?? '').trim();
   /** Rincian struk bawaan pemanggil untuk diteruskan (bukan dihitung ulang). */
@@ -610,7 +619,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const mirrorSettleToServer = (
     salesNum: string, methodLabel: string, amount: number,
     tip: number, voucherCode: string | undefined, clientId: string | undefined,
-    pin?: string, customerId?: number | null,
+    pin?: string, customerId?: number | null, prevPoints?: number | null,
   ) => {
     void (async () => {
       try {
@@ -639,7 +648,26 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(cashSid ? { cashSessionId: cashSid } : {}),
           ...(pin ? { pin } : {}),
         });
-        if (res.ok || res.reason === 'blocked') return;
+        if (res.ok || res.reason === 'blocked') {
+          if (res.ok) {
+            // Ronde-3 Q4: snapshot pra vs block pasca → banner persisten di
+            // Success; view minimal Q3 disimpan untuk Success/struk.
+            // Fire-and-forget: sale lokal tetap sah apa pun hasilnya.
+            void recordSettleMemberResult(
+              salesNum,
+              res.data,
+              {
+                customerId: custId,
+                pointsBalance:
+                  prevPoints == null || !Number.isFinite(Number(prevPoints))
+                    ? null
+                    : Math.round(Number(prevPoints)),
+                vouchersValid: null,
+              },
+            ).catch(() => undefined);
+          }
+          return;
+        }
         try {
           enqueueSync('other', {
             op: GO_OP_SETTLE, serverId, method: beMethod, amountPaid: amount,
@@ -736,7 +764,7 @@ export default function PayScreen({ navigation, route }: Props) {
           await saveSale(gInput);
           recordSale(gInput);
           // W2: cermin lunas grup ke BE bila tertaut order server.
-          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin, saleCustomerId);
+          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -840,7 +868,7 @@ export default function PayScreen({ navigation, route }: Props) {
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
     recordSale(input);
     // W2: cermin lunas ke BE bila tertaut order server.
-    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId);
+    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
@@ -955,6 +983,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(customerName ? { customer: customerName } : {}),
         ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
         ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
+        ...(memberPoinParam != null ? { memberPoin: memberPoinParam } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
         // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke QRIS.
         clientId: chainClientId,
@@ -986,6 +1015,8 @@ export default function PayScreen({ navigation, route }: Props) {
       m.id.toLowerCase().includes(memberQ.toLowerCase()),
   );
   const memberPicked = memberSource.find((m) => m.id === memberSel) ?? null;
+  /** Ronde-3 Q3: member tertempel untuk chip minimal (pilihan tab / params). */
+  const chipMember = memberPicked ?? memberSource.find((m) => m.id === memberIdParam) ?? null;
   const onDepositLanjut = () => {
     if (!memberPicked || memberPicked.saldo <= 0 || payable <= 0) return;
     const pakai = Math.min(memberPicked.saldo, remaining);
@@ -1467,6 +1498,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(customerName ? { customer: customerName } : {}),
           ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
           ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
+          ...(memberPoinParam != null ? { memberPoin: memberPoinParam } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
           // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke EDC.
           clientId: chainClientId,
@@ -1543,6 +1575,15 @@ export default function PayScreen({ navigation, route }: Props) {
   const renderMember = () => (
     <View>
       <Text style={styles.panelTitle}>{t('pay_dep_title')}</Text>
+      {/* Ronde-3 Q3: tampilan minimal member tertempel (nama samar + poin
+          bila diketahui); JANGAN kontak penuh/riwayat. Poin pra-settle dari
+          Member terapkan (memberPoin params); tanpa itu hanya nama samar. */}
+      {chipMember ? (
+        <Text style={styles.ctaHint}>
+          {maskMemberName(chipMember.nama)}
+          {memberPoinParam != null ? ` · ${t('mem_go_points')}: ${memberPoinParam}` : ''}
+        </Text>
+      ) : null}
       <AppInput
         placeholder={t('pay_dep_search')}
         value={memberQ}
