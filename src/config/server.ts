@@ -190,6 +190,15 @@ export const ApiPath = {
   terminalClaim: 'api/v1/terminals/{id}/claim', // E32 POST ambil alih {pin,deviceId} → {bound, kickedUserId} (fase-1b: PIN terminal WAJIB; pindah device saja, kapasitas per-tag 409 TAG_CONFLICT)
   terminalQrIssue: 'api/v1/terminals/{id}/qr-issue', // POST terbitkan token QR login sekali-pakai (tanpa body; member-only) → {qrToken, expiresAt, ttlSeconds} (TTL 60 dtk BE; E25 login-qr TBD Q2)
   terminalQrConsume: 'api/v1/terminals/{id}/qr-consume', // POST tukar token QR hasil scan {qrToken, deviceId?} (PUBLIC, HP belum bersesi) → {terminalId, terminalCode, merchantId, pinVersion advisory} — TANPA sesi/grant/binding; PIN terminal tetap wajib tahap-B
+  // TRISISI2 ronde-2 (A10/A11/A12): kontrak terminal kasir — klien siap-
+  // kontrak di terminalApi.ts; pemanggil fallback jujur bila BE 404/offline.
+  // BE-BELUM-ADA (2026-10-25): expenses + vouchers/burn|release belum ada di
+  // router BE (agen BE ronde-2 masih jalan); transition ADA (router.go:1229)
+  // tapi tanpa endpoint LIST tabel → mapping id-numerik PARKED.
+  terminalExpenses: 'api/v1/terminals/{id}/expenses', // POST {clientExpenseId,kind:EXPENSE|PETTY_CASH,amount,note,occurredAt} → 201 {id}; duplikat 409 + existing id
+  terminalTableTransition: 'api/v1/terminals/{id}/tables/{tableId}/transition', // POST {status:OCCUPIED|AVAILABLE,guestName?,partySize?} → {id,tableNumber,status,statusSince,guestName,partySize}
+  terminalVouchersBurn: 'api/v1/terminals/{id}/vouchers/burn', // POST {code,orderClientId,idempotencyKey} → 200 {ok,redemptionId}
+  terminalVouchersRelease: 'api/v1/terminals/{id}/vouchers/release', // POST {idempotencyKey} → {ok,released}
   // PP-001/S7: kontrak supervisor BARU (BE router.go:1119,
   // supervisor_approve.go) — PENGGANTI legacy auth/supervisor-approve untuk
   // alur void/eskalasi/compliment. '{id}' = ID numerik BE terminal (bukan

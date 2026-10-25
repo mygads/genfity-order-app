@@ -1019,3 +1019,169 @@ export async function submitStockCountItem(
   return { ok: true, data: { countedQty: numId(data.countedQty) }, fromDummy: false };
 }
 
+// --------------------------------------------------------------------------
+// TRISISI2 ronde-2 — klien siap-kontrak (BE-BELUM-ADA 2026-10-25 kecuali
+// transition): expenses (A10), table-transition (A11), vouchers burn/release
+// (A12). Pola fail jujur sama: {ok:false} = pemanggil fallback, BUKAN sukses.
+// 409-duplicate = sukses idempoten (catat id server).
+// --------------------------------------------------------------------------
+
+export type TerminalExpenseKind = 'EXPENSE' | 'PETTY_CASH';
+
+export interface TerminalExpenseInput {
+  clientExpenseId: string;
+  kind: TerminalExpenseKind;
+  amount: number;
+  note: string;
+  occurredAt: string;
+}
+
+export interface TerminalExpenseDone {
+  id: string;
+  duplicate: boolean;
+}
+
+function readExistingExpenseId(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['id', 'existingId', 'existing_id', 'expenseId', 'expense_id']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    }
+  }
+  return '';
+}
+
+export async function createTerminalExpense(
+  terminalId: string,
+  inp: TerminalExpenseInput,
+): Promise<TerminalApiResult<TerminalExpenseDone>> {
+  const r = await apiFetch(withId(ApiPath.terminalExpenses, terminalId), {
+    method: 'POST',
+    body: {
+      clientExpenseId: inp.clientExpenseId,
+      kind: inp.kind,
+      amount: Math.round(inp.amount),
+      note: inp.note.slice(0, 500),
+      occurredAt: inp.occurredAt,
+    },
+  });
+  if (r.fromDummy) return fail<TerminalExpenseDone>(r.status, r.fromDummy);
+  const { data } = unwrap<Record<string, unknown> | null>(r.data);
+  if (r.ok) {
+    return { ok: true, data: { id: readExistingExpenseId(data), duplicate: false }, fromDummy: false };
+  }
+  // 409-duplicate = sukses idempoten (kontrak: 409 + existing id).
+  if (r.status === 409) {
+    const existing = readExistingExpenseId(data ?? r.data);
+    if (existing) return { ok: true, data: { id: existing, duplicate: true }, fromDummy: false };
+  }
+  return failWith<TerminalExpenseDone>(r.status, r.fromDummy, r.data);
+}
+
+export type TerminalTableStatus = 'OCCUPIED' | 'AVAILABLE';
+
+export interface TerminalTableTransitionInput {
+  status: TerminalTableStatus;
+  guestName?: string;
+  partySize?: number;
+}
+
+export interface TerminalTableTransitionDone {
+  id: number;
+  tableNumber: string;
+  status: TerminalTableStatus;
+  statusSince: string | null;
+  guestName: string | null;
+  partySize: number | null;
+}
+
+export async function transitionTerminalTable(
+  terminalId: string,
+  tableId: number,
+  inp: TerminalTableTransitionInput,
+): Promise<TerminalApiResult<TerminalTableTransitionDone>> {
+  const path = withId(ApiPath.terminalTableTransition, terminalId)
+    .replace('{tableId}', encodeURIComponent(String(tableId)));
+  const r = await apiFetch(path, {
+    method: 'POST',
+    body: {
+      status: inp.status,
+      ...(inp.guestName ? { guestName: inp.guestName.slice(0, 120) } : {}),
+      ...(inp.partySize ? { partySize: Math.max(1, Math.min(40, Math.round(inp.partySize))) } : {}),
+    },
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<TerminalTableTransitionDone>(r.status, r.fromDummy)
+      : failWith<TerminalTableTransitionDone>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const st = String(data.status ?? '').trim().toUpperCase();
+  return {
+    ok: true,
+    data: {
+      id: numId(data.id),
+      tableNumber: str(data.tableNumber),
+      status: st === 'AVAILABLE' ? 'AVAILABLE' : 'OCCUPIED',
+      statusSince: str(data.statusSince) || null,
+      guestName: str(data.guestName) || null,
+      partySize: data.partySize === null || data.partySize === undefined ? null : numId(data.partySize),
+    },
+    fromDummy: false,
+  };
+}
+
+export interface TerminalVoucherBurnDone {
+  ok: boolean;
+  redemptionId: string;
+}
+
+export async function burnTerminalVoucher(
+  terminalId: string,
+  inp: { code: string; orderClientId: string; idempotencyKey: string },
+): Promise<TerminalApiResult<TerminalVoucherBurnDone>> {
+  const r = await apiFetch(withId(ApiPath.terminalVouchersBurn, terminalId), {
+    method: 'POST',
+    body: { code: inp.code, orderClientId: inp.orderClientId, idempotencyKey: inp.idempotencyKey },
+    idempotencyKey: inp.idempotencyKey,
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<TerminalVoucherBurnDone>(r.status, r.fromDummy)
+      : failWith<TerminalVoucherBurnDone>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { ok: data.ok !== false, redemptionId: str(data.redemptionId ?? data.id) },
+    fromDummy: false,
+  };
+}
+
+export async function releaseTerminalVoucher(
+  terminalId: string,
+  idempotencyKey: string,
+): Promise<TerminalApiResult<{ ok: boolean; released: boolean }>> {
+  const r = await apiFetch(withId(ApiPath.terminalVouchersRelease, terminalId), {
+    method: 'POST',
+    body: { idempotencyKey },
+    idempotencyKey,
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<{ ok: boolean; released: boolean }>(r.status, r.fromDummy)
+      : failWith<{ ok: boolean; released: boolean }>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { ok: data.ok !== false, released: data.released !== false },
+    fromDummy: false,
+  };
+}
+
+
