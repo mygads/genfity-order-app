@@ -31,6 +31,17 @@
  * Tiap jalur fail-open memancarkan console.warn sekali
  * (warn-once) agar tidak diam. Fungsi ini TIDAK PERNAH melempar. Alur PIN
  * supervisor (lib/pin.ts) tidak disentuh - modul ini hanya membaca tabel akses.
+ *
+ * PEMBAGIAN DUA LAPIS #9 (audit trisisi — BUKAN duplikasi, sengaja):
+ * - RBAC lokal di sini = gating UX offline: menyembunyikan/memblokir tombol
+ *   sensitif di perangkat. Ini BUKAN otorisasi — penyerang dengan akses DB
+ *   lokal bisa melewatinya.
+ * - PIN server (`requirePinFor*` + `pos_supervisor_approvals`, diverifikasi
+ *   BE per aksi void/refund/cancel via posPinGate transport) = otorisasi
+ *   AKSI yang sebenarnya. BE enforce fail-closed end-to-end.
+ * Aturan: JANGAN pernah menganggap lolos RBAC lokal = boleh eksekusi; tiap
+ * aksi sensitif WAJIB lewat gerbang PIN server saat online. Offline = aksi
+ * sensitif ditunda (outbox) atau ditolak, tak pernah dieksekusi diam-diam.
  */
 import { queryFirst } from './db';
 import {

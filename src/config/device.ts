@@ -45,7 +45,9 @@ const DEFAULT_STATIONS: Station[] = [
     name: 'Printer Dapur',
     role: 'Dapur',
     type: 'LAN',
-    address: '192.168.1.50:9100',
+    // #11: alamat default SENGAJA kosong (dulu 192.168.1.50:9100 basi) —
+    // kasir wajib mengisi di layar Printer; IP basi bisa salah kirim cetakan.
+    address: '',
     cols: 32,
     autocut: false,
     isDefault: false,

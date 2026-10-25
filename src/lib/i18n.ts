@@ -874,7 +874,6 @@ const STR: Record<string, Entry> = {
   itemDiscount: { id: 'Diskon item', en: 'Item discount' },
   subtotalNet: { id: 'Subtotal (net)', en: 'Subtotal (net)' },
   taxIncl: { id: 'Pajak (incl)', en: 'Tax (incl)' },
-  serviceExcl: { id: 'Service 5% (excl)', en: 'Service 5% (excl)' },
   serviceExclRate: { id: 'Service {r}% (excl)', en: 'Service {r}% (excl)' },
   serviceExclFixed: { id: 'Service (tetap)', en: 'Service (flat)' },
   serviceEst: { id: ' (estimasi)', en: ' (estimate)' },

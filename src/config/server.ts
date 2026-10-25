@@ -71,8 +71,6 @@ export const ApiPath = {
   pullTerminalSettings: 'esb_api/pull/pull-terminal-settings',
   // [FAKTA] REA-12: versi POS (nama konkret pull-pos-version).
   pullPosVersion: 'esb_api/pull/pull-pos-version',
-  // [FAKTA] REA-8: spesimen grup v11.
-  terminalSettingsV11: 'esb_apiv11/main/get-terminal-settings',
   // [FAKTA] REA-9: notifikasi verifikasi terminal.
   terminalVerifyNotify: 'esb_apiv9/terminal/verification-notify',
   pushOrderFinish: 'order/finish',

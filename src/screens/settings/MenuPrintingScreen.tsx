@@ -24,7 +24,14 @@ showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OP
  * event/notifikasi di dispatcher, bukan memblokir fitur — kasir/dapur/full =
  * fitur penuh. Station kanonis ST-KASIR/ST-DAPUR/ST-CHECKER/ST-LABEL di bawah
  * adalah address book printer; SELEKSI aktif di-scope per terminal klaim
- * (scopeRank di lib/print.ts), jadi routing ini tetap valid lintas terminal. */
+ * (scopeRank di lib/print.ts), jadi routing ini tetap valid lintas terminal.
+ *
+ * VERDIK SoT #6 (audit trisisi): routing per-menu + peta station→printer-fisik
+ * = DEVICE-LOCAL by design (BE tak punya konsep station; pull katalog
+ * masterGo.ts sengaja mempertahankan stationId lokal). Server hanya memiliki
+ * definisi destinasi/template (pos-config S-F12, editor FE PrintBridgeTab).
+ * Konsekuensi: dua terminal BISA divergen — owner wajib mengonfigurasi tiap
+ * terminal identik. Jangan pindahkan ke server tanpa migrasi + endpoint BE. */
 /** Pilihan station UI -> id station kanonis (kolom id ms_station, dibaca KitchenScreen). */
 const STATION_ID_OF: Record<StationId, string | null> = {
   kasir: 'ST-KASIR',
