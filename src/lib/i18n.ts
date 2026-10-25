@@ -993,6 +993,8 @@ const STR: Record<string, Entry> = {
   'expense.takePhoto': { id: 'Ambil Foto', en: 'Take Photo' },
   'expense.changePhoto': { id: 'Ganti Foto', en: 'Change Photo' },
   'expense.saveBtn': { id: 'Simpan Pengeluaran', en: 'Save Expense' },
+  // A-P1-6: foto lokal tersimpan, menunggu endpoint upload terminal (PARKED).
+  'expense.photoPending': { id: 'Foto tersimpan di perangkat — menunggu upload (server menyusul).', en: 'Photo saved on device — waiting for upload (server to follow).' },
   'printers.title': { id: 'Printer', en: 'Printers' },
   'printers.sub': { id: 'Station kasir/dapur/checker/label - BT SPP - LAN - Star', en: 'Cashier/kitchen/checker/label stations - BT SPP - LAN - Star' },
   'printers.stations': { id: 'Station Printer', en: 'Printer Stations' },

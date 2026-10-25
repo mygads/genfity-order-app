@@ -1041,11 +1041,30 @@ export interface TerminalExpenseInput {
   amount: number;
   note: string;
   occurredAt: string;
+  /** A-P1-6: URL foto struk bila SUDAH remote (https). Lokal (file://) JANGAN
+   *  dikirim — BE menolak >2048 char; tanpa endpoint upload terminal, foto
+   *  lokal ditandai photoPending (banner + marker storage, lapor PARKED). */
+  photoUrl?: string;
 }
 
 export interface TerminalExpenseDone {
   id: string;
   duplicate: boolean;
+  /** Gema photoUrl dari server ('' bila tak ada). */
+  photoUrl: string;
+}
+
+function readExpensePhotoUrl(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['photoUrl', 'photo_url', 'photoURL']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 2048);
+    }
+  }
+  return '';
 }
 
 function readExistingExpenseId(body: unknown): string {
@@ -1066,6 +1085,7 @@ export async function createTerminalExpense(
   terminalId: string,
   inp: TerminalExpenseInput,
 ): Promise<TerminalApiResult<TerminalExpenseDone>> {
+  const photoUrl = String(inp.photoUrl ?? '').trim().slice(0, 2048);
   const r = await apiFetch(withId(ApiPath.terminalExpenses, terminalId), {
     method: 'POST',
     body: {
@@ -1074,17 +1094,20 @@ export async function createTerminalExpense(
       amount: Math.round(inp.amount),
       note: inp.note.slice(0, 500),
       occurredAt: inp.occurredAt,
+      // A-P1-6: kirim photoUrl HANYA bila sudah remote; lokal = omit
+      // (pemanggil menandai photoPending + banner).
+      ...(photoUrl ? { photoUrl } : {}),
     },
   });
   if (r.fromDummy) return fail<TerminalExpenseDone>(r.status, r.fromDummy);
   const { data } = unwrap<Record<string, unknown> | null>(r.data);
   if (r.ok) {
-    return { ok: true, data: { id: readExistingExpenseId(data), duplicate: false }, fromDummy: false };
+    return { ok: true, data: { id: readExistingExpenseId(data), duplicate: false, photoUrl: readExpensePhotoUrl(data) }, fromDummy: false };
   }
   // 409-duplicate = sukses idempoten (kontrak: 409 + existing id).
   if (r.status === 409) {
     const existing = readExistingExpenseId(data ?? r.data);
-    if (existing) return { ok: true, data: { id: existing, duplicate: true }, fromDummy: false };
+    if (existing) return { ok: true, data: { id: existing, duplicate: true, photoUrl: readExpensePhotoUrl(data ?? r.data) }, fromDummy: false };
   }
   return failWith<TerminalExpenseDone>(r.status, r.fromDummy, r.data);
 }

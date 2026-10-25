@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { postExpenseToTerminal } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
   cashMoveBe,
   cashMovePayload,
   getCashSessionId,
@@ -17,7 +17,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   const [catatan, setCatatan] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoErr, setPhotoErr] = useState('');
-  const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); return () => { alive = false; }; }, []);
+  const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null; photoPending?: boolean }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); return () => { alive = false; }; }, []);
 
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
@@ -70,7 +70,11 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
       // clientExpenseId = id baris (uuidv7 mentah, dibangun SEKALI di atas,
       // dipakai ulang saat retry); sukses terminal = LEWATI antrean ESB
       // (tutup ledger ganda); gagal/BE-BELUM-ADA = fallback ESB lama.
+      // A-P1-6: photoUrl HANYA bila remote; foto lokal = photoPending
+      // (marker storage + banner layar hasil).
       let terminalPosted = false;
+      const remotePhoto = isRemotePhoto(photo) ? String(photo).trim() : '';
+      const localPhotoOnly = !!photo && !remotePhoto;
       try {
         const h = await postExpenseToTerminal({
           rowId: id,
@@ -79,11 +83,15 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
           amount: signed,
           note,
           occurredAt: now,
+          ...(remotePhoto ? { photoUrl: remotePhoto } : {}),
         });
         terminalPosted = h.posted === true;
       } catch { /* abaikan: fallback ESB */ }
+      if (localPhotoOnly) {
+        try { await markPhotoPending(id, String(photo)); } catch { /* best-effort */ }
+      }
       if (!terminalPosted) {
-        await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' });
+        await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert', ...(localPhotoOnly ? { photoPending: true } : {}) });
       }
       // W1 (SESI-FIX-APPW1): cermin mutasi kas ke sesi kas server — immediate-
       // first fire-and-forget SETELAH lokal menang di atas. Tanpa sesi server
@@ -115,13 +123,13 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
         } catch {
           /* abaikan */
         }
-      })(); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo }); }; if (done) {
+      })(); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo, ...(photo && !isRemotePhoto(photo) ? { photoPending: true } : {}) }); }; if (done) {
     return (
       <View style={s.root}>
         <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /><View style={[s.body, isTablet && wideCenterLg]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('petty.doneTitle')}</Text>
-          <Text style={s.sub}>{done.arus === 'Masuk' ? t('petty_flow_in') : t('petty_flow_out')} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
+          <Text style={s.sub}>{done.arus === 'Masuk' ? t('petty_flow_in') : t('petty_flow_out')} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}{done.photoPending ? <Text style={s.pending}>{t('expense.photoPending')}</Text> : null}
           <AppButton title={t('petty.detailTitle')} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString(lang === 'en' ? 'en-US' : 'id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })} />
           <AppButton title={t('petty.viewList')} variant="secondary" onPress={() => navigation?.navigate('PettyCash')} />
           <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); setPhotoErr(''); }} />
@@ -277,6 +285,9 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
   del: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
   err: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8 },
+  // A-P1-6: banner foto-menunggu-upload di layar hasil (kuning/merah lembut,
+  // bukan error picker).
+  pending: { fontFamily: fonts.medium, fontSize: 12, color: colors.orange, marginTop: 8, textAlign: 'center' },
   primary: { backgroundColor: colors.orange, borderRadius: 10, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
   disabled: { opacity: 0.5 },
   primaryT: { color: colors.white, fontSize: 16, fontFamily: fonts.bold },

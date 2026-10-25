@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { postExpenseToTerminal } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { verifyLocalEscalation } from '../../lib/supervisor';
 import { uuidv7 } from '../../lib/uuidv7';
 import { preparePhoto } from '../../lib/photo';
@@ -76,7 +76,11 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     // clientExpenseId = uuid di balik prefix EX- (dibangun SEKALI di atas,
     // dipakai ulang saat retry); sukses terminal = LEWATI antrean ESB di
     // bawah (tutup ledger ganda); gagal/BE-BELUM-ADA = fallback ESB lama.
+    // A-P1-6: photoUrl dikirim HANYA bila foto sudah remote; foto lokal =
+    // photoPending (marker storage + banner) — upload-file terminal PARKED.
     let terminalPosted = false;
+    const remotePhoto = isRemotePhoto(photo) ? String(photo).trim() : '';
+    const localPhotoOnly = !!photo && !remotePhoto;
     try {
       const h = await postExpenseToTerminal({
         rowId: id,
@@ -85,16 +89,28 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
         amount: -jumlahNum,
         note: nama.trim(),
         occurredAt: now,
+        ...(remotePhoto ? { photoUrl: remotePhoto } : {}),
       });
       terminalPosted = h.posted === true;
     } catch { /* abaikan: fallback ESB */ }
-    if (!terminalPosted) {
-      try { await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: item tetap tampil dari state */ }
+    if (localPhotoOnly) {
+      // Foto tak ikut ke server (posted = tanpa foto; fallback = ikut baris
+      // ESB sbg path lokal). Tandai menunggu-upload + banner jujur.
+      try { await markPhotoPending(id, String(photo)); } catch { /* best-effort */ }
     }
-    setNama('');
-    setJumlah('');
-    setPhoto(null);
-    setFormOpen(false);
+    if (!terminalPosted) {
+      try { await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert', ...(localPhotoOnly ? { photoPending: true } : {}) }); } catch { /* DB belum init: item tetap tampil dari state */ }
+    }
+    if (localPhotoOnly) {
+      // A-P1-6: banner pending harus TERLIHAT — form tetap terbuka (item sudah
+      // masuk daftar + DB di atas); kasir tutup manual setelah membaca.
+      setSaveNotice(t('expense.photoPending'));
+    } else {
+      setNama('');
+      setJumlah('');
+      setPhoto(null);
+      setFormOpen(false);
+    }
   setSaving(false); };
 
   /** Buka modal PIN owner untuk satu expense (audit trail, bukan auto-approve). */
