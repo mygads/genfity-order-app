@@ -141,7 +141,28 @@ export async function listUsbDevices(): Promise<UsbDeviceInfo[]> {
  * Dipakai pindai BLE, daftar bonded klasik, DAN kirim BT/BLE — tanpa
  * BLUETOOTH_CONNECT, getBondedDevices() kosong + RFCOMM melempar
  * SecurityException (temuan E2E-HP 2026-10-26: granted=false permanen
- * karena izin tak pernah diminta; pemindaian selalu "tidak ditemukan"). */
+ * karena izin tak pernah diminta; pemindaian selalu "tidak ditemukan").
+ * Tiap request dibatasi timeout: dialog izin yang hilang/dibuang sistem tanpa
+ * hasil (temuan E2E-HP: dialog CONNECT ke-2 lenyap 90ms, promise tak pernah
+ * settle → layar "Scanning..." selamanya) tak boleh menggantung UI. */
+const BT_PERMISSION_TIMEOUT_MS = 30000;
+
+async function requestBtPermission(
+  perm: (typeof PermissionsAndroid.PERMISSIONS)[keyof typeof PermissionsAndroid.PERMISSIONS],
+): Promise<boolean> {
+  try {
+    const res = await Promise.race([
+      PermissionsAndroid.request(perm),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('BT_PERMISSION_TIMEOUT')), BT_PERMISSION_TIMEOUT_MS),
+      ),
+    ]);
+    return res === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureBtPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   try {
@@ -151,8 +172,7 @@ export async function ensureBtPermission(): Promise<boolean> {
         ? [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN, PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]
         : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
     for (const p of perms) {
-      const res = await PermissionsAndroid.request(p);
-      if (res !== PermissionsAndroid.RESULTS.GRANTED) return false;
+      if (!(await requestBtPermission(p))) return false;
     }
     return true;
   } catch {
