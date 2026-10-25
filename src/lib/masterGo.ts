@@ -11,6 +11,7 @@
  */
 import { apiGet, getBranchId } from '../config/server';
 import { initDb, run } from './db';
+import { persistReceiptPrefs } from './posSyncReceipt';
 import { setWatermark } from './sync';
 
 export class GoCatalogUnavailable extends Error {
@@ -46,6 +47,12 @@ interface GoMerchant {
    * BE lama tak mengirim; ketidakhadiran = jangan sentuh cache lokal. */
   enablePackagingFee?: boolean;
   packagingFeeAmount?: number;
+  /** Preferensi struk merchant (A3, server-wins). Opsional — BE lama tak
+   * mengirim; ketidakhadiran = jangan sentuh cache lokal. */
+  receiptShowTax?: boolean;
+  receiptShowFooter?: boolean;
+  receiptShowQris?: boolean;
+  receiptFooterText?: string;
 }
 
 interface GoMenuResponse {
@@ -162,6 +169,8 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       [String(amount), enabled],
     );
   }
+  // A3: preferensi struk milik server (hanya tulis bila BE mengirim kuncinya).
+  await persistReceiptPrefs(merchant, run);
 
   await setWatermark('menu', { pull: now });
   await setWatermark('branchmenu', { pull: now });
