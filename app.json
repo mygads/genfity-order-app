@@ -51,7 +51,15 @@
           "cameraPermission": "Izinkan Genfity POS memakai kamera untuk memotret bukti kas kecil."
         }
       ],
-      "./modules/genfity-printer/app.plugin.js"
+      "./modules/genfity-printer/app.plugin.js",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
