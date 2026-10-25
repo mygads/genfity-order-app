@@ -74,6 +74,15 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_cancelmenu (
     id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, menuId TEXT, menuName TEXT, qty REAL DEFAULT 0,
     reasonId TEXT, reasonNote TEXT, userId TEXT, cancelDate TEXT, syncDate TEXT)`,
+  // A5: jejak void-penuh lokal (LOCAL-ONLY, SENGAJA tanpa sync/outbox):
+  // head dinolkan saat void penuh sehingga nominal asli hilang dari ledger;
+  // arsip ini menyimpan snapshot-nya untuk audit kasir. Idempoten per salesNum
+  // (helper memakai INSERT OR REPLACE id `void-{salesNum}`).
+  `CREATE TABLE IF NOT EXISTS tr_voidtrail (
+    id TEXT PRIMARY KEY, salesNum TEXT, branchId TEXT,
+    grandTotal REAL DEFAULT 0, discount REAL DEFAULT 0, service REAL DEFAULT 0,
+    feeESB REAL DEFAULT 0, packaging REAL DEFAULT 0, tip REAL DEFAULT 0, ongkir REAL DEFAULT 0,
+    reasonId TEXT, reasonNote TEXT, userId TEXT, voidDate TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_shiftlog (
     id TEXT PRIMARY KEY, branchId TEXT, terminalId TEXT, userId TEXT, shiftName TEXT,
     clockIn TEXT, clockOut TEXT, cashInDrawer REAL DEFAULT 0, totalSales REAL DEFAULT 0,
@@ -245,4 +254,11 @@ export const MIGRATION_STATEMENTS: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
   // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE ms_member ADD COLUMN email TEXT',
+  // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
+  // idempoten; gagal = sudah ada).
+  `CREATE TABLE IF NOT EXISTS tr_voidtrail (
+    id TEXT PRIMARY KEY, salesNum TEXT, branchId TEXT,
+    grandTotal REAL DEFAULT 0, discount REAL DEFAULT 0, service REAL DEFAULT 0,
+    feeESB REAL DEFAULT 0, packaging REAL DEFAULT 0, tip REAL DEFAULT 0, ongkir REAL DEFAULT 0,
+    reasonId TEXT, reasonNote TEXT, userId TEXT, voidDate TEXT, syncDate TEXT)`,
 ];

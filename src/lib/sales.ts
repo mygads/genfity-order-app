@@ -304,6 +304,63 @@ export function queueNoOf(salesNum: string): string | null {
 }
 
 /**
+ * A5: arsip jejak void-penuh lokal (tr_voidtrail, LOCAL-ONLY — SENGAJA tanpa
+ * enqueueOutbox/sync: audit kasir bertahan walau head dinolkan; server
+ * menerima pembatalan lewat jalur void/sync yang sudah ada).
+ * Snapshot diambil SEBELUM head di-UPDATE 'void'/grandTotal=0. Tak pernah
+ * melempar (best-effort; idempoten per salesNum — void ganda menimpa baris
+ * yang sama via INSERT OR REPLACE).
+ */
+export type VoidTrailSnapshot = {
+  salesNum: string;
+  branchId?: string | null;
+  grandTotal?: number | null;
+  discount?: number | null;
+  service?: number | null;
+  feeESB?: number | null;
+  packaging?: number | null;
+  tip?: number | null;
+  ongkir?: number | null;
+  reasonId?: string | null;
+  reasonNote?: string | null;
+  userId?: string | null;
+  voidDate?: string | null;
+};
+
+export async function archiveVoidTrail(s: VoidTrailSnapshot): Promise<void> {
+  const no = String(s.salesNum ?? '').trim();
+  if (!no) return;
+  try {
+    await initDb();
+    const n = (v: unknown) => Math.max(0, Math.round(Number(v) || 0));
+    await run(
+      `INSERT OR REPLACE INTO tr_voidtrail
+         (id, salesNum, branchId, grandTotal, discount, service, feeESB, packaging, tip, ongkir,
+          reasonId, reasonNote, userId, voidDate, syncDate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      [
+        `void-${no}`,
+        no,
+        s.branchId ?? null,
+        n(s.grandTotal),
+        n(s.discount),
+        n(s.service),
+        n(s.feeESB),
+        n(s.packaging),
+        n(s.tip),
+        n(s.ongkir),
+        s.reasonId ?? null,
+        String(s.reasonNote ?? '').slice(0, 500) || null,
+        s.userId ?? null,
+        s.voidDate ?? dbNowLocal(),
+      ],
+    );
+  } catch {
+    /* abaikan: arsip best-effort, void tetap jalan */
+  }
+}
+
+/**
  * Stasiun kerja satu menu untuk kolom tr_salesmenu.stationId (L17, read-only):
  * cermin pola baca routing print (MenuManagementScreen: SELECT qty, stationId
  * FROM ms_branchmenu WHERE branchId = ? AND menuId = ?) lalu fallback
