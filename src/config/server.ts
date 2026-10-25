@@ -234,6 +234,13 @@ export const ApiPath = {
   // fail-closed untuk keranjang sebelum order ada. Bearer otomatis via
   // needsSessionBearer (prefix api/). Kasir ter-cover PermOrders.
   merchantPosVoucherPreview: 'api/merchant/orders/pos/validate-voucher-preview', // POST {voucherCode,subtotal,items,orderType,tillCustomerEmail?} → {templateId,codeId,label,discountAmount,eligibleSubtotal}
+  // Print-bridge slice penuh (FULL, BE 50fd533): antrean cetak terminal.
+  // '{id}' diganti caller via pathWithId. Klaim/ack terminal-auth (UserAuth
+  // + gate G2 di BE); enqueue terminal = jalur kasir yang jujur (kasir 403
+  // di rute merchant /api/merchant/print-bridge/terminal-jobs).
+  terminalPrintEnqueue: 'api/v1/terminals/{id}/print-jobs', // POST {idempotencyKey,source?,payloadBase64,metadata?,maxAttempts?} → 201 (+200 duplicate)
+  terminalPrintClaim: 'api/v1/terminals/{id}/print-jobs/claim', // POST → 200 {job} | 204 kosong
+  terminalPrintAck: 'api/v1/terminals/{id}/print-jobs/{jobId}/ack', // POST {leaseToken,status,errorCode?,lastError?} → 200 | 409 lease basi
   // ---- W1 (wiring-1): kontrak merchant Go untuk shift/clock + sesi kas +
   // tutup-hari (grup /api/merchant, MerchantAuth — token sesi cermin W2).
   // '{sessionId}' diganti caller via .replace('{sessionId}',
