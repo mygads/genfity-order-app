@@ -34,6 +34,7 @@ import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
+import { getPosPromoGate, isPayTabEnabled } from '../../lib/posConfigSync';
 import { customerIdFromLocalKey, maskMemberName, parseCustomerId } from '../../lib/memberRef';
 import { recordSettleMemberResult } from '../../lib/memberChangedStore';
 
@@ -256,10 +257,59 @@ export default function PayScreen({ navigation, route }: Props) {
     if (isAudBranch && (initial === 'online' || initial === 'nontunai')) return 'tunai';
     return initial;
   });
-  /** Tab yang tampil untuk currency cabang aktif (AUD = tanpa nontunai/online). */
-  const visibleTabs: Tab[] = isAudBranch
-    ? SIDEBAR_IDS.filter((id) => id !== 'nontunai' && id !== 'online')
-    : SIDEBAR_IDS;
+  /** S-F1: tab yang dimatikan server via pos-config (absen = tampil).
+   * Muat sekali saat layar dibuka; cache gagal = perilaku lama. */
+  const [srvOffTabs, setSrvOffTabs] = useState<Tab[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const off: Tab[] = [];
+      for (const id of SIDEBAR_IDS) {
+        try {
+          if (!(await isPayTabEnabled(id))) off.push(id);
+        } catch {
+          /* absen = tampil */
+        }
+      }
+      if (alive) setSrvOffTabs(off);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** S-F2: gate promo server (posDiscountsEnabled=false = kunci UI pasang
+   * voucher baru; voucher bawaan order tetap ditampilkan apa adanya). */
+  const [posPromoOn, setPosPromoOn] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const g = await getPosPromoGate();
+        if (alive) setPosPromoOn(g.posDiscountsEnabled);
+      } catch {
+        /* absen = true = perilaku lama */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** Tab yang tampil untuk currency cabang aktif (AUD = tanpa nontunai/online),
+   * dikurangi tab yang dimatikan server (S-F1). Salah-konfigurasi server
+   * (semua tab mati) = kembali ke daftar currency agar kasir tak terkunci. */
+  const visibleTabs: Tab[] = (() => {
+    const base = isAudBranch
+      ? SIDEBAR_IDS.filter((id) => id !== 'nontunai' && id !== 'online')
+      : SIDEBAR_IDS;
+    const cut = base.filter((id) => !srvOffTabs.includes(id));
+    return cut.length > 0 ? cut : base;
+  })();
+  /** Bila tab terpilih dimatikan server susulan, jatuh ke tab tampil pertama. */
+  useEffect(() => {
+    if (srvOffTabs.length === 0) return;
+    setTab((cur) => (srvOffTabs.includes(cur) ? visibleTabs[0] ?? 'tunai' : cur));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srvOffTabs]);
 
   const [voucherOpen, setVoucherOpen] = useState(false);
   // Voucher bawaan order (CartDetail/BillPreview/SplitBill): total pemanggil sudah
@@ -1213,7 +1263,7 @@ export default function PayScreen({ navigation, route }: Props) {
           <View style={styles.voucherBarTablet}>
             <Text style={styles.voucherBarTabletText}>{`◈  ${orderBannerText}`}</Text>
           </View>
-        ) : !isSplitGroup ? (
+        ) : !isSplitGroup && posPromoOn ? (
           <TouchableOpacity
             style={styles.voucherBarTablet}
             onPress={() => setVoucherOpen((v) => !v)}>
@@ -1259,7 +1309,7 @@ export default function PayScreen({ navigation, route }: Props) {
           <View style={styles.voucherBar}>
             <Text style={styles.voucherBarText}>{`◈  ${orderBannerText}`}</Text>
           </View>
-        ) : !isSplitGroup ? (
+        ) : !isSplitGroup && posPromoOn ? (
           <TouchableOpacity
             style={styles.voucherBar}
             onPress={() => setVoucherOpen((v) => !v)}>
@@ -1268,7 +1318,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ) : null
       )}
       {renderSummary()}
-      {voucherOpen && !boxVoucher && !orderVoucher && !isSplitGroup && (
+      {voucherOpen && posPromoOn && !boxVoucher && !orderVoucher && !isSplitGroup && (
         <View style={styles.voucherRow}>
           <View style={styles.voucherField}>
             <AppInput
