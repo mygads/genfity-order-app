@@ -145,17 +145,25 @@ function run() {
   // + thread body + 409 PROOF_REQUIRED passthrough). Pengecualian dipersempit
   // via penanda kontrak: tanpa ketiganya = tetap FAIL. Jalur W1
   // (goWorkforceOp/drain-be) tak boleh berubah oleh sentuhan ini.
+  // SESI-FINAL-APP K4 (mandat koordinator, kontrak BE paralel — bukan lane W1):
+  // KitchenScreen BOLEH tersentuh SEMATA untuk catatan kanonis (fallback ESB
+  // pullMenu/pullStation = kanonis penuh, tak ada endpoint menu gambar
+  // GO-terminal). Pengecualian dipersempit: penanda K4 di raw + logika
+  // pullMenu/pullStation lestari di stripped (= sentuhan komentar saja).
   const AP14_MARKERS = ['holdAsUnpaidOffline', 'pay_hold_unpaid', 'requiresPosPin'];
   const FINALAPP_WIRE_MARKERS = ['proofUrl', 'PROOF_REQUIRED', 'proofClean'];
+  const FINALAPP_KITCHEN_MARKERS = ['SESI-FINAL-APP K4', 'KANONIS'];
   try {
     const diff = execSync('git diff --name-only', { cwd: ROOT, encoding: 'utf8' });
     const touched = diff.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const w2Guard = ['src/lib/history.ts', 'src/lib/apiSource.ts',
-      'src/screens/booking/BookingScreen.tsx', 'src/screens/history/KitchenScreen.tsx',
+      'src/screens/booking/BookingScreen.tsx',
       'src/screens/history/EsbOrderScreen.tsx',
       'src/screens/history/HistoryScreen.tsx', 'test/tripwire-poswire-w2.cjs'];
     // NB: src/lib/posWire.ts dikeluarkan dari w2Guard — dijaga blok
     // FINAL-APP di bawah (penanda kontrak, bukan blanko).
+    // NB: src/screens/history/KitchenScreen.tsx dikeluarkan dari w2Guard —
+    // dijaga blok FINAL-APP K4 di bawah (catatan kanonis komentar-saja).
     for (const f of w2Guard) {
       ok(!touched.includes(f), `W1-05: ${f} tak tersentuh (milik W2)`);
     }
@@ -175,6 +183,16 @@ function run() {
       const wireStripped = read('lib/posWire.ts');
       ok(!/goWorkforceOp|W1_OP_|beWorkforce/.test(wireStripped),
         'W1-05: sentuhan FINAL-APP tak menyentuh jalur W1 (goWorkforceOp/drain-be)');
+    } else {
+      checks++;
+    }
+    if (touched.includes('src/screens/history/KitchenScreen.tsx')) {
+      const kitRaw = raw('screens/history/KitchenScreen.tsx');
+      ok(FINALAPP_KITCHEN_MARKERS.every((m) => kitRaw.includes(m)),
+        'W1-05: KitchenScreen tersentuh HANYA untuk catatan kanonis SESI-FINAL-APP K4 (fallback ESB = kanonis, bukan sementara)');
+      const kitStripped = read('screens/history/KitchenScreen.tsx');
+      ok(/pullMenu/.test(kitStripped) && /pullStation/.test(kitStripped),
+        'W1-05: logika fallback pullMenu/pullStation lestari (sentuhan = komentar saja)');
     } else {
       checks++;
     }

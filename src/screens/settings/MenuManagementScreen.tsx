@@ -8,6 +8,7 @@ import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
 import { useLang, tCur } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import { initDb, query, queryFirst, run } from '../../lib/db';
+import { prefetchCatalogImage, isCatalogImageReady, noteCatalogImageError } from '../../lib/catalogImages';
 import { enqueueOutbox } from '../../lib/sync';
 import { getBranchId } from '../../config/server';
 
@@ -21,6 +22,8 @@ interface MenuEntry {
   price: number;
   soldOut: boolean;
   imageState: 'ok' | 'missing' | 'downloading';
+  /** SESI-FINAL-APP K4: URL remote hasil pull master (null = tanpa gambar). */
+  imageUrl: string | null;
 }
 
 // A9 (P0-1): katalog read-only di POS — tambah/ubah/hapus nama, harga, dan
@@ -124,14 +127,17 @@ export default function MenuManagementScreen({ navigation }: Props) {
   const [newPrice, setNewPrice] = useState('');
   const [newGroup, setNewGroup] = useState('');
   const [newStation, setNewStation] = useState('');
+  // SESI-FINAL-APP K4: pemicu render-ulang saat <Image> remote onError
+  // (noteCatalogImageError = module-cache; perlu state agar placeholder tampil).
+  const [, setImgTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         await initDb();
-        const rows = await query<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
-          'SELECT id, menuName, categoryId, price FROM ms_menu WHERE COALESCE(flagActive, 1) = 1',
+        const rows = await query<{ id: string; menuName: string | null; categoryId: string | null; price: number | null; imageUrl: string | null }>(
+          'SELECT id, menuName, categoryId, price, imageUrl FROM ms_menu WHERE COALESCE(flagActive, 1) = 1',
         );
         if (!alive) return;
         if (rows.length === 0) {
@@ -162,6 +168,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
             price: Number(r.price ?? 0),
             soldOut: soldMap.get(r.id) ?? false,
             imageState: 'ok' as const,
+            imageUrl: (r.imageUrl ?? '').trim() ? String(r.imageUrl).trim() : null,
           })),
         );
       } catch {
@@ -184,11 +191,11 @@ export default function MenuManagementScreen({ navigation }: Props) {
     });
   };
 
-  /** Validasi URL gambar secara jujur: tanpa expo-file-system (tidak ada di
-   * package.json) tidak ada unduhan berkas lokal. Fungsi ini hanya memastikan
-   * imageUrl hasil pull master valid, lalu memakai URL remote apa adanya.
-   * TODO: tambah expo-file-system lalu unduh via downloadAsync ke direktori
-   * dokumen + simpan path lokal ke ms_menu.imageUrl agar katalog offline penuh. */
+  /** SESI-FINAL-APP K4: verifikasi gambar TANPA dep baru — URL valid lalu
+   *  Image.prefetch (cache disk RN). Sukses = 'ok' (dirender remote +
+   *  placeholder onError); gagal = 'missing' (placeholder, tanpa ikon rusak).
+   *  Tanpa expo-file-system (tak ada di package.json) tidak ada unduhan berkas
+   *  lokal — URL remote dipakai apa adanya setelah terverifikasi. */
   const downloadImage = async (id: string) => {
     patch(id, { imageState: 'downloading' });
     setMsg(t('menu.downloading'));
@@ -204,7 +211,13 @@ export default function MenuManagementScreen({ navigation }: Props) {
         setMsg(t('menu.imgFail'));
         return;
       }
-      patch(id, { imageState: 'ok' });
+      const okFetch = await prefetchCatalogImage(url);
+      if (!okFetch) {
+        patch(id, { imageState: 'missing', imageUrl: url });
+        setMsg(t('menu.imgFail'));
+        return;
+      }
+      patch(id, { imageState: 'ok', imageUrl: url });
       setMsg(t('menu.imgUrlOk'));
     } catch {
       patch(id, { imageState: 'missing' });
@@ -276,7 +289,7 @@ export default function MenuManagementScreen({ navigation }: Props) {
       );
       await enqueueOutbox('ms_menu', id, 'insert');
       await enqueueOutbox('ms_branchmenu', `${branchId}:${id}`, 'insert');
-      setMenus((ms) => [...ms, { id, name, group: grp, price, soldOut: false, imageState: 'ok' }]);
+      setMenus((ms) => [...ms, { id, name, group: grp, price, soldOut: false, imageState: 'ok', imageUrl: null }]);
       setNewName('');
       setNewPrice('');
       setNewGroup('');
@@ -397,13 +410,25 @@ export default function MenuManagementScreen({ navigation }: Props) {
       {list.map((m) => (
         <View key={m.id} style={[styles.card, isTablet && styles.cardTablet, m.soldOut && styles.cardSold]}>
           <View style={styles.itemTop}>
-            <Image
-              source={m.imageState === 'ok'
-                ? require('../../../assets/images/empty_menu.webp')
-                : require('../../../assets/images/empty_menu_image.webp')}
-              style={styles.thumb}
-              resizeMode="contain"
-            />
+            {/* SESI-FINAL-APP K4: remote HANYA bila terverifikasi prefetch
+              * (isCatalogImageReady); onError → placeholder (tanpa ikon rusak).
+              * Tanpa imageUrl/GAGAL prefetch = placeholder lokal seperti dulu. */}
+            {m.imageState === 'ok' && isCatalogImageReady(m.imageUrl) ? (
+              <Image
+                source={{ uri: String(m.imageUrl) }}
+                style={styles.thumb}
+                resizeMode="cover"
+                onError={() => { noteCatalogImageError(m.imageUrl); setImgTick((x) => x + 1); }}
+              />
+            ) : (
+              <Image
+                source={m.imageState === 'ok'
+                  ? require('../../../assets/images/empty_menu.webp')
+                  : require('../../../assets/images/empty_menu_image.webp')}
+                style={styles.thumb}
+                resizeMode="contain"
+              />
+            )}
             <View style={styles.itemLeft}>
               <Text style={styles.itemName}>{m.name}</Text>
               <Text style={styles.itemMeta}>{m.group} - {rp(m.price)}</Text>
