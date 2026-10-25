@@ -279,24 +279,16 @@ const STR: Record<string, Entry> = {
   vou_st_used: { id: 'Voucher sudah terpakai (burn)', en: 'Voucher already used (burned)' },
   vou_st_expired: { id: 'Voucher telah kadaluarsa', en: 'Voucher has expired' },
   vou_st_scheduled: { id: 'Belum berlaku - menunggu tanggal mulai', en: 'Not yet valid - waiting for start date' },
-<<<<<<< HEAD
-  vou_kind_discount: { id: 'Diskon (Rp)', en: 'Discount (Rp)' },
-  vou_kind_discount_aud: { id: 'Diskon (A$)', en: 'Discount (A$)' },
-=======
   vou_kind_discount: { id: 'Diskon (Rp)', en: 'Discount (IDR)' },
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
+  vou_kind_discount_aud: { id: 'Diskon (A$)', en: 'Discount (A$)' },
   vou_checking: { id: 'Memeriksa kode ke server...', en: 'Checking code on server...' },
   vou_server_valid: { id: 'Kode {k} valid - {a}. Min. belanja {m}. {l}', en: 'Code {k} is valid - {a}. Min. spend {m}. {l}' },
 
   // ---- topup ----
   top_title: { id: 'Top Up Deposit', en: 'Deposit Top Up' },
   top_quick: { id: 'Nominal Cepat', en: 'Quick Amount' },
-<<<<<<< HEAD
-  top_custom_label: { id: 'Nominal top up (Rp)', en: 'Top up amount (Rp)' },
-  top_custom_label_aud: { id: 'Nominal top up (A$)', en: 'Top up amount (A$)' },
-=======
   top_custom_label: { id: 'Nominal top up (Rp)', en: 'Top up amount (IDR)' },
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
+  top_custom_label_aud: { id: 'Nominal top up (A$)', en: 'Top up amount (A$)' },
   top_method: { id: 'Metode Bayar', en: 'Payment Method' },
   top_note_ph: { id: 'Catatan top up', en: 'Top up note' },
   top_balance_before: { id: 'Saldo awal', en: 'Starting balance' },
@@ -931,24 +923,16 @@ const STR: Record<string, Entry> = {
   backToCashier: { id: 'Kembali ke kasir', en: 'Back to cashier' },
   dineInTitle: { id: 'Dine In', en: 'Dine In' },
   noteKitchen: { id: 'Catatan item (ke dapur)', en: 'Item note (to kitchen)' },
-<<<<<<< HEAD
-  discItemRp: { id: 'Diskon item (Rp)', en: 'Item discount (Rp)' },
-  discItemAud: { id: 'Diskon item (A$)', en: 'Item discount (A$)' },
-=======
   discItemRp: { id: 'Diskon item (Rp)', en: 'Item discount (IDR)' },
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
+  discItemAud: { id: 'Diskon item (A$)', en: 'Item discount (A$)' },
   disc_neg: { id: 'Diskon tak boleh negatif.', en: 'Discount must not be negative.' },
   disc_over_line: { id: 'Diskon melebihi nilai item.', en: 'Discount exceeds the line value.' },
   voidItem: { id: 'Void Item', en: 'Void Item' },
   voidRestore: { id: 'Void - ketuk untuk kembalikan', en: 'Voided - tap to restore' },
   restoreItem: { id: 'Kembalikan item', en: 'Restore item' },
   editNoteDisc: { id: 'Catatan / diskon / void', en: 'Note / discount / void' },
-<<<<<<< HEAD
-  unitPriceRp: { id: 'Harga satuan (Rp)', en: 'Unit price (Rp)' },
-  unitPriceAud: { id: 'Harga satuan (A$)', en: 'Unit price (A$)' },
-=======
   unitPriceRp: { id: 'Harga satuan (Rp)', en: 'Unit price (IDR)' },
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
+  unitPriceAud: { id: 'Harga satuan (A$)', en: 'Unit price (A$)' },
   notePh: { id: 'cth: Level 3, es sedikit', en: 'e.g.: Level 3, less ice' },
   viewOrder: { id: 'Lihat Pesanan', en: 'View Order' },
   amountCount: { id: 'Jumlah', en: 'Count' },
@@ -1972,8 +1956,6 @@ const STR: Record<string, Entry> = {
   // Tanpa varian _aud, tCur jatuh ke kunci dasar (label IDR) — tak pernah blank.
   price_aud: { id: 'Harga (A$)', en: 'Price (A$)' },
   mem_nominal_label_aud: { id: 'Nominal deposit (A$)', en: 'Deposit amount (A$)' },
-  vou_kind_discount_aud: { id: 'Diskon (A$)', en: 'Discount (A$)' },
-  top_custom_label_aud: { id: 'Nominal top up (A$)', en: 'Top up amount (A$)' },
   ongkirNominal_aud: { id: 'Nominal (A$)', en: 'Amount (A$)' },
   discItemRp_aud: { id: 'Diskon item (A$)', en: 'Item discount (A$)' },
   unitPriceRp_aud: { id: 'Harga satuan (A$)', en: 'Unit price (A$)' },

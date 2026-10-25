@@ -13,12 +13,7 @@ import {
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useFocusEffect } from '@react-navigation/native';
-<<<<<<< HEAD
-import { useLang } from '../../lib/i18n';
-import { getCachedCurrency } from '../../lib/currency';
-=======
 import { useLang, tCur } from '../../lib/i18n';
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
@@ -1151,11 +1146,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           onChangeText={setNoteDraft}
           placeholder={t('notePh')}
         />
-<<<<<<< HEAD
-        <Text style={styles.editorLabel}>{t(getCachedCurrency().code === 'AUD' ? 'discItemAud' : 'discItemRp')}</Text>
-=======
         <Text style={styles.editorLabel}>{tCur('discItemRp')}</Text>
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
         <AppInput
           boxStyle={styles.editorInput}
           style={styles.fieldText}

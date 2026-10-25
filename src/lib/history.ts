@@ -592,7 +592,7 @@ export function mapServerHistoryEntry(e: ServerHistoryEntry): Transaction {
     registerServerTxnKey(e.orderNumber, numeric as number);
     registerServerTxnKey(id, numeric as number);
   }
-  const { date, time } = fmtSalesDate(e.paidAt || e.createdAt);
+  const { date, time } = fmtSalesDateInTz(e.paidAt || e.createdAt);
   return {
     id,
     no: e.orderNumber,

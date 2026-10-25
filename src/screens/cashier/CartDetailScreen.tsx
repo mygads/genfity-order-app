@@ -5,15 +5,9 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
-<<<<<<< HEAD
-import { useLang } from '../../lib/i18n';
-import { getCachedCurrency } from '../../lib/currency';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
-=======
 import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import { useLang, tCur } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync } from '../../lib/sync';
@@ -402,11 +396,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               )}
               {editingId === c.id && !c.voided && (
                 <View style={styles.editor}>
-<<<<<<< HEAD
-                  <Text style={styles.editorLabel}>{t(getCachedCurrency().code === 'AUD' ? 'unitPriceAud' : 'unitPriceRp')}</Text>
-=======
                   <Text style={styles.editorLabel}>{tCur('unitPriceRp')}</Text>
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
                   <AppInput
                     boxStyle={styles.editorInput}
                     style={styles.fieldText}

@@ -5,17 +5,6 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-<<<<<<< HEAD
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';
-import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang —
- *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
-const MAX_KAS_AWAL_IDR = 10000000;
-const MAX_KAS_AWAL_AUD = 10000;
-/** Nominal cepat kas awal (PW-4: chip IDR 50rb–1jt tak masuk akal untuk A$). */
-const QUICK_NOMINAL_IDR = [50000, 100000, 200000, 500000, 1000000];
-const QUICK_NOMINAL_AUD = [20, 50, 100, 200, 500];
-const terbilang = (n: number): string => {
-=======
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashApproveBe,
   cashApprovePayload,
@@ -25,8 +14,15 @@ const terbilang = (n: number): string => {
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
-} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';
+import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang —
+ *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
+const MAX_KAS_AWAL_IDR = 10000000;
+const MAX_KAS_AWAL_AUD = 10000;
+/** Nominal cepat kas awal (PW-4: chip IDR 50rb–1jt tak masuk akal untuk A$). */
+const QUICK_NOMINAL_IDR = [50000, 100000, 200000, 500000, 1000000];
+const QUICK_NOMINAL_AUD = [20, 50, 100, 200, 500];
+const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -412,12 +408,9 @@ const terbilang = (n: number): string => {
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('shf_pin_title')}</Text>
             <Text style={s.modalHint}>{t('shf_pin_hint')}</Text>
-<<<<<<< HEAD
-=======
             {wfGates.requirePinForPos ? (
               <Text style={s.modalHint}>{t('shf_policy_pin')}</Text>
             ) : null}
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />

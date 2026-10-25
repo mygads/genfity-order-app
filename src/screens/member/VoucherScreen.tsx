@@ -230,11 +230,7 @@ export default function VoucherScreen({ navigation }: Props) {
             id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
             kode,
             nama: String(it.name ?? kode),
-<<<<<<< HEAD
-            jenis: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
-=======
             jenis: tCur('vou_kind_discount'),
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
             nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
             minBelanja: 0,
             berlakuHingga: hingga,
@@ -394,11 +390,7 @@ export default function VoucherScreen({ navigation }: Props) {
       voucher: {
         code: kode,
         amount: Math.max(0, Math.round(amount)),
-<<<<<<< HEAD
-        kind: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
-=======
         kind: tOf(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount', lang),
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
         ...(opts?.minSpend ? { minSpend: opts.minSpend } : {}),
         ...(opts?.rate != null ? { rate: opts.rate } : {}),
         ...(opts?.maxAmount != null ? { maxAmount: opts.maxAmount } : {}),

@@ -16,15 +16,10 @@ import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
-<<<<<<< HEAD
-import { useLang } from '../../lib/i18n';
-import { getCachedCurrency } from '../../lib/currency';
-import { hasOpenShift } from '../../lib/shiftGuard';
-=======
 import { useLang, tCur } from '../../lib/i18n';
+import { getCachedCurrency } from '../../lib/currency';
 import { appAlert } from '../../lib/appAlert';
 import { getShiftBlockKind } from '../../lib/shiftGuard';
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -317,11 +312,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
             ))}
           </View>
           <AppInput
-<<<<<<< HEAD
-            label={t(getCachedCurrency().code === 'AUD' ? 'top_custom_label_aud' : 'top_custom_label')}
-=======
             label={tCur('top_custom_label')}
->>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
             keyboardType="number-pad"
             placeholder="0"
             value={nominalNum ? numGrouping(nominalNum) : ''}
