@@ -949,9 +949,7 @@ export default function LoginScreen({ navigation }: Props) {
     const term = (binding.terminalCode || '').trim();
     const tpl = t('terminal_welcome');
     if (tpl === 'terminal_welcome') {
-      return lang === 'id'
-        ? `Selamat datang di ${merchant} · Terminal ${term}`
-        : `Welcome to ${merchant} · Terminal ${term}`;
+      return `${merchant} · Terminal ${term}`;
     }
     return tpl.split('{merchant}').join(merchant).split('{terminal}').join(term);
   };
@@ -2071,7 +2069,6 @@ export default function LoginScreen({ navigation }: Props) {
           resizeMode="contain"
         />
         <Text style={styles.title}>{t('g_login_welcome')}</Text>
-        <Text style={styles.sub}>{t('g_login_sub')}</Text>
         {/* TAHAP-1 REMEMBER-ME: sapaan akun yang diingat + tautan ganti user.
             Hanya tampil bila kolom username cocok (lihat `greeted`). */}
         {greeted ? (

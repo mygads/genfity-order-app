@@ -1653,7 +1653,7 @@ const STR: Record<string, Entry> = {
   exit_pin_title: { id: 'PIN Supervisor/Owner', en: 'Supervisor/Owner PIN' },
   exit_pin_hint: { id: 'Keluar cabang mengubah peran perangkat,masukkan PIN supervisor/owner.', en: 'Leaving the branch changes the device role,enter the supervisor/owner PIN.' },
   rebind_button: { id: 'Ikat ulang terminal', en: 'Re-bind terminal' },
-  terminal_welcome: { id: 'Selamat datang di {merchant} · Terminal {terminal}', en: 'Welcome to {merchant} · Terminal {terminal}' },
+  terminal_welcome: { id: '{merchant} · Terminal {terminal}', en: '{merchant} · Terminal {terminal}' },
   grant_expired: { id: 'Grant login kedaluwarsa,masuk online lagi.', en: 'Login grant expired,sign in online again.' },
   terminal_unbound_title: { id: 'Terminal belum diikat', en: 'Terminal not bound' },
   terminal_unbound_hint: { id: 'Ikat perangkat ke terminal dulu sebelum melanjutkan.', en: 'Bind this device to a terminal first to continue.' },
