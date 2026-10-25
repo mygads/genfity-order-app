@@ -317,6 +317,12 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
+      {/* SESI-FINAL-APP K5: backup/restore via clipboard PARKED jujur — tanpa
+          expo-clipboard/file-system/sharing di package.json (dep baru
+          dilarang), tanpa Share/file. Codec murni (lib/backupCodec) siap +
+          diuji roundtrip; baris ini SENGAJA tanpa onPress (disabled, tanpa
+          chevron) sampai dep clipboard diputuskan owner. */}
+      <MenuRow title={t('settings.backup')} sub={t('settings.backupSub')} />
       {/* Cabang Australia (AUD): bahasa dikunci Inggris, baris pemilih disembunyikan. */}
       {isLocked ? null : (
       <MenuRow

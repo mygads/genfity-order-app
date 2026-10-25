@@ -1100,6 +1100,10 @@ const STR: Record<string, Entry> = {
   'settings.syncSub': { id: 'Push/pull manual - antrean offline', en: 'Manual push/pull - offline queue' },
   'settings.log': { id: 'Log Aplikasi', en: 'App Log' },
   'settings.logSub': { id: 'Riwayat kejadian + detail', en: 'Event history + details' },
+  // SESI-FINAL-APP K5: backup via clipboard PARKED (tanpa expo-clipboard di
+  // package.json + larangan dep baru) — codec murni siap, entri disabled.
+  'settings.backup': { id: 'Backup & Restore', en: 'Backup & Restore' },
+  'settings.backupSub': { id: 'SEGERA — butuh expo-clipboard (belum dipasang). Tanpa kirim data.', en: 'COMING SOON — needs expo-clipboard (not installed). No data sent.' },
   'settings.language': { id: 'Bahasa', en: 'Language' },
   'settings.help': { id: 'Bantuan / FAQ', en: 'Help / FAQ' },
   'settings.helpSub': { id: 'Panduan dan pertanyaan umum', en: 'Guides and common questions' },
