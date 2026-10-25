@@ -1531,6 +1531,7 @@ const STR: Record<string, Entry> = {
   sync_pull_msg: { id: 'Menarik data master...', en: 'Pulling master data...' },
   sync_pull_done: { id: 'Pull selesai - {t} baris (menu {m}, meja {tb}, member {mb}, voucher {v}).', en: 'Pull done - {t} rows (menus {m}, tables {tb}, members {mb}, vouchers {v}).' },
   sync_pull_fail: { id: 'Pull gagal.', en: 'Pull failed.' },
+  sync_pull_skip: { id: 'Lewati {n} domain tanpa kontrak Go: {l}.', en: 'Skipped {n} domains without Go contract: {l}.' },
   sync_sim_msg: { id: 'Simulasi: sync terakhir 5 hari lalu.', en: 'Simulation: last sync 5 days ago.' },
   sync_kind_sale: { id: 'Penjualan', en: 'Sale' },
   sync_kind_receipt: { id: 'Email struk', en: 'Receipt email' },

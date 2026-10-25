@@ -130,7 +130,11 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
     setBusy('pull'); setMsg(t('sync_pull_msg')); try {
       const r = await pullMaster(); { const now = new Date(); setLastPull(`${fmtDateInTz(now, lang)} ${fmtTimeInTz(now)}`); }
       refreshDaysAgo();
-      setMsg(t('sync_pull_done').replace('{t}', String(r.total)).replace('{m}', String(r.per.menu ?? 0)).replace('{tb}', String(r.per.table ?? 0)).replace('{mb}', String(r.per.member ?? 0)).replace('{v}', String(r.per.voucher ?? 0))); } catch (e) { setMsg(e instanceof Error ? `${t('sync_pull_fail')} (${e.message})` : t('sync_pull_fail')); } finally { setBusy(null); }
+      const doneBase = t('sync_pull_done').replace('{t}', String(r.total)).replace('{m}', String(r.per.menu ?? 0)).replace('{tb}', String(r.per.table ?? 0)).replace('{mb}', String(r.per.member ?? 0)).replace('{v}', String(r.per.voucher ?? 0));
+      // E2E-HP (2026-10-26): tampilkan domain yang dilewati eksplisit
+      // (404 tanpa kontrak Go) agar skip tak pernah diam-diam.
+      const skipPart = r.skipped.length > 0 ? t('sync_pull_skip').replace('{n}', String(r.skipped.length)).replace('{l}', r.skipped.join(', ')) : '';
+      setMsg(skipPart ? `${doneBase} ${skipPart}` : doneBase); } catch (e) { setMsg(e instanceof Error ? `${t('sync_pull_fail')} (${e.message})` : t('sync_pull_fail')); } finally { setBusy(null); }
   };
 
   const simulateOld = () => {

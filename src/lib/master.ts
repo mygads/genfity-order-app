@@ -385,6 +385,9 @@ function rowsOf(body: unknown): Row[] {
 export interface PullResult {
   total: number;
   per: Record<string, number>;
+  /** Domain ESB-legacy yang 404 di backend Go (kontrak tak ada) — dilewati
+   * eksplisit, bukan gagal. Diisi hanya bila katalog Go terbukti (goOk). */
+  skipped: string[];
   at: string;
 }
 
@@ -402,7 +405,7 @@ export interface PullResult {
  */
 export async function pullMaster(only?: string[]): Promise<PullResult> {
   if (getApiMode() !== 'real') {
-    return { total: 0, per: {}, at: new Date().toISOString() };
+    return { total: 0, per: {}, skipped: [], at: new Date().toISOString() };
   }
   if (getServerEnv() !== 'custom' || !getBaseUrl()) {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
@@ -413,15 +416,20 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
   // bukan Go (404) → jatuh kembali ke domain ESB di bawah. Watermark
   // 'menu'/'branchmenu' dipakai bersama oleh kedua jalur.
   const per: Record<string, number> = {};
+  const skipped: string[] = [];
   let targets = !only || only.length === 0
     ? DOMAINS
     : DOMAINS.filter((d) => only.includes(d.key));
   const goTargets = targets.filter((d) => d.key === 'menu' || d.key === 'branchmenu');
+  // E2E-HP (2026-10-26): bukti backend adalah Go (katalog Go sukses) —
+  // prasyarat melewati domain ESB-legacy yang 404 (kontrak tak ada).
+  let goOk = false;
   if (goTargets.length > 0) {
     try {
       const go = await pullGoCatalog();
       Object.assign(per, go.per);
-      targets = targets.filter((d) => d.key !== 'menu' && d.key !== 'branchmenu');
+      goOk = true;
+      targets = targets.filter((d) => d.key !== 'menu' && d.key !== 'branchmenu' && d.key !== 'branchsettings');
     } catch (e) {
       if (!(e instanceof GoCatalogUnavailable)) throw e;
       // Bukan backend Go — lanjut jalur ESB seperti semula.
@@ -430,7 +438,21 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
   for (const d of targets) {
     const wm = await getWatermark(d.key);
     const res = await apiGet(d.path, { ...(wm.pull ? { since: wm.pull } : {}), limit: 200 });
-    if (!res.ok) throw new Error(`Pull ${d.key}: HTTP ${res.status}`);
+    if (!res.ok) {
+      // E2E-HP (2026-10-26): backend Go tak punya endpoint ESB-legacy
+      // (main/..., esb_api/..., v1/pull/...) → 404 = kontrak tak ada, BUKAN
+      // data rusak. ms_setting sudah diisi jalur Go (masterGo menulis
+      // Branch/Currency, Tax/PPN, Packaging/Fee, Service, Rounding), jadi
+      // branchsettings dilewati di atas tanpa kehilangan data. Domain lain
+      // yang 404 ikut dilewati eksplisit + tercatat; 5xx/jaringan/parse
+      // tetap melempar (fail-closed). Pull eksplisit per-domain (`only`,
+      // mis. terminalsettings) tanpa bukti Go tetap ketat seperti semula.
+      if (res.status === 404 && goOk) {
+        skipped.push(d.key);
+        continue;
+      }
+      throw new Error(`Pull ${d.key}: HTTP ${res.status}`);
+    }
     const rows = rowsOf(await res.json());
     const now = new Date().toISOString();
     const marks = d.cols.map(() => '?').join(', ');
@@ -465,5 +487,5 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
     await setWatermark(d.key, { pull: now });
   }
   const total = Object.values(per).reduce((a, b) => a + b, 0);
-  return { total, per, at: new Date().toISOString() };
+  return { total, per, skipped, at: new Date().toISOString() };
 }
