@@ -1505,6 +1505,8 @@ const STR: Record<string, Entry> = {
   cx_reason_2: { id: 'Customer berubah pikiran', en: 'Customer changed their mind' },
   cx_reason_3: { id: 'Stok habis / menu tidak tersedia', en: 'Out of stock / menu unavailable' },
   cx_reason_4: { id: 'Kualitas / komplain dapur', en: 'Quality / kitchen complaint' },
+  // #5: merchant menghapus semua preset server → kasir tulis manual di catatan.
+  cx_server_empty: { id: 'Preset alasan server kosong — tulis alasan di catatan.', en: 'No server reason presets — write the reason in the note.' },
 
   // ---- B3a M11 sync (pesan push/pull + label antrean SyncScreen) ----
   sync_never: { id: 'Belum pernah', en: 'Never' },

@@ -224,6 +224,10 @@ export const ApiPath = {
   merchantOrderStatus: 'api/merchant/orders/{id}/status', // PUT {status,...}
   merchantOrderCancel: 'api/merchant/orders/{id}/cancel', // POST {pin?,reason?}
   merchantOrderVoid: 'api/merchant/orders/{id}/void', // POST {pin?,reason?}
+  // #5 cancel-reasons: GET daftar preset alasan kasir (MerchantAuth — kasir/
+  // staff boleh baca; tulis tetap owner via CRUD admin). Konsumsi:
+  // lib/cancelReasons.ts (server-wins + cache ms_setting + fallback i18n).
+  merchantCancelReasons: 'api/merchant/cancel-reasons', // GET [{name,isActive,...}]
   merchantOrderMoveTable: 'api/merchant/orders/{id}/move-table', // POST {tableNumber} (DINE_IN aktif)
   merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
   merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
