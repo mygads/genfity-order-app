@@ -22,7 +22,7 @@ import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClie
 import { uuidv7 } from '../../lib/uuidv7';
 import { getCashSessionId } from '../../lib/beWorkforce';
 import { publishDisplayOrder } from '../../lib/display';
-import { validateVoucherCode } from '../../lib/apiSource';
+import { validatePosVoucherPreview, mapAppModeToGoOrderType, mapSaleItemsToPreviewItems, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueSync, syncWarnLevel } from '../../lib/sync';
 import {
   getServerOrderIdForSale,
@@ -625,6 +625,37 @@ export default function PayScreen({ navigation, route }: Props) {
     setVoucherBusy(true);
     setVoucherMsg(t('pay_voucher_checking'));
     try {
+      // P1-2: coba preview merchant-Go dulu (engine SAMA dengan settle,
+      // fail-closed). GO-ok → pakai nominal server. GO menolak definitif
+      // (bukan NOT_FOUND, bukan offline) → pesan i18n + STOP (jangan
+      // fail-open ke ESB: kode milik universe GO). GO NOT_FOUND/offline →
+      // lanjut alur ESB di bawah (kode mungkin milik universe ESB/lokal).
+      const goItems = mapSaleItemsToPreviewItems(route?.params?.items);
+      if (goItems) {
+        const goSubtotal = goItems.reduce((a, it) => a + it.subtotal, 0);
+        if (goSubtotal > 0) {
+          const g = await validatePosVoucherPreview(
+            code, goSubtotal, goItems, mapAppModeToGoOrderType(orderMode),
+          );
+          if (g.ok) {
+            const amt = Math.min(g.amount, total);
+            if (amt <= 0) {
+              setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
+              return;
+            }
+            setBoxVoucher({ code, amount: amt, kind: '' });
+            setBoxCode(code);
+            setVoucherMsg('');
+            setVoucherOpen(false);
+            clampSplits(Math.max(0, total - amt));
+            return;
+          }
+          if (!g.offline && g.error && g.error !== 'VOUCHER_NOT_FOUND') {
+            setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(g.minSpend)));
+            return;
+          }
+        }
+      }
       const v = await validateVoucherCode(code, total);
       if (!v.ok || (v.minSpend > 0 && total < v.minSpend)) {
         setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(v.minSpend)));

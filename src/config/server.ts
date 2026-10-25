@@ -230,6 +230,10 @@ export const ApiPath = {
   merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
   merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
   merchantPosRefund: 'api/merchant/orders/pos/refund', // POST refund
+  // P1-2: preview voucher order-less merchant-Go (BE df15781) — estimasi
+  // fail-closed untuk keranjang sebelum order ada. Bearer otomatis via
+  // needsSessionBearer (prefix api/). Kasir ter-cover PermOrders.
+  merchantPosVoucherPreview: 'api/merchant/orders/pos/validate-voucher-preview', // POST {voucherCode,subtotal,items,orderType,tillCustomerEmail?} → {templateId,codeId,label,discountAmount,eligibleSubtotal}
   // ---- W1 (wiring-1): kontrak merchant Go untuk shift/clock + sesi kas +
   // tutup-hari (grup /api/merchant, MerchantAuth — token sesi cermin W2).
   // '{sessionId}' diganti caller via .replace('{sessionId}',

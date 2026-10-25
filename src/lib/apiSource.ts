@@ -745,6 +745,157 @@ export async function validateVoucherCode(
   return validateVoucherCodeLocal(code, grandTotal);
 }
 
+// ---------------------------------------------------------------------------
+// P1-2: preview voucher merchant-Go order-less (BE df15781).
+// Estimasi fail-closed untuk keranjang POS sebelum order ada — memakai engine
+// yang SAMA dengan settle (AudiencePOS, fail-closed), bukan adapter ke
+// endpoint order-bound. Server menang penuh:
+//  - ok:true → pakai discountAmount/label/eligibleSubtotal apa adanya.
+//  - Server menjawab tak-valid (ok:false, bukan dummy) → teruskan pesan
+//    server; TANPA fallback lintas-engine (SQLite/ESB tak mengenal kode
+//    order_voucher_codes — fallback akan menampilkan nominal bohong).
+//  - Offline/dummy/jaringan gagal → {ok:false, offline:true} agar pemanggil
+//    lanjut ke alur ESB/lokal yang memang mengenal kode itu.
+// Keranjang KOSONG tak pernah dikirim (engine menghitung eligible dari items;
+// items kosong selalu tak-valid — fakta lane E2E :18097): pemanggil wajib
+// memetakan cart-nya dulu via mapSaleItemsToPreviewItems (null = jangan call).
+// ---------------------------------------------------------------------------
+
+export interface PosVoucherPreviewItem {
+  menuId: number;
+  subtotal: number;
+}
+
+export interface PosVoucherPreview {
+  ok: boolean;
+  amount: number;
+  label: string;
+  eligibleSubtotal: number;
+  minSpend: number;
+  code: string;
+  message: string;
+  /** Kode error server (mis. VOUCHER_NOT_FOUND) — pemanggil boleh lanjut ESB hanya bila ini. */
+  error: string;
+  /** true bila tanpa jawaban server (offline/dummy) — pemanggil boleh lanjut ESB. */
+  offline: boolean;
+  status: number;
+}
+
+const NO_PREVIEW: PosVoucherPreview = {
+  ok: false, amount: 0, label: '', eligibleSubtotal: 0, minSpend: 0,
+  code: '', message: '', error: '', offline: false, status: 0,
+};
+
+/** Label mode APP → OrderType BE (models.go: DINE_IN, TAKEAWAY, DELIVERY,
+ * IN_STORE_ORDER, IN_STORE_SERVICE, ...). Marketplace = DELIVERY. */
+export function mapAppModeToGoOrderType(mode: unknown): string {
+  const m = String(mode ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (m === 'DINE_IN') return 'DINE_IN';
+  if (m === 'TAKE_AWAY' || m === 'TAKEAWAY') return 'TAKEAWAY';
+  if (m === 'GOFOOD' || m === 'GRABFOOD' || m === 'SHOPEEFOOD' || m === 'DELIVERY') return 'DELIVERY';
+  if (m === 'IN_STORE_ORDER') return 'IN_STORE_ORDER';
+  if (m === 'IN_STORE_SERVICE' || m === 'SERVICE') return 'IN_STORE_SERVICE';
+  return m || 'DINE_IN';
+}
+
+type PreviewMappableItem = {
+  id?: unknown; menuId?: unknown; name?: unknown; basePrice?: unknown; price?: unknown;
+  qty?: unknown; quantity?: unknown; modifiers?: unknown; discount?: unknown; voided?: unknown;
+};
+
+/** CartItem/SaleItemIn → items preview. Kanon = goPosItems (sync.ts): id
+ * numerik → MenuID itu, selainnya (id lokal/custom) → MenuID 0 (hanya
+ * dihitung template include-all; scope menu/kategori mengabaikannya).
+ * Subtotal per item = ((price + modifier) × qty − discount), dibulatkan.
+ * null = tak ada baris valid → pemanggil JANGAN call (tanpa items = 400). */
+export function mapSaleItemsToPreviewItems(
+  raw: unknown,
+): PosVoucherPreviewItem[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: PosVoucherPreviewItem[] = [];
+  for (const it of raw) {
+    const r = it as PreviewMappableItem;
+    if (!r || typeof r !== 'object') continue;
+    if ((r as { voided?: unknown }).voided === true) continue;
+    const qty = Math.max(1, Math.round(Number(r.qty ?? r.quantity) || 1));
+    const price = Math.round(Number(r.basePrice ?? r.price) || 0);
+    const mods = Array.isArray(r.modifiers) ? (r.modifiers as { price?: unknown }[]) : [];
+    const modTotal = mods.reduce((a, m) => a + Math.round(Number(m?.price) || 0), 0);
+    const disc = Math.round(Number(r.discount) || 0);
+    const menuRaw = String(r.menuId ?? r.id ?? '').trim();
+    const menuNum = /^[0-9]+$/.test(menuRaw) ? parseInt(menuRaw, 10) : NaN;
+    const subtotal = Math.max(0, (price + modTotal) * qty - disc);
+    out.push({ menuId: Number.isFinite(menuNum) && menuNum > 0 ? menuNum : 0, subtotal });
+  }
+  return out.length > 0 ? out : null;
+}
+
+export async function validatePosVoucherPreview(
+  code: string,
+  subtotal: number,
+  items: PosVoucherPreviewItem[],
+  orderType: string,
+  tillCustomerEmail?: string,
+): Promise<PosVoucherPreview> {
+  const clean = (code ?? '').trim().toUpperCase();
+  if (!clean || !(subtotal > 0) || !Array.isArray(items) || items.length === 0) {
+    return { ...NO_PREVIEW, code: clean };
+  }
+  let r: Awaited<ReturnType<typeof apiFetch>>;
+  try {
+    r = await apiFetch(ApiPath.merchantPosVoucherPreview, {
+      body: {
+        voucherCode: clean,
+        subtotal: Math.round(subtotal),
+        items: items.map((it) => ({
+          menuId: Math.max(0, Math.round(Number(it.menuId) || 0)),
+          subtotal: Math.max(0, Math.round(Number(it.subtotal) || 0)),
+        })),
+        orderType: String(orderType || 'DINE_IN'),
+        ...(tillCustomerEmail && tillCustomerEmail.trim()
+          ? { tillCustomerEmail: tillCustomerEmail.trim() }
+          : {}),
+      },
+    });
+  } catch {
+    return { ...NO_PREVIEW, code: clean, offline: true };
+  }
+  if (r.fromDummy || !r.ok) {
+    // Gagal jaringan/dummy TANPA jawaban server → offline (pemanggil boleh
+    // lanjut ESB). Server menjawab tak-valid → teruskan pesan, offline:false
+    // (pemanggil DILARANG fail-open ke nominal lokal).
+    if (r.fromDummy || r.status === 0) {
+      return { ...NO_PREVIEW, code: clean, offline: true, status: r.status };
+    }
+    const body = (r.data ?? {}) as Record<string, unknown>;
+    const details = (body.details ?? {}) as Record<string, unknown>;
+    const minRaw = Number(details.minOrderAmount);
+    return {
+      ...NO_PREVIEW,
+      code: clean,
+      message: String(body.message ?? body.error ?? ''),
+      error: String(body.error ?? ''),
+      minSpend: Number.isFinite(minRaw) && minRaw > 0 ? Math.round(minRaw) : 0,
+      status: r.status,
+    };
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const d = (data ?? {}) as Record<string, unknown>;
+  const amount = Math.round(Number(d.discountAmount ?? 0)) || 0;
+  return {
+    ok: amount > 0,
+    amount,
+    label: String(d.label ?? ''),
+    eligibleSubtotal: Math.max(0, Math.round(Number(d.eligibleSubtotal ?? 0)) || 0),
+    minSpend: 0,
+    code: clean,
+    message: '',
+    error: '',
+    offline: false,
+    status: r.status,
+  };
+}
+
 export interface EmployeeSession {
   ok: boolean;
   userId: string;
