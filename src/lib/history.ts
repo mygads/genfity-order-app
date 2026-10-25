@@ -9,6 +9,7 @@ import { initDb, markClean, query, queryFirst, run } from './db';
 import { enqueueOutbox, enqueueSync, postImmediate } from './sync';
 import { fmtSalesDate } from './datefmt';
 import { uuidv7 } from './uuidv7';
+import { releaseVoucherAtTerminal } from './terminalVoucher';
 import {
   getServerOrderIdForSale,
   isDecimalId,
@@ -276,14 +277,20 @@ export async function persistVoidDb(
     // Ambil dari usage agar kaki tender ikut pulih, bukan cuma head.
     // Void ganda (head sudah 'void') = lewati agar tak +1 dua kali.
     if (!alreadyVoid) try {
-      const burned = await query<{ voucherCode: string | null }>(
-        `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
-         WHERE salesNum = ? AND status = 'burn'`,
+      const burned = await query<{ voucherCode: string | null; clientId: string | null }>(
+        `SELECT voucherCode, MAX(client_id) AS clientId FROM tr_salesvoucherusage
+         WHERE salesNum = ? AND status = 'burn' GROUP BY voucherCode`,
         [salesNum],
       );
       for (const b of burned) {
         const code = String(b.voucherCode ?? '').trim();
         if (!code) continue;
+        // A12: lepas voucher di server terminal (best-effort; kuota lokal di
+        // bawah tetap pulih). Kunci idempotency = milik burn (lookup helper).
+        void releaseVoucherAtTerminal({
+          orderClientId: String(b.clientId ?? salesNum),
+          code,
+        });
         await run(
           `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
             WHERE UPPER(voucherCode) = UPPER(?)`,

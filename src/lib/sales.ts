@@ -19,6 +19,7 @@ import { apiFetch } from './apiSource';
 import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
 import { uuidv7 } from './uuidv7';
 import { GO_OP_SETTLE, getServerOrderIdForSale, mapPayMethodToBe, type BePayMethod } from './posWire';
+import { burnVoucherAtTerminal } from './terminalVoucher';
 import { getCashSessionId } from './beWorkforce';
 import { getItem, setItem } from './storage';
 import * as DisplayBus from './display';
@@ -751,6 +752,21 @@ export async function saveSale(s: SaleInput): Promise<string> {
       [uid('sv'), salesNum, clientId, c],
     );
   }
+  // A12: burn voucher di server terminal — pasca-commit (postCommit di-flush
+  // hanya bila COMMIT berhasil; best-effort, kuota lokal di atas tetap sah).
+  // IdempotencyKey per-voucher-per-transaksi milik helper (persist pra-kirim).
+  if (headVoucherOk && s.voucherCode) {
+    const bc = String(s.voucherCode);
+    postCommit.push(() => {
+      void burnVoucherAtTerminal({ code: bc, orderClientId: clientId });
+    });
+  }
+  for (const b of burnedLegs) {
+    const bc = String(b.code);
+    postCommit.push(() => {
+      void burnVoucherAtTerminal({ code: bc, orderClientId: clientId });
+    });
+  }
   // tr_platformfee (L18): escpos/payments hanya mengenal SATU angka fee
   // (feeESB → platformFee tunggal, tanpa breakdown per platform) sehingga
   // ditulis satu baris {platform:'total'} sebagai sumber rekap; syncDate
@@ -957,6 +973,8 @@ export async function appendGroupPayment(
   let outDepMember = '';
   let outDepBranch: string | null = null;
   let outDepId = '';
+  // A12: kode voucher kaki yang terbakar (di-flush pasca-commit di bawah).
+  let outBurnedCodes: string[] = [];
   // L3: SELURUH mutasi (kaki + head + deposit + voucher) dalam SATU transaksi
   // — kill di tengah tak menyisakan kaki tanpa head / head tanpa debit.
   await withTransaction(async () => {
@@ -996,6 +1014,7 @@ export async function appendGroupPayment(
       if (chk.ok) burnedLegs.push({ code: c, amount: chk.amount });
       else rejectedLegs.add(c.toUpperCase());
     }
+    outBurnedCodes = burnedLegs.map((b) => b.code);
     // Deposit backstop (paritas saveSale bug G1): kaki deposit kunjungan ke-2+
     // WAJIB memotong saldo member. Sebelumnya appendGroupPayment tak menyentuh
     // ms_member sama sekali sehingga deposit bisa dipakai ulang tanpa batas
@@ -1136,6 +1155,14 @@ export async function appendGroupPayment(
     });
   } catch {
     /* abaikan */
+  }
+  // A12: burn voucher kaki di server terminal (pasca-commit; best-effort,
+  // kuota lokal di atas tetap sah). groupClientId = orderClientId rantai
+  // bersama (paritas payload group-payment di atas).
+  if (outGroupClientId) {
+    for (const bc of outBurnedCodes) {
+      void burnVoucherAtTerminal({ code: bc, orderClientId: outGroupClientId });
+    }
   }
   // A6: kunjungan grup yang MELUNASI bill (visit 2+) = antre GO_OP_SETTLE
   // SEKALI agar drain memfinalisasi order BE. Drain-only (layar tak

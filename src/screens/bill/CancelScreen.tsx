@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { archiveVoidTrail } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong.
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { archiveVoidTrail } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';import { postTableTransition } from '../../lib/terminalTable';import { releaseVoucherAtTerminal } from '../../lib/terminalVoucher';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong.
  * Tip SENGAJA tak ikut: order-level, menempel pada bill seperti ongkir —
  * void sebagian melestarikan tip (grand baru = grand lama − gross void). */
 async function loadHeadAdj(salesNum: string): Promise<{ discount: number; service: number; tax: number }> {
@@ -202,14 +202,20 @@ async function applyVoidLocal(
     // HANYA untuk kode yang benar-benar terbakar (usage 'burn', head + kaki
     // tender); deposit kembali + ledger refund; dapur Batal.
     try {
-      const burned = await query<{ voucherCode: string | null }>(
-        `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
-         WHERE salesNum = ? AND status = 'burn'`,
+      const burned = await query<{ voucherCode: string | null; clientId: string | null }>(
+        `SELECT voucherCode, MAX(client_id) AS clientId FROM tr_salesvoucherusage
+         WHERE salesNum = ? AND status = 'burn' GROUP BY voucherCode`,
         [orderId],
       );
       for (const b of burned) {
         const code = String(b.voucherCode ?? '').trim();
         if (!code) continue;
+        // A12: lepas voucher di server terminal (best-effort; kuota lokal di
+        // bawah tetap pulih). Kunci idempotency = milik burn (lookup helper).
+        void releaseVoucherAtTerminal({
+          orderClientId: String(b.clientId ?? orderId),
+          code,
+        });
         try {
           await run(
             `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
@@ -297,6 +303,9 @@ async function applyVoidLocal(
         } catch {
           /* abaikan */
         }
+        // A11: bebaskan meja di server terminal (best-effort; jalur lokal di
+        // atas + antrean sync tetap jadi fallback offline).
+        void postTableTransition({ tableRef: head.tableNo, status: 'AVAILABLE' });
       }
     } catch {
       /* abaikan */
