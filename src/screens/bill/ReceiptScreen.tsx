@@ -62,7 +62,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const edcLine = [route?.params?.bank, route?.params?.terminal].filter(Boolean).join(' · ');
   // Nama + alamat gerai dari terminal aktif (bukan hardcode Poris); alamat
   // kosong = baris alamat disembunyikan.
-  // A3: preferensi struk server-wins (ms_setting Receipt/*, default tampil
+  // A3: preferensi struk server-wins (ms_setting Receipt/..., default tampil
   // semua). Params eksplisit pemanggil tetap menang atas preferensi.
   const [rcPrefs, setRcPrefs] = useState<ReceiptPrefs>(RECEIPT_PREFS_DEFAULT);/** Label service mengikuti knob server (audit trisisi #1); nilai service tetap dari pemanggil (angka resmi rantai). */const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);useEffect(() => { let alive = true; void getServiceConfig().then((c) => { if (alive) setSvcCfg(c); }); return () => { alive = false; }; }, []);
   const shopName = route?.params?.shopName ?? getTerminal().branchName ?? 'Genfity';
@@ -79,7 +79,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   // navigation/types Receipt sudah membawa splitPaid, layar wajib merender).
   const splitPaidAmt = Math.max(0, Math.round(Number(route?.params?.splitPaid?.amount) || 0));
   const splitPaidMethod = typeof route?.params?.splitPaid?.method === 'string' ? route.params.splitPaid.method : '';
-  // A3: preferensi struk server-wins (ms_setting Receipt/*, default tampil
+  // A3: preferensi struk server-wins (ms_setting Receipt/..., default tampil
   // semua). Params eksplisit pemanggil tetap menang atas preferensi.
   useEffect(() => {
     let alive = true;

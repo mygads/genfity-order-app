@@ -512,7 +512,7 @@ export async function getDeviceId(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Helper install (dipakai layar install/*): selalu lewat apiFetch.
+// Helper install (dipakai layar install/...): selalu lewat apiFetch.
 // ---------------------------------------------------------------------------
 
 export interface ValidateTerminalResult {

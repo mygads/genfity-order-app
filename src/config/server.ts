@@ -116,7 +116,7 @@ export const ApiPath = {
   depositInquiry: 'member-deposit-withdrawal/inquiry-deposit',
   // [asumsi-clean-room] inquiry-deposit ADA di APK, topup nihil (REA-18).
   depositTopup: 'member-deposit-withdrawal/topup',
-  // Dipetakan ke grup erp/member/* (REA-3: balance-deposit, deposit, sales).
+  // Dipetakan ke grup erp/member/... (REA-3: balance-deposit, deposit, sales).
   // Sub-path pasti untuk registrasi tak terverifikasi - pakai path dasar grup.
   // Lihat kontrak §5.5.
   registerMember: 'erp/member',
@@ -128,7 +128,7 @@ export const ApiPath = {
   deliveryScheduleOrder: 'erp/ezo-delivery/schedule-order',
   deliverySearchOngoing: 'erp/ezo-delivery/search-ongoing',
   deliverySearchOutstanding: 'erp/ezo-delivery/search-outstanding',
-  // [FAKTA] REA-3: sub-path member erp/member/*.
+  // [FAKTA] REA-3: sub-path member erp/member/....
   memberErpBalance: 'erp/member/balance-deposit',
   memberErpDeposit: 'erp/member/deposit',
   memberErpSales: 'erp/member/sales',
