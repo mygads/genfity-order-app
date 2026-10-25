@@ -27,6 +27,34 @@ const LOCK_MS = 60_000;
 const LS_SUP_ATTEMPTS = 'genfity.supervisor.attempts';
 const LS_SUP_LOCKED = 'genfity.supervisor.lockedUntil';
 
+// A-P0-1: flag wajib-ganti-PIN pasca-seed. PIN seed = acak sekali-pakai yang
+// tak diketahui siapa pun; eskalasi supervisor akun default ('u-admin')
+// DITOLAK selama flag '1' — kasir wajib buat PIN via Install/CreatePin atau
+// reset via Lupa PIN (keduanya membersihkan flag). Instalasi lama yang
+// record-nya sudah ada tak tersentuh (hash tak bisa membuktikan PIN default)
+// — limitasi terdokumentasi, bukan celah baru.
+export const PIN_MUST_CHANGE_PREFIX = 'genfity.pin.mustChange.';
+export async function isPinChangeRequired(userId: string): Promise<boolean> {
+  const id = String(userId ?? '').trim();
+  if (!id) return false;
+  try {
+    return (await getItem(PIN_MUST_CHANGE_PREFIX + id)) === '1';
+  } catch {
+    // Fail-closed: storage tak terbaca = anggap wajib ganti.
+    return true;
+  }
+}
+export async function markPinChangeRequired(userId: string): Promise<void> {
+  const id = String(userId ?? '').trim();
+  if (!id) return;
+  await setItem(PIN_MUST_CHANGE_PREFIX + id, '1');
+}
+export async function clearPinChangeRequired(userId: string): Promise<void> {
+  const id = String(userId ?? '').trim();
+  if (!id) return;
+  await setItem(PIN_MUST_CHANGE_PREFIX + id, '0');
+}
+
 let attempts = 0;
 let lockedUntil = 0;
 let throttleHydrated = false;
@@ -169,6 +197,18 @@ export async function verifyLocalEscalation(
   }
   if (v.ok !== true || !v.userId) {
     return fail('invalid', tOf('sup_invalid'));
+  }
+  // A-P0-1: tolak akun default selama flag wajib-ganti menyala (PIN seed
+  // acak sekali-pakai belum diganti manusia). Bakar attempt seperti tebakan
+  // gagal — PIN default bukan kredensial sah.
+  if (v.userId === 'u-admin') {
+    let must = true;
+    try {
+      must = await isPinChangeRequired('u-admin');
+    } catch {
+      must = true;
+    }
+    if (must) return fail('denied', tOf('sup_default_deny'));
   }
   let gate: { ok: boolean };
   try {

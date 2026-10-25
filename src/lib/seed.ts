@@ -28,6 +28,7 @@
 import { initDb, query, queryFirst, run } from './db';
 import type { BindParams } from './db';
 import { loadPinRecord, removePinHash, savePinHash } from './pin';
+import { markPinChangeRequired } from './supervisor';
 import { assertVoucherUsable, isTerminalBound, queueNoOf, saveSale } from './sales';
 import type { SaleInput } from './payments';
 import { normalizeMethod } from './payments';
@@ -36,7 +37,7 @@ import type { TotalsResult } from './totals';
 import { setCachedCurrency } from './currency';
 import { applyBranchLanguagePolicy } from './i18n';
 import { setCachedTimezone } from './timezone';
-import { uuidv7 } from './uuidv7';
+import { randomHex, uuidv7 } from './uuidv7';
 import { trimTestUsers } from './seedUsers';
 
 // S2-C311: gate kesiapan seed — App.tsx menjalankan seedIfEmpty fire-and-forget
@@ -598,7 +599,20 @@ export async function ensureSeeded(): Promise<void> {
   );
   try {
     const rec = await loadPinRecord('u-admin');
-    if (!rec) await savePinHash('u-admin', '1234');
+    if (!rec) {
+      // A-P0-1: TANPA PIN default '1234'. Seed = PIN acak 6-digit sekali-pakai
+      // (tak ditampilkan di mana pun — tak bisa dipakai siapa pun) + flag
+      // wajib-ganti; verifyLocalEscalation menolak u-admin selama flag
+      // menyala (fail-closed bila flag tak terbaca). Alur Install/CreatePin
+      // atau Lupa PIN mengganti + membersihkan flag.
+      const oneTime = String(100000 + (parseInt(randomHex(5), 16) % 900000));
+      await savePinHash('u-admin', oneTime);
+      try {
+        await markPinChangeRequired('u-admin');
+      } catch {
+        /* flag gagal — eskalasi tetap fail-closed via isPinChangeRequired */
+      }
+    }
   } catch {
     /* seed PIN gagal — migrasi/startup berikut mencoba lagi */
   }

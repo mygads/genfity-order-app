@@ -1219,6 +1219,7 @@ const STR: Record<string, Entry> = {
   sup_invalid: { id: 'Masukkan 6 digit PIN supervisor.', en: 'Enter the 6-digit supervisor PIN.' },
   sup_locked: { id: 'Terkunci sementara, coba lagi dalam {n} detik.', en: 'Temporarily locked, try again in {n}s.' },
   sup_denied: { id: 'Otorisasi ditolak server (sisa {n}x percobaan).', en: 'Authorization denied by server ({n} attempts left).' },
+  sup_default_deny: { id: 'PIN bawaan ditolak - ganti PIN dulu via Install / Lupa PIN.', en: 'Default PIN denied - change your PIN via Install / Forgot PIN first.' },
   sup_offline: { id: 'Offline, aksi sensitif ditolak demi keamanan.', en: 'Offline, sensitive action denied for safety.' },
   sup_unconfigured: { id: 'Server belum diatur, otorisasi ditolak.', en: 'Server not configured, authorization denied.' },
   sup_ok: { id: 'Disetujui supervisor.', en: 'Approved by supervisor.' },
