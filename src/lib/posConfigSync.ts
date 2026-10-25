@@ -212,7 +212,7 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     // flag server sehingga TAK di-gate; online/member/lainnya tak punya knob.
     // Blok absen / tanpa kunci eksplisit = tampil (perilaku lama, nol-regresi).
     const tabs = parsePayTabs(pbRaw);
-    const pm = ((r.data as Record<string, unknown>).paymentSettings ?? {}) as Record<string, unknown>;
+    const pm = ((r.data as unknown as Record<string, unknown>).paymentSettings ?? {}) as Record<string, unknown>;
     if (pm && typeof pm === 'object') {
       const cash = pm.payAtCashierEnabled ?? pm.pay_at_cashier_enabled;
       if (cash !== undefined && cash !== null) tabs.tunai = asBool(cash, true);

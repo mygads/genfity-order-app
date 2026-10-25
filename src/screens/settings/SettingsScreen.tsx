@@ -112,7 +112,9 @@ export default function SettingsScreen({ navigation }: Props) {
 
   /**
    * Gate RBAC settings.edit: deny = Alert + block (tanpa eskalasi).
-   * Fail-open: DB belum siap / tanpa baris = allow.
+   * Fail-CLOSED (R1): DB belum siap / throw = DENY. Gate ini menjaga server
+   * env + re-bind terminal — fail-open akan membiarkan kasir mengganti
+   * endpoint server saat DB rusak/belum hydrate.
    */
   const guardSettingsEdit = async (): Promise<boolean> => {
     try {
@@ -123,7 +125,8 @@ export default function SettingsScreen({ navigation }: Props) {
       }
       return true;
     } catch {
-      return true;
+      appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', 'db-unready'));
+      return false;
     }
   };
 
