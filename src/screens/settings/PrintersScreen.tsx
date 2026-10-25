@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { pollServerPrintJobs } from '../../lib/printBridge';import { fetchBranchTerminals } from '../../lib/terminalApi';import { hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -145,6 +145,7 @@ function backupBindings(ss: Station[]): void {
   const [lanPort, setLanPort] = useState('9100');
   const [lanMsg, setLanMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  const [serverPulling, setServerPulling] = useState(false);
   /** S-F12/S-F13: destinasi cetak server (hibrida: tampil bila ada; cetak
    * tetap memakai station lokal — tanpa secret di kontrak BE). */
   const [srvDests, setSrvDests] = useState<PrintDestination[]>([]);
@@ -437,6 +438,75 @@ function backupBindings(ss: Station[]): void {
     );
   };
 
+  /** Tarik manual antrean cetak server (print-bridge FULL): terminalCode klaim
+   * dibaca ulang lalu dipetakan ke id BE via daftar terminal cabang, kemudian
+   * satu siklus klaim-cetak-ack jalan ke station terikat (mundur ke utama,
+   * lalu ke station pertama yang bisa kirim). Tanpa klaim = tolak eksplisit.
+   * Tanpa state antrean lokal baru: hasil poller hanya statusMsg. */
+  const pullServerJobs = async () => {
+    if (serverPulling) return;
+    let bound = activeTerm;
+    try {
+      bound = getTerminal();
+    } catch {
+      bound = activeTerm;
+    }
+    const term = String(bound.terminalCode ?? '').trim().toUpperCase();
+    const br = String(bound.branchId ?? '').trim();
+    if (!term || !br) {
+      setStatusMsg(t('printers.serverNeedClaim'));
+      return;
+    }
+    setServerPulling(true);
+    setStatusMsg(t('printers.serverPulling'));
+    try {
+      const list = await fetchBranchTerminals(br);
+      if (!list.ok) {
+        setStatusMsg(t('printers.serverError').replace('{n}', String(list.status)));
+        return;
+      }
+      const hit = list.data.terminals.find(
+        (x) => String(x.terminalCode ?? '').trim().toUpperCase() === term,
+      );
+      const beId = String(hit?.terminalId ?? '').trim();
+      if (!beId) {
+        setStatusMsg(t('printers.serverError').replace('{n}', 'no-terminal-id'));
+        return;
+      }
+      const boundHit = stations.find(
+        (s) => String(s.terminalCode ?? '').trim().toUpperCase() === term,
+      );
+      const defHit = stations.find((s) => s.isDefault);
+      const cands = [boundHit, defHit, ...stations].filter(
+        (s): s is Station => Boolean(s),
+      );
+      const picked = cands.find((s) => stationTarget(s) !== null);
+      if (!picked) {
+        setStatusMsg(t('printers.noPrinter'));
+        return;
+      }
+      const target = stationTarget(picked);
+      if (!target) {
+        setStatusMsg(t('printers.noPrinter'));
+        return;
+      }
+      const out = await pollServerPrintJobs(beId, target, (tg, bytes) => printBytes(tg, bytes));
+      if (out.state === 'printed') {
+        setStatusMsg(t('printers.serverPrinted').replace('{x}', String(out.jobId)));
+      } else if (out.state === 'failed') {
+        setStatusMsg(
+          t('printers.serverFailed').replace('{x}', String(out.jobId)).replace('{e}', String(out.serverStatus)),
+        );
+      } else if (out.state === 'empty') {
+        setStatusMsg(t('printers.serverEmpty'));
+      } else {
+        setStatusMsg(t('printers.serverError').replace('{n}', String(out.status)));
+      }
+    } finally {
+      setServerPulling(false);
+    }
+  };
+
   /** Test print per station: pratinjau + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
     // R57: alamat tak bisa kirim = null — tolak eksplisit (kunci noPrinter
@@ -512,6 +582,8 @@ function backupBindings(ss: Station[]): void {
           <Text style={styles.stMeta}>
             {String(activeTerm.branchId ?? '').trim() ? `Cabang: ${String(activeTerm.branchId).trim()}` : t('printers_claim_first')}
           </Text>
+          {/* Print-bridge FULL: pemicu manual poller klaim-cetak-ack server. */}
+          <AppButton size="md" title={serverPulling ? t('printers.serverPulling') : t('printers.serverPull')} onPress={() => { void pullServerJobs(); }} disabled={serverPulling} variant="secondary" fullWidth={false} style={styles.blockGap} />
         </View>
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
         {/* WIRE REA-16: kunci prefs native printer (info status, best-effort) */}

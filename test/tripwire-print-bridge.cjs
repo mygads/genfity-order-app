@@ -10,6 +10,9 @@
 //     INVALID_PAYLOAD (racun antrean jangan muter selamanya).
 //  4. Modul tak mengimpor runtime native/printer (hanya `import type`);
 //     printFn disuntik pemanggil (resolveDrainTarget print.ts).
+//  5. fillPrintPath ganti dua placeholder {id} + {jobId}.
+//  6. UI wiring: PrintersScreen memicu poller via tombol manual
+//     (klaim ulang terminalCode ke id BE, kirim via printBytes, lapor statusMsg).
 const fs = require('fs');
 const path = require('path');
 
@@ -78,6 +81,24 @@ function run() {
   // 5. fillPrintPath ganti dua placeholder.
   ok(/export function fillPrintPath/.test(pb) && /\{jobId\}/.test(pb),
     'PB: fillPrintPath isi {id} + {jobId} (ack butuh dua)');
+
+  // 6. UI wiring: PrintersScreen memicu poller (tanpa tombol = modul mati di HP).
+  //    Mentahan (readRaw) agar strip tak menelan bukti.
+  const screen = readRaw('screens/settings/PrintersScreen.tsx');
+  const i18n = readRaw('lib/i18n.ts');
+  ok(/from '\.\.\/\.\.\/lib\/printBridge'/.test(screen) && /pollServerPrintJobs/.test(screen),
+    'PB-UI: PrintersScreen mengimpor pollServerPrintJobs (poller ada pemicu)');
+  ok(/fetchBranchTerminals/.test(screen),
+    'PB-UI: terminalCode klaim dipetakan ke id BE via fetchBranchTerminals');
+  ok(screen.indexOf('pollServerPrintJobs(') >= 0 && screen.indexOf('printBytes(') >= 0,
+    'PB-UI: poller dipanggil dengan printBytes (byte server ke printer nyata)');
+  ok(/printers\.serverPull/.test(screen),
+    'PB-UI: tombol tarik antrean memakai kunci i18n printers.serverPull');
+  ok(/printers\.serverPull/.test(i18n) && /printers\.serverPulling/.test(i18n) &&
+    /printers\.serverPrinted/.test(i18n) && /printers\.serverFailed/.test(i18n) &&
+    /printers\.serverEmpty/.test(i18n) && /printers\.serverError/.test(i18n) &&
+    /printers\.serverNeedClaim/.test(i18n),
+    'PB-UI: tujuh kunci printers.server ada di i18n');
 
   return { failures, checks };
 }
