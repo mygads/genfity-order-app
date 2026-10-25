@@ -16,6 +16,7 @@ import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import {
   adoptTerminalBinding,
   buildGrant as buildSessionGrant,
+  clearRememberedAccount,
   consumeKickNotice,
   describeGrantProblem,
   forceLogoutOnTokenLoss,
@@ -24,8 +25,10 @@ import {
   getMaxOfflineGrantDays,
   getSession,
   hydrateTerminalState,
+  loadRememberedAccount,
   loginEmployee,
   saveGrant as saveSessionGrant,
+  saveRememberedAccount,
   saveSession,
   setMaxOfflineGrantDays,
   setPostLoginRoute,
@@ -62,6 +65,7 @@ import BackChevron from '../../components/BackChevron';
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack?: () => void;
+  canGoBack?: () => boolean;
 };
 
 type Props = { navigation?: Nav };
@@ -133,6 +137,27 @@ function QrTabletArt() {
  * unbound mulai di picker cabang-terminal, bukan layar klaim lama.
  */
 const BIND_FLOW_ROUTE = 'BranchPicker';
+
+/**
+ * TAHAP-1 REMEMBER-ME: preferensi checkbox "ingat saya" (state komponen →
+ * dibaca funnel login module-level di bawah). Default true agar kasir minim
+ * ketikan; yang disimpan hanya username+nama (BUKAN password/token).
+ * Funnel completeOnline/completeLogin/completeOffline menerapkannya seragam:
+ * sukses + pref on → simpan; sukses + pref off → buang.
+ */
+let rememberPref = true;
+function setRememberMePreference(v: boolean): void {
+  rememberPref = !!v;
+}
+/** Terapkan preferensi ke hasil login sukses (fire-and-forget, anti blokir). */
+function applyRememberMe(username: string, name: string): void {
+  try {
+    if (rememberPref) void saveRememberedAccount({ username, name });
+    else void clearRememberedAccount();
+  } catch {
+    /* abaikan */
+  }
+}
 
 /**
  * APP-FIXUP(Q2) HIDE-QR: entry login-QR DIHIDE dulu (QR_LOGIN_VISIBLE=false).
@@ -668,6 +693,11 @@ async function completeOnline(
   const branchId = branches[0]?.id || ctx.branchId;
   const tag = str(payload.tag ?? payload.terminalTag) || ctx.tag;
   const authToken = str(payload.authToken ?? payload.token ?? payload.authKey);
+  // T-AUTH-REFRESH: tangkap refresh token E01 (payload.refreshToken; BE
+  // terminal-login memutarnya bersama access). Tanpa ini silent refresh
+  // mustahil (APP-zero-refresh) — sesi online TANPA refresh token diperlakukan
+  // seperti tanpa token (fail-closed bila requireToken).
+  const refreshToken = str(payload.refreshToken ?? payload.refresh_token);
   if (opts?.requireToken && !authToken) {
     forceLogoutOnTokenLoss('e01-no-token');
     throw new Error('e01-no-token');
@@ -685,6 +715,9 @@ async function completeOnline(
     terminalId: ctx.terminalId,
     deviceId,
     ...(authToken ? { authToken } : {}),
+    // T-AUTH-REFRESH: refresh token ikut sesi (memori + SecureStore via
+    // saveSession); sesi offline/lokal tetap tanpa keduanya.
+    ...(refreshToken ? { refreshToken } : {}),
     loginAt: new Date().toISOString(),
     outlet: sameUser && prev ? prev.outlet : (ctx.branchName || prev?.outlet || ''),
     shift: sameUser && prev ? prev.shift : '',
@@ -695,6 +728,8 @@ async function completeOnline(
   // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
   if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
+  // TAHAP-1 REMEMBER-ME: login online sukses → ingat/buang akun per preferensi.
+  applyRememberMe(username, sess.name);
   // S-READINESS: gerbang shift server-side (SPEC-TERMINAL-SESSION §11).
   // Pasca-saveSession (bearer sesi tersedia untuk apiFetch kontrak-Go):
   // tanya BE readiness best-effort; bila server eksplisit needsShift/needsCash
@@ -797,6 +832,8 @@ async function completeOffline(
   // GAP-14: attribution owner-override ikut sesi (persist via saveSession).
   if (approvedBy) sess.approvedBy = approvedBy;
   saveSession(sess);
+  // TAHAP-1 REMEMBER-ME: login offline sukses → ingat/buang akun per preferensi.
+  applyRememberMe(username, sess.name);
   // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
   // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
   // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
@@ -824,6 +861,11 @@ export default function LoginScreen({ navigation }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
+  // TAHAP-1 REMEMBER-ME: akun yang diingat device ini (prefill + sapaan) dan
+  // preferensi checkbox. Default pref on: minim ketikan di device shared;
+  // yang disimpan hanya username+nama, password/PIN tak pernah tersimpan.
+  const [remembered, setRemembered] = useState<{ username: string; name: string } | null>(null);
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState(false);
   const [serverError, setServerError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -949,6 +991,23 @@ export default function LoginScreen({ navigation }: Props) {
       /* abaikan */
     }
   }, []);
+  // TAHAP-1 REMEMBER-ME: muat akun yang diingat saat layar dibuka → prefill
+  // username (kolom kosong saja, jangan timpa ketikan) agar kasir tinggal
+  // password/PIN. Gagal muat = form kosong biasa (fail-open aman).
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const r = await loadRememberedAccount();
+        if (!live || !r) return;
+        setRemembered(r);
+        setUsername((cur) => (cur.trim() ? cur : r.username));
+      } catch {
+        /* abaikan */
+      }
+    })();
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     let live = true;
     const unsub = subscribeSession(() => {
@@ -1006,10 +1065,56 @@ export default function LoginScreen({ navigation }: Props) {
 
   const filled = username.trim().length > 0 && password.length > 0;
 
-  const goBack = () => {
-    if (navigation?.goBack) navigation.goBack();
-    else navigation?.navigate('Intro');
+  // Tombol ‹ header: HANYA bermakna bila ada riwayat stack (alur
+  // install/bind yang tiba di Login dari layar sebelumnya). Pemakaian harian
+  // (device bound → Login = initialRouteName, App.tsx:376) = Login adalah root:
+  // goBack() no-op (tombol mati) dan fallback lama navigate('Intro') malah
+  // melempar user ke layar welcome tanpa jalan kembali yang jelas. Maka:
+  // bisa-kembali → goBack(); root → tombol DISEMBUNYIKAN (spacer agar header
+  // tetap simetris), bukan tombol mati.
+  const canGoBackNow = (): boolean => {
+    try {
+      return !!navigation?.canGoBack?.();
+    } catch {
+      return false;
+    }
   };
+  const goBack = () => {
+    if (!canGoBackNow()) return;
+    try {
+      navigation?.goBack?.();
+    } catch {
+      /* abaikan — tetap di Login */
+    }
+  };
+
+  // TAHAP-1 REMEMBER-ME: toggle checkbox — off langsung melupakan akun yang
+  // tersimpan (tanpa menunggu login berikutnya); on hanya mengubah preferensi
+  // (penyimpanan terjadi saat login sukses via applyRememberMe).
+  const toggleRemember = () => {
+    const v = !rememberMe;
+    setRememberMe(v);
+    setRememberMePreference(v);
+    if (!v) void clearRememberedAccount();
+  };
+  // TAHAP-1 REMEMBER-ME: "Bukan kamu?" — buang akun yang diingat + kosongkan
+  // form agar pengguna lain mulai bersih (1 tap, tanpa logout karena belum login).
+  const switchUser = () => {
+    setRemembered(null);
+    setUsername('');
+    setPassword('');
+    setError(false);
+    setServerError('');
+    void clearRememberedAccount();
+  };
+  // Sapaan "Halo kembali" hanya bila kolom username cocok dengan yang diingat
+  // (bila user mengetik nama lain, sapaan + tautan ganti otomatis hilang).
+  const greeted = (() => {
+    if (!remembered) return null;
+    const cur = username.trim().toLowerCase();
+    if (!cur || cur !== remembered.username.toLowerCase()) return null;
+    return remembered;
+  })();
 
   /**
    * Kunci sesi setelah server menyatakan lolos (dipakai form PIN maupun QR):
@@ -1051,6 +1156,8 @@ export default function LoginScreen({ navigation }: Props) {
         ...(ctx?.terminalTag ? { terminalTag: ctx.terminalTag } : {}),
       },
     );
+    // TAHAP-1 REMEMBER-ME: login lokal/QR sukses → ingat/buang akun per preferensi.
+    applyRememberMe(uname, s.nama);
     // Dual-currency: segarkan cache currency dari profil merchant (fire-and-forget,
     // best-effort — login tak diblokir bila gagal; currency tak ada = fallback IDR).
     // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
@@ -1944,9 +2051,13 @@ export default function LoginScreen({ navigation }: Props) {
   const formBody = (
     <>
         <View style={styles.header}>
-          <TouchableOpacity onPress={goBack} hitSlop={12}>
-            <BackChevron color="#4A4A4A" />
-          </TouchableOpacity>
+          {canGoBackNow() ? (
+            <TouchableOpacity onPress={goBack} hitSlop={12}>
+              <BackChevron color="#4A4A4A" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.headerSpacer} />
+          )}
           <TouchableOpacity onPress={() => setHelp(true)} hitSlop={12}>
             <View style={styles.helpCircle}>
               <Text style={styles.helpGlyph}>?</Text>
@@ -1961,6 +2072,18 @@ export default function LoginScreen({ navigation }: Props) {
         />
         <Text style={styles.title}>{t('g_login_welcome')}</Text>
         <Text style={styles.sub}>{t('g_login_sub')}</Text>
+        {/* TAHAP-1 REMEMBER-ME: sapaan akun yang diingat + tautan ganti user.
+            Hanya tampil bila kolom username cocok (lihat `greeted`). */}
+        {greeted ? (
+          <>
+            <Text style={styles.hello}>
+              {t('g_login_hello').replace('{n}', greeted.name || greeted.username)}
+            </Text>
+            <TouchableOpacity onPress={switchUser} hitSlop={8} style={styles.notYouLink}>
+              <Text style={styles.notYouLinkT}>{t('g_login_notyou')}</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
         {/* Sapaan merchant-terminal (SPEC §2/B1 terminal_welcome): dari
          * getBinding(), BUKAN fallback B001. Belum diikat → tautan bind. */}
         {bindingLoaded && binding ? (
@@ -2188,6 +2311,20 @@ export default function LoginScreen({ navigation }: Props) {
               style={styles.forgotLink}
               onPress={() => navigation?.navigate('ForgotPin')}>
               <Text style={styles.forgotLinkT}>{t('g_login_forgot')}</Text>
+            </TouchableOpacity>
+
+            {/* TAHAP-1 REMEMBER-ME: checkbox custom (tanpa dependensi baru) —
+                off = lupakan sekarang, on = simpan saat login sukses. */}
+            <TouchableOpacity
+              style={styles.rememberRow}
+              onPress={toggleRemember}
+              hitSlop={8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: rememberMe }}>
+              <View style={[styles.checkbox, rememberMe && styles.checkboxOn]}>
+                {rememberMe ? <Text style={styles.checkmark}>✓</Text> : null}
+              </View>
+              <Text style={styles.rememberLabel}>{t('g_login_remember')}</Text>
             </TouchableOpacity>
 
             <View style={styles.spacer} />
@@ -2529,6 +2666,21 @@ const styles = StyleSheet.create({
   infoItem: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, textAlign: 'center' },
   infoHelp: { fontFamily: fonts.medium, fontSize: 13, color: colors.white, textAlign: 'center', marginTop: 8 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Spacer pengganti chevron-back saat Login = root stack (tak bisa kembali):
+  // lebar ≈ area sentuh chevron agar tombol "?" kanan tetap di posisinya.
+  headerSpacer: { width: 34, height: 34 },
+  // TAHAP-1 REMEMBER-ME: sapaan akun yang diingat + tautan ganti + checkbox.
+  hello: { fontFamily: fonts.bold, fontSize: 15, color: TITLE_DARK, textAlign: 'center', marginTop: 8 },
+  notYouLink: { alignSelf: 'center', marginTop: 4, paddingVertical: 4, paddingHorizontal: 8 },
+  notYouLinkT: { fontFamily: fonts.medium, fontSize: 13, color: BLUE, textAlign: 'center' },
+  rememberRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 6, alignSelf: 'flex-start' },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: INPUT_BORDER,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', marginRight: 10,
+  },
+  checkboxOn: { borderColor: BLUE, backgroundColor: BLUE },
+  checkmark: { color: '#FFFFFF', fontSize: 14, fontWeight: 'bold', lineHeight: 16 },
+  rememberLabel: { fontFamily: fonts.regular, fontSize: 13, color: GREY, flexShrink: 1 },
   back: { fontSize: 28, color: '#4A4A4A', fontFamily: fonts.bold, paddingRight: 12 },
   helpCircle: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: '#E4E4E4',

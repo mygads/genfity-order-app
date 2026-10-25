@@ -142,6 +142,7 @@ export const ApiPath = {
   // (scope-merchant ada, auth berbeda), E23, E24, E25-consume. E04/E10/E11/E12
   // SUDAH ADA (mendarat 2026-10-17). '{id}'/'{viewId}' diganti caller.
   staffLogin: 'api/v1/auth/terminal-login', // E01 POST LOGIN-FIRST F1 (single-stage, BUKAN dua kredensial): {username,password,deviceId,terminalCode?,terminalPin?,merchantId?} → tahap-A {stage:'pick-terminal'} tanpa terminalCode, tahap-B sesi penuh + pinRequired SELALU. `staffPin` TAK ADA (server abaikan); PIN user SELALU langkah 2 via E29 (cek hybrid berversi, bukan gate buta).
+  terminalRefresh: 'api/v1/auth/terminal-refresh', // T-AUTH-REFRESH POST {refreshToken} → rotasi {accessToken, refreshToken, expiresIn, merchantId} (cermin AuthRefresh admin, skop sesi terminal POS; replay → REVOKE + 401)
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
   terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding

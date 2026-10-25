@@ -1253,6 +1253,10 @@ const STR: Record<string, Entry> = {
   g_login_scan: { id: 'Scan QR', en: 'Scan QR' },
   g_login_welcome: { id: 'Selamat Datang Juragan!', en: 'Welcome, Boss!' },
   g_login_sub: { id: 'Silakan masuk dengan akun Anda', en: 'Please sign in with your account' },
+  // TAHAP-1 REMEMBER-ME: sapaan akun yang diingat + preferensi + ganti user.
+  g_login_hello: { id: 'Halo kembali, {n}!', en: 'Welcome back, {n}!' },
+  g_login_remember: { id: 'Ingat saya di perangkat ini', en: 'Remember me on this device' },
+  g_login_notyou: { id: 'Bukan kamu? Ganti pengguna', en: 'Not you? Switch user' },
   g_login_label_user: { id: 'Username atau Email', en: 'Username or Email' },
   g_login_ph_user: { id: 'Masukkan Username atau Email Anda', en: 'Enter your Username or Email' },
   g_login_label_pass: { id: 'Password', en: 'Password' },
