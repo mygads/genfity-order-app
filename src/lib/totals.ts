@@ -10,8 +10,16 @@
  *   kontrak §10.3 + fixtures: 66000->6541, 50000->4955, 145000->14369),
  *   dibaca dari ms_setting(Tax, PPN) via getTaxRate(); info-only (sudah termasuk)
  * - feeESB = round(dasar * 5 / 100), hanya order ESB/marketplace
- * - bruto = dasar + service + ongkirNet + feeESB
+ * - packaging = nominal kemasan per mode (DINE IN = 0; TAKE AWAY/DELIVERY =
+ *   info merchant bila tersedia; kosong/tak dikenal = 0; dibaca via
+ *   getPackagingFee — lokal saja, TANPA kirim ke BE karena pos/payment
+ *   tak punya field kemasan; cermin ongkir yang menempel pada bill)
+ * - bruto = dasar + service + ongkirNet + feeESB + packaging
  * - grandTotal = bulatkan(bruto, step 100); rounding = grandTotal - bruto
+ *
+ * DISCOUNT_BACKSTOP: diskonBelanja eksplisit di-clamp ke gross (flag
+ * backstopHit) agar diskon tak pernah melebihi bruto — dasarBelanja/voucher
+ * persen dihitung dari dasar yang sudah dijaga, bukan dari nilai negatif.
  *
  * Voucher:
  * - kind 'Ongkir' / kode GRATISONGKIR -> potong ongkir sebesar min(amount, cap, ongkir)
@@ -164,6 +172,37 @@ export async function getRoundStep(currency?: string): Promise<number> {
   return FEE_DEFAULTS.roundStep;
 }
 
+/**
+ * Biaya kemasan nominal (Rp utuh) untuk mode order dari ms_setting
+ * ('Packaging','Fee': value1 = nominal, value2 = '1' aktif / '0' mati),
+ * ditulis oleh pull katalog masterGo dari info merchant BE
+ * (enablePackagingFee + packagingFeeAmount).
+ * - DINE IN (varian) = 0 — makan di tempat tak kena kemasan.
+ * - TAKE AWAY / DELIVERY / agregator (varian) = nominal bila diaktifkan.
+ * - kosong / tak dikenal = 0 (tanpa tuduhan biaya).
+ * Tanpa baris setting (BE lama / belum pull) = 0: perilaku lama persis.
+ */
+export async function getPackagingFee(mode?: string): Promise<number> {
+  const m = (mode ?? '').trim().toUpperCase();
+  if (!m) return 0;
+  if (m.includes('DINE')) return 0;
+  const takeaway = m.includes('TAKE') || m.includes('BAWA') || m.includes('BUNGKUS') || m.includes('PULANG');
+  const delivery = m.includes('DELIVER') || m.includes('ANTAR') || m.includes('KIRIM') || m.includes('OJEK');
+  const aggregator = isMarketplaceMode(m) || m.includes('PICKUP') || m.includes('AMBIL');
+  if (!takeaway && !delivery && !aggregator) return 0;
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null; value2: string | null }>(
+      `SELECT value1, value2 FROM ms_setting WHERE key1 = 'Packaging' AND key2 = 'Fee' LIMIT 1`,
+    );
+    if ((row?.value2 ?? '').trim() !== '1') return 0;
+    const n = Math.round(Number(row?.value1) || 0);
+    return n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export type TotalsInput = {
   /** Bruto item (jumlah itemTotal, sebelum diskon/voucher). */
   gross: number;
@@ -173,6 +212,10 @@ export type TotalsInput = {
   discountTotal?: number;
   voucher?: TotalsVoucher | null;
   ongkir?: number;
+  /** Biaya kemasan nominal (Rp utuh) per mode order — default 0 (DINE IN /
+   * mode tak dikenal). Diisi pemanggil dari getPackagingFee(mode). Masuk
+   * bruto apa adanya (tanpa persen/pembulatan sendiri). */
+  packaging?: number;
   /** true untuk order ESB/marketplace → fee platform 5% masuk bruto. */
   esbOrder?: boolean;
   /** Tarif pajak persen; default TAX_DEFAULT (11 = PPN). */
@@ -217,6 +260,10 @@ export type TotalsResult = {
   taxRate: number;
   /** Fee platform 5% dari subtotal (0 bila bukan order ESB/marketplace). */
   feeESB: number;
+  /** Biaya kemasan nominal (echo input tersanitasi; 0 = tanpa kemasan). */
+  packaging: number;
+  /** true bila diskonBelanja eksplisit melebihi gross dan di-clamp. */
+  backstopHit: boolean;
   /** subtotal + service + ongkirNet + feeESB (tak membulat). */
   bruto: number;
   /** bruto dibulatkan ke kelipatan langkah (default Rp 100; AUD = 1). */
@@ -233,11 +280,15 @@ export type TotalsResult = {
 
 export function totals(input: TotalsInput): TotalsResult {
   const gross = Math.max(0, Math.round(Number(input.gross) || 0));
-  const discount = Math.max(
+  /** DISCOUNT_BACKSTOP: diskon eksplisit tak boleh melebihi bruto item. */
+  const discountRaw = Math.max(
     0,
     Math.round(Number(input.discount ?? input.discountTotal) || 0),
   );
+  const backstopHit = discountRaw > gross;
+  const discount = Math.min(discountRaw, gross);
   const ongkir = Math.max(0, Math.round(Number(input.ongkir) || 0));
+  const packaging = Math.max(0, Math.round(Number(input.packaging) || 0));
   const amount = Math.max(0, Math.round(Number(input.voucher?.amount) || 0));
   const code = typeof input.voucher?.code === 'string' ? input.voucher.code : '';
   const kind = typeof input.voucher?.kind === 'string' ? input.voucher.kind : '';
@@ -286,7 +337,7 @@ export function totals(input: TotalsInput): TotalsResult {
   const taxIncl = Math.round((subtotal * rate) / (100 + rate));
   /** Fee platform khusus order ESB/marketplace (kontrak §5: platformFee). */
   const feeESB = input.esbOrder ? Math.round(subtotal * FEE_DEFAULTS.platformFeeRate) : 0;
-  const bruto = subtotal + service + ongkirNet + feeESB;
+  const bruto = subtotal + service + ongkirNet + feeESB + packaging;
   /** Pembulatan ke kelipatan langkah (default Rp 100; AUD = 1 via roundStep). */
   const stepRaw = Number(input.roundStep);
   const step = Number.isFinite(stepRaw) && stepRaw > 0 ? Math.round(stepRaw) : FEE_DEFAULTS.roundStep;
@@ -303,6 +354,8 @@ export function totals(input: TotalsInput): TotalsResult {
     taxIncl,
     taxRate: rate,
     feeESB,
+    packaging,
+    backstopHit,
     bruto,
     total,
     rounding,

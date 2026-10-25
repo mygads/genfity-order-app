@@ -128,6 +128,8 @@ type Props = {
       rounding?: number;
       /** Fee platform order ESB/marketplace (info-only, kontrak §5: platformFee). */
       feeESB?: number;
+      /** Biaya kemasan order (info-only terusan; ledger via packagingFee). */
+      packaging?: number;
       /** Tip/gratuity terusan (kembali dari Member/EDC agar pilihan tak hilang). */
       tip?: number;
       /** Nomor struk bawaan (dari Simpan/LoadOrder via kasir) - pakai ulang bila ada. */
@@ -209,6 +211,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const taxParam = Math.max(0, Math.round(Number(route?.params?.tax) || 0));
   const roundingParam = Math.round(Number(route?.params?.rounding) || 0);
   const feeESBParam = Math.max(0, Math.round(Number(route?.params?.feeESB) || 0));
+  const packagingParam = Math.max(0, Math.round(Number(route?.params?.packaging) || 0));
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang();
@@ -299,7 +302,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const tipItems = route?.params?.items ?? [];
   const tipBase = tipItems.length > 0
     ? Math.max(0, tipItems.reduce((a, it) => a + lineSubtotal(it), 0))
-    : Math.max(0, total - serviceParam - feeESBParam - roundingParam - Math.max(0, (Number(ongkir) || 0) - totalOngkirCut));
+    : Math.max(0, total - serviceParam - feeESBParam - packagingParam - roundingParam - Math.max(0, (Number(ongkir) || 0) - totalOngkirCut));
   const [tipMode, setTipMode] = useState<'none' | 'p5' | 'p10' | 'p15' | 'custom'>(() => (
     Math.max(0, Math.round(Number(route?.params?.tip) || 0)) > 0 ? 'custom' : 'none'
   ));
@@ -668,6 +671,7 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
             ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
             ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+            ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
             ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
             cash,
             change,
@@ -731,6 +735,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(taxParam > 0 ? { tax: taxParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
         ...(ongkir > 0 ? { ongkir } : {}),
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
@@ -749,6 +754,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(tipAmount > 0 ? { tipTotal: tipAmount } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       cash,
       change,
@@ -800,6 +806,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(taxParam > 0 ? { tax: taxParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(orderMode ? { mode: orderMode } : {}),
       ...(tableNo ? { table: tableNo } : {}),
@@ -889,6 +896,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(serviceParam > 0 ? { service: serviceParam } : {}),
         ...(taxParam > 0 ? { tax: taxParam } : {}),
         ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
@@ -1392,6 +1400,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(serviceParam > 0 ? { service: serviceParam } : {}),
           ...(taxParam > 0 ? { tax: taxParam } : {}),
           ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+          ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
           ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
           ...(orderMode ? { mode: orderMode } : {}),
           ...(tableNo ? { table: tableNo } : {}),
@@ -1522,6 +1531,7 @@ export default function PayScreen({ navigation, route }: Props) {
           tax: taxParam,
           rounding: roundingParam,
           feeESB: feeESBParam,
+          packaging: packagingParam,
         })}>
         <Text style={styles.edcLinkText}>{t('pay_dep_find')} ›</Text>
       </TouchableOpacity>

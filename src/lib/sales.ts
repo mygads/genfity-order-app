@@ -471,9 +471,9 @@ export async function saveSale(s: SaleInput): Promise<string> {
       salesMode, subtotal, discount, tax, serviceCharge, tip, platformFee, rounding,
       voucherAmount, voucherCode,
       grandTotal, paidAmount, changeAmount,
-      paymentMethod, memberId, tableNo, customerName, ongkir,
+      paymentMethod, memberId, tableNo, customerName, ongkir, packaging,
       status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, now,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
@@ -483,7 +483,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       voucherAmt, s.voucherCode ?? null,
       r(s.grandTotal), r(paid),
       r(s.change ?? Math.max(0, paid - s.grandTotal)), normalizeMethod(payments[0]?.method ?? s.method),
-      s.memberId ?? null, s.tableId ?? null, s.customer ?? null, r(s.ongkir ?? 0),
+      s.memberId ?? null, s.tableId ?? null, s.customer ?? null, r(s.ongkir ?? 0), r(s.packagingFee ?? 0),
       headStatus, queueNumber, cashier, now, now,
     ],
   );
@@ -1170,6 +1170,8 @@ interface HeadLite extends HeadTotals {
   cashierName: string | null;
   status: string | null;
   ongkir: number | null;
+  /** Biaya kemasan per bill (A2): menempel pada bill cermin ongkir/tip. */
+  packaging: number | null;
 }
 
 interface MenuLite {
@@ -1444,7 +1446,8 @@ export async function moveSaleItems(args: {
   // gratifikasi atas kunjungan, bukan per item — pindah item tak memindahkan
   // tip; grand kedua bill wajib membawa tip masing-masing agar tip yang sudah
   // diputuskan di Pay tak hilang diam-diam saat baris dipindah.
-  const srcGrand = srcAgg.subtotal - srcAgg.discount + srcTax + srcSvc - n(src.voucherAmount) + srcFee + srcRound + n(src.ongkir) + n(src.tip);
+  // Kemasan (A2) sama: menempel pada bill cermin ongkir/tip.
+  const srcGrand = srcAgg.subtotal - srcAgg.discount + srcTax + srcSvc - n(src.voucherAmount) + srcFee + srcRound + n(src.ongkir) + n(src.tip) + n(src.packaging);
   // Grand tak boleh negatif: prorata pajak/service dari sumber bersubtotal
   // nol (diskon 100%) bisa mengecilkan sisi asal di bawah nol. Clamp 0 yang
   // jujur (selisih sen akibat pembulatan prorata tetap terlihat di rekap).
@@ -1453,7 +1456,7 @@ export async function moveSaleItems(args: {
     [srcAgg.subtotal, srcAgg.discount, srcTax, srcSvc, srcFee, srcRound, Math.max(0, r(srcGrand)), now, fromSalesNum],
   );
   const destAgg = await headTotals(destNum);
-  const destGrand = destAgg.subtotal - destAgg.discount + dTax + dSvc + dFee + dRound + n(dest?.ongkir ?? 0) + n(dest?.tip ?? 0);
+  const destGrand = destAgg.subtotal - destAgg.discount + dTax + dSvc + dFee + dRound + n(dest?.ongkir ?? 0) + n(dest?.tip ?? 0) + n(dest?.packaging ?? 0);
   await run(
     'UPDATE tr_saleshead SET subtotal = ?, discount = ?, tax = ?, serviceCharge = ?, platformFee = ?, rounding = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?',
     [destAgg.subtotal, destAgg.discount, dTax, dSvc, dFee, dRound, r(destGrand), now, destNum],

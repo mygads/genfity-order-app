@@ -203,6 +203,7 @@ function seedSaleInput(spec: SeedOrderSpec, canon: TotalsResult): SaleInput {
     vatTotal: canon.taxIncl,
     serviceTotal: canon.service,
     ...(canon.feeESB > 0 ? { feeESB: canon.feeESB } : {}),
+    ...(canon.packaging > 0 ? { packagingFee: canon.packaging } : {}),
     ...(canon.rounding !== 0 ? { rounding: canon.rounding } : {}),
     ...(spec.cash !== undefined ? { cash: spec.cash, change: Math.max(0, spec.cash - canon.total) } : { change: 0 }),
     mode: spec.mode,

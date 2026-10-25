@@ -49,6 +49,8 @@ type OrderCtx = {
   tax?: number;
   rounding?: number;
   feeESB?: number;
+  /** Biaya kemasan order — teruskan apa adanya agar tak hilang pulang-pergi. */
+  packaging?: number;
   /** Tip/gratuity pelanggan — teruskan apa adanya agar tak hilang pulang-pergi. */
   tip?: number;
 };
@@ -801,6 +803,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...(p?.tax != null ? { tax: p.tax } : {}),
       ...(p?.rounding != null ? { rounding: p.rounding } : {}),
       ...(p?.feeESB != null ? { feeESB: p.feeESB } : {}),
+      ...(p?.packaging != null ? { packaging: p.packaging } : {}),
       ...(p?.tip != null ? { tip: p.tip } : {}),
     };
     if (typeof p?.returnTo === 'string' && p.returnTo) {

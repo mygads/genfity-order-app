@@ -67,6 +67,11 @@ export interface SaleInput {
   tipTotal?: number;
   /** Fee platform order ESB/marketplace → payload kontrak §5: platformFee. */
   feeESB?: number;
+  /** Biaya kemasan nominal (Rp utuh) — LEDGER LOKAL SAJA. SENGAJA tak
+   * dikirim ke BE: kontrak pos/payment tak punya field kemasan; nilainya
+   * tetap terbawa di dalam grandTotal (finalTotal). Cermin aturan ongkir
+   * yang menempel pada bill. */
+  packagingFee?: number;
   cash?: number;
   change?: number;
   items?: SaleItemIn[];

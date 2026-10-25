@@ -7,7 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import { useLang, tCur } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync } from '../../lib/sync';
@@ -34,6 +34,7 @@ type Props = {
       customer?: string;
       memberId?: string;
       ongkir?: number;
+      packaging?: number;
       subtotal?: number;
       salesNum?: string;
     };
@@ -63,6 +64,27 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
+  /** Biaya kemasan: params pemanggil menang (sudah dihitung untuk mode ini);
+   * tanpa params = baca dari info merchant via getPackagingFee(mode). */
+  const [packagingFee, setPackagingFee] = useState(Math.max(0, Math.round(Number(route?.params?.packaging) || 0)));
+  useEffect(() => {
+    const fromCaller = Number(route?.params?.packaging);
+    if (Number.isFinite(fromCaller) && fromCaller > 0) {
+      setPackagingFee(Math.max(0, Math.round(fromCaller)));
+      return;
+    }
+    if (route?.params?.packaging != null) {
+      setPackagingFee(0);
+      return;
+    }
+    let alive = true;
+    void getPackagingFee(mode).then((v) => {
+      if (alive) setPackagingFee(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mode, route?.params?.packaging]);
   /** Ongkir fungsional - bawaan per mode dari FEE_DEFAULTS, bisa diubah di sini, diteruskan ke Pay. */
   const [ongkir, setOngkir] = useState(route?.params?.ongkir ?? defaultOngkirForMode(route?.params?.mode));
   const [showOngkir, setShowOngkir] = useState(false);
@@ -97,19 +119,20 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     [active],
   );
   const discountTotal = useMemo(() => active.reduce((s, c) => s + c.discount, 0), [active]);
-  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100, feeESB utk agregator. */
+  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100, feeESB utk agregator, kemasan per mode. */
   const {
     subtotal,
     service,
     taxIncl,
     feeESB,
+    packaging,
     ongkirCut,
     ongkirNet,
     bruto,
     total,
     rounding,
     voucherAmt,
-  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, voucher: voucher ?? undefined, esbOrder: isMarketplaceMode(mode), taxRate });
+  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, packaging: packagingFee, voucher: voucher ?? undefined, esbOrder: isMarketplaceMode(mode), taxRate });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = active.reduce((s, c) => s + c.qty, 0);
@@ -205,6 +228,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       // catatan (sebelumnya ongkirNet tanpa ongkirCut di sini).
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(ongkirCut > 0 ? { ongkirCut } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
@@ -486,6 +510,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                 <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(feeESB)}</Text>
               </View>
             )}
+            {packaging > 0 && (
+              <View style={styles.sumRow}>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('packaging')}</Text>
+                <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(packaging)}</Text>
+              </View>
+            )}
             <View style={styles.sumRow}>
               <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('deliveryFee')}</Text>
               <View style={styles.ongkirVal}>
@@ -530,6 +560,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               // SplitBill menghitung ulang kanonis dari ongkir BRUTO (cut
               // dihitung ulang min(cap, bruto)); kirim net = cut tak terhitung.
               ...(ongkir > 0 ? { ongkir } : {}),
+              ...(packaging > 0 ? { packaging } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
             })}>
@@ -547,6 +578,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               // utuh (BillPreview meneruskan keduanya via orderCtx).
               ...(ongkir > 0 ? { ongkir } : {}),
               ...(ongkirCut > 0 ? { ongkirCut } : {}),
+              ...(packaging > 0 ? { packaging } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
               ...(service > 0 ? { service } : {}),
@@ -665,6 +697,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
                   // Pracetak dari cart = pratinjau belum bayar (cermin DineIn).
                   ...(ongkir > 0 ? { ongkir } : {}),
                   ...(ongkirCut > 0 ? { ongkirCut } : {}),
+                  ...(packaging > 0 ? { packaging } : {}),
                   unpaid: true,
                   ...(service > 0 ? { service } : {}),
                   ...(taxIncl > 0 ? { tax: taxIncl } : {}),

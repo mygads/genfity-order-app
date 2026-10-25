@@ -30,7 +30,7 @@ type Props = {
       voucherCode?: string; approvalCode?: string; cardLast4?: string;
       bank?: string; terminal?: string; memberId?: string;
       tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
-      rounding?: number; feeESB?: number; tip?: number;
+      rounding?: number; feeESB?: number; packaging?: number; tip?: number;
       /** Kunjungan split grup: nominal + metode yang dibayar kunjungan ini. */
       splitPaid?: { amount?: number; method?: string };
     };
@@ -119,6 +119,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
   const rounding = route?.params?.rounding ?? 0;
   const feeESB = route?.params?.feeESB ?? 0;
+  const packaging = route?.params?.packaging ?? 0;
   const tip = Math.max(0, Math.round(Number(route?.params?.tip) || 0));
   // Kunjungan split: yang dibayar + sisa grup (sisa dari DB, best-effort).
   const splitPaidParam = route?.params?.splitPaid;
@@ -216,6 +217,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
     ...(tax > 0 ? { tax } : {}),
     ...(rounding !== 0 ? { rounding } : {}),
     ...(feeESB > 0 ? { feeESB } : {}),
+    ...(packaging > 0 ? { packaging } : {}),
     ...(voucherCode ? { voucherCode } : {}),
     ...(approvalCode ? { approvalCode } : {}),
     ...(cardLast4 ? { cardLast4 } : {}),
@@ -266,7 +268,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
 
   // Pratinjau struk: SATU scroll milik layar (tanpa ScrollView bersarang di
   // dalam kartu), semua item tampil, urutan baris SELARAS ReceiptScreen
-  // (diskon → service → tip → feeESB → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
+  // (diskon → service → tip → feeESB → kemasan → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
   const receipt = (
     <View style={styles.receipt}>
         <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
@@ -306,6 +308,12 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('feeESB')}</Text>
             <Text style={styles.value}>{rp(feeESB)}</Text>
+          </View>
+        )}
+        {packaging > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('packaging')}</Text>
+            <Text style={styles.value}>{rp(packaging)}</Text>
           </View>
         )}
         {tax > 0 && (

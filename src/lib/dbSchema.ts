@@ -48,6 +48,7 @@ export const SCHEMA_STATEMENTS: string[] = [
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
     ongkir REAL DEFAULT 0,
+    packaging REAL DEFAULT 0,
     status TEXT DEFAULT 'open', note TEXT, queueNumber TEXT, refNum TEXT,
     externalId TEXT, onlineOrderId TEXT, cashierName TEXT,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT, printedCount INTEGER DEFAULT 0)`,
@@ -202,6 +203,9 @@ export const SCHEMA_STATEMENTS: string[] = [
  */
 export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE tr_saleshead ADD COLUMN ongkir REAL DEFAULT 0',
+  // Kemasan per bill (A2): aditif untuk instalasi lama (gagal = sudah ada).
+  // Menempel pada bill cermin ongkir/tip — pindah item tak memindahkannya.
+  'ALTER TABLE tr_saleshead ADD COLUMN packaging REAL DEFAULT 0',
   'ALTER TABLE tr_salesvoucherusage ADD COLUMN voucherAmount REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashActual REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashDiff REAL DEFAULT 0',

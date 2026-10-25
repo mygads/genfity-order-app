@@ -27,7 +27,7 @@ import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
@@ -329,6 +329,19 @@ export default function CashierScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
+  /** Biaya kemasan setting-driven (ms_setting Packaging/Fee dari info
+   * merchant; DINE IN / kosong / tak dikenal = 0). Muat ulang tiap mode
+   * berubah agar toolbar total selalu kanonis. */
+  const [packagingFee, setPackagingFee] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void getPackagingFee(mode).then((v) => {
+      if (alive) setPackagingFee(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mode]);
   // Keranjang mulai kosong (offline-first): diisi dari menu yang diketuk /
   // draft atau order yang dibuka (loadItems/salesNum), bukan 3 item contoh.
   // DB kosong + tanpa draft = empty-state kasir yang jujur.
@@ -837,12 +850,13 @@ export default function CashierScreen({ navigation, route }: Props) {
     service,
     taxIncl,
     feeESB,
+    packaging,
     ongkirCut: ongkirDiscount,
     ongkirNet,
     bruto,
     total,
     rounding,
-  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir, esbOrder: isMarketplaceMode(mode), taxRate });
+  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir, packaging: packagingFee, esbOrder: isMarketplaceMode(mode), taxRate });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
@@ -865,6 +879,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       mode,
       table,
       ongkir,
+      ...(packaging > 0 ? { packaging } : {}),
       customer: customer.trim(),
       ...(memberId.trim() ? { memberId: memberId.trim() } : {}),
       ...(voucher ? { voucher } : {}),
@@ -1462,6 +1477,12 @@ export default function CashierScreen({ navigation, route }: Props) {
             <Text style={styles.totalVal}>{rp(feeESB)}</Text>
           </View>
         )}
+        {packaging > 0 && (
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>{t('packaging')}</Text>
+            <Text style={styles.totalVal}>{rp(packaging)}</Text>
+          </View>
+        )}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>{t('deliveryFee')}</Text>
           <Text style={styles.totalVal}>{rp(ongkirNet)}</Text>
@@ -1502,6 +1523,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             ...(taxIncl > 0 ? { tax: taxIncl } : {}),
             ...(rounding !== 0 ? { rounding } : {}),
             ...(feeESB > 0 ? { feeESB } : {}),
+            ...(packaging > 0 ? { packaging } : {}),
           })}>
             <Image source={require('../../../assets/icons/print_blue.webp')} style={styles.btnIcon} resizeMode="contain" />
             <Text style={styles.btnPrintText}>{t('printReceipt')}</Text>

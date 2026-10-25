@@ -30,6 +30,8 @@ export interface EscReceipt {
   tax?: number;
   /** Fee platform ESB/marketplace 5% (kontrak §5). */
   feeESB?: number;
+  /** Biaya kemasan nominal (Rp utuh) — komponen bruto cermin ongkir. */
+  packaging?: number;
   voucherCode?: string;
   voucherAmount?: number;
   ongkir?: number;
@@ -251,6 +253,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.tip) row2(out, 'Tip', `+${money(r.tip)}`, cols);
   if (r.tax) row2(out, 'PPN (Inkl.)', money(r.tax), cols);
   if (r.feeESB) row2(out, 'Fee Layanan', money(r.feeESB), cols);
+  if (r.packaging) row2(out, 'Kemasan', money(r.packaging), cols);
   if (r.voucherCode || r.voucherAmount) {
     row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${money(r.voucherAmount)}` : '-', cols);
   }

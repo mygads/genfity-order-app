@@ -29,6 +29,7 @@ type Props = {
       service?: number;
       tax?: number;
       feeESB?: number;
+      packaging?: number;
       rounding?: number;
       mode?: string;
       table?: string;
@@ -156,6 +157,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
+    const packagingParam = Math.max(0, Math.round(Number(p.packaging) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
     const tipParam = Math.max(0, Math.round(Number(p.tip) || 0));
     const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
@@ -187,6 +189,8 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
             ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
             ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
+            ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
             ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
             approvalCode: approval,
             ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
@@ -250,6 +254,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         ...(serviceParam > 0 ? { service: serviceParam } : {}),
         ...(taxParam > 0 ? { tax: taxParam } : {}),
         ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
         ...(effMemberId ? { memberId: effMemberId } : {}),
@@ -273,6 +278,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
@@ -321,6 +327,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(effMemberId ? { memberId: effMemberId } : {}),
@@ -463,6 +470,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.voucherCode ? { voucher: p.voucherCode } : {}),
             ...(p.service ? { service: p.service } : {}),
             ...(p.feeESB ? { feeESB: p.feeESB } : {}),
+            ...(p.packaging ? { packaging: p.packaging } : {}),
             ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
             ...(p.ongkirCut ? { ongkirCut: p.ongkirCut } : {}),
             ...(p.tip ? { tip: p.tip } : {}),

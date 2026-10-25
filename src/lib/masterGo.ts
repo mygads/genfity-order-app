@@ -42,6 +42,10 @@ interface GoMerchant {
   currency: string;
   enableTax: boolean;
   taxPercentage: number;
+  /** Biaya kemasan merchant (BE /pos/menu → merchant block). Opsional —
+   * BE lama tak mengirim; ketidakhadiran = jangan sentuh cache lokal. */
+  enablePackagingFee?: boolean;
+  packagingFeeAmount?: number;
 }
 
 interface GoMenuResponse {
@@ -144,6 +148,18 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Tax', 'PPN', ?, NULL)
        ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1`,
       [String(num(merchant.taxPercentage, 11))],
+    );
+  }
+  // Kemasan milik server (A2: info merchant /pos/menu). Hanya tulis bila BE
+  // mengirim kuncinya (kompat BE lama); server menang atas cache lokal.
+  // value1 = nominal, value2 = '1' aktif / '0' mati (dibaca getPackagingFee).
+  if (merchant.enablePackagingFee !== undefined || merchant.packagingFeeAmount !== undefined) {
+    const enabled = merchant.enablePackagingFee === true ? '1' : '0';
+    const amount = Math.max(0, Math.round(num(merchant.packagingFeeAmount, 0)));
+    await run(
+      `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Packaging', 'Fee', ?, ?)
+       ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+      [String(amount), enabled],
     );
   }
 

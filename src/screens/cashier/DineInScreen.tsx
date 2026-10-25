@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
 import { nextSalesNum } from '../../lib/sales';
@@ -21,6 +21,7 @@ type Props = {
       mode?: string;
       items?: CartItem[];
       ongkir?: number;
+      packaging?: number;
       customer?: string;
       memberId?: string;
       voucher?: Voucher;
@@ -92,6 +93,27 @@ export default function DineInScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
+  /** Biaya kemasan: params pemanggil menang; tanpa params = info merchant
+   * per mode saat ini (mode bisa diganti di layar ini). */
+  const [packagingFee, setPackagingFee] = useState(Math.max(0, Math.round(Number(route?.params?.packaging) || 0)));
+  useEffect(() => {
+    const fromCaller = Number(route?.params?.packaging);
+    if (Number.isFinite(fromCaller) && fromCaller > 0) {
+      setPackagingFee(Math.max(0, Math.round(fromCaller)));
+      return;
+    }
+    if (route?.params?.packaging != null) {
+      setPackagingFee(0);
+      return;
+    }
+    let alive = true;
+    void getPackagingFee(mode).then((v) => {
+      if (alive) setPackagingFee(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mode, route?.params?.packaging]);
 
   /** Bill meja ini - diambil dari cart kasir via params, bukan hardcode. */
   const billItems: CartItem[] = route?.params?.items ?? [];
@@ -113,10 +135,12 @@ export default function DineInScreen({ navigation, route }: Props) {
     total,
     rounding,
     feeESB,
+    packaging,
   } = totals({
     gross: subtotalGross,
     discount: discountTotal,
     ongkir,
+    packaging: packagingFee,
     voucher: voucher ?? undefined,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
@@ -186,6 +210,7 @@ export default function DineInScreen({ navigation, route }: Props) {
         // cut tak terhitung. Extras rate/cap/minSpend wajib agar persen
         // tak jadi flat / minSpend tak hilang di split.
         ...(ongkir > 0 ? { ongkir } : {}),
+        ...(packaging > 0 ? { packaging } : {}),
         ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
         discount: discountTotal + voucherAmt,
@@ -205,11 +230,13 @@ export default function DineInScreen({ navigation, route }: Props) {
       // struk terbaca lunas).
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(ongkirCut > 0 ? { ongkirCut } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       unpaid: true,
       // Rincian info-only agar baris struk pas dengan total (service/pajak/fee/pembulatan).
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
@@ -231,6 +258,7 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
@@ -337,6 +365,9 @@ export default function DineInScreen({ navigation, route }: Props) {
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('serviceExcl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
         {feeESB > 0 && (
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('feeESB')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
+        )}
+        {packaging > 0 && (
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('packaging')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(packaging)}</Text></View>
         )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('deliveryFee')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(ongkirNet)}</Text></View>
         {voucher && useOngkirCut && (

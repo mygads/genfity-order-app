@@ -25,8 +25,8 @@ type Props = {
       voucherCode?: string;
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;
-      /** Fee platform agregator + pembulatan bawaan pemanggil (info-only, diteruskan). */
-      feeESB?: number; rounding?: number;
+      /** Fee platform agregator + pembulatan + kemasan bawaan pemanggil (info-only, diteruskan). */
+      feeESB?: number; rounding?: number; packaging?: number;
       mode?: string; table?: string; ongkir?: number; ongkirCut?: number;
       customer?: string; memberId?: string;
       /** Nomor order bila sudah ada (alir balik History); pratinjau baru = tanpa nomor. */
@@ -65,6 +65,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const serviceVal = p.service ?? p.serviceTotal ?? 0;
   const taxVal = p.tax ?? p.vatTotal ?? 0;
   const feeESBVal = p.feeESB ?? 0;
+  const packagingVal = Math.max(0, Math.round(Number(p.packaging) || 0));
   const roundingVal = p.rounding ?? 0;
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
@@ -192,10 +193,13 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(p.table ? { table: p.table } : {}),
     ...(ongkirVal > 0 ? { ongkir: ongkirVal } : {}),
     ...(ongkirCutVal > 0 ? { ongkirCut: ongkirCutVal } : {}),
+    // Kemasan cermin ongkir: menempel pada order PENUH (bukan per-split),
+    // diteruskan utuh via orderCtx agar Pay/Success/Receipt mencatat benar.
+    ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(p.customer ? { customer: p.customer } : {}),
     ...(p.memberId ? { memberId: p.memberId } : {}),
   };
-  // Share proporsional service/pajak/feeESB/pembulatan untuk split parsial
+  // Share proporsional service/pajak/feeESB/kemasan/pembulatan untuk split parsial
   // (info-only struk di Pay > Success > Receipt). P5: feeESB ikut (charged
   // total grup memuatnya; Success menampilkannya) agar konsisten di keduanya.
   // Diskon/voucher tak diteruskan per-split karena total split sudah neto
@@ -207,15 +211,17 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       ...(serviceVal > 0 ? { service: Math.max(0, Math.round(serviceVal * r)) } : {}),
       ...(taxVal > 0 ? { tax: Math.max(0, Math.round(taxVal * r)) } : {}),
       ...(feeESBVal > 0 ? { feeESB: Math.max(0, Math.round(feeESBVal * r)) } : {}),
+      ...(packagingVal > 0 ? { packaging: Math.max(0, Math.round(packagingVal * r)) } : {}),
       ...(roundingVal !== 0 ? { rounding: Math.round(roundingVal * r) } : {}),
     };
   };
-  // Rincian info-only bawaan pemanggil (service/pajak/fee/pembulatan) - diteruskan
-  // agar baris struk pas dengan total di Pay > Success > Receipt.
+  // Rincian info-only bawaan pemanggil (service/pajak/fee/kemasan/pembulatan)
+  // - diteruskan agar baris struk pas dengan total di Pay > Success > Receipt.
   const breakdownCtx = {
     ...(serviceVal > 0 ? { service: serviceVal } : {}),
     ...(taxVal > 0 ? { tax: taxVal } : {}),
     ...(feeESBVal > 0 ? { feeESB: feeESBVal } : {}),
+    ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(roundingVal !== 0 ? { rounding: roundingVal } : {}),
   };
 
@@ -250,6 +256,9 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         )}
         {feeESBVal > 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
+        )}
+        {packagingVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('packaging')}</Text><Text style={styles.price}>{rp(packagingVal)}</Text></View>
         )}
         {roundingVal !== 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.price}>{rp(roundingVal)}</Text></View>

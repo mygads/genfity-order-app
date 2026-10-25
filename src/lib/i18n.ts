@@ -851,6 +851,7 @@ const STR: Record<string, Entry> = {
   taxIncl: { id: 'Pajak (incl)', en: 'Tax (incl)' },
   serviceExcl: { id: 'Service 5% (excl)', en: 'Service 5% (excl)' },
   feeESB: { id: 'Biaya platform (5%)', en: 'Platform fee (5%)' },
+  packaging: { id: 'Kemasan', en: 'Packaging' },
   deliveryFee: { id: 'Ongkir', en: 'Delivery fee' },
   total: { id: 'Total', en: 'Total' },
   editAction: { id: 'Ubah', en: 'Edit' },
