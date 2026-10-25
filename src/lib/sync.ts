@@ -300,7 +300,7 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 
 // ---------------------------------------------------------------------------
 // GO-POS COMPAT (wire-app): backend Go TIDAK melayani path bentuk-ESB
-// (order/finish, order/view, split-bill, move-items, posv1/*, v1/push/*,
+// (order/finish, order/view, split-bill, move-items, posv1/..., v1/push/...,
 // sales/receipt-email). Yang dilayani: POST api/merchant/orders/pos
 // (create; orderType + items WAJIB — orders_pos_create.go:196-203) dan
 // POST api/merchant/orders/{orderId}/group-bill/payments (router.go:335;
@@ -1524,7 +1524,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // - kind 'attendance' (clock-in/out): offline-only eksplisit S9/PP-010 —
   //   endpoint BE clock-in/out mencatat AUTH-USER (titip-absen tak terpetakan)
   //   + grup /api/merchant memakai MerchantAuth (bukan token sesi kasir).
-  //   Legacy ESB employee-attendance/* 404 vs Go.
+  //   Legacy ESB employee-attendance/(...) 404 vs Go.
   // - kind 'other' op 'shift-*' (shift-open/shift-close legacy): data shift
   //   dibawa W1 be-cash-open/be-cash-close ke Go workforce; item legacy ini
   //   ganda + ESB-nya (v1/push/shift) 404 vs Go.
