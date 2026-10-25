@@ -1446,6 +1446,7 @@ const STR: Record<string, Entry> = {
   // ---- B2c kasir/split (bill_rata_hint) + titipan batch-1 (booking/move warns) ----
   bill_rata_hint: { id: 'Dibagi sama besar ke tiap bill - sisa pembulatan masuk bill terakhir.', en: 'Split evenly across bills - rounding remainder goes to the last bill.' },
   bok_warn_capacity: { id: 'Tamu melebihi kapasitas meja.', en: 'Guests exceed table capacity.' },
+  bok_auto_table: { id: 'Otomatis (data lokal) — ketuk chip untuk pilih manual.', en: 'Auto (local data) — tap a chip to pick manually.' },
   mov_warn_same: { id: 'Meja tujuan sama dengan meja asal.', en: 'Destination table is the same as the source table.' },
   mov_warn_nosrc: { id: 'Tidak ada tagihan aktif di meja asal.', en: 'No active bill on the source table.' },
 
