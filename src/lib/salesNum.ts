@@ -10,6 +10,7 @@
  */
 import { getTerminal } from '../config/server';
 import { initDb, query, queryFirst, run, withTransaction } from './db';
+import { getItem } from './storage';
 
 /**
  * Kode terminal kanonis Q7: unik per branch, kapital, maks 8 char (lebar
@@ -38,12 +39,37 @@ function terminalUnboundError(): Error {
 
 /**
  * Nomor display tersegmen Q7 (SPEC §12, inti dari nextSalesNum): menerbitkan
- * `TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}` untuk branch+terminal eksplisit.
+ * `TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}-{DEVTAG}` untuk branch+terminal eksplisit.
  * Melempar terminalUnboundError bila salah satunya kosong/invalid — tanpa
  * fallback B001. Counter harian per (terminalCode, tanggal) di tr_sales_seq,
  * transaksional, init dari MAX suffix lokal (format baru + adopsi format
  * lama hari ini); NNNN 4-digit zero-padded, overflow lanjut 5 digit alami.
+ *
+ * A-P2-10: segmen DEVTAG (4 hex kapital dari device-id stabil install,
+ * cermin apiSource.getDeviceId; absen = '0000' = perilaku unik-seperti-dulu
+ * untuk instalasi pra-device-id). DB lokal per-device sehingga counter NNNN
+ * tak bisa koordinasi antar-device offline: tanpa DEVTAG, dua device di
+ * terminal yang sama mencetak NNNN kembar lalu tabrakan di UNIQUE display_no
+ * server (BE displayNo = string unik opaque, tanpa validasi format — aman
+ * diperpanjang; tripwire-history hanya menuntut awalan ^TRX).
  */
+/**
+ * Tag device 4-hex kapital untuk segmen DEVTAG nomor display (A-P2-10).
+ * Baca read-only kunci milik apiSource ('genfity.device.id', 16-hex stabil
+ * per install — dibuat di alur install/login, selalu ada sebelum jualan
+ * karena klaim terminal butuh login). Daun murni: tak impor apiSource
+ * (hindari require-cycle); absen/invalid = '0000' (jujur, unik-seperti-dulu).
+ */
+export async function deviceTag(): Promise<string> {
+  try {
+    const cur = await getItem('genfity.device.id');
+    if (cur && /^[0-9a-f]{16}$/.test(cur)) return cur.slice(0, 4).toUpperCase();
+  } catch {
+    /* storage gagal = fallback di bawah */
+  }
+  return '0000';
+}
+
 export async function nextDisplayNumber(branchCode: unknown, terminalCode: unknown): Promise<string> {
   const term = normalizeTerminalCode(terminalCode);
   const branch = String(branchCode ?? '').trim().toUpperCase();
@@ -51,6 +77,8 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   await initDb();
+  // A-P2-10: tag dibaca SEKALI di luar transaksi (tetap untuk INSERT + return).
+  const dev = await deviceTag();
   let n = 1;
   await withTransaction(async () => {
     const row = await queryFirst<{ lastN: number | null }>(
@@ -83,19 +111,27 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
       n = mx + 1;
     }
     await run(
-      `INSERT INTO tr_sales_seq (terminalCode, ymd, lastN) VALUES (?, ?, ?)
-       ON CONFLICT (terminalCode, ymd) DO UPDATE SET lastN = excluded.lastN`,
-      [term, ymd, n],
+      `INSERT INTO tr_sales_seq (terminalCode, ymd, lastN, deviceTag) VALUES (?, ?, ?, ?)
+       ON CONFLICT (terminalCode, ymd) DO UPDATE SET lastN = excluded.lastN, deviceTag = excluded.deviceTag`,
+      // Kolom deviceTag belum ada di instalasi lama sebelum migrasi jalan —
+      // pernyataan ini dieksekusi SETELAH initDb (migrasi best-effort); bila
+      // migrasi gagal total, INSERT 4-kolom melempar → tangkap pemanggil
+      // (nextSalesNumRetry hanya retry konflik-unik; galat skema diteruskan
+      // jujur, bukan nomor fiktif). Praktiknya migrasi ADD COLUMN idempoten.
+      [term, ymd, n, dev],
     );
   });
-  return `TRX-${branch}-${term}-${ymd}-${String(n).padStart(4, '0')}`;
+  // A-P2-10: segmen DEVTAG di ekor (prefix lama utuh → adopsi-MAX + tripwire
+  // ^TRX tak pecah; tail split('-')[0] tetap NNNN untuk format lama maupun baru).
+  return `TRX-${branch}-${term}-${ymd}-${String(n).padStart(4, '0')}-${dev}`;
 }
 
 /**
- * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}.
+ * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}-{DEVTAG}.
  * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq —
  * transaksional (ketuk-ganda tak bikin nomor ganda), tahan reinstall
  * (bukan AsyncStorage), init dari MAX suffix lokal yang tahan 4 format lama.
+ * DEVTAG (A-P2-10) = 4-hex device agar dua device satu terminal tak kembar.
  * padStart(4), overflow >9999 lanjut 5 digit alami (UNIQUE server atas
  * string penuh; pecahan split -A/-B di atas satu NNN induk, T3-opsi-a).
  * ymd = kalender lokal; sale lewat tengah malam ikut ymd baru dengan

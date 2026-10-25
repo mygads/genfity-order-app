@@ -198,6 +198,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   // dengan shiftId lama tetap menempel (atribusi shift != tanggal nomor).
   `CREATE TABLE IF NOT EXISTS tr_sales_seq (
     terminalCode TEXT NOT NULL, ymd TEXT NOT NULL, lastN INTEGER DEFAULT 0,
+    deviceTag TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (terminalCode, ymd))`,
   // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
   // logika drain diimplementasikan lane printer belakangan (jangan drain di
@@ -258,6 +259,11 @@ export const MIGRATION_STATEMENTS: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
   // Ronde-3 trisisi Q1: ref member GO untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE tr_saleshead ADD COLUMN customerId INTEGER',
+  // A-P2-10: segmen device pada seq display untuk instalasi lama
+  // (gagal = sudah ada). Counter tetap per (terminalCode, ymd) — DB lokal
+  // per-device; tag device dicetak di nomor display agar dua device di
+  // terminal yang sama tak kembar saat sync (BE displayNo = string unik).
+  'ALTER TABLE tr_sales_seq ADD COLUMN deviceTag TEXT NOT NULL DEFAULT \'\'',
   // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE ms_member ADD COLUMN email TEXT',
   // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
