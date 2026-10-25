@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { SERVICE_LEGACY, getServiceConfig, serviceLabel, type ServiceConfig } from '../../lib/totals';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 import { getSession } from '../../session';
 import { getTerminal } from '../../config/server';
@@ -393,7 +393,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         )}
         {feeESB > 0 && (
           <View style={styles.row}>
-            <Text style={styles.label}>{t('feeESB')}</Text>
+            <Text style={styles.label}>{platformFeeLabel(t)}</Text>
             <Text style={styles.value}>{rp(feeESB)}</Text>
           </View>
         )}

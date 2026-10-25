@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
@@ -391,7 +391,7 @@ export default function DineInScreen({ navigation, route }: Props) {
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{serviceLabel(t, svcCfg)}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
         )}
         {feeESB > 0 && (
-          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('feeESB')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{platformFeeLabel(t)}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
         )}
         {packaging > 0 && (
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('packaging')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(packaging)}</Text></View>

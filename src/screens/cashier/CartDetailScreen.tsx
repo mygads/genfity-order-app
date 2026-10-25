@@ -7,7 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import { useLang, tCur } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync } from '../../lib/sync';
@@ -531,7 +531,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             )}
             {feeESB > 0 && (
               <View style={styles.sumRow}>
-                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('feeESB')}</Text>
+                <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{platformFeeLabel(t)}</Text>
                 <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(feeESB)}</Text>
               </View>
             )}

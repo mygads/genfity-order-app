@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { SERVICE_LEGACY, getServiceConfig, serviceLabel, type ServiceConfig } from '../../lib/totals';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
 import { getGroupPaid, nextSalesNum } from '../../lib/sales';
 import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
@@ -270,7 +270,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={styles.item}>{serviceLabel(t, svcCfg)}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
         )}
         {feeESBVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{platformFeeLabel(t)}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
         )}
         {packagingVal > 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('packaging')}</Text><Text style={styles.price}>{rp(packagingVal)}</Text></View>

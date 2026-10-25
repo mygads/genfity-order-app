@@ -171,6 +171,19 @@ export function serviceLabel(
 }
 
 /**
+ * Label baris fee platform ESB/marketplace dari tarif efektif.
+ * Angka {r} diisi dari FEE_DEFAULTS.platformFeeRate (hari ini 5) — label
+ * tak lagi meng-hardcode "5%" di kamus (audit trisisi R1: kejujuran label;
+ * ID+EN via kunci feeESB). Nilai fee tetap dari totals().
+ * (Lane ESB: EsbOrderScreen milik W2 - kunci esb_fee tak tersentuh sesi ini.)
+ */
+export function platformFeeLabel(t: (key: string) => string): string {
+  const pct = FEE_DEFAULTS.platformFeeRate * 100;
+  const r = String(Math.round(pct * 100) / 100);
+  return t('feeESB').replace('{r}', r);
+}
+
+/**
  * Konfigurasi fee terpusat - SATU sumber angka untuk service, fee platform,
  * langkah pembulatan, dan ongkir bawaan per mode. totals() di bawah memakai
  * konstanta ini (nilai identik dengan literal lama: 0.05 / 0.05 / 100),

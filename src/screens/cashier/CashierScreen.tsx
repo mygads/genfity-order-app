@@ -27,7 +27,7 @@ import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type DeliveryFeeSchedule, type ServiceConfig } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type DeliveryFeeSchedule, type ServiceConfig } from '../../lib/totals';
 import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn, getDeliveryFeeSchedule } from '../../lib/posConfigSync';
@@ -1584,7 +1584,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         )}
         {feeESB > 0 && (
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>{t('feeESB')}</Text>
+            <Text style={styles.totalLabel}>{platformFeeLabel(t)}</Text>
             <Text style={styles.totalVal}>{rp(feeESB)}</Text>
           </View>
         )}

@@ -54,15 +54,19 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Switch value={opts.lowWarn} onValueChange={(v) => setOpt('lowWarn', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         <AppInput label={t('stock.lowLimit')} value={opts.lowLimit} onChangeText={(v) => setOpt('lowLimit', v.replace(/\D/g, '').slice(0, 4))} keyboardType="numeric" placeholder="5" />
+        {/* R1: server-wins tiap sync login (posConfigSync S-F5, sengaja) —
+            kasir diberi tahu agar tak bingung bila kustomnya tertimpa. */}
+        <Text style={styles.cardSub}>{t('stock.lowLimitManaged')}</Text>
         <View style={styles.rowBetween}>
           <Text style={styles.rowLabel}>{t('stock.sellEmpty')}</Text>
           <Switch value={opts.allowSellEmpty} onValueChange={(v) => setOpt('allowSellEmpty', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         {/* REA-14: tampilkan info pembulatan hanya bila ms_setting menyimpang
-            dari default (kunci i18n: stock_round_info, {n} ganda = chained). */}
+            dari default (kunci kanonis: stock.roundInfo; fallback underscore
+            + string kosong aman bila kamus belum sinkron; {n} ganda = chained). */}
         {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
           <Text style={styles.cardSub}>
-            {t('stock_round_info').replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
+            {(t('stock.roundInfo') || t('stock_round_info')).replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
           </Text>
         ) : null}
       </View>

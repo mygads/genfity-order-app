@@ -5,7 +5,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { TAX_DEFAULT, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
 import { parseCustomerId } from '../../lib/memberRef';
@@ -498,7 +498,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           </View>
           {feeEff > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>{t('feeESB')}</Text>
+              <Text style={styles.metaL}>{platformFeeLabel(t)}</Text>
               <Text style={styles.metaV}>+{rp(feeEff)}</Text>
             </View>
           )}
@@ -609,7 +609,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 )}
                 {feeEff > 0 && (
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaL}>{t('feeESB')}</Text>
+                    <Text style={styles.metaL}>{platformFeeLabel(t)}</Text>
                     <Text style={styles.metaV}>+{rp(feeShares[i] as number)}</Text>
                   </View>
                 )}
