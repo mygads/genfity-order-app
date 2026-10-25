@@ -69,11 +69,19 @@ function run() {
     'PW4: i18n shf_zero_hint.en bebas kata rupiah');
 
   // 3. Layar pilih label ikut currency cabang (bukan kunci Rp mentah).
-  ok(/vou_kind_discount_aud/.test(voucher), 'PW4: VoucherScreen label ikut currency');
+  // Vonis 25-Okt: konvensi kanonis = tCur('<dasar>') (tripwire-dual-currency,
+  // arah owner di main); literal ternari `<dasar>_aud` tetap diterima sebagai
+  // padanan (jalur lama yang belum migrasi). Keduanya membuktikan label ikut
+  // currency — yang dilarang = kunci Rp mentah / hardcode.
+  ok(/vou_kind_discount_aud/.test(voucher) || /tCur\('vou_kind_discount'\)/.test(voucher),
+    'PW4: VoucherScreen label ikut currency');
   ok(!/'Diskon \(Rp\)'/.test(voucher), 'PW4: VoucherScreen tanpa hardcode Diskon (Rp)');
-  ok(/discItemAud/.test(cashier), 'PW4: CashierScreen label diskon ikut currency');
-  ok(/unitPriceAud/.test(cart), 'PW4: CartDetailScreen label harga ikut currency');
-  ok(/top_custom_label_aud/.test(topup), 'PW4: TopupDepositScreen label ikut currency');
+  ok(/discItemAud/.test(cashier) || /tCur\('discItemRp'\)/.test(cashier),
+    'PW4: CashierScreen label diskon ikut currency');
+  ok(/unitPriceAud/.test(cart) || /tCur\('unitPriceRp'\)/.test(cart),
+    'PW4: CartDetailScreen label harga ikut currency');
+  ok(/top_custom_label_aud/.test(topup) || /tCur\('top_custom_label'\)/.test(topup),
+    'PW4: TopupDepositScreen label ikut currency');
   ok(/QUICK_AUD/.test(topup) && /MIN_TOPUP_AUD/.test(topup),
     'PW4: TopupDepositScreen chip+minimum ikut currency');
 

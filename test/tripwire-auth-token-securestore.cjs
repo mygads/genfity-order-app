@@ -38,7 +38,10 @@ function run() {
   // 1. SecureStore + strip persist + migrasi restore.
   ok(/import \* as SecureStore from 'expo-secure-store'/.test(sess),
     'C4: session.ts impor expo-secure-store (pola pin.ts)');
-  ok(/delete scrubbed\.authToken;\s*void setItem\(LS_SESSION, JSON\.stringify\(scrubbed\)\)/.test(sess),
+  // d145ca9 juga mem-scrub refreshToken (lebih ketat dari C4 awal) —
+  // regex menerima baris delete tambahan di antara (niat sama: scrubbed,
+  // bukan current mentah).
+  ok(/delete scrubbed\.authToken;[\s\S]{0,120}?void setItem\(LS_SESSION, JSON\.stringify\(scrubbed\)\)/.test(sess),
     'C4: persist() strip authToken (scrubbed, bukan current mentah)');
   ok(!/setItem\(LS_SESSION, JSON\.stringify\(current\)\)/.test(sess),
     'C4: NOL tulis sesi-mentah-ke-AsyncStorage (plaintext token mati)');
