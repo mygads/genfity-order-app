@@ -75,7 +75,11 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     setError('');
     if (k === 'C') setPin('');
     else if (k === '⌫') setPin(pin.slice(0, -1));
-    else if (pin.length < 4) setPin(pin + k);
+    // E2E-HP (2026-10-26): pad menerima 4-6 digit (paritas changePin
+    // maxLength 6 + verifyGrantPin sesi 6-digit). Cap 4 membuat PIN 6-digit
+    // (mis. seed 246810) tak pernah bisa dimasukkan -> Wrong PIN selamanya.
+    // Minimum tetap 4 (dijaga clockIn/clockOut via att_pin_short).
+    else if (pin.length < 6) setPin(pin + k);
   };
 
   /** Nama tampilan pemilik PIN: nama sesi bila PIN milik sesi aktif, sonst username/id stabil (anti-titip: clock tercatat atas pemilik PIN). */
@@ -172,7 +176,8 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
       <Text style={styles.sec}>{t('att_pin_entry')}</Text>
       <View style={styles.pinRow}>
-        {[0, 1, 2, 3].map((i) => (
+        {/* E2E-HP (2026-10-26): 6 slot paritas cap pad (4-digit tetap tampil + 2 strip). */}
+        {[0, 1, 2, 3, 4, 5].map((i) => (
           <View key={i} style={styles.pinDot}><Text style={styles.pinChar}>{pin[i] ? '●' : '-'}</Text></View>
         ))}
       </View>

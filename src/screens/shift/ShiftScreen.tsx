@@ -130,10 +130,15 @@ const terbilang = (n: number): string => {
     let openerUserId: string | null = null;
     try {
       await initDb();
-      // (1) Cegah shift-ganda: tolak bila masih ada shift berstatus open, JANGAN insert.
+      // (1) Cegah shift-ganda: tolak bila masih ada shift berstatus open
+      // di CABANG AKTIF, JANGAN insert. E2E-HP (2026-10-26): guard global
+      // (tanpa filter cabang) diblokir selamanya oleh baris seed demo
+      // (seed-shift-pagi/B001/open) + melarang shift-konkuren antar-cabang
+      // yang sah. Predikat disamakan dgn kartu Last Shift di bawah
+      // (branch-scope) dan EndShiftScreen.
       const openShift = await queryFirst<{ id: string }>(
-        'SELECT id FROM tr_shiftlog WHERE status = ? LIMIT 1',
-        ['open'],
+        "SELECT id FROM tr_shiftlog WHERE status = ? AND (branchId = ? OR branchId IS NULL OR branchId = '') LIMIT 1",
+        ['open', getBranchId()],
       );
       if (openShift) {
         setError(t('shf_double_open'));
