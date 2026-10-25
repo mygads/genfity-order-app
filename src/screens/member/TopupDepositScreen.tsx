@@ -17,6 +17,7 @@ import { initDb, queryFirst, run } from '../../lib/db';
 import { getSession } from '../../session';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { useLang, tCur } from '../../lib/i18n';
+import { appAlert } from '../../lib/appAlert';
 import { hasOpenShift } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
@@ -197,12 +198,30 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
       return;
     }
     setSaveErr('');
-    setSaving(true);
-    void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).finally(() => {
-      submitBusy.current = false;
-      setSaving(false);
-      setDone(true);
-    });
+    // A8: konfirmasi sebelum gerak uang — kasir melihat nominal + metode +
+    // penerima + saldo akhir; batal = lepas guard ketuk-ganda tanpa persist.
+    appAlert(
+      t('top_confirm_title'),
+      t('top_confirm_msg')
+        .replace('{a}', rp(nominalNum))
+        .replace('{m}', method)
+        .replace('{n}', nama || memberId)
+        .replace('{s}', rp(saldoAkhir)),
+      [
+        { text: t('c_cancel'), style: 'cancel', onPress: () => { submitBusy.current = false; } },
+        {
+          text: t('top_confirm_go'),
+          onPress: () => {
+            setSaving(true);
+            void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).finally(() => {
+              submitBusy.current = false;
+              setSaving(false);
+              setDone(true);
+            });
+          },
+        },
+      ],
+    );
   };
 
   /** Kembali ke Member sambil membawa saldo baru agar kartu + riwayat terupdate. */

@@ -290,6 +290,10 @@ const STR: Record<string, Entry> = {
   top_hint: { id: 'Nominal minimal {m} dan metode bayar wajib dipilih.', en: 'Minimum {m} and a payment method is required.' },
   top_queued: { id: 'Tersimpan ke antrean sync bila offline.', en: 'Saved to the sync queue when offline.' },
   top_success: { id: 'Top Up Berhasil', en: 'Top Up Successful' },
+  // A8: konfirmasi sebelum gerak uang (nominal + metode + penerima + saldo akhir).
+  top_confirm_title: { id: 'Konfirmasi Top Up', en: 'Confirm Top Up' },
+  top_confirm_msg: { id: 'Top up {a} ({m}) untuk {n}? Saldo jadi {s}.', en: 'Top up {a} ({m}) for {n}? Balance becomes {s}.' },
+  top_confirm_go: { id: 'Ya, Top Up', en: 'Yes, Top Up' },
   top_back_member: { id: 'Kembali ke Member', en: 'Back to Member' },
   top_new_order: { id: 'Order Baru', en: 'New Order' },
 
@@ -1341,6 +1345,8 @@ const STR: Record<string, Entry> = {
   bok_save_changes: { id: 'Simpan perubahan ›', en: 'Save changes ›' },
   bok_cancel_edit: { id: 'Batalkan edit', en: 'Cancel editing' },
   bok_example: { id: 'Contoh tersimpan', en: 'Saved example' },
+  // A8 badge lokal-belum-sync: baris reservasi tanpa serverId (belum menempel server).
+  bok_local: { id: 'Lokal · belum sync', en: 'Local · not synced' },
 
   // ---- realtime WS (kontrak §7: MENU_SOLDOUT - ORDER_STATUS - FORCE_PULL - SHIFT_NOTICE - SELF_ORDER_PAID) ----
   'ws.soldoutTitle': { id: 'Menu habis berubah', en: 'Sold-out menu changed' },

@@ -469,7 +469,9 @@ export default function BookingScreen({ navigation }: Props) {
               <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} {t('guests')} · {t('c_table')} {r.table}</Text>
               <Text style={[styles.meta, isTablet && styles.metaBig]}>{maskHp(r.phone)} · {t('kit_note')}: {r.note}</Text>
               <Text style={[styles.meta, isTablet && styles.metaBig]}>
-                {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>
+                {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>{typeof r.serverId !== 'number' ? (
+                  <Text> · <Text style={[styles.statusBadge, { backgroundColor: colors.line, color: colors.muted }]}>{t('bok_local')}</Text></Text>
+                ) : null}
               </Text>
             </View>
             <Text style={styles.chev}>›</Text>
