@@ -8,8 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getSaleClientId } from '../../lib/sales';
-import { uuidv7 } from '../../lib/uuidv7';
+import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getOrCreatePayChainId } from '../../lib/sales';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = {
@@ -124,12 +123,13 @@ export default function EdcScreen({ navigation, route }: Props) {
       }
       return;
     }
-    // APP-PRINTER-SALES (Q7): SATU client_id per sale (rantai Pay → head → baru).
-    // uuidv7() melempar bila CSPRNG absen: guard di-reset agar tombol Simpan
-    // tetap hidup (cermin penjagaan nextSalesNum di atas).
+    // APP-PRINTER-SALES (Q7) + P0-4: SATU client_id per sale (seed Pay menang;
+    // kunci lama uuidv7 mentah TETAP sah; baru = payment-{order}-uuidv7),
+    // dipersist SEBELUM saveSale agar retry/drain satu kunci. Hanya melempar
+    // bila CSPRNG absen: guard di-reset agar tombol Simpan tetap hidup.
     let saleClientId: string;
     try {
-      saleClientId = (p.clientId ?? '').trim() || (await getSaleClientId(orderNo)) || uuidv7();
+      saleClientId = await getOrCreatePayChainId(orderNo, (p.clientId ?? '').trim());
     } catch (e) {
       savedRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
@@ -445,15 +445,13 @@ export default function EdcScreen({ navigation, route }: Props) {
           // nomor + client_id + kaki split + grup ikut pulang (ganti metode
           // bukan sale baru — rantai Q7 lestari).
           const p = route?.params ?? {};
-          // P1: blok issuance dijaga (cermin Qris-guard) — getSaleClientId /
-          // uuidv7 gagal = Alert + tetap di EDC, bukan pulang tanpa client_id.
+          // P1: blok issuance dijaga (cermin Qris-guard) — getOrCreate gagal
+          // (CSPRNG absen) = Alert + tetap di EDC, bukan pulang tanpa client_id.
           let backSalesNum = '';
           let backClientId = '';
           try {
             backSalesNum = (p.salesNum ?? '').trim();
-            backClientId = (p.clientId ?? '').trim()
-              || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
-              || uuidv7();
+            backClientId = await getOrCreatePayChainId(backSalesNum, (p.clientId ?? '').trim());
           } catch {
             appAlert(t('pay_issue_fail'));
             return;

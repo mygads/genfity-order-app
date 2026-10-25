@@ -579,6 +579,9 @@ function goMerchantOp(
         ...(p.changeAmount !== undefined ? { changeAmount: Math.round(Number(p.changeAmount) || 0) } : {}),
         ...(p.tipAmount ? { tipAmount: Math.round(Number(p.tipAmount) || 0) } : {}),
         ...(p.voucherCode ? { voucherCode: String(p.voucherCode).slice(0, 64) } : {}),
+        // P1-2: teruskan sesi kas W1 bila pemanggil menyimpannya di payload
+        // (cermin settlePosPayment); absen = BE me-resolve sendiri.
+        ...(Math.round(Number(p.cashSessionId) || 0) > 0 ? { cashSessionId: Math.round(Number(p.cashSessionId)) } : {}),
       },
       method: 'POST',
       idemKey: String(p.clientId ?? item.id),

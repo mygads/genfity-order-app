@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, buildSaleQrPayload } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { publishDisplayOrder } from '../../lib/display';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
@@ -22,6 +22,10 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   const pollRef = useRef(0); /** Kode referensi mock - di app nyata dari backend saat generate QR. */
   /** Guard settle-ganda: poll otomatis + tombol manual bisa panggil berbarengan. */
   const settledRef = useRef(false);
+  /** C2: QR kadaluarsa = terminal — poll in-flight yang pulang telat dilarang
+   *  settle (tanpa ini respons telat menimpa status expired → Success palsu
+   *  atas QR basi). Direset hanya oleh tombol Buat-kode-baru. */
+  const expiredRef = useRef(false);
   const refCode = useMemo(() => {
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
@@ -39,8 +43,9 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     void (async () => {
       try {
         const sn = (route?.params?.salesNum ?? '').trim();
-        const head = sn ? await getSaleClientId(sn) : null;
-        if (on) setQrChainId(head ?? uuidv7());
+        // P0-4: rantai dipersist SEBELUM settle (seed/head/stored menang, baru =
+        // payment-{order}-uuidv7) agar retry/drain memakai kunci yang SAMA.
+        if (on) setQrChainId(await getOrCreatePayChainId(sn));
       } catch {
         if (on) {
           setChainErr(true);
@@ -69,6 +74,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     const t = setTimeout(() => {
       if (seconds <= 1) {
         setSeconds(0);
+        expiredRef.current = true;
         setStatus('expired');
       } else {
         setSeconds(seconds - 1);
@@ -94,7 +100,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
    * baru terbitkan bila belum ada — QR tak basi. FauxQr tampil tetap
    * dekoratif; payload QR nyata (buildSaleQrPayload) ikut clientId ini. */
   const settlePaid = async () => {
-    if (settledRef.current) return;
+    if (settledRef.current || expiredRef.current) return;
     settledRef.current = true;
     // T5: QRIS tampil dulu; persist + struk/bukti hanya setelah bayar sukses.
     const p = route?.params ?? {};
@@ -117,12 +123,14 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
       }
       return;
     }
-    // APP-PRINTER-SALES (Q7): SATU client_id per sale (rantai Pay → QR tampil → head → baru).
-    // uuidv7() melempar bila CSPRNG absen: guard di-reset agar Cek Status tetap
-    // hidup (cermin penjagaan nextSalesNum di atas).
+    // APP-PRINTER-SALES (Q7) + P0-4: SATU client_id per sale (seed Pay/QR
+    // tampil menang; kunci lama uuidv7 mentah TETAP sah; baru =
+    // payment-{order}-uuidv7), dipersist SEBELUM saveSale agar retry/drain
+    // satu kunci. getOrCreate hanya melempar bila CSPRNG absen: guard
+    // di-reset agar Cek Status tetap hidup.
     let saleClientId: string;
     try {
-      saleClientId = (p.clientId ?? '').trim() || qrChainId || (await getSaleClientId(orderNo)) || uuidv7();
+      saleClientId = await getOrCreatePayChainId(orderNo, (p.clientId ?? '').trim() || qrChainId);
     } catch (e) {
       settledRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
@@ -254,7 +262,11 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
         paid = pollRef.current >= 3;
       }
     } catch {
-    paid = false; } if (paid) {
+    paid = false; }
+    // C2: respons telat yang pulang setelah kadaluarsa = abaikan (jangan timpa
+    // status expired, jangan settle QR basi).
+    if (expiredRef.current) return;
+    if (paid) {
       setStatus('paid');
       void settlePaid(); } else { setStatus('waiting'); }
   };
@@ -379,6 +391,7 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
           <TouchableOpacity
             style={[styles.checkBtn, isTablet && styles.checkBtnTablet]}
             onPress={() => {
+              expiredRef.current = false;
               setSeconds(5 * 60);
               setStatus('waiting');
             }}>

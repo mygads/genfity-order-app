@@ -584,6 +584,13 @@ export interface SettleInput {
   voucherCode?: string;
   notes?: string;
   idempotencyKey?: string;
+  /**
+   * P1-2: id sesi kas W1 yang terbuka (liat beWorkforce.getCashSessionId).
+   * Dikirim apa adanya bila diketahui agar BE mengatribusikan setoran ke
+   * sesi yang benar; absen = BE me-resolve sendiri (sesi tunggal user/
+   * merchant) atau menolak jujur bila register kasir diwajibkan.
+   */
+  cashSessionId?: number;
   /** P1-1: PIN supervisor transport-only (live; tak pernah dipersist). */
   pin?: string;
 }
@@ -595,6 +602,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
   if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
   const key = inp.idempotencyKey && inp.idempotencyKey.trim() ? inp.idempotencyKey.trim() : uuidv7();
   const pinClean = String(inp.pin ?? '').trim();
+  const cashSid = Math.max(0, Math.round(Number(inp.cashSessionId) || 0));
   try {
     const res = await withTimeoutMs(
       apiFetch(ApiPath.merchantPosPayment, {
@@ -608,6 +616,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<{ rep
           ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
           ...(inp.notes ? { notes: inp.notes.slice(0, 500) } : {}),
           ...(pinClean ? { pin: pinClean } : {}),
+          ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
         },
         idempotencyKey: key,
       }),

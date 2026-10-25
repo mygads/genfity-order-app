@@ -18,6 +18,7 @@ import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from './sync';
 import { apiFetch } from './apiSource';
 import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
 import { uuidv7 } from './uuidv7';
+import { getItem, setItem } from './storage';
 import * as DisplayBus from './display';
 
 const r = (n: number) => Math.round(n);
@@ -200,6 +201,77 @@ export async function getSaleClientId(salesNum: string): Promise<string | null> 
   } catch {
     return null;
   }
+}
+
+/**
+ * Rantai idempotency bayar (P0-4): SATU chainClientId per salesNum, dipersist
+ * ke storage SEBELUM saveSale pertama agar SEMUA retry/drain memakai kunci
+ * yang sama (bukan uuidv7 baru tiap ketukan). Format kunci baru:
+ * `payment-{orderId}-{uuidv7}`.
+ * Urutan menang: seed params/head (kunci lama uuidv7 mentah TETAP sah untuk
+ * rantai ini — stabilitas lebih penting dari format) → simpanan rantai →
+ * terbitkan baru + simpan. Tak pernah melempar (fallback uuidv7 mentah).
+ */
+const LS_PAY_CHAIN = 'genfity.paychain.';
+
+function payChainName(salesNum: string): string {
+  return `${LS_PAY_CHAIN}${String(salesNum ?? '').trim()}`;
+}
+
+/** Terbitkan kunci rantai baru format `payment-{orderId}-{uuidv7}`. */
+export function buildPayChainId(salesNum: string): string {
+  return `payment-${String(salesNum ?? '').trim()}-${uuidv7()}`;
+}
+
+/** True bila v sudah berupa kunci rantai nomor ini (format baru). */
+export function isPayChainIdFor(v: string, salesNum: string): boolean {
+  const s = String(v ?? '').trim();
+  const no = String(salesNum ?? '').trim();
+  return !!s && !!no && s.startsWith(`payment-${no}-`) && s.length > `payment-${no}-`.length;
+}
+
+export async function getOrCreatePayChainId(salesNum: string, seed?: string): Promise<string> {
+  const no = String(salesNum ?? '').trim();
+  const cleanSeed = String(seed ?? '').trim();
+  if (!no) return cleanSeed || uuidv7();
+  const name = payChainName(no);
+  // Seed params/head menang (stabil untuk rantai ini) lalu dipersist agar
+  // retry berikutnya + drain membaca kunci yang sama.
+  if (cleanSeed) {
+    try {
+      await setItem(name, cleanSeed);
+    } catch {
+      /* abaikan: kunci tetap dipakai untuk panggilan ini */
+    }
+    return cleanSeed;
+  }
+  try {
+    const head = await getSaleClientId(no);
+    if (head) {
+      try {
+        await setItem(name, head);
+      } catch {
+        /* abaikan */
+      }
+      return head;
+    }
+  } catch {
+    /* abaikan: lanjut ke simpanan */
+  }
+  try {
+    const stored = await getItem(name);
+    const st = String(stored ?? '').trim();
+    if (st) return st;
+  } catch {
+    /* abaikan: terbitkan baru */
+  }
+  const fresh = buildPayChainId(no);
+  try {
+    await setItem(name, fresh);
+  } catch {
+    /* abaikan: kunci tetap dipakai untuk panggilan ini */
+  }
+  return fresh;
 }
 
 /**

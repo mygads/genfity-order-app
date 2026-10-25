@@ -17,8 +17,9 @@ import { appAlert } from '../../lib/appAlert';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { lineSubtotal, recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId } from '../../lib/sales';
+import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, getOrCreatePayChainId } from '../../lib/sales';
 import { uuidv7 } from '../../lib/uuidv7';
+import { getCashSessionId } from '../../lib/beWorkforce';
 import { publishDisplayOrder } from '../../lib/display';
 import { validateVoucherCode } from '../../lib/apiSource';
 import { enqueueSync, syncWarnLevel } from '../../lib/sync';
@@ -542,15 +543,19 @@ export default function PayScreen({ navigation, route }: Props) {
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
 
   /**
-   * APP-PRINTER-SALES (Q7): SATU client_id per sale untuk SELURUH rantai.
+   * APP-PRINTER-SALES (Q7) + P0-4: SATU client_id per sale untuk SELURUH rantai.
    * Diselesaikan sekali di Pay (params → head → terbitkan baru) lalu
    * diteruskan WAJIB ke Qris/Edc/Success — Qris/Edc memakai ulang, tak
    * menerbitkan sendiri, agar QR tak basi dan upsert server satu kunci.
+   * Bila nomor sale sudah ada, kunci dipersist SEBELUM saveSale pertama
+   * (getOrCreatePayChainId) agar retry/drain memakai kunci yang SAMA.
    */
-  const resolveChainClientId = async (): Promise<string> =>
-    (route?.params?.clientId ?? '').trim() ||
-    (paramSalesNum ? (await getSaleClientId(paramSalesNum)) ?? '' : '') ||
-    uuidv7();
+  const resolveChainClientId = async (): Promise<string> => {
+    const seed = (route?.params?.clientId ?? '').trim() ||
+      (paramSalesNum ? (await getSaleClientId(paramSalesNum)) ?? '' : '');
+    if (paramSalesNum) return getOrCreatePayChainId(paramSalesNum, seed);
+    return seed || uuidv7();
+  };
 
   /**
    * Selesaikan pembayaran dengan SATU nomor struk: nomor TRX diterbitkan dulu,
@@ -561,7 +566,11 @@ export default function PayScreen({ navigation, route }: Props) {
  *  Tanpa id server / tanpa padanan enum = BLOCKED (diam, lokal tetap sah).
  *  Immediate gagal (offline/ditolak) = antre GO_OP_SETTLE agar drain
  *  memfinalisasi (retry saat offline, 'gagal'+catatan saat 4xx) — jujur di
- *  SyncScreen, tanpa Success palsu dan tanpa kirim buta. Tak pernah melempar. */
+ *  SyncScreen, tanpa Success palsu dan tanpa kirim buta. Tak pernah melempar.
+ *  P1-2: sesi kas W1 yang diketahui disertakan (atribusi setoran benar);
+ *  tak diketahui = BE me-resolve sendiri (sesi tunggal) atau menolak jujur
+ *  bila register kasir diwajibkan — tanpa blokir-buta kasir offline (buka
+ *  shift offline = id sesi belum ada di perangkat ini). */
   const mirrorSettleToServer = (
     salesNum: string, methodLabel: string, amount: number,
     tip: number, voucherCode: string | undefined, clientId: string | undefined,
@@ -571,13 +580,24 @@ export default function PayScreen({ navigation, route }: Props) {
       try {
         const serverId = await getServerOrderIdForSale(salesNum);
         if (serverId == null) return;
+        // A4: deposit/member/transfer TAK punya padanan enum BE — cermin
+        // server DILARANG untuk ketiganya (hanya ledger lokal + antre ESB).
         const beMethod = mapPayMethodToBe(methodLabel);
         if (!beMethod) return;
+        let cashSid: number | undefined;
+        try {
+          const s = await getCashSessionId();
+          const n = parseInt(String(s ?? '').trim(), 10);
+          if (Number.isFinite(n) && n > 0) cashSid = n;
+        } catch {
+          /* abaikan: BE me-resolve */
+        }
         const res = await settlePosPayment({
           serverId, method: beMethod, amountPaid: amount,
           ...(tip > 0 ? { tipAmount: tip } : {}),
           ...(voucherCode ? { voucherCode } : {}),
           ...(clientId ? { idempotencyKey: clientId } : {}),
+          ...(cashSid ? { cashSessionId: cashSid } : {}),
           ...(pin ? { pin } : {}),
         });
         if (res.ok || res.reason === 'blocked') return;
@@ -587,6 +607,7 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(tip > 0 ? { tipAmount: tip } : {}),
             ...(voucherCode ? { voucherCode } : {}),
             ...(clientId ? { clientId } : {}),
+            ...(cashSid ? { cashSessionId: cashSid } : {}),
             salesNum, at: new Date().toISOString(),
           });
         } catch { /* antrean belum siap */ }
