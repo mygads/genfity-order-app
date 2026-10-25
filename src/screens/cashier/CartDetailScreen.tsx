@@ -15,6 +15,7 @@ import { nextSalesNum } from '../../lib/sales';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
 import { postTableTransition } from '../../lib/terminalTable';
+import { parseCustomerId } from '../../lib/memberRef';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -34,6 +35,8 @@ type Props = {
       table?: string;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) — diteruskan rantai ke Pay. */
+      customerId?: number;
       ongkir?: number;
       packaging?: number;
       subtotal?: number;
@@ -52,6 +55,8 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [table, setTable] = useState(route?.params?.table ?? '');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
   const [memberId, setMemberId] = useState(route?.params?.memberId ?? '');
+  /** Ronde-3 Q1: ref GO — dibawa di semua rantai keluar (Pay/Split/BillPreview). */
+  const [customerId, setCustomerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Nomor struk draft: dipakai ulang saat bayar + kunci hapus draft di Success. */
   const [salesNum, setSalesNum] = useState(route?.params?.salesNum ?? '');
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
@@ -101,6 +106,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     if (route?.params?.table !== undefined) setTable(route.params.table ?? '');
     if (route?.params?.customer !== undefined) setCustomer(route.params.customer ?? '');
     if (route?.params?.memberId !== undefined) setMemberId(route.params.memberId ?? '');
+    if (route?.params?.customerId !== undefined) setCustomerId(parseCustomerId(route.params.customerId));
     if (typeof route?.params?.salesNum === 'string' && route.params.salesNum.trim()) setSalesNum(route.params.salesNum.trim());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params]);
@@ -224,6 +230,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
       // Ongkir diteruskan BRUTO + cut terpisah (kontrak PayScreen): Pay
       // percaya ongkirCut pemanggil; kirim net tanpa cut = cut hilang di
       // catatan (sebelumnya ongkirNet tanpa ongkirCut di sini).
@@ -248,6 +255,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
       ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
     });
   const goSave = () => {
@@ -274,6 +282,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         items: active,
         ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
+        ...(customerId != null ? { customerId } : {}),
         ...(customer.trim() ? { customer: customer.trim() } : {}),
         ...(sn ? { salesNum: sn } : {}),
         // Draft menyimpan ongkir BRUTO + cut terpisah agar muat-ulang hitung
@@ -561,6 +570,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
+              ...(customerId != null ? { customerId } : {}),
               // SplitBill menghitung ulang kanonis dari ongkir BRUTO (cut
               // dihitung ulang min(cap, bruto)); kirim net = cut tak terhitung.
               ...(ongkir > 0 ? { ongkir } : {}),
@@ -578,6 +588,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(table ? { table } : {}),
               ...(customer ? { customer } : {}),
               ...(memberId ? { memberId } : {}),
+              ...(customerId != null ? { customerId } : {}),
               // Pratinjau butuh bruto + cut terpisah agar terusannya ke Pay
               // utuh (BillPreview meneruskan keduanya via orderCtx).
               ...(ongkir > 0 ? { ongkir } : {}),

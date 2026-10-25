@@ -10,6 +10,7 @@ import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } f
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getOrCreatePayChainId } from '../../lib/sales';
 import { mirrorSettleToServer } from '../../lib/settleMirror';
+import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = {
@@ -20,7 +21,7 @@ type Props = {
       salesNum?: string;
       /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): dipakai ulang, bukan dibuat baru. */
       clientId?: string;
-      splits?: { method?: string; amount?: number }[];
+      splits?: { method?: string; amount?: number; memberId?: string; customerId?: number }[];
       /** Split grup: kunjungan bayar memakai SATU salesNum + tahu total penuh. */
       splitGroup?: boolean;
       orderTotal?: number;
@@ -39,6 +40,8 @@ type Props = {
       tip?: number;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
+      customerId?: number;
     };
   };
 };
@@ -144,17 +147,24 @@ export default function EdcScreen({ navigation, route }: Props) {
       }
       return;
     }
-    // P7/P15: kaki terusan boleh membawa approvalCode/memberId defensif dari
-    // Pay (tipe nav params belum diperluas) — dipertahankan ke visitPay agar
-    // atribusi deposit + kode otorisasi kunjungan lalu tak hilang di EDC.
-    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string };
+    // P7/P15: kaki terusan boleh membawa approvalCode/memberId/customerId
+    // defensif dari Pay (tipe nav params belum diperluas) — dipertahankan ke
+    // visitPay agar atribusi deposit + kode otorisasi kunjungan lalu tak hilang
+    // di EDC. Ronde-3 Q1: customerId GO diteruskan; alias memberId hanya
+    // pointer ledger lokal.
+    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string; customerId?: number };
     const fwdSplits = ((p.splits ?? []) as FwdLeg[])
-      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}) }))
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}), ...(parseCustomerId(s?.customerId) != null ? { customerId: parseCustomerId(s?.customerId) as number } : {}) }))
       .filter((s) => s.amount > 0);
     const legMemberId = ((p.splits ?? []) as FwdLeg[])
       .map((s) => String(s?.memberId ?? '').trim())
       .find((v) => v !== '') ?? '';
     const effMemberId = String(p.memberId ?? '').trim() || legMemberId;
+    // Ronde-3 Q1: ref GO = params → kaki → kunci lokal (MC{id}).
+    const effCustomerId =
+      parseCustomerId(p.customerId) ??
+      parseCustomerId(((p.splits ?? []) as FwdLeg[]).map((s) => s?.customerId).find((v) => v != null)) ??
+      customerIdFromLocalKey(effMemberId);
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
@@ -175,7 +185,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       const visitPay = [...fwdSplits, { method, amount: total, approvalCode: approval }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}) });
+          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}) });
         } else {
           const gInput: SaleInput = {
             method,
@@ -196,6 +206,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             approvalCode: approval,
             ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
             ...(effMemberId ? { memberId: effMemberId } : {}),
+            ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
             ...(p.table ? { tableId: p.table } : {}),
             ...(p.mode ? { mode: p.mode } : {}),
             ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -259,6 +270,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
         ...(effMemberId ? { memberId: effMemberId } : {}),
+        ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
         ...(p.mode ? { mode: p.mode } : {}),
         ...(p.table ? { table: p.table } : {}),
         ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -284,6 +296,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(effMemberId ? { memberId: effMemberId } : {}),
+      ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
       ...(p.table ? { tableId: p.table } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -314,7 +327,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), clientId: saleClientId });
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), clientId: saleClientId });
     navigation?.navigate('Success', {
       total: fullTotal,
       method,
@@ -335,6 +348,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(effMemberId ? { memberId: effMemberId } : {}),
+      ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.table ? { table: p.table } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -485,6 +499,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.ongkir ? { ongkir: p.ongkir } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
             ...(p.memberId ? { memberId: p.memberId } : {}),
+            ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
             ...(backSalesNum ? { salesNum: backSalesNum } : {}),
             clientId: backClientId,
             ...(p.splits ? { splits: p.splits } : {}),

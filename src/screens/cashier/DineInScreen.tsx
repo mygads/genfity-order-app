@@ -8,6 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
+import { parseCustomerId } from '../../lib/memberRef';
 import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
 
@@ -24,6 +25,8 @@ type Props = {
       packaging?: number;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) — diteruskan rantai ke Pay. */
+      customerId?: number;
       voucher?: Voucher;
     };
   };
@@ -82,6 +85,8 @@ export default function DineInScreen({ navigation, route }: Props) {
       : (MODES[0] ?? 'DINE IN'),
   );
   const [memberId] = useState(route?.params?.memberId ?? '');
+  /** Ronde-3 Q1: ref GO read-only (cermin memberId di atas). */
+  const [customerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   useEffect(() => {
@@ -184,6 +189,7 @@ export default function DineInScreen({ navigation, route }: Props) {
           ...(num ? { salesNum: num } : {}),
           ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
           ...(memberId ? { memberId } : {}),
+          ...(customerId != null ? { customerId } : {}),
           ...(guest.trim() ? { customer: guest.trim() } : {}),
         },
       });
@@ -213,6 +219,7 @@ export default function DineInScreen({ navigation, route }: Props) {
         ...(packaging > 0 ? { packaging } : {}),
         ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
+        ...(customerId != null ? { customerId } : {}),
         discount: discountTotal + voucherAmt,
       });
     })();
@@ -240,6 +247,7 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
     });
   // Rantai Pay (kontrak PayScreen): total penuh + items/mode/table/ongkir/voucher/customer/memberId
   // + diskon belanja + rincian info-only agar Pay teruskan ke Success > Receipt.
@@ -262,6 +270,7 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
     });
 
   return (

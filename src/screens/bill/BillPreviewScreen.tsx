@@ -8,6 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { getGroupPaid, nextSalesNum } from '../../lib/sales';
 import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
+import { parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type OrderItemParam = {
@@ -28,7 +29,7 @@ type Props = {
       /** Fee platform agregator + pembulatan + kemasan bawaan pemanggil (info-only, diteruskan). */
       feeESB?: number; rounding?: number; packaging?: number;
       mode?: string; table?: string; ongkir?: number; ongkirCut?: number;
-      customer?: string; memberId?: string;
+      customer?: string; memberId?: string; customerId?: number;
       /** Nomor order bila sudah ada (alir balik History); pratinjau baru = tanpa nomor. */
       no?: string;
       /** Identitas resto/kasir untuk kepala struk (cermin ReceiptScreen). */
@@ -198,6 +199,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(p.customer ? { customer: p.customer } : {}),
     ...(p.memberId ? { memberId: p.memberId } : {}),
+    ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
   };
   // Share proporsional service/pajak/feeESB/kemasan/pembulatan untuk split parsial
   // (info-only struk di Pay > Success > Receipt). P5: feeESB ikut (charged

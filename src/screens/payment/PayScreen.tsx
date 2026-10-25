@@ -34,6 +34,7 @@ import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
+import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -114,6 +115,8 @@ type Props = {
       ongkir?: number;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
+      customerId?: number;
       /** Voucher bawaan order: kode string, objek {code, amount, kind}, atau nominal. */
       voucher?: VoucherIn;
       /** Kode voucher eksplisit bila voucher di atas hanya angka. */
@@ -146,8 +149,8 @@ type Props = {
 };
 
 type Tab = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
-/** Split parsial: label untuk tampilan, method mentah untuk payload (bank/dompet masing-masing). memberId dibawa kaki deposit agar gate withdraw saveSale jalan. */
-type Split = { id: string; label: string; method: string; amount: number; memberId?: string };
+/** Split parsial: label untuk tampilan, method mentah untuk payload (bank/dompet masing-masing). memberId dibawa kaki deposit agar gate withdraw saveSale jalan; customerId GO ikut agar settle/drain membawa ref GO (ronde-3 Q1). */
+type Split = { id: string; label: string; method: string; amount: number; memberId?: string; customerId?: number };
 
 /** Label generik ExtraPay → method mentah agar payload tidak ke-strip. */
 const extraLabelToMethod = (label: string): string => {
@@ -204,6 +207,8 @@ export default function PayScreen({ navigation, route }: Props) {
   const ongkir = route?.params?.ongkir ?? 0;
   const customerName = route?.params?.customer;
   const memberIdParam = route?.params?.memberId;
+  /** Ronde-3 Q1: ref GO dari params (ditempel MemberScreen pasca-resolve). */
+  const customerIdParam = parseCustomerId(route?.params?.customerId);
   /** Nomor struk bawaan draft (Simpan/LoadOrder): pakai ulang agar struk = arsip. */
   const paramSalesNum = (route?.params?.salesNum ?? '').trim();
   /** Rincian struk bawaan pemanggil untuk diteruskan (bukan dihitung ulang). */
@@ -357,13 +362,18 @@ export default function PayScreen({ navigation, route }: Props) {
   // Pay bisa dibuka tanpa memberId params sementara kaki deposit parsial sudah
   // membawa memberId; tanpa fallback ini withdraw di daun dilewati (G1).
   const fwdMemberId = memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
+  /** Ronde-3 Q1: ref GO untuk terusan Pay→Qris/Edc (params → kaki → kunci lokal). */
+  const fwdCustomerId =
+    customerIdParam ??
+    splits.find((s) => s.customerId != null)?.customerId ??
+    customerIdFromLocalKey(fwdMemberId);
   /** Guard ketuk-ganda goSuccess (dideklarasi di sini agar di atas goSuccess). */
   const goRef = useRef(false);
   // P1-1b: prompt PIN manajer transport-only — dibuka hanya bila merchant
   // mewajibkan PIN payment DAN sale tertaut order server; batal = bayar
   // dibatalkan (paritas FE: gate memblokir konfirmasi).
   const [mgrPinOpen, setMgrPinOpen] = useState(false);
-  const pinRetryRef = useRef<{ method: string; cash: number; change: number; detail?: { approvalCode?: string; memberId?: string; approvedBy?: string } } | null>(null);
+  const pinRetryRef = useRef<{ method: string; cash: number; change: number; detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string } } | null>(null);
 
   // Tunai
   const [cashSel, setCashSel] = useState<number | null>(null);
@@ -559,10 +569,11 @@ export default function PayScreen({ navigation, route }: Props) {
     clampSplits(Math.max(0, total - boxBelanjaAmt - boxOngkirCut + next));
   };
 
-  const addSplit = (label: string, amount: number, method?: string, memberId?: string) => {
+  const addSplit = (label: string, amount: number, method?: string, memberId?: string, customerId?: number) => {
     if (amount <= 0) return;
     splitSeq += 1;
-    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, method: method ?? label, amount, ...(memberId ? { memberId } : {}) }]);
+    const splitCustomerId = parseCustomerId(customerId);
+    setSplits((s) => [...s, { id: `split-${splitSeq}`, label, method: method ?? label, amount, ...(memberId ? { memberId } : {}), ...(splitCustomerId != null ? { customerId: splitCustomerId } : {}) }]);
   };
 
   const removeSplit = (id: string) => setSplits((s) => s.filter((x) => x.id !== id));
@@ -599,7 +610,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const mirrorSettleToServer = (
     salesNum: string, methodLabel: string, amount: number,
     tip: number, voucherCode: string | undefined, clientId: string | undefined,
-    pin?: string,
+    pin?: string, customerId?: number | null,
   ) => {
     void (async () => {
       try {
@@ -617,11 +628,14 @@ export default function PayScreen({ navigation, route }: Props) {
         } catch {
           /* abaikan: BE me-resolve */
         }
+        // Ronde-3 Q1: customerId GO (int) bila member ditempel.
+        const custId = parseCustomerId(customerId);
         const res = await settlePosPayment({
           serverId, method: beMethod, amountPaid: amount,
           ...(tip > 0 ? { tipAmount: tip } : {}),
           ...(voucherCode ? { voucherCode } : {}),
           ...(clientId ? { idempotencyKey: clientId } : {}),
+          ...(custId != null ? { customerId: custId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),
           ...(pin ? { pin } : {}),
         });
@@ -632,6 +646,7 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(tip > 0 ? { tipAmount: tip } : {}),
             ...(voucherCode ? { voucherCode } : {}),
             ...(clientId ? { clientId } : {}),
+            ...(custId != null ? { customerId: custId } : {}),
             ...(cashSid ? { cashSessionId: cashSid } : {}),
             salesNum, at: new Date().toISOString(),
           });
@@ -639,7 +654,7 @@ export default function PayScreen({ navigation, route }: Props) {
       } catch { /* abaikan: sale lokal tetap sah */ }
     })();
   };
-  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }, pin?: string) => {
+  const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string }, pin?: string) => {
     // Guard ketuk-ganda (#8/#21): tiap goSuccess menerbitkan nomor + tulis
     // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
     if (goRef.current) return;
@@ -669,6 +684,14 @@ export default function PayScreen({ navigation, route }: Props) {
     // memberId kaki deposit parsial ikut menentukan pemilik (tanpa ini gate
     // withdraw saveSale tak jalan bila Pay dibuka tanpa memberId params).
     const saleMemberId = detail?.memberId ?? memberIdParam ?? splits.find((s) => s.memberId)?.memberId;
+    // Ronde-3 Q1: ref GO otoritatif = detail → params → kaki → kunci lokal
+    // (MC{id} → id). Dipakai saveSale/recordSale/appendGroupPayment/mirror/
+    // Success; memberId di atas tinggal pointer ledger (kompat lokal).
+    const saleCustomerId =
+      parseCustomerId(detail?.customerId) ??
+      customerIdParam ??
+      splits.find((s) => s.customerId != null)?.customerId ??
+      customerIdFromLocalKey(saleMemberId);
     // Split grup (dari SplitBill): SATU nomor struk untuk semua kunjungan.
     // Kunjungan pertama = saveSale penuh (status auto 'open'); berikutnya =
     // appendGroupPayment (tanpa stok/voucher/dapur ganda). Struk tampilkan
@@ -677,12 +700,12 @@ export default function PayScreen({ navigation, route }: Props) {
     const orderTotalFull = Math.max(0, Math.round(Number(route?.params?.orderTotal) || 0));
     if (splitGroup && paramSalesNum && orderTotalFull > 0) {
       const visitPay = [
-        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })),
+        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}), ...(s.customerId != null ? { customerId: s.customerId } : {}) })),
         { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
       ];
       try {
         if (await saleHeadExists(paramSalesNum)) {
-          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change, clientId: saleClientId, ...(saleMemberId ? { memberId: saleMemberId } : {}) });
+          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change, clientId: saleClientId, ...(saleMemberId ? { memberId: saleMemberId } : {}), ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}) });
         } else {
           const gInput: SaleInput = {
             method,
@@ -702,6 +725,7 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
             ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
             ...(saleMemberId ? { memberId: saleMemberId } : {}),
+            ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}),
             ...(tableNo ? { tableId: tableNo } : {}),
             ...(orderMode ? { mode: orderMode } : {}),
             ...(ongkir > 0 ? { ongkir } : {}),
@@ -712,7 +736,7 @@ export default function PayScreen({ navigation, route }: Props) {
           await saveSale(gInput);
           recordSale(gInput);
           // W2: cermin lunas grup ke BE bila tertaut order server.
-          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin);
+          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin, saleCustomerId);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -753,6 +777,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
         ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
         ...(saleMemberId ? { memberId: saleMemberId } : {}),
+        ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}),
         ...(serviceParam > 0 ? { service: serviceParam } : {}),
         ...(taxParam > 0 ? { tax: taxParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
@@ -782,13 +807,14 @@ export default function PayScreen({ navigation, route }: Props) {
       change,
       items: route?.params?.items,
       payments: [
-        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })),
+        ...splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}), ...(s.customerId != null ? { customerId: s.customerId } : {}) })),
         { method, amount: Math.max(0, payable - paid), ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}) },
       ],
       ...(effVoucherCode ? { voucherCode: effVoucherCode } : {}),
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
       ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
       ...(saleMemberId ? { memberId: saleMemberId } : {}),
+      ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}),
       ...(tableNo ? { tableId: tableNo } : {}),
       ...(orderMode ? { mode: orderMode } : {}),
       ...(ongkir > 0 ? { ongkir } : {}),
@@ -814,7 +840,7 @@ export default function PayScreen({ navigation, route }: Props) {
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
     recordSale(input);
     // W2: cermin lunas ke BE bila tertaut order server.
-    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin);
+    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
@@ -823,6 +849,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(detail?.approvalCode ? { approvalCode: detail.approvalCode } : {}),
       ...(detail?.approvedBy ? { approvedBy: detail.approvedBy } : {}),
       ...(saleMemberId ? { memberId: saleMemberId } : {}),
+      ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}),
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
       ...(tipAmount > 0 ? { tip: tipAmount } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
@@ -843,7 +870,7 @@ export default function PayScreen({ navigation, route }: Props) {
   // P1-1b: gerbang PIN manajer (paritas FE DeletePinModal): bila merchant
   // mewajibkan PIN payment DAN sale tertaut order server, kumpulkan PIN dulu
   // lalu teruskan ke goSuccess → mirror live; batal = bayar dibatalkan.
-  const goSuccessGated = (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; approvedBy?: string }) => {
+  const goSuccessGated = (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string }) => {
     void (async () => {
       try {
         // Tanpa padanan enum BE = BLOCKED diam (deposit/member): tanpa prompt.
@@ -927,6 +954,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(tipAmount > 0 ? { tip: tipAmount } : {}),
         ...(customerName ? { customer: customerName } : {}),
         ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
+        ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
         ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
         // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke QRIS.
         clientId: chainClientId,
@@ -935,7 +963,7 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
         // Kaki split yang sudah dibayar diteruskan agar QRIS/EDC mencatat
         // SATU bill utuh (bukan hanya sisa): nomor + kaki lama dipakai ulang.
-        ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })) } : {}),
+        ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}), ...(s.customerId != null ? { customerId: s.customerId } : {}) })) } : {}),
         });
         } catch {
           // resolveChainClientId melempar hanya bila CSPRNG absen (uuidv7
@@ -962,10 +990,12 @@ export default function PayScreen({ navigation, route }: Props) {
     if (!memberPicked || memberPicked.saldo <= 0 || payable <= 0) return;
     const pakai = Math.min(memberPicked.saldo, remaining);
     const grand = paid + pakai;
+    // Ronde-3 Q1: kunci ledger lokal → ref GO bila format MC{id}.
+    const pickedCustomerId = customerIdFromLocalKey(memberPicked.id);
     if (grand >= payable) {
-      void goSuccessGated('deposit', grand, 0, { memberId: memberPicked.id });
+      void goSuccessGated('deposit', grand, 0, { memberId: memberPicked.id, ...(pickedCustomerId != null ? { customerId: pickedCustomerId } : {}) });
     } else {
-      addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit', memberPicked.id);
+      addSplit(`Deposit ${memberPicked.nama}`, pakai, 'deposit', memberPicked.id, pickedCustomerId ?? undefined);
       setMemberSel(null);
     }
   };
@@ -1436,6 +1466,7 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(tipAmount > 0 ? { tip: tipAmount } : {}),
           ...(customerName ? { customer: customerName } : {}),
           ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
+          ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
           ...(paramSalesNum ? { salesNum: paramSalesNum } : {}),
           // APP-PRINTER-SALES (Q7): client_id rantai SELALU dibawa ke EDC.
           clientId: chainClientId,
@@ -1444,7 +1475,7 @@ export default function PayScreen({ navigation, route }: Props) {
           // head lalu gagal diam-diam (Success palsu, setoran tak tercatat).
           ...(route?.params?.splitGroup === true ? { splitGroup: true } : {}),
           ...(route?.params?.orderTotal ? { orderTotal: route.params.orderTotal } : {}),
-          ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}) })) } : {}),
+          ...(splits.length > 0 ? { splits: splits.map((s) => ({ method: s.method, amount: s.amount, ...(s.memberId ? { memberId: s.memberId } : {}), ...(s.customerId != null ? { customerId: s.customerId } : {}) })) } : {}),
           });
           } catch {
             appAlert(t('pay_issue_fail'));
@@ -1544,6 +1575,7 @@ export default function PayScreen({ navigation, route }: Props) {
         onPress={() => navigation?.navigate('Member', {
           from: 'Pay',
           ...(memberIdParam ? { memberId: memberIdParam } : {}),
+          ...(customerIdParam != null ? { customerId: customerIdParam } : {}),
           total,
           ...(route?.params?.items ? { items: route.params.items } : {}),
           ...(orderMode ? { mode: orderMode } : {}),

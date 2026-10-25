@@ -8,6 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
 import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
+import { parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 
@@ -21,6 +22,8 @@ type SplitParams = {
   table?: string;
   customer?: string;
   memberId?: string;
+  /** Ronde-3 Q1: customerId GO (int) — diteruskan ke Pay. */
+  customerId?: number;
   ongkir?: number;
   /** Porsi voucher atas ongkir (diteruskan ke Pay → saveSale info audit). */
   ongkirCut?: number;
@@ -165,6 +168,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const table = asText(params.table);
   const customer = asText(params.customer);
   const memberId = asText(params.memberId);
+  /** Ronde-3 Q1: ref GO — dibawa ke Pay tiap kunjungan. */
+  const customerId = parseCustomerId(params.customerId);
   /** Biaya kemasan: params pemanggil menang; tanpa params = info merchant
    * per mode (cermin CartDetail/DineIn). */
   const [packagingFee, setPackagingFee] = useState(() => Math.max(0, Math.round(Number(params.packaging) || 0)));
@@ -349,6 +354,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
       ...(ongkirEff > 0 ? { ongkir: ongkirEff } : {}),
       ...(ongkirCutParam > 0 ? { ongkirCut: ongkirCutParam } : {}),
       ...(approvedBy ? { approvedBy } : {}),
