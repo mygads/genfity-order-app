@@ -17,7 +17,7 @@ import { appAlert } from '../../lib/appAlert';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import ExtraPaySection from './ExtraPaySection';
 import { lineSubtotal, recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, getOrCreatePayChainId } from '../../lib/sales';
+import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, getOrCreatePayChainId, getGroupPaid } from '../../lib/sales';
 import { uuidv7 } from '../../lib/uuidv7';
 import { getCashSessionId } from '../../lib/beWorkforce';
 import { publishDisplayOrder } from '../../lib/display';
@@ -331,6 +331,28 @@ export default function PayScreen({ navigation, route }: Props) {
         : `${t('ok_voucher')} ${orderVoucher.code}`;
 
   const [splits, setSplits] = useState<Split[]>([]);
+  // A6 banner 2-share: kunjungan 2+ bill patungan (head sudah ada pembayaran
+  // sebelumnya) tampil jujur terkumpul-vs-grand. Read-only; tanpa ubah
+  // perilaku bayar/settle. Diisi sekali saat layar dibuka.
+  const [groupPaidInfo, setGroupPaidInfo] = useState<{ paid: number; grand: number } | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        if (!isSplitGroup || !paramSalesNum) return;
+        if (!(await saleHeadExists(paramSalesNum))) return;
+        const gp = await getGroupPaid(paramSalesNum);
+        if (live && gp.payCount > 0 && gp.paidTotal > 0) {
+          setGroupPaidInfo({ paid: gp.paidTotal, grand: gp.grandTotal });
+        }
+      } catch {
+        /* abaikan: banner info saja */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
   // Pemilik deposit untuk TERUSAN Pay→Qris/Edc (cermin saleMemberId goSuccess):
   // Pay bisa dibuka tanpa memberId params sementara kaki deposit parsial sudah
   // membawa memberId; tanpa fallback ini withdraw di daun dilewati (G1).
@@ -1118,6 +1140,11 @@ export default function PayScreen({ navigation, route }: Props) {
           <Text style={[styles.bannerValue, styles.bannerRemaining]}>{rp(remaining)}</Text>
         </View>
       </View>
+      {groupPaidInfo && (
+        <View style={styles.voucherBar}>
+          <Text style={styles.voucherBarText}>{`◈  ${t('pay_group_collected').replace('{p}', rp(groupPaidInfo.paid)).replace('{g}', rp(groupPaidInfo.grand))}`}</Text>
+        </View>
+      )}
       {isTablet ? null : (
         boxVoucher ? (
           <TouchableOpacity

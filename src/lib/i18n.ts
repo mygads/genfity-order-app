@@ -320,6 +320,8 @@ const STR: Record<string, Entry> = {
   pay_title: { id: 'Metode Pembayaran', en: 'Payment Method' },
   pay_online: { id: 'Online', en: 'Online' },
   pay_remaining: { id: 'Belum Terbayar', en: 'Outstanding' },
+  // A6 banner 2-share: kunjungan 2+ bill patungan (head sudah ada pembayaran).
+  pay_group_collected: { id: 'Patungan: sudah terkumpul {p} dari {g} (kunjungan sebelumnya)', en: 'Split bill: {p} of {g} collected (previous visits)' },
   pay_sum_incl: { id: 'Termasuk diskon & voucher order', en: 'Incl. order discount & voucher' },
   pay_sum_due: { id: 'Harus dibayar (setelah voucher Pay)', en: 'Due (after Pay voucher)' },
   pay_voucher_add: { id: 'Tambah Voucher', en: 'Add Voucher' },

@@ -14,10 +14,12 @@ import { getBranchId, getTerminal, ApiPath } from '../config/server';
 import { getSession } from '../session';
 import { initDb, query, queryFirst, run, withTransaction } from './db';
 import { dbNowLocal } from './datefmt';
-import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from './sync';
+import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync, listOutbox } from './sync';
 import { apiFetch } from './apiSource';
 import { lineSubtotal, normalizeMethod, normalizeSalesMode, type SaleInput } from './payments';
 import { uuidv7 } from './uuidv7';
+import { GO_OP_SETTLE, getServerOrderIdForSale, mapPayMethodToBe, type BePayMethod } from './posWire';
+import { getCashSessionId } from './beWorkforce';
 import { getItem, setItem } from './storage';
 import * as DisplayBus from './display';
 
@@ -1134,6 +1136,64 @@ export async function appendGroupPayment(
     });
   } catch {
     /* abaikan */
+  }
+  // A6: kunjungan grup yang MELUNASI bill (visit 2+) = antre GO_OP_SETTLE
+  // SEKALI agar drain memfinalisasi order BE. Drain-only (layar tak
+  // immediate-POST untuk grup — paritas keputusan A4, hindari settle ganda
+  // antar-kunjungan yang balapan). IdemKey = clientId rantai bersama (satu
+  // rantai per salesNum via getOrCreatePayChainId) → replay BE = 'terkirim'.
+  // Syarat: grand > 0, serverId tertaut (tanpa itu drain BLOCKED — kasus
+  // create-belum-push ditutup link-block A1), SEMUA kaki punya padanan enum
+  // BE (deposit/member/transfer = skip total, paritas gate A4), dan belum ada
+  // settle antre/gagal untuk salesNum ini (twin S6 + cek outbox).
+  if (outFullyPaid && outGrand > 0 && outGroupClientId) {
+    try {
+      const bem = legs.map((l) => mapPayMethodToBe(l.method));
+      const allMapped = bem.every((m): m is BePayMethod => m != null);
+      if (allMapped) {
+        const uniq = [...new Set<string>(bem)];
+        const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
+        const bemSingle: BePayMethod =
+          only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT'
+            ? only
+            : 'SPLIT';
+        const serverId = await getServerOrderIdForSale(no);
+        if (serverId != null) {
+          const hasSettle = listOutbox().some((o) => {
+            if (o.status === 'terkirim') return false;
+            const op = String(((o.payload ?? {}) as { op?: unknown }).op ?? '');
+            if (op !== GO_OP_SETTLE) return false;
+            return String(((o.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '') === no;
+          });
+          if (!hasSettle) {
+            let cashSid = 0;
+            try {
+              const s = await getCashSessionId();
+              const n = parseInt(String(s ?? '').trim(), 10);
+              if (Number.isFinite(n) && n > 0) cashSid = n;
+            } catch {
+              /* abaikan: BE me-resolve */
+            }
+            enqueueSync(
+              'other',
+              {
+                op: GO_OP_SETTLE,
+                serverId,
+                method: bemSingle,
+                amountPaid: outGrand,
+                ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
+                clientId: outGroupClientId,
+                salesNum: no,
+                at: new Date().toISOString(),
+              },
+              `pos-settle-group-${no}`,
+            );
+          }
+        }
+      }
+    } catch {
+      /* abaikan: settle grup best-effort, ledger lokal tetap sah */
+    }
   }
   // D5: siarkan display setelah COMMIT (tanpa import cycle — display.ts tak
   // mengimpor sales.ts). Best-effort; pembayaran tetap sah bila display gagal.
