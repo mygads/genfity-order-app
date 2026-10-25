@@ -313,7 +313,14 @@ export async function getServerRoundStep(): Promise<number | null> {
   }
 }
 
-/** S-F6: gerbang workforce (absen/error = keduanya OFF = perilaku lama). */
+/** S-F6: gerbang workforce (absen/error = keduanya OFF = perilaku lama).
+ * Peta 3 sistem PIN (jangan dicampur):
+ * (1) PIN binding terminal — klaim/pair perangkat (TerminalBind/Claim);
+ * (2) PIN staff/workforce pasca-login — buka shift (ShiftScreen +
+ *     verifyAttendancePin, lib/pin.ts);
+ * (3) PIN supervisor/manager per-aksi — otorisasi manajer (ManagerPinPrompt
+ *     + authorizeSupervisor + posPinGate).
+ * requirePinForPos = kebijakan server: jalur (2) wajib sebelum kasir jalan. */
 export interface WorkforceGates {
   requirePinForPos: boolean;
   requireCashRegisterForPos: boolean;

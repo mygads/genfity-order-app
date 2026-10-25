@@ -1779,6 +1779,9 @@ const STR: Record<string, Entry> = {
   shf_chip_hint: { id: 'Ketuk nominal untuk menambah ke Kas Awal · maks. {m}', en: 'Tap an amount to add to the opening float · max {m}' },
   shf_att_link: { id: 'Belum absen? Catat kehadiran dulu → Absensi', en: 'Not clocked in? Record attendance first → Attendance' },
   shf_pin_hint: { id: 'PIN kasir untuk membuka shift', en: 'Cashier PIN to open the shift' },
+  shf_policy_cash: { id: 'Kebijakan merchant: buka kas wajib sebelum jualan.', en: 'Merchant policy: opening float is required before selling.' },
+  shf_policy_pin: { id: 'Kebijakan merchant: PIN staff wajib untuk kasir.', en: 'Merchant policy: staff PIN is required for POS.' },
+  shf_offline_recon: { id: 'Sesi kas terminal berjalan offline dan direkonsiliasi saat sinkronisasi (tanpa sesi kas server).', en: 'Terminal cash sessions run offline and reconcile on sync (no server cash session).' },
   hist_deny_title: { id: 'Akses ditolak', en: 'Access denied' },
   hist_deny_change_pay: { id: 'Ubah metode bayar perlu PIN supervisor ({r})', en: 'Changing payment method needs supervisor PIN ({r})' },
 

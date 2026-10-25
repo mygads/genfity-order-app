@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
-} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';type Props = { navigation?: any };const QUICK_NOMINAL = [50000, 100000, 200000, 500000, 1000000];const terbilang = (n: number): string => {
   if (n <= 0) return 'Nol rupiah';
   const kata = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas'];
   const sebut = (x: number): string => {
@@ -44,6 +44,8 @@ const MAX_KAS_AWAL = 10000000;
   const [lastShift, setLastShift] = useState<LastShift | null>(null);
   // Sesi kas menunggu review manager kedua (diset EndShiftScreen saat tutup
   // menjawab pendingManagerReview; dibersihkan saat approve sukses/replay).
+  // S-F6: gerbang workforce server (absen = OFF).
+  const [wfGates, setWfGates] = useState({ requirePinForPos: false, requireCashRegisterForPos: false });
   const [pendingSid, setPendingSid] = useState<string | null>(null);
   const [approveNote, setApproveNote] = useState('');
   const [approveBusy, setApproveBusy] = useState(false);
@@ -52,6 +54,8 @@ const MAX_KAS_AWAL = 10000000;
   useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE status IN (\'open\', \'closed\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1', [getBranchId()]); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || '-', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
   // Muat sid menunggu-review tiap mount (persist di storage).
   useEffect(() => { let on = true; (async () => { try { const sid = await getPendingReviewSid(); if (on) setPendingSid(sid); } catch { /* abaikan */ } })(); return () => { on = false; }; }, []);
+  // S-F6: muat gerbang workforce sekali saat layar dibuka (cache gagal = OFF).
+  useEffect(() => { let on = true; (async () => { try { const g = await getWorkforceGates(); if (on) setWfGates({ requirePinForPos: g.requirePinForPos, requireCashRegisterForPos: g.requireCashRegisterForPos }); } catch { /* abaikan: OFF */ } })(); return () => { on = false; }; }, []);
 
   const submitApprove = async () => {
     if (!pendingSid || approveBusy) return;
@@ -314,6 +318,12 @@ const MAX_KAS_AWAL = 10000000;
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_cash_open')}</Text>
           <Text style={s.hint}>{t('shf_cash_hint')}</Text>
+          {wfGates.requireCashRegisterForPos ? (
+            <Text style={s.hint}>{t('shf_policy_cash')}</Text>
+          ) : null}
+          {/* S-F7: tanpa endpoint sesi-kas terminal di BE — kas terminal
+              resmi offline-dengan-rekonsiliasi via antrean sync. */}
+          <Text style={s.hint}>{t('shf_offline_recon')}</Text>
           <AppInput
             keyboardType="number-pad"
             placeholder="0"
@@ -359,7 +369,7 @@ const MAX_KAS_AWAL = 10000000;
           </View>
         ) : null}
         <TouchableOpacity onPress={() => navigation?.navigate?.('Attendance')}>
-          <Text style={s.link}>Belum absen? Catat kehadiran dulu → Absensi</Text>
+          <Text style={s.link}>{t('shf_att_link')}</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -387,7 +397,10 @@ const MAX_KAS_AWAL = 10000000;
         <View style={[s.modalBg, isTablet && s.modalBgTablet]}>
           <View style={[s.modalCard, isTablet && s.modalCardTablet]}>
             <Text style={[s.modalTitle, isTablet && s.modalTitleBig]}>{t('shf_pin_title')}</Text>
-            <Text style={s.modalHint}>PIN kasir untuk membuka shift</Text>
+            <Text style={s.modalHint}>{t('shf_pin_hint')}</Text>
+            {wfGates.requirePinForPos ? (
+              <Text style={s.modalHint}>{t('shf_policy_pin')}</Text>
+            ) : null}
             <View style={s.pinDots}>
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <View key={i} style={[s.dot, i < pin.length && s.dotFill]} />
