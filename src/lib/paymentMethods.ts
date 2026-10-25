@@ -1,0 +1,143 @@
+/**
+ * R4-4 — snapshot metode bayar merchant dari GET pos-config (agen BE paralel;
+ * kontrak: key `pos.paymentMethods{payAtCashierEnabled,manualTransferEnabled,
+ * qrisEnabled,codEnabled,gpayEnabled}`, absen = semua true = tampil semua).
+ *
+ * Modul MURNI (nol-impor, erasable-only) agar dapat ditranspile + diuji
+ * runtime oleh tripwire-payment-methods apa adanya (cermin backupCodec).
+ *
+ * Kebijakan konsumsi (server-wins, defensif vs BE lama):
+ * - Kunci absen (BE lama) = semua true = tampil semua (legacy, NOL-regresi).
+ * - Nilai tak dikenal (string asing) = dianggap absen = true (fail-visible:
+ *   kasir tak boleh terkunci oleh payload asing).
+ * - Hanya pemetaan JELAS yang digerbang UI (QRIS). Sisanya tampil + parked
+ *   di bawah (jangan tebak berlebihan).
+ *
+ * R4-4 PETA FLAG→UI APP POS (permukaan yang tak disebut = selalu tampil):
+ * - qrisEnabled=false → kartu QRIS di tab online PayScreen disembunyikan.
+ *   [JELAS — nama sama, elemen sama — DITERAPKAN via filterOnlineWallets]
+ * - codEnabled → TANPA permukaan UI di APP POS (tak ada alur COD di PayScreen
+ *   / ExtraPaySection — grep COD nihil) → no-op. [PARKED: BE mungkin untuk FE]
+ * - manualTransferEnabled → kandidat kartu Transfer ExtraPay, TAPI setting ini
+ *   milik checkout customer (FE storefront) bukan tender kasir → TAMPIL.
+ *   [PARKED/AMBIGU — butuh putusan owner sebelum digerbang]
+ * - payAtCashierEnabled → kandidat tab tunai, TAPI seluruh POS = di kasir
+ *   (pemetaan 1:1 tak bermakna) → TAMPIL. [PARKED/AMBIGU]
+ * - gpayEnabled → kandidat kartu GoPay, TAPI "gpay" ambigu (GoPay vs Google Pay
+ *   vs Genfity Pay — BE memakai istilah Genfity Pay untuk proxy Duitku) →
+ *   TAMPIL. [PARKED/AMBIGU]
+ * - Tab tunai + member (deposit) → tak digerbang snapshot R4-4 ini (selalu
+ *   tampil dari sisi paymentMethods; gate tab S-F1/S-F1b terpisah tak diubah
+ *   R4-4 — kasir tak boleh terkunci; cermin fallback visibleTabs PayScreen
+ *   yang kembali ke daftar currency bila semua tab mati).
+ */
+
+/** Snapshot 5 flag metode bayar (semua-true = tampil semua = default legacy). */
+export interface PaymentMethods {
+  payAtCashierEnabled: boolean;
+  manualTransferEnabled: boolean;
+  qrisEnabled: boolean;
+  codEnabled: boolean;
+  gpayEnabled: boolean;
+}
+
+export const PAYMENT_METHODS_DEFAULT: PaymentMethods = {
+  payAtCashierEnabled: true,
+  manualTransferEnabled: true,
+  qrisEnabled: true,
+  codEnabled: true,
+  gpayEnabled: true,
+};
+
+/** Satu flag + alias yang diterima (camelCase + snake_case + bentuk pendek). */
+interface FlagAlias {
+  key: keyof PaymentMethods;
+  aliases: string[];
+}
+
+const FLAG_ALIASES: FlagAlias[] = [
+  { key: 'payAtCashierEnabled', aliases: ['payAtCashierEnabled', 'pay_at_cashier_enabled', 'payAtCashier', 'pay_at_cashier'] },
+  { key: 'manualTransferEnabled', aliases: ['manualTransferEnabled', 'manual_transfer_enabled', 'manualTransfer', 'manual_transfer'] },
+  { key: 'qrisEnabled', aliases: ['qrisEnabled', 'qris_enabled', 'qris', 'enableQris', 'enable_qris'] },
+  { key: 'codEnabled', aliases: ['codEnabled', 'cod_enabled', 'cod', 'cashOnDelivery', 'cash_on_delivery'] },
+  { key: 'gpayEnabled', aliases: ['gpayEnabled', 'gpay_enabled', 'gpay', 'goPayEnabled', 'gopay_enabled', 'gopay'] },
+];
+
+/** Kunci pembungkus yang dipindai (kontrak `pos.paymentMethods` + varian). */
+const CONTAINER_KEYS = [
+  'pos',
+  'posBehavior',
+  'posBehaviorSettings',
+  'pos_behavior',
+  'pb',
+  'paymentSettings',
+  'payment_settings',
+  'payment',
+  'settings',
+];
+
+/** Kunci objek snapshot di dalam tiap kontainer. */
+const SNAPSHOT_KEYS = ['paymentMethods', 'payment_methods'];
+
+/** Tafsir satu nilai ke boolean; undefined = absen/tak-dikenal (→ default). */
+function asBoolLoose(v: unknown): boolean | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return undefined;
+    return v !== 0;
+  }
+  const s = String(v).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'ya' || s === 'yes') return true;
+  if (s === 'false' || s === '0' || s === 'tidak' || s === 'no') return false;
+  return undefined;
+}
+
+/**
+ * Parse murni snapshot metode bayar: toleran flat + nested + snake_case.
+ * Tak pernah melempar; absen total = semua-true (BE lama, NOL-regresi).
+ */
+export function parsePaymentMethods(raw: unknown): PaymentMethods {
+  const out: PaymentMethods = { ...PAYMENT_METHODS_DEFAULT };
+  if (!raw || typeof raw !== 'object') return out;
+  const root = raw as Record<string, unknown>;
+  const found: Partial<Record<keyof PaymentMethods, boolean>> = {};
+
+  const scanFlat = (o: Record<string, unknown>): void => {
+    for (const { key, aliases } of FLAG_ALIASES) {
+      if (found[key] !== undefined) continue;
+      for (const a of aliases) {
+        const b = asBoolLoose(o[a]);
+        if (b !== undefined) {
+          found[key] = b;
+          break;
+        }
+      }
+    }
+  };
+
+  const scanContainer = (o: Record<string, unknown>): void => {
+    for (const nk of SNAPSHOT_KEYS) {
+      const n = o[nk];
+      if (n && typeof n === 'object') scanFlat(n as Record<string, unknown>);
+    }
+    scanFlat(o);
+  };
+
+  scanContainer(root);
+  for (const ck of CONTAINER_KEYS) {
+    const c = root[ck];
+    if (c && typeof c === 'object') scanContainer(c as Record<string, unknown>);
+  }
+  return { ...out, ...found };
+}
+
+/**
+ * Saring kartu dompet online menurut snapshot (murni).
+ * Hanya QRIS yang digerbang tegas; gpayEnabled AMBIGU → tak dipakai di sini.
+ * NOL-regresi: snapshot absen/all-true = daftar utuh dikembalikan.
+ */
+export function filterOnlineWallets<T extends { id: string }>(wallets: T[], m: PaymentMethods): T[] {
+  if (!m || m.qrisEnabled !== false) return wallets;
+  return wallets.filter((w) => w.id !== 'qris');
+}

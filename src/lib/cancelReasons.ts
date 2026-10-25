@@ -13,6 +13,13 @@
  * - Offline/gagal: baca cache; cache absen = {fromServer:false} agar
  *   pemanggil memakai fallback hardcoded (perilaku lama lestari).
  * - Modul TAK pernah melempar; tanpa markDirty (baris ini milik server).
+ *
+ * R4-DOCS(b) SoT CANCEL PRESET = ADVISORY: daftar di atas HANYA saran tombol
+ * kasir — server menyimpan FREE-TEXT (CancelScreen menulis string `reason`
+ * apa adanya + catatan opsional ke tr_cancelmenu.reasonId/reasonNote dan
+ * POST order/finish void {reason}; tak divalidasi cocok preset). Preset boleh
+ * usang/berbeda tanpa merusak void; JANGAN jadikan enum lateral
+ * (allowlist penolakan) tanpa kontrak BE.
  */
 
 import { ApiPath } from '../config/server';

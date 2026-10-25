@@ -31,7 +31,11 @@ showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OP
  * masterGo.ts sengaja mempertahankan stationId lokal). Server hanya memiliki
  * definisi destinasi/template (pos-config S-F12, editor FE PrintBridgeTab).
  * Konsekuensi: dua terminal BISA divergen — owner wajib mengonfigurasi tiap
- * terminal identik. Jangan pindahkan ke server tanpa migrasi + endpoint BE. */
+ * terminal identik. Jangan pindahkan ke server tanpa migrasi + endpoint BE.
+ *
+ * R4-DOCS(c): ditegaskan ulang — routing menu-print tetap SoT DEVICE-LOCAL
+ * (tak ada snapshot server R4 untuk ini; S-F12 hanya destinasi/template).
+ */
 /** Pilihan station UI -> id station kanonis (kolom id ms_station, dibaca KitchenScreen). */
 const STATION_ID_OF: Record<StationId, string | null> = {
   kasir: 'ST-KASIR',

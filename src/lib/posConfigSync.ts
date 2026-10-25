@@ -33,6 +33,7 @@
  */
 import { getJSON, setJSON } from './storage';
 import { fetchTerminalPosConfig } from './terminalApi';
+import { parsePaymentMethods, PAYMENT_METHODS_DEFAULT, type PaymentMethods } from './paymentMethods';
 
 const STOCK_OPTS_KEY = 'genfity.stock.opts';
 const TIMER_CFG_KEY = 'genfity.tabletimer.config';
@@ -55,6 +56,8 @@ const PROMO_GATE_KEY = 'genfity.pos.promo';
 const AUTO_PRINT_KEY = 'genfity.pos.autoPrint';
 /** SESI-FINAL-APP: cache flag wajib-foto-bukti-bayar (absen = OFF). */
 const REQUIRE_PROOF_KEY = 'genfity.pos.requireProof';
+/** R4-4: cache snapshot metode bayar server (absen = semua tampil). */
+const PAYMENT_METHODS_KEY = 'genfity.pos.paymentMethods';
 
 /** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 — posPayImmediately,
  * requireTableNumberForDineIn, posCustomItems, posEditOrder). Konsumsi toleran:
@@ -203,7 +206,18 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   try {
     // S-F1: filter tab bayar (map metode→bool; kunci tak dikenal diabaikan
     // saat konsumsi; absen = semua tampil).
-    await setJSON(PAY_TABS_KEY, parsePayTabs(pbRaw));
+    // S-F1b: gabung gate eksplisit per-tab dari blok paymentSettings server
+    // (BE turunkan dari merchant_payment_settings). Hanya 'tunai' punya knob
+    // tak-ambigu (payAtCashierEnabled): 'nontunai' mencakup EDC yang tak punya
+    // flag server sehingga TAK di-gate; online/member/lainnya tak punya knob.
+    // Blok absen / tanpa kunci eksplisit = tampil (perilaku lama, nol-regresi).
+    const tabs = parsePayTabs(pbRaw);
+    const pm = ((r.data as Record<string, unknown>).paymentSettings ?? {}) as Record<string, unknown>;
+    if (pm && typeof pm === 'object') {
+      const cash = pm.payAtCashierEnabled ?? pm.pay_at_cashier_enabled;
+      if (cash !== undefined && cash !== null) tabs.tunai = asBool(cash, true);
+    }
+    await setJSON(PAY_TABS_KEY, tabs);
   } catch { /* abaikan */ }
   try {
     // S-F2: gate promo (posDiscounts* gerbang UI POS; customer* info-only).
@@ -220,6 +234,12 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     // terminalApi tak mengimpor posConfigSync; impor balik aman, tapi bentuk
     // nested dibaca langsung agar nol-risiko siklus).
     await setJSON(REQUIRE_PROOF_KEY, { required: parseRequireProof(r.data) });
+  } catch { /* abaikan */ }
+  try {
+    // R4-4: snapshot metode bayar — server-wins tiap sync sukses (tulis TANPA
+    // SYARAT, bukan seed-once: nilai server selalu menimpa cache). BE lama
+    // tanpa kunci → parse = semua-true = tampil semua (NOL-regresi).
+    await setJSON(PAYMENT_METHODS_KEY, parsePaymentMethods(r.data));
   } catch { /* abaikan */ }
   return true;
 }
@@ -499,5 +519,19 @@ export async function getRequirePaymentProof(): Promise<boolean> {
     return String(cur.required).trim().toLowerCase() === 'true';
   } catch {
     return false;
+  }
+}
+
+/** R4-4: snapshot metode bayar merchant (server-wins tiap sync; absen/error =
+ *  semua-true = tampil semua = perilaku lama). Cache korup/parsial
+ *  dinormalisasi via parse (bukan dibuang) agar satu kunci asing tak
+ *  mengunci kasir. */
+export async function getPaymentMethods(): Promise<PaymentMethods> {
+  try {
+    const cur = await getJSON<Partial<PaymentMethods> | null>(PAYMENT_METHODS_KEY, null);
+    if (!cur || typeof cur !== 'object') return { ...PAYMENT_METHODS_DEFAULT };
+    return parsePaymentMethods(cur);
+  } catch {
+    return { ...PAYMENT_METHODS_DEFAULT };
   }
 }

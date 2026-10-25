@@ -35,7 +35,8 @@ import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
-import { getPosPromoGate, isPayTabEnabled, getRequirePaymentProof } from '../../lib/posConfigSync';
+import { getPosPromoGate, isPayTabEnabled, getRequirePaymentProof, getPaymentMethods } from '../../lib/posConfigSync';
+import { filterOnlineWallets, PAYMENT_METHODS_DEFAULT } from '../../lib/paymentMethods';
 import { uploadExpensePhotoFirst } from '../../lib/terminalExpense';
 import { preparePhoto } from '../../lib/photo';
 import { customerIdFromLocalKey, maskMemberName, parseCustomerId } from '../../lib/memberRef';
@@ -263,6 +264,23 @@ export default function PayScreen({ navigation, route }: Props) {
   /** S-F1: tab yang dimatikan server via pos-config (absen = tampil).
    * Muat sekali saat layar dibuka; cache gagal = perilaku lama. */
   const [srvOffTabs, setSrvOffTabs] = useState<Tab[]>([]);
+  /** R4-4: snapshot metode bayar server (absen = semua tampil). HANYA QRIS
+   * yang digerbang tegas (qrisEnabled=false → kartu QRIS disembunyikan);
+   * flag lain AMBIGU (peta lengkap di lib/paymentMethods) → tampil + parked.
+   * Muat sekali saat layar dibuka; cache gagal = perilaku lama. */
+  const [qrisEnabled, setQrisEnabled] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void getPaymentMethods()
+      .then((m) => { if (alive) setQrisEnabled(m.qrisEnabled !== false); })
+      .catch(() => { /* absen = tampil */ });
+    return () => { alive = false; };
+  }, []);
+  /** R4-4: bila QRIS terpilih lalu server menonaktifkan susulan, kembalikan
+   * pilihan ke null (bukan ke dompet lain) agar kasir memilih sadar. */
+  useEffect(() => {
+    if (!qrisEnabled) setWallet((w) => (w === 'qris' ? null : w));
+  }, [qrisEnabled]);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -280,6 +298,12 @@ export default function PayScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
+  /** R4-4: kartu dompet online yang tampil (QRIS disembunyikan bila owner
+   * menonaktifkan via server; dompet lain tak digerbang — lihat peta flag). */
+  const visibleWallets = useMemo(
+    () => filterOnlineWallets(WALLETS, { ...PAYMENT_METHODS_DEFAULT, qrisEnabled }),
+    [qrisEnabled],
+  );
   /** S-F2: gate promo server (posDiscountsEnabled=false = kunci UI pasang
    * voucher baru; voucher bawaan order tetap ditampilkan apa adanya). */
   const [posPromoOn, setPosPromoOn] = useState(true);
@@ -1698,7 +1722,7 @@ export default function PayScreen({ navigation, route }: Props) {
     <View>
       <Text style={styles.panelTitle}>{t('pay_online_title')}</Text>
       <View style={styles.grid}>
-        {WALLETS.map((w) => {
+        {visibleWallets.map((w) => {
           const active = wallet === w.id;
           return (
             <TouchableOpacity

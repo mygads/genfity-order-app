@@ -51,6 +51,13 @@ export function getCachedTimezone(): string {
  * 'WIB' hardcode di idle_hours_val/help.contact). Peta eksplisit agar
  * deterministik di semua engine; zona tak dikenal = tampil nama zonanya
  * sendiri (jujur, bukan WIB yang salah).
+ *
+ * R4-DOCS(a) SoT JAM OPERASIONAL = DISPLAY-ONLY: label '08.00 - 22.00 {tz}'
+ * (i18n idle_hours_val, render IdleScreen infoRow) adalah teks STATIS, BUKAN
+ * jadwal yang dienforce server — server tak menolak order di luar jam ini.
+ * Jangan jadikan gerbang (mis. blokir kasir / kunci PayScreen) tanpa kontrak
+ * + endpoint BE. (Catatan ditaruh di sini — bukan di IdleScreen — karena
+ * tripwire-shiftcash W1-05 mengunci status Idle* sebagai aset lane W1.)
  */
 const TZ_SHORT: Record<string, string> = {
   'Asia/Jakarta': 'WIB',
