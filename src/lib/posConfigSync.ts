@@ -55,6 +55,8 @@ const PROMO_GATE_KEY = 'genfity.pos.promo';
 const AUTO_PRINT_KEY = 'genfity.pos.autoPrint';
 /** S-F12: cache flag notifikasi server (toleran; absen = {}). */
 const NOTIFY_FLAGS_KEY = 'genfity.pos.notify';
+/** SESI-FINAL-APP: cache flag wajib-foto-bukti-bayar (absen = OFF). */
+const REQUIRE_PROOF_KEY = 'genfity.pos.requireProof';
 
 /** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 — posPayImmediately,
  * requireTableNumberForDineIn, posCustomItems, posEditOrder). Konsumsi toleran:
@@ -217,6 +219,13 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   try {
     // S-F12: flag notifikasi server (toleran: objek apa adanya; absen = {}).
     await setJSON(NOTIFY_FLAGS_KEY, parseNotifyFlags(pbRaw));
+  } catch { /* abaikan */ }
+  try {
+    // SESI-FINAL-APP: merchant mewajibkan foto bukti bayar (absen = OFF).
+    // parseRequirePaymentProof inline-toleran DI SINI (tanpa impor terminalApi:
+    // terminalApi tak mengimpor posConfigSync; impor balik aman, tapi bentuk
+    // nested dibaca langsung agar nol-risiko siklus).
+    await setJSON(REQUIRE_PROOF_KEY, { required: parseRequireProof(r.data) });
   } catch { /* abaikan */ }
   return true;
 }
@@ -473,6 +482,43 @@ function parseNotifyFlags(pb: Record<string, unknown>): Record<string, unknown> 
     return out;
   }
   return {};
+}
+
+/** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
+ * Parser toleran lokal (tanpa impor terminalApi — nol-risiko siklus):
+ * top-level ATAU nested posBehaviorSettings/posBehavior/pb/paymentSettings/
+ * payment_settings — varian snake_case ikut dibaca. Absen/error = false. */
+function parseRequireProof(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const o = raw as Record<string, unknown>;
+  const nested: Array<Record<string, unknown>> = [];
+  for (const k of ['posBehaviorSettings', 'posBehavior', 'pb', 'pos_behavior', 'paymentSettings', 'payment_settings', 'payment', 'settings']) {
+    const v = o[k];
+    if (v && typeof v === 'object') nested.push(v as Record<string, unknown>);
+  }
+  const cands: unknown[] = [o.requirePaymentProof, o.require_payment_proof, o.proofRequired, o.proof_required];
+  for (const n of nested) cands.push(n.requirePaymentProof, n.require_payment_proof, n.proofRequired, n.proof_required);
+  for (const c of cands) {
+    if (c === undefined || c === null) continue;
+    if (typeof c === 'boolean') return c;
+    if (typeof c === 'number') return c !== 0;
+    const s = String(c).trim().toLowerCase();
+    if (s === 'true' || s === '1' || s === 'ya' || s === 'yes') return true;
+    if (s === 'false' || s === '0' || s === 'tidak' || s === 'no') return false;
+  }
+  return false;
+}
+
+/** SESI-FINAL-APP: wajibkah foto bukti bayar? (absen/error = false). */
+export async function getRequirePaymentProof(): Promise<boolean> {
+  try {
+    const cur = await getJSON<{ required?: unknown } | null>(REQUIRE_PROOF_KEY, null);
+    if (!cur || cur.required === undefined || cur.required === null) return false;
+    if (typeof cur.required === 'boolean') return cur.required;
+    return String(cur.required).trim().toLowerCase() === 'true';
+  } catch {
+    return false;
+  }
 }
 
 /** S-F12: baca flag notifikasi server ({} = BE lama / belum dikonfigurasi). */

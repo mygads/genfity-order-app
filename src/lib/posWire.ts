@@ -604,6 +604,12 @@ export interface SettleInput {
   cashSessionId?: number;
   /** P1-1: PIN supervisor transport-only (live; tak pernah dipersist). */
   pin?: string;
+  /**
+   * SESI-FINAL-APP: URL foto bukti bayar (https) dari upload terminal.
+   * Diteruskan apa adanya bila https ≤2048; selain itu dihilangkan (settle
+   * jalan tanpa proof — BE yang menolak jujur via 409 PROOF_REQUIRED).
+   */
+  proofUrl?: string;
 }
 
 /** Ronde-3 Q2: hasil settle + member block opsional (absen = kompat BE
@@ -624,6 +630,11 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<Settl
   const cashSid = Math.max(0, Math.round(Number(inp.cashSessionId) || 0));
   // Q1: hanya int GO yang diteruskan; alias/hasil parse gagal = dihilangkan.
   const custId = parseCustomerId(inp.customerId);
+  // SESI-FINAL-APP: proofUrl hanya https ≤2048 (selain itu = dihilangkan, BE
+  // menolak jujur via 409 PROOF_REQUIRED bila diwajibkan).
+  const proofClean = /^https:\/\/.{1,2040}$/i.test(String(inp.proofUrl ?? '').trim())
+    ? String(inp.proofUrl ?? '').trim().slice(0, 2048)
+    : '';
   try {
     const res = await withTimeoutMs(
       apiFetch(ApiPath.merchantPosPayment, {
@@ -639,6 +650,7 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<Settl
           ...(custId != null ? { customerId: custId } : {}),
           ...(pinClean ? { pin: pinClean } : {}),
           ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
+          ...(proofClean ? { proofUrl: proofClean } : {}),
         },
         idempotencyKey: key,
       }),
@@ -655,6 +667,8 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<Settl
       return { ok: true, data: { replayed: true, ...withMember, ...withDropped } };
     }
     const be = beErrorOf(data ?? res.data);
+    // SESI-FINAL-APP: 409 PROOF_REQUIRED dilewatkan apa adanya (be.code) —
+    // PayScreen menahannya sebagai hold + banner, BUKAN Success palsu.
     return {
       ok: false,
       reason: 'rejected',

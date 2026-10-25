@@ -197,6 +197,9 @@ export const ApiPath = {
   // router BE (agen BE ronde-2 masih jalan); transition ADA (router.go:1229)
   // tapi tanpa endpoint LIST tabel → mapping id-numerik PARKED.
   terminalExpenses: 'api/v1/terminals/{id}/expenses', // POST {clientExpenseId,kind:EXPENSE|PETTY_CASH,amount,note,occurredAt} → 201 {id}; duplikat 409 + existing id
+  // SESI-FINAL-APP: upload berkas terminal — POST multipart {file} → 201 {url}
+  // (kontrak BE paralel; dipakai expense-foto + payment-proof upload-dulu).
+  terminalUploads: 'api/v1/terminals/{id}/uploads',
   terminalTableTransition: 'api/v1/terminals/{id}/tables/{tableId}/transition', // POST {status:OCCUPIED|AVAILABLE,guestName?,partySize?} → {id,tableNumber,status,statusSince,guestName,partySize}
   terminalVouchersBurn: 'api/v1/terminals/{id}/vouchers/burn', // POST {code,orderClientId,idempotencyKey} → 200 {ok,redemptionId}
   terminalVouchersRelease: 'api/v1/terminals/{id}/vouchers/release', // POST {idempotencyKey} → {ok,released}

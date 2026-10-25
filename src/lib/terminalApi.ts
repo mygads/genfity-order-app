@@ -15,7 +15,7 @@
  * bind, dan login WAJIB fail-closed (dummy tak pernah sukses:
  * login pertama wajib online, SPEC §2 + Q6 CLOSED).
  */
-import { ApiPath } from '../config/server';
+import { ApiPath, apiUrl, getTerminal } from '../config/server';
 import { apiFetch, getApiMode, getDeviceId, unwrap } from './apiSource';
 // F10: validasi tag BE via parseDeviceRole (standalone, tanpa siklus impor).
 import { parseDeviceRole } from './deviceRole';
@@ -907,6 +907,8 @@ export interface TerminalPosConfig {
   posBehavior: Record<string, unknown>;
   /** Ronde-3 Q5: gate lookup/search member (absen = enabled). */
   memberLookupEnabled: boolean;
+  /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar (absen = OFF). */
+  requirePaymentProof: boolean;
   /** S-F3: jadwal ongkir server (null per field = tak dikonfigurasi). */
   deliveryFee: TerminalDeliveryFee;
   /** S-F4: langkah pembulatan kas server (null = BE lama; pemanggil pakai default currency). */
@@ -948,6 +950,32 @@ function cleanPrintDestination(r: unknown): TerminalPrintDestination | null {
   };
 }
 
+/** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
+ * Kontrak BE paralel: flag `requirePaymentProof` (absen = OFF). Dibaca
+ * toleran: top-level ATAU nested posBehaviorSettings/posBehavior/pb ATAU
+ * paymentSettings/payment_settings (cache payment-settings) — varian
+ * snake_case ikut dibaca. Absen/error = false (perilaku lama, nol-regresi). */
+export function parseRequirePaymentProof(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const o = data as Record<string, unknown>;
+  const nested: Array<Record<string, unknown>> = [];
+  for (const k of ['posBehaviorSettings', 'posBehavior', 'pb', 'paymentSettings', 'payment_settings', 'payment', 'settings']) {
+    const v = o[k];
+    if (v && typeof v === 'object') nested.push(v as Record<string, unknown>);
+  }
+  const cands: unknown[] = [o.requirePaymentProof, o.require_payment_proof, o.proofRequired, o.proof_required];
+  for (const n of nested) cands.push(n.requirePaymentProof, n.require_payment_proof, n.proofRequired, n.proof_required);
+  for (const c of cands) {
+    if (c === undefined || c === null) continue;
+    if (typeof c === 'boolean') return c;
+    if (typeof c === 'number') return c !== 0;
+    const s = String(c).trim().toLowerCase();
+    if (s === 'true' || s === '1' || s === 'ya' || s === 'yes') return true;
+    if (s === 'false' || s === '0' || s === 'tidak' || s === 'no') return false;
+  }
+  return false;
+}
+
 export async function fetchTerminalPosConfig(
   terminalId: string,
 ): Promise<TerminalApiResult<TerminalPosConfig>> {  const r = await apiFetch(withId(ApiPath.terminalPosConfig, terminalId), {
@@ -979,6 +1007,8 @@ export async function fetchTerminalPosConfig(
       // Q5: parse top-level + nested posBehaviorSettings/posBehavior
       // (absen = enabled); tak pernah crash pada data asing.
       memberLookupEnabled: parseMemberLookupEnabled(data),
+      // SESI-FINAL-APP: requirePaymentProof (absen = OFF = perilaku lama).
+      requirePaymentProof: parseRequirePaymentProof(data),
       deliveryFee: {
         base: cleanFeeAmount(fee.base),
         perKm: cleanFeeAmount(fee.perKm),
@@ -1191,6 +1221,110 @@ export async function createTerminalExpense(
     if (existing) return { ok: true, data: { id: existing, duplicate: true, photoUrl: readExpensePhotoUrl(data ?? r.data) }, fromDummy: false };
   }
   return failWith<TerminalExpenseDone>(r.status, r.fromDummy, r.data);
+}
+
+// --------------------------------------------------------------------------
+// SESI-FINAL-APP: upload berkas terminal (kontrak BE paralel — pakai spec
+// persis): POST /api/v1/terminals/{id}/uploads multipart {file} → 201 {url}
+// (maks 5MB sisi server; klien mengecilkan via preparePhoto JPEG 0.7).
+// Dipakai expense-foto + payment-proof (upload-dulu, bukan photoPending-only).
+// Fail jujur {ok:false}: mode non-real/offline/timeout/non-201 = pemanggil
+// fallback (photoPending/hold), BUKAN sukses palsu.
+// --------------------------------------------------------------------------
+
+export interface TerminalUploadDone {
+  /** URL publik berkas (https) dari server. */
+  url: string;
+}
+
+function guessUploadMime(uri: string): string {
+  const m = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(String(uri ?? '').trim());
+  const ext = (m?.[1] ?? '').toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+function guessUploadName(uri: string): string {
+  const base = String(uri ?? '').split(/[?#]/)[0].split('/').pop()?.trim() ?? '';
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/.test(base) && base.includes('.')) return base;
+  return `proof-${Date.now()}.jpg`;
+}
+
+function readUploadUrl(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['url', 'fileUrl', 'file_url', 'location']) {
+      const v = o[k];
+      if (typeof v === 'string' && /^https?:\/\/.+/i.test(v.trim())) return v.trim().slice(0, 2048);
+    }
+  }
+  return '';
+}
+
+/** Lazy-resolve token sesi (cermin resolveSessionToken config/server — lazy
+ * require agar nol risiko siklus impor statis). */
+function uploadSessionToken(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sess = require('../session') as typeof import('../session');
+    return String(sess.getSession()?.authToken ?? sess.getSession()?.authKey ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export async function uploadTerminalFile(
+  terminalId: string,
+  uri: string,
+): Promise<TerminalApiResult<TerminalUploadDone>> {
+  const tid = String(terminalId ?? '').trim();
+  const src = String(uri ?? '').trim();
+  if (!tid || !src) return fail<TerminalUploadDone>(400, false);
+  // Tanpa file lokal (sudah remote) = bukan tugas uploader; tanpa mode real =
+  // offline/dummy → gagal jujur (pemanggil fallback, tanpa sukses palsu).
+  if (/^https?:\/\//i.test(src)) return fail<TerminalUploadDone>(400, false);
+  if (getApiMode() !== 'real') return fail<TerminalUploadDone>(0, false);
+  try {
+    const t = getTerminal();
+    const headers: Record<string, string> = {};
+    if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+    if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+    const token = uploadSessionToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const form = new FormData();
+    form.append('file', {
+      uri: src,
+      name: guessUploadName(src),
+      type: guessUploadMime(src),
+    } as unknown as Blob);
+    const url = apiUrl(withId(ApiPath.terminalUploads, tid));
+    const res = await Promise.race([
+      fetch(url, { method: 'POST', headers, body: form }),
+      new Promise<Response>((_, reject) => {
+        setTimeout(() => reject(new Error('timeout')), 25000);
+      }),
+    ]);
+    if (res.status === 0) return fail<TerminalUploadDone>(0, false);
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.status === 201 || res.ok) {
+      const out = readUploadUrl(body);
+      if (out) return { ok: true, data: { url: out }, fromDummy: false };
+      return failWith<TerminalUploadDone>(res.status, false, body);
+    }
+    return failWith<TerminalUploadDone>(res.status, false, body);
+  } catch {
+    return fail<TerminalUploadDone>(0, false);
+  }
 }
 
 export type TerminalTableStatus = 'OCCUPIED' | 'AVAILABLE';

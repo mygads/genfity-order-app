@@ -414,6 +414,15 @@ const STR: Record<string, Entry> = {
   pay_issue_fail: { id: 'Gagal menyiapkan pembayaran - coba lagi.', en: 'Could not start the payment - try again.' },
   pay_hold_unpaid_title: { id: 'Pembayaran ditahan', en: 'Payment held' },
   pay_hold_unpaid: { id: 'Belum lunas (tahan-offline): PIN manajer wajib tapi order server belum tertaut / tak bisa dipastikan. Tetap di layar ini - ulangi setelah order tertaut atau online kembali.', en: 'Still unpaid (offline hold): manager PIN is required but the server order is not linked / could not be verified. Staying on this screen - retry once the order is linked or you are back online.' },
+  // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof).
+  pay_proof_required: { id: 'Merchant mewajibkan foto bukti bayar — ambil foto dulu sebelum bayar.', en: 'This merchant requires a payment-proof photo — take one before paying.' },
+  pay_proof_title: { id: 'Bukti bayar *', en: 'Payment proof *' },
+  pay_proof_take: { id: 'Ambil Foto Bukti', en: 'Take Proof Photo' },
+  pay_proof_retake: { id: 'Ganti Foto', en: 'Retake Photo' },
+  pay_proof_uploading: { id: 'Mengunggah bukti…', en: 'Uploading proof…' },
+  pay_proof_uploaded: { id: 'Bukti terunggah', en: 'Proof uploaded' },
+  pay_proof_upload_fail: { id: 'Upload bukti gagal — pembayaran ditahan offline. Ulangi saat online.', en: 'Proof upload failed — payment held offline. Retry when online.' },
+  pay_proof_hold: { id: 'Bukti belum ada (server menolak: PROOF_REQUIRED). Tetap di layar ini — lengkapi foto lalu ulangi.', en: 'Proof missing (server rejected: PROOF_REQUIRED). Staying on this screen — attach the photo then retry.' },
   pay_add: { id: '+ Tambah', en: '+ Add' },
   edc_title: { id: 'EDC', en: 'EDC' },
   edc_sub: { id: 'Non-Tunai - Kartu Debit/Kredit', en: 'Non-Cash - Debit/Credit Card' },
@@ -996,6 +1005,9 @@ const STR: Record<string, Entry> = {
   'expense.saveBtn': { id: 'Simpan Pengeluaran', en: 'Save Expense' },
   // A-P1-6: foto lokal tersimpan, menunggu endpoint upload terminal (PARKED).
   'expense.photoPending': { id: 'Foto tersimpan di perangkat — menunggu upload (server menyusul).', en: 'Photo saved on device — waiting for upload (server to follow).' },
+  // SESI-FINAL-APP: upload-dulu aktif — foto diunggah sebelum kirim expense.
+  'expense.photoAttached': { id: 'Foto nota terunggah ke server.', en: 'Receipt photo uploaded to the server.' },
+  'expense.photoUploadFail': { id: 'Upload foto gagal — expense tercatat lokal, foto menunggu upload ulang.', en: 'Photo upload failed — expense saved locally, photo waiting for re-upload.' },
   'printers.title': { id: 'Printer', en: 'Printers' },
   'printers.sub': { id: 'Station kasir/dapur/checker/label - BT SPP - LAN - Star', en: 'Cashier/kitchen/checker/label stations - BT SPP - LAN - Star' },
   'printers.stations': { id: 'Station Printer', en: 'Printer Stations' },

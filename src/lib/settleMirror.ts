@@ -45,6 +45,9 @@ export type MirrorSettleInput = {
   /** Ronde-3 Q4: dipanggil SEKALI saat immediate settle menjawab (2xx/409
    *  replay = sukses; offline/blocked/ditolak = tak dipanggil). */
   onSettled?: (r: SettleResult & { memberChanged?: boolean }) => void;
+  /** SESI-FINAL-APP: URL foto bukti bayar (https) — diteruskan aditif ke
+   *  settlePosPayment + antrean GO_OP_SETTLE. Absen = perilaku lama. */
+  proofUrl?: string;
 };
 
 export function mirrorSettleToServer(inp: MirrorSettleInput): void {
@@ -64,6 +67,11 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
         /* abaikan: BE me-resolve */
       }
       const custId = parseCustomerId(inp.customerId);
+      // SESI-FINAL-APP: proofUrl https ≤2048 diteruskan aditif (lainnya =
+      // dihilangkan; settle jalan, BE menolak jujur bila diwajibkan).
+      const proofClean = /^https:\/\/.{1,2040}$/i.test(String(inp.proofUrl ?? '').trim())
+        ? String(inp.proofUrl ?? '').trim().slice(0, 2048)
+        : '';
       const res = await settlePosPayment({
         serverId,
         method: beMethod,
@@ -73,6 +81,7 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
         ...(custId != null ? { customerId: custId } : {}),
         ...(inp.clientId ? { idempotencyKey: inp.clientId } : {}),
         ...(cashSid ? { cashSessionId: cashSid } : {}),
+        ...(proofClean ? { proofUrl: proofClean } : {}),
       });
       if (res.ok || res.reason === 'blocked') {
         if (res.ok) {
@@ -118,6 +127,7 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
           ...(custId != null ? { customerId: custId } : {}),
           ...(inp.clientId ? { clientId: inp.clientId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),
+          ...(proofClean ? { proofUrl: proofClean } : {}),
           salesNum: inp.salesNum,
           at: new Date().toISOString(),
         });
