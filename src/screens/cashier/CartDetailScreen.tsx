@@ -7,7 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 import { SUPERVISOR_ACTION_ORDER_VOID } from '../../lib/supervisor';
 import { useLang, tCur } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync } from '../../lib/sync';
@@ -61,10 +61,20 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [salesNum, setSalesNum] = useState(route?.params?.salesNum ?? '');
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
       if (alive) setTaxRate(r);
+    });
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep().then((s) => {
+      if (alive) setRoundStep(s);
     });
     return () => {
       alive = false;
@@ -126,7 +136,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     [active],
   );
   const discountTotal = useMemo(() => active.reduce((s, c) => s + c.discount, 0), [active]);
-  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100, feeESB utk agregator, kemasan per mode. */
+  /** Kanonis via helper: voucher ongkir/persen/flat, service server-driven (legacy 5%), pajak incl info-only (setting, default 11), rounding Go-lane step server (legacy 100). */
   const {
     subtotal,
     service,
@@ -139,7 +149,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
     total,
     rounding,
     voucherAmt,
-  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, packaging: packagingFee, voucher: voucher ?? undefined, esbOrder: isMarketplaceMode(mode), taxRate });
+  } = totals({ gross: subtotalGross, discount: discountTotal, ongkir, packaging: packagingFee, voucher: voucher ?? undefined, esbOrder: isMarketplaceMode(mode), taxRate, serviceEnabled: svcCfg.enabled, serviceType: svcCfg.type, serviceRate: svcCfg.rate, serviceFixed: svcCfg.fixed, ...(roundStep != null ? { roundStep } : {}) });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = active.reduce((s, c) => s + c.qty, 0);
@@ -513,10 +523,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('taxIncl')}</Text>
               <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(taxIncl)}</Text>
             </View>
+            {service > 0 && (
             <View style={styles.sumRow}>
-              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('serviceExcl')}</Text>
+              <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{serviceLabel(t, svcCfg)}</Text>
               <Text style={[styles.sumValue, isTablet && styles.sumValueBig]}>{rp(service)}</Text>
             </View>
+            )}
             {feeESB > 0 && (
               <View style={styles.sumRow}>
                 <Text style={[styles.sumLabel, isTablet && styles.sumLabelBig]}>{t('feeESB')}</Text>

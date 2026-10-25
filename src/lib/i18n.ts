@@ -665,6 +665,8 @@ const STR: Record<string, Entry> = {
   fallback_user: { id: 'Pengguna', en: 'User' },
   dash_shift_open: { id: 'Shift Buka', en: 'Shift Open' },
   dash_shift_closed: { id: 'Shift Tutup', en: 'Shift Closed' },
+  // A-P1-5: DB lokal belum siap — blokir kasir + pesan ini (bukan "shift tutup").
+  shift_db_error: { id: 'Database lokal belum siap — coba lagi sesaat.', en: 'Local database is not ready — try again shortly.' },
   dash_never: { id: 'belum pernah', en: 'never' },
   sync_pending: { id: 'tertunda', en: 'pending' },
   dash_clock_in: { id: 'Masuk', en: 'Clock in' },
@@ -864,6 +866,9 @@ const STR: Record<string, Entry> = {
   subtotalNet: { id: 'Subtotal (net)', en: 'Subtotal (net)' },
   taxIncl: { id: 'Pajak (incl)', en: 'Tax (incl)' },
   serviceExcl: { id: 'Service 5% (excl)', en: 'Service 5% (excl)' },
+  serviceExclRate: { id: 'Service {r}% (excl)', en: 'Service {r}% (excl)' },
+  serviceExclFixed: { id: 'Service (tetap)', en: 'Service (flat)' },
+  serviceEst: { id: ' (estimasi)', en: ' (estimate)' },
   feeESB: { id: 'Biaya platform (5%)', en: 'Platform fee (5%)' },
   packaging: { id: 'Kemasan', en: 'Packaging' },
   deliveryFee: { id: 'Ongkir', en: 'Delivery fee' },

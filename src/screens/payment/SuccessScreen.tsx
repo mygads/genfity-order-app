@@ -5,6 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, type ServiceConfig } from '../../lib/totals';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 import { getSession } from '../../session';
 import { getTerminal } from '../../config/server';
@@ -133,6 +134,18 @@ export default function SuccessScreen({ navigation, route }: Props) {
   // takeMemberChanged = consume-once (banner tak ganda).
   const [memberChanged, setMemberChanged] = useState(false);
   const [memberView, setMemberView] = useState<{ name: string; points: number; vouchers: number } | null>(null);
+  /** Label service mengikuti knob server (audit trisisi #1); nilai service
+   * tetap dari pemanggil (angka resmi rantai). */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  useEffect(() => {
+    let alive = true;
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     const no = String(orderNo ?? '').trim();
     if (!no) return;
@@ -351,7 +364,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         )}
         {service > 0 && (
           <View style={styles.row}>
-            <Text style={styles.label}>{t('serviceExcl')}</Text>
+            <Text style={styles.label}>{serviceLabel(t, svcCfg)}</Text>
             <Text style={styles.value}>{rp(service)}</Text>
           </View>
         )}

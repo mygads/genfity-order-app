@@ -27,7 +27,7 @@ import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
@@ -250,6 +250,22 @@ export default function CashierScreen({ navigation, route }: Props) {
   );
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep().then((s) => {
+      if (alive) setRoundStep(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   /** G5: sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync = BLOKIR Bayar
    * (tombol Bayar/CTA mati + banner blokir beraksi Sync di bawah).
    * Local Mode (tanpa server untuk sync): banner TIDAK tampil - tak ada
@@ -856,7 +872,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     bruto,
     total,
     rounding,
-  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir, packaging: packagingFee, esbOrder: isMarketplaceMode(mode), taxRate });
+  } = totals({ gross: subtotalGross, discount: discountTotal, voucher: voucher ?? undefined, ongkir, packaging: packagingFee, esbOrder: isMarketplaceMode(mode), taxRate, serviceEnabled: svcCfg.enabled, serviceType: svcCfg.type, serviceRate: svcCfg.rate, serviceFixed: svcCfg.fixed, ...(roundStep != null ? { roundStep } : {}) });
   const isOngkirVoucher = voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR';
   const useOngkirCut = !!isOngkirVoucher && ongkir > 0;
   const itemCount = activeCart.reduce((s, c) => s + c.qty, 0);
@@ -1467,10 +1483,12 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.totalLabel}>{t('taxIncl')}</Text>
           <Text style={styles.totalVal}>{rp(taxIncl)}</Text>
         </View>
+        {service > 0 && (
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>{t('serviceExcl')}</Text>
+          <Text style={styles.totalLabel}>{serviceLabel(t, svcCfg)}</Text>
           <Text style={styles.totalVal}>{rp(service)}</Text>
         </View>
+        )}
         {feeESB > 0 && (
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>{t('feeESB')}</Text>

@@ -3,11 +3,30 @@
  * Dipanggil fire-and-forget pasca-login (cermin syncCurrencyFromProfile):
  * best-effort, fail-silent — login tak diblokir bila gagal.
  *
+ * KEBIJAKAN SYNC TRISISI (audit #4 — satu paragraf acuan):
+ * - merchant-truth = server-wins-on-sync: lookup member, threshold stok,
+ *   tax, fee/service, packaging, receipt prefs. Nilai server menimpa lokal
+ *   tiap sync sukses (pengecualian TERDOKUMENTASI: threshold stok seed-hanya-
+ *   bila-default, lihat bawah — terminal tak bisa baca endpoint owner-gated
+ *   /menu/stock/settings, jadi kasir yang sudah mengkustom tak ditimpa).
+ * - fisik-perangkat = local-wins SELALU: port/MAC printer, paper-size/autocut
+ *   per-station, mapping station, preferensi acquirer EDC/QRIS. Server tak
+ *   tahu alamat printer per-terminal (cermin master.ts:113-123).
+ * - UX-perangkat = seed-once: timer meja, sound, sync opts, float shift.
+ *   Ditulis hanya bila belum ada cfg lokal (kasir yang sudah mengatur tak
+ *   ditimpa).
+ *
  * Aturan server-wins yang disepakati:
  * - Stok (`genfity.stock.opts.lowLimit`): adopsi threshold merchant HANYA
  *   bila lokal masih default/belum dikustom kasir (StockScreen DEFAULT '5').
  *   Flag local-only lain (trackStock/lowWarn/allowSellEmpty/onlineSync)
  *   tak disentuh — tak ada padanannya di server (M9-3 local-only).
+ *   CATATAN threshold (#7): endpoint owner-gated BE GET+PUT
+ *   /menu/stock/settings ADA dan FE SUDAH punya editornya (InventoryPanel
+ *   FE — temuan awal "tanpa editor FE" terkoreksi). Terminal APP tak bisa
+ *   membacanya (owner-gated), jadi APP mempertahankan seed-sekali; owner
+ *   yang mengubah threshold lewat FE akan terlihat di APP hanya bila kasir
+ *   belum mengkustom (sengaja, bukan bug).
  * - Timer (`genfity.tabletimer.config`): seed HANYA bila belum ada cfg lokal
  *   (kasir yang sudah mengatur tak ditimpa).
  */

@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
 import { parseCustomerId } from '../../lib/memberRef';
@@ -89,10 +89,20 @@ export default function DineInScreen({ navigation, route }: Props) {
   const [customerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
       if (alive) setTaxRate(r);
+    });
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep().then((s) => {
+      if (alive) setRoundStep(s);
     });
     return () => {
       alive = false;
@@ -126,7 +136,7 @@ export default function DineInScreen({ navigation, route }: Props) {
   /** Voucher dari kasir/promo - diteruskan ke helper agar setara Cashier. */
   const voucher: Voucher | null = route?.params?.voucher ?? null;
   const ongkir = Math.max(0, route?.params?.ongkir ?? defaultOngkirForMode(route?.params?.mode));
-  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100. */
+  /** Kanonis via helper: voucher ongkir/persen/flat, service server-driven (legacy 5%), pajak incl info-only (setting, default 11), rounding Go-lane step server. */
   const subtotalGross = active.reduce((s, c) => s + unitPrice(c) * c.qty, 0);
   const discountTotal = active.reduce((s, c) => s + c.discount, 0);
   const {
@@ -149,6 +159,11 @@ export default function DineInScreen({ navigation, route }: Props) {
     voucher: voucher ?? undefined,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
+    serviceEnabled: svcCfg.enabled,
+    serviceType: svcCfg.type,
+    serviceRate: svcCfg.rate,
+    serviceFixed: svcCfg.fixed,
+    ...(roundStep != null ? { roundStep } : {}),
   });
   const useOngkirCut = (voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR') && ongkir > 0;
   /** Alias lama agar sisa render tetap jalan. */
@@ -371,7 +386,9 @@ export default function DineInScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>Voucher {voucher.code}</Text><Text style={[styles.disc, isTablet && styles.priceBig]}>-{rp(voucherAmt)}</Text></View>
         )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('taxIncl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(taxIncl)}</Text></View>
-        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('serviceExcl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
+        {service > 0 && (
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{serviceLabel(t, svcCfg)}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
+        )}
         {feeESB > 0 && (
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('feeESB')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
         )}

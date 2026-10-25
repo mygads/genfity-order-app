@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, type ServiceConfig } from '../../lib/totals';
 import { getGroupPaid, nextSalesNum } from '../../lib/sales';
 import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
@@ -50,6 +51,18 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang();
+  /** Label service mengikuti knob server (audit trisisi #1); nilai serviceVal
+   * tetap dari pemanggil (angka resmi rantai). */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  useEffect(() => {
+    let alive = true;
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   // Order asli dari params kasir (bukan konstanta hardcode).
   const p = route?.params ?? {};
   const orderItems = p.items ?? [];
@@ -254,7 +267,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={styles.item}>{t('taxIncl')}</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
         )}
         {serviceVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{serviceLabel(t, svcCfg)}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
         )}
         {feeESBVal > 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>

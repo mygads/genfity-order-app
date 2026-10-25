@@ -5,7 +5,10 @@
  * - diskonBelanja = sum(item.discount) + voucherBelanja
  * - ongkirNet = max(0, ongkir - min(ongkir, voucherOngkir))
  * - dasar = subtotal - diskonBelanja
- * - service = round(dasar * 5 / 100)
+ * - service = server-driven (audit trisisi #1): enabled/type/rate/fixed dari
+ *   ms_setting Service/* via getServiceConfig() — cermin BE serviceChargeForOrder
+ *   (service_charge.go: enabled? FIXED? round(fixed) : round(dasar*rate/100)).
+ *   Tanpa baris setting (lane ESB / offline-murni) = legacy 5% + label estimasi.
  * - pajakTampil = round(dasar * taxRate / (100 + taxRate)), taxRate default 11 (PPN,
  *   kontrak §10.3 + fixtures: 66000->6541, 50000->4955, 145000->14369),
  *   dibaca dari ms_setting(Tax, PPN) via getTaxRate(); info-only (sudah termasuk)
@@ -15,7 +18,20 @@
  *   getPackagingFee — lokal saja, TANPA kirim ke BE karena pos/payment
  *   tak punya field kemasan; cermin ongkir yang menempel pada bill)
  * - bruto = dasar + service + ongkirNet + feeESB + packaging
- * - grandTotal = bulatkan(bruto, step 100); rounding = grandTotal - bruto
+ * - grandTotal = bulatkan(bruto, step); rounding = grandTotal - bruto
+ *
+ * ATURAN PEMBULATAN TRISISI (audit #3 — satu kontrak, tiga repo):
+ * - Lane Go: step = 1 (integer rupiah). Ditulis server-wins oleh pullGoCatalog
+ *   ke ms_setting(Rounding, Step); cermin BE validatePOSPaymentAmountsCurrency
+ *   (due IDR dibulatkan ke presisi currency = integer; nilai kirim pun wajib
+ *   presisi currency) dan FE roundCurrencyAmount IDR (Math.round). Total APP =
+ *   integer = due yang divalidasi BE saat settle (E2E 2026-10-25: stored
+ *   totalAmount 27037.5 → cash/card 27038 hijau, stepped 400).
+ *   Catatan: stored totalAmount BE (round2) boleh bawa .5; yang diuji saat
+ *   settle adalah due presisi-currency — keduanya 27038 untuk kasus di atas.
+ * - Lane ESB: step = 100 (NEAREST, dari branch-settings server lama).
+ * - JANGAN tambah endpoint rounding; JANGAN ubah step sepihak — tiga repo
+ *   harus tetap selaras (BE integer / FE integer / APP step-setting).
  *
  * DISCOUNT_BACKSTOP: diskonBelanja eksplisit di-clamp ke gross (flag
  * backstopHit) agar diskon tak pernah melebihi bruto — dasarBelanja/voucher
@@ -62,6 +78,96 @@ export function voucherExtras(
 
 /** Tarif pajak default 11 (PPN, kontrak §10.3) bila ms_setting(Tax, PPN) tak terbaca. */
 export const TAX_DEFAULT = 11;
+
+/**
+ * Konfigurasi service charge merchant (audit trisisi #1 — server-driven).
+ * Cermin baris BE: enable_service_charge / service_charge_type /
+ * service_charge_percent (skala persen, mis. 5 = 5%) / service_charge_fixed_amount.
+ */
+export type ServiceChargeType = 'PERCENT' | 'FIXED';
+export interface ServiceConfig {
+  enabled: boolean;
+  type: ServiceChargeType;
+  /** Skala persen (5 = 5%), cermin BE service_charge_percent. */
+  rate: number;
+  /** Nominal tetap (Rp), cermin BE service_charge_fixed_amount. */
+  fixed: number;
+  /** true = dari pull server (Go); false = fallback legacy offline-murni. */
+  fromServer: boolean;
+}
+
+/**
+ * Fallback legacy: lane ESB / offline-murni tanpa pull = service 5% seperti
+ * perilaku lama. Pemanggil WAJIB melabeli hasil ini sebagai estimasi
+ * (lihat serviceLabel() + kunci i18n serviceEst) karena server bisa
+ * menetapkan 0% / FIXED / persen lain — settle BE selalu menang.
+ */
+export const SERVICE_LEGACY: ServiceConfig = {
+  enabled: true,
+  type: 'PERCENT',
+  rate: 5,
+  fixed: 0,
+  fromServer: false,
+};
+
+/**
+ * Baca konfigurasi service dari ms_setting (ditulis server-wins oleh
+ * pullGoCatalog dari blok merchant /pos/menu).
+ * - ('Service','Enabled') = '1'/'0'
+ * - ('Service','Type') = 'PERCENT'/'FIXED' (selain FIXED = persen, cermin BE)
+ * - ('Service','Rate') = persen (skala persen)
+ * - ('Service','Fixed') = nominal tetap
+ * Baris absen (BE lama / lane ESB / belum pull) = SERVICE_LEGACY.
+ * Catatan: baris legacy ('Service','Charge') era ESB/seed SENGAJA tak dibaca —
+ * itu konstanta tampilan, bukan knob server.
+ */
+export async function getServiceConfig(): Promise<ServiceConfig> {
+  try {
+    await initDb();
+    const rows = await query<{ key2: string | null; value1: string | null }>(
+      `SELECT key2, value1 FROM ms_setting WHERE key1 = 'Service' LIMIT 10`,
+    );
+    if (!rows.length) return { ...SERVICE_LEGACY };
+    const get = (k: string): string | null => {
+      const r = rows.find((x) => (x.key2 ?? '').trim().toLowerCase() === k);
+      return r ? (r.value1 ?? null) : null;
+    };
+    const enabledRaw = get('enabled');
+    if (enabledRaw === null) return { ...SERVICE_LEGACY };
+    const typeRaw = (get('type') ?? '').trim().toUpperCase();
+    const rateRaw = Number(get('rate') ?? '');
+    const fixedRaw = Number(get('fixed') ?? '');
+    return {
+      enabled: enabledRaw.trim() !== '0',
+      type: typeRaw === 'FIXED' ? 'FIXED' : 'PERCENT',
+      rate: Number.isFinite(rateRaw) && rateRaw >= 0 ? rateRaw : 0,
+      fixed: Number.isFinite(fixedRaw) && fixedRaw >= 0 ? Math.round(fixedRaw) : 0,
+      fromServer: true,
+    };
+  } catch {
+    return { ...SERVICE_LEGACY };
+  }
+}
+
+/**
+ * Label baris service untuk layar/struk dari konfigurasi efektif.
+ * - disabled → '' (pemanggil menyembunyikan baris bila service = 0)
+ * - FIXED → 'Service (tetap)'
+ * - PERCENT → 'Service {r}%' (r = persen server, atau 5 legacy)
+ * - legacy (fromServer false) → + ' (estimasi)'
+ * `t` = fungsi translate layar (kunci: serviceExclRate/serviceExclFixed/serviceEst).
+ */
+export function serviceLabel(
+  t: (key: string) => string,
+  cfg: ServiceConfig,
+): string {
+  if (!cfg.enabled) return '';
+  const base =
+    cfg.type === 'FIXED'
+      ? t('serviceExclFixed')
+      : t('serviceExclRate').replace('{r}', String(cfg.rate));
+  return cfg.fromServer ? base : `${base}${t('serviceEst')}`;
+}
 
 /**
  * Konfigurasi fee terpusat - SATU sumber angka untuk service, fee platform,
@@ -220,6 +326,15 @@ export type TotalsInput = {
   esbOrder?: boolean;
   /** Tarif pajak persen; default TAX_DEFAULT (11 = PPN). */
   taxRate?: number;
+  /**
+   * Service charge server-driven (audit trisisi #1). Default = legacy 5%
+   * (enabled, PERCENT, rate 5) = perilaku lama; pemanggil yang sadar-server
+   * mengisi dari getServiceConfig(). Skala rate = persen (5 = 5%).
+   */
+  serviceEnabled?: boolean;
+  serviceType?: ServiceChargeType;
+  serviceRate?: number;
+  serviceFixed?: number;
   /** Langkah pembulatan grand total; default FEE_DEFAULTS.roundStep (100 =
    * rupiah). Cabang AUD memakai 1 (sen) — diisi pemanggil dari
    * getRoundStep() atau eksplisit per order (seed AUD). */
@@ -252,7 +367,7 @@ export type TotalsResult = {
   ongkirCut: number;
   /** ongkir - ongkirCut. */
   ongkirNet: number;
-  /** 5% dari subtotal (excl). */
+  /** Service server-driven (0 bila disabled); legacy = 5% dari subtotal. */
   service: number;
   /** Pajak inclusive info-only: round(subtotal * taxRate / (100 + taxRate)). */
   taxIncl: number;
@@ -332,7 +447,31 @@ export function totals(input: TotalsInput): TotalsResult {
           ? Math.min(cappedPct, dasarBelanja)
           : Math.min(cappedFlat, dasarBelanja);
   const subtotal = Math.max(0, gross - discount - voucherAmt);
-  const service = Math.round(subtotal * FEE_DEFAULTS.serviceRate);
+  /**
+   * Service server-driven (audit trisisi #1) — cermin BE serviceChargeForOrder
+   * (FIXED? round(fixed) : round(dasar*rate/100), disabled/rate<=0/fixed<=0 = 0).
+   * Default tanpa input server = legacy 5% (perilaku lama persis).
+   */
+  const svcEnabled = input.serviceEnabled ?? true;
+  const svcType: ServiceChargeType =
+    input.serviceType === 'FIXED' ? 'FIXED' : 'PERCENT';
+  const svcRateRaw = Number(input.serviceRate);
+  const svcRate =
+    Number.isFinite(svcRateRaw) && svcRateRaw >= 0 ? svcRateRaw : 5;
+  const svcFixedRaw = Number(input.serviceFixed);
+  const svcFixed =
+    Number.isFinite(svcFixedRaw) && svcFixedRaw >= 0
+      ? Math.round(svcFixedRaw)
+      : 0;
+  const service = !svcEnabled
+    ? 0
+    : svcType === 'FIXED'
+      ? svcFixed > 0
+        ? svcFixed
+        : 0
+      : svcRate > 0
+        ? Math.round((subtotal * svcRate) / 100)
+        : 0;
   /** Pajak inclusive info-only (kontrak §10.3: default 11 -> round(net * 11/111), setting-driven via ms_setting Tax/PPN). */
   const taxIncl = Math.round((subtotal * rate) / (100 + rate));
   /** Fee platform khusus order ESB/marketplace (kontrak §5: platformFee). */

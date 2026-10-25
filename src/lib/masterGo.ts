@@ -43,6 +43,14 @@ interface GoMerchant {
   currency: string;
   enableTax: boolean;
   taxPercentage: number;
+  /** Knob service charge merchant (audit trisisi #1 — server-driven).
+   * Skala serviceChargePercent = persen (5 = 5%), cermin BE
+   * MerchantPOSMenuGet. Opsional — BE lama tak mengirim; ketidakhadiran =
+   * jangan sentuh cache lokal (fallback legacy 5% + label estimasi). */
+  enableServiceCharge?: boolean;
+  serviceChargeType?: string;
+  serviceChargePercent?: number;
+  serviceChargeFixedAmount?: number;
   /** Biaya kemasan merchant (BE /pos/menu → merchant block). Opsional —
    * BE lama tak mengirim; ketidakhadiran = jangan sentuh cache lokal. */
   enablePackagingFee?: boolean;
@@ -169,6 +177,47 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       [String(amount), enabled],
     );
   }
+  // A2: service charge milik server (audit trisisi #1). Hanya tulis bila BE
+  // mengirim minimal satu kunci (kompat BE lama); server menang atas cache
+  // lokal. value1: Enabled '1'/'0'; Type 'PERCENT'/'FIXED'; Rate persen
+  // (skala persen, mis. 5 = 5%); Fixed nominal. Dibaca getServiceConfig().
+  if (
+    merchant.enableServiceCharge !== undefined ||
+    merchant.serviceChargeType !== undefined ||
+    merchant.serviceChargePercent !== undefined ||
+    merchant.serviceChargeFixedAmount !== undefined
+  ) {
+    const svcEnabled = merchant.enableServiceCharge === true ? '1' : '0';
+    const svcType =
+      String(merchant.serviceChargeType ?? '').trim().toUpperCase() === 'FIXED'
+        ? 'FIXED'
+        : 'PERCENT';
+    const svcRate = Math.max(0, num(merchant.serviceChargePercent, 0));
+    const svcFixed = Math.max(0, Math.round(num(merchant.serviceChargeFixedAmount, 0)));
+    const svcRows: Array<[string, string]> = [
+      ['Enabled', svcEnabled],
+      ['Type', svcType],
+      ['Rate', String(svcRate)],
+      ['Fixed', String(svcFixed)],
+    ];
+    for (const [k2, v1] of svcRows) {
+      await run(
+        `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Service', ?, ?, '1')
+         ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+        [k2, v1],
+      );
+    }
+  }
+  // Aturan pembulatan trisisi (audit #3): lane Go = integer rupiah (step 1),
+  // cermin BE roundGroupOrderMoney IDR (scale 1) + FE roundCurrencyAmount IDR
+  // (Math.round). Server-wins: pull Go SELALU menulis Step=1 agar preview
+  // kasir = nilai yang divalidasi BE saat settle (tanpa step, tender non-tunai
+  // 400). Lane ESB (fallback 404) tak menulis Step = default legacy 100.
+  // JANGAN tambah endpoint rounding; JANGAN ubah step sepihak.
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Rounding', 'Step', '1', 'go-lane')
+     ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+  );
   // A3: preferensi struk milik server (hanya tulis bila BE mengirim kuncinya).
   await persistReceiptPrefs(merchant, run);
 

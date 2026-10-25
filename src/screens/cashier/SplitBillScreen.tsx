@@ -5,7 +5,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, getPackagingFee, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
 import { parseCustomerId } from '../../lib/memberRef';
@@ -143,10 +143,20 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const [groupPaid, setGroupPaid] = useState({ paidTotal: 0, grandTotal: 0, fullyPaid: false, payCount: 0 });
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11) untuk rumus kanonik. */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
       if (alive) setTaxRate(r);
+    });
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep().then((s) => {
+      if (alive) setRoundStep(s);
     });
     return () => {
       alive = false;
@@ -229,9 +239,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const itemSum = itemSplits.reduce((s, v) => s + v, 0);
 
   // Rumus kanonik kasir/CartDetail (src/lib/totals.ts): voucher dibatasi nilai
-  // item (flat atau persen sebelum service/pajak), service 5% dari net,
-  // pajak inclusive info-only (setting-driven via taxRate, default 11),
-  // feeESB 5% utk agregator, kemasan nominal per mode, bulat Rp 100.
+  // item (flat atau persen sebelum service/pajak), service server-driven
+  // (audit #1; legacy 5% dari net), pajak inclusive info-only (setting-driven
+  // via taxRate, default 11), feeESB 5% utk agregator, kemasan nominal per
+  // mode, bulat Go-lane step server (legacy Rp 100).
   const canon = totals({
     gross: itemSum,
     discount: asAmount(params.discount),
@@ -245,6 +256,11 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     packaging: packagingFee,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
+    serviceEnabled: svcCfg.enabled,
+    serviceType: svcCfg.type,
+    serviceRate: svcCfg.rate,
+    serviceFixed: svcCfg.fixed,
+    ...(roundStep != null ? { roundStep } : {}),
   });
   // L8: representasi voucher — `discount` INCLUDES voucher, `voucher.amount`
   // adalah SUBSET porsi voucher untuk pelaporan; pembaca (Pay/saveSale)
@@ -466,7 +482,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           )}
           {serviceEff > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>{t('serviceExcl')}</Text>
+              <Text style={styles.metaL}>{serviceLabel(t, svcCfg)}</Text>
               <Text style={styles.metaV}>+{rp(serviceEff)}</Text>
             </View>
           )}
@@ -587,7 +603,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 </View>
                 {serviceEff > 0 && (
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaL}>{t('serviceExcl')}</Text>
+                    <Text style={styles.metaL}>{serviceLabel(t, svcCfg)}</Text>
                     <Text style={styles.metaV}>+{rp(serviceShares[i] as number)}</Text>
                   </View>
                 )}

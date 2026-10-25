@@ -9,13 +9,17 @@
 import { getTerminal, setTerminal, type TerminalInfo } from '../config/server';
 import { getNotif, setNotif } from '../config/device';
 import { initDb, query } from './db';
-import { getItem, getJSON, setItem, setJSON } from './storage';
+import { getJSON, setJSON } from './storage';
 import { pullMaster } from './master';
 import { parseDeviceRole, setDeviceRole } from './deviceRole';
 import { setMaxOfflineGrantDays } from '../session';
 
 const LS_STATIONS = 'genfity.printer.stations';
-const LS_RECEIPT_FOOTER = 'genfity.terminal.receiptFooter';
+// Audit trisisi #2: jalur footer ganda DIHAPUS. Baris ms_setting Receipt/
+// FooterText via posSyncReceipt (getReceiptPrefs) adalah SATU-SATUNYA jalur
+// baca footer struk (ReceiptScreen customFooter). Kunci 'receiptFooter'
+// ms_terminalsetting + LS genfity.terminal.receiptFooter + getReceiptFooter()
+// dihapus 2026-10-25; baris SQLite lama dibiarkan (tak dibaca siapa pun).
 
 interface StationLite {
   id: string;
@@ -26,7 +30,7 @@ interface StationLite {
  * tag/terminalTag = tag kanonis model-5 (SPEC §1); pairedKasirId/pairedViewId =
  * pairing 1:1 view→kasir (E09/E15); pinSet = owner sudah set PIN terminal (E09/E14);
  * max_offline_grant_days = policy TTL grant offline server-wins (Q6, E28). */
-export const KNOWN_TERMINAL_KEYS = ['deviceRole', 'tag', 'terminalTag', 'pairedKasirId', 'pairedViewId', 'pinSet', 'autoPrintKitchen', 'printerDefault', 'receiptFooter', 'max_offline_grant_days'] as const;
+export const KNOWN_TERMINAL_KEYS = ['deviceRole', 'tag', 'terminalTag', 'pairedKasirId', 'pairedViewId', 'pinSet', 'autoPrintKitchen', 'printerDefault', 'max_offline_grant_days'] as const;
 
 export interface TerminalSyncResult {
   ok: boolean;
@@ -105,9 +109,6 @@ export async function syncTerminalSettings(): Promise<TerminalSyncResult> {
             applied.push(key);
           }
         }
-      } else if (key === 'receiptFooter') {
-        await setItem(LS_RECEIPT_FOOTER, val);
-        applied.push(key);
       } else if (key === 'max_offline_grant_days') {
         // G2 (audit 2026-10-17): policy TTL grant offline server-wins (E28).
         // Clamp 0-365 milik setMaxOfflineGrantDays (cermin session.ts);
@@ -143,14 +144,5 @@ export async function syncTerminalSettings(): Promise<TerminalSyncResult> {
     return { ok: true, applied, skipped: false };
   } catch {
     return { ok: false, applied, skipped: true };
-  }
-}
-
-/** Footer struk dari server ('' bila belum pernah sync). */
-export async function getReceiptFooter(): Promise<string> {
-  try {
-    return (await getItem(LS_RECEIPT_FOOTER)) ?? '';
-  } catch {
-    return '';
   }
 }
