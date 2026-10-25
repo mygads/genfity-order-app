@@ -28,7 +28,7 @@
     "react-native-screens": "^4.29.0",
     "react-native-tcp-socket": "^6.4.3",
     "react-native-web": "^0.21.2",
-    "react-native-webview": "13.16.1"
+    "react-native-webview": "14.0.1"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
