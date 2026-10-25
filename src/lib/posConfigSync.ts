@@ -53,8 +53,6 @@ const PAY_TABS_KEY = 'genfity.pos.paymentTabs';
 const PROMO_GATE_KEY = 'genfity.pos.promo';
 /** S-F8: cache auto-print (absen = OFF). */
 const AUTO_PRINT_KEY = 'genfity.pos.autoPrint';
-/** S-F12: cache flag notifikasi server (toleran; absen = {}). */
-const NOTIFY_FLAGS_KEY = 'genfity.pos.notify';
 /** SESI-FINAL-APP: cache flag wajib-foto-bukti-bayar (absen = OFF). */
 const REQUIRE_PROOF_KEY = 'genfity.pos.requireProof';
 
@@ -215,10 +213,6 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     // S-F8: auto-print (varian deprecated ikut dibaca; absen = OFF).
     const auto = pbRaw.autoPrint ?? pbRaw.autoPrintOnPaymentConfirm ?? pbRaw.autoPrintOnOrderCreated;
     await setJSON(AUTO_PRINT_KEY, { enabled: asBool(auto, false) });
-  } catch { /* abaikan */ }
-  try {
-    // S-F12: flag notifikasi server (toleran: objek apa adanya; absen = {}).
-    await setJSON(NOTIFY_FLAGS_KEY, parseNotifyFlags(pbRaw));
   } catch { /* abaikan */ }
   try {
     // SESI-FINAL-APP: merchant mewajibkan foto bukti bayar (absen = OFF).
@@ -471,19 +465,6 @@ export async function getAutoPrintEnabled(): Promise<boolean> {
   }
 }
 
-/** S-F12: flag notifikasi server (toleran: objek apa adanya; absen = {}). */
-function parseNotifyFlags(pb: Record<string, unknown>): Record<string, unknown> {
-  const src = (pb.notifications ?? pb.notify ?? pb.notificationSettings ?? null) as Record<string, unknown> | null;
-  if (src && typeof src === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(src)) {
-      if (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string') out[k] = v;
-    }
-    return out;
-  }
-  return {};
-}
-
 /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
  * Parser toleran lokal (tanpa impor terminalApi — nol-risiko siklus):
  * top-level ATAU nested posBehaviorSettings/posBehavior/pb/paymentSettings/
@@ -518,16 +499,5 @@ export async function getRequirePaymentProof(): Promise<boolean> {
     return String(cur.required).trim().toLowerCase() === 'true';
   } catch {
     return false;
-  }
-}
-
-/** S-F12: baca flag notifikasi server ({} = BE lama / belum dikonfigurasi). */
-export async function getNotificationFlags(): Promise<Record<string, unknown>> {
-  try {
-    const cur = await getJSON<Record<string, unknown> | null>(NOTIFY_FLAGS_KEY, null);
-    if (!cur || typeof cur !== 'object') return {};
-    return cur;
-  } catch {
-    return {};
   }
 }
