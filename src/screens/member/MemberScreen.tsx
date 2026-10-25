@@ -263,14 +263,37 @@ async function persistMember(id: string, nama: string, noHp: string, email?: str
  * kunci `dep-…` bersama untuk ledger + fisik + light + direct
  * (direct-or-one-light). Light 'member-deposit' terpisah DIHAPUS — yang hidup
  * hanya light kind 'deposit-topup' (routing pathFor tak diubah agar antrean
- * warisan tetap terkuras). Selalu catat lokal dulu agar aman offline.
+ * warisan tetap terkuras).
+ *
+ * A-P1-3: SERVER DULU, tanpa saldo optimistis. Bump lokal (ms_member +
+ * ledger + fisik) HANYA bila direct posted. Gagal/offline = SATU light twin
+ * (kunci sama, idempoten) + item antrean sebagai flag pending (terlihat
+ * SyncScreen) + banner oleh pemanggil. Lokal-gagal-pasca-posted = twin
+ * pengaman (server 200 already-synced, tanpa kredit ganda).
  */
-async function persistDeposit(memberId: string, amount: number, via: string): Promise<void> {
+async function persistDeposit(memberId: string, amount: number, via: string): Promise<{ posted: boolean }> {
   // 'cepat' adalah label UI deposit cepat - kirim metode bayar yang dikenal server.
   const paymentMethod = via === 'cepat' ? 'Tunai' : via;
   // SATU kunci idempotensi untuk semua kanal tap ini.
   const key = newDepositKey();
-  // Lokal dulu: bump saldo + ledger (id = kunci bersama) + fisik SAJA.
+  // Direct dulu — bump lokal Ditunda hingga posted.
+  let posted = false;
+  try {
+    posted = (await postDepositOnce({ key, memberId, amount, method: paymentMethod, note: 'Deposit cepat Member' })).posted;
+  } catch {
+    posted = false;
+  }
+  if (!posted) {
+    try {
+      // Alias kanonis kontrak §5.2 (amount/paymentMethod) di samping kunci
+      // ringan lama (nominal/method) agar server ketat tetap memproses retry.
+      enqueueSync('other', { kind: 'deposit-topup', memberId, nominal: amount, method: paymentMethod, amount, paymentMethod, clientId: key }, key);
+    } catch {
+      /* abaikan */
+    }
+    return { posted: false };
+  }
+  // Posted: bump lokal + ledger + fisik SAJA.
   try {
     await initDb();
     await run('UPDATE ms_member SET depositBalance = COALESCE(depositBalance, 0) + ?, syncDate = NULL WHERE id = ?', [amount, memberId]);
@@ -294,7 +317,14 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
       [key, memberId, getTerminal().branchId || null, 'topup', amount, after, depUser, nowIso],
     );
   } catch {
-    /* abaikan - outbox + direct di bawah tetap jalan */
+    // Lokal gagal pasca-posted: twin pengaman berkunci-sama (tanpa kredit
+    // ganda), pemanggil menampilkan banner pending.
+    try {
+      enqueueSync('other', { kind: 'deposit-topup', memberId, nominal: amount, method: paymentMethod, amount, paymentMethod, clientId: key }, key);
+    } catch {
+      /* abaikan */
+    }
+    return { posted: false };
   }
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
@@ -307,23 +337,7 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
   } catch {
     /* abaikan */
   }
-  // Direct-or-one-light dengan kunci yang sama; light twin HANYA bila direct
-  // tak posted (offline/gagal/timeout).
-  let posted = false;
-  try {
-    posted = (await postDepositOnce({ key, memberId, amount, method: paymentMethod, note: 'Deposit cepat Member' })).posted;
-  } catch {
-    posted = false;
-  }
-  if (!posted) {
-    try {
-      // Alias kanonis kontrak §5.2 (amount/paymentMethod) di samping kunci
-      // ringan lama (nominal/method) agar server ketat tetap memproses retry.
-      enqueueSync('other', { kind: 'deposit-topup', memberId, nominal: amount, method: paymentMethod, amount, paymentMethod, clientId: key }, key);
-    } catch {
-      /* abaikan */
-    }
-  }
+  return { posted: true };
 }
 
 export default function MemberScreen({ navigation, route }: Props) {
@@ -775,10 +789,16 @@ export default function MemberScreen({ navigation, route }: Props) {
       }
       setDepositErr('');
       const mid = selected.id;
-      // SATU jalur tulis (persistDeposit): lokal + fisik + direct-or-one-light
-      // dengan satu kunci bersama. Blok ledger inline ganda DIHAPUS.
+      // A-P1-3: SATU jalur tulis (persistDeposit) server-dulu. Bump daftar/UI +
+      // riwayat + tutup modal HANYA bila posted; bila antre/offline, modal tetap
+      // terbuka dengan banner pending (tanpa saldo optimistis) — kredit server
+      // dijamin light twin berkunci-sama, flag pending terlihat di SyncScreen.
       // M1: tanpa earn poin lokal — poin milik loyalty server.
-      await persistDeposit(mid, n, 'cepat');
+      const res = await persistDeposit(mid, n, 'cepat');
+      if (!res.posted) {
+        setDepositErr(t('mem_topup_pending').replace('{n}', rp(n)));
+        return;
+      }
       setMembers((ms) =>
         ms.map((m) =>
           m.id === mid ? { ...m, saldo: m.saldo + n } : m,

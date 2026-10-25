@@ -1858,6 +1858,9 @@ const STR: Record<string, Entry> = {
   mem_pay_line: { id: 'Bayar {n} ({m})', en: 'Pay {n} ({m})' },
   mem_topup_full: { id: 'Top up deposit (Top Up)', en: 'Top up deposit (Full)' },
   mem_topup_quick: { id: 'Top up deposit (Cepat)', en: 'Top up deposit (Quick)' },
+  // A-P1-3: server belum posted — tanpa saldo optimistis; kredit dijamin twin
+  // berkunci-sama, flag pending terlihat di SyncScreen.
+  mem_topup_pending: { id: 'Top up {n} dicatat — menunggu server. Saldo diperbarui setelah terkirim.', en: 'Top up {n} recorded — waiting for server. Balance updates once delivered.' },
   mem_search_suffix: { id: ' - hasil "{q}"', en: ' - results for "{q}"' },
   mem_offline_note: { id: 'Offline - riwayat dari cache lokal, disinkron saat online.', en: 'Offline - history from local cache, syncs when online.' },
 
