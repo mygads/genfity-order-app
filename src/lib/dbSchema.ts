@@ -47,6 +47,10 @@ export const SCHEMA_STATEMENTS: string[] = [
     platformFee REAL DEFAULT 0, rounding REAL DEFAULT 0, grandTotal REAL DEFAULT 0,
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
+    -- customerId (ronde-3 trisisi Q1): ref member TUNGGAL = id GO (int).
+    -- memberId kini pointer ledger deposit turunan (MC{customerId}) atau
+    -- warisan baris lama; identitas member SELALU dibaca dari customerId.
+    customerId INTEGER,
     ongkir REAL DEFAULT 0,
     packaging REAL DEFAULT 0,
     status TEXT DEFAULT 'open', note TEXT, queueNumber TEXT, refNum TEXT,
@@ -252,6 +256,8 @@ export const MIGRATION_STATEMENTS: string[] = [
   // backfill menyalin salesNum (PK, unik). Gagal = sudah ada.
   `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
+  // Ronde-3 trisisi Q1: ref member GO untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE tr_saleshead ADD COLUMN customerId INTEGER',
   // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE ms_member ADD COLUMN email TEXT',
   // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =

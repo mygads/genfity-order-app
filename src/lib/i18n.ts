@@ -230,6 +230,12 @@ const STR: Record<string, Entry> = {
   mem_full_form: { id: 'Form Top Up Lengkap', en: 'Full Top Up Form' },
   mem_scan: { id: 'Pindai QR', en: 'Scan QR' },
   mem_voucher: { id: 'Voucher', en: 'Vouchers' },
+  // Ronde-3 trisisi member GO (Q3/Q4/Q5): info minimal + banner berubah + gate.
+  mem_go_points: { id: 'Poin', en: 'Points' },
+  mem_go_vouchers: { id: '{n} voucher valid', en: '{n} valid vouchers' },
+  mem_changed_banner: { id: 'Data member berubah, cek ulang', en: 'Member data changed, please re-check' },
+  mem_attach_needs_go: { id: 'Member belum terdaftar di server — cari lalu pilih hasil server sebelum ditempel.', en: 'Member is not registered on the server — search and pick a server result before attaching.' },
+  mem_lookup_disabled: { id: 'Pencarian member dimatikan merchant.', en: 'Member lookup is disabled by the merchant.' },
 
   // ---- voucher ----
   vou_title: { id: 'Voucher / Promo', en: 'Vouchers / Promos' },
