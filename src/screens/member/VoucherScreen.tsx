@@ -16,7 +16,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';import { apiFetch, claimOnlineVoucher, externalVoucher, unwrap, validateOnlineVoucher, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { initDb, query, queryFirst, run } from '../../lib/db';
-import { tOf, useLang } from '../../lib/i18n';
+import { tOf, useLang, tCur } from '../../lib/i18n';
 import { getCachedCurrency } from '../../lib/currency';
 import type { Lang } from '../../lib/i18n';
 import { verifyLocalEscalation } from '../../lib/supervisor';
@@ -230,7 +230,11 @@ export default function VoucherScreen({ navigation }: Props) {
             id: String(it.voucherId ?? it.id ?? `V${idx + 1}`),
             kode,
             nama: String(it.name ?? kode),
+<<<<<<< HEAD
             jenis: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
+=======
+            jenis: tCur('vou_kind_discount'),
+>>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
             nilai: Math.max(0, Math.round(Number(it.amount ?? 0) || 0)),
             minBelanja: 0,
             berlakuHingga: hingga,
@@ -385,10 +389,16 @@ export default function VoucherScreen({ navigation }: Props) {
     }
     navigation?.navigate('Cashier', {
       // U1: teruskan minSpend/rate/maxAmount agar totals.ts bisa pakai.
+      // S4: label jenis ikut currency cabang — totals.ts hanya baca
+      // 'Ongkir'/'%', jadi kind di sini inert, tapi label IDR salah di AUD.
       voucher: {
         code: kode,
         amount: Math.max(0, Math.round(amount)),
+<<<<<<< HEAD
         kind: t(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount'),
+=======
+        kind: tOf(getCachedCurrency().code === 'AUD' ? 'vou_kind_discount_aud' : 'vou_kind_discount', lang),
+>>>>>>> fdca68cb2e8d89f923c36c256419060e3af62830
         ...(opts?.minSpend ? { minSpend: opts.minSpend } : {}),
         ...(opts?.rate != null ? { rate: opts.rate } : {}),
         ...(opts?.maxAmount != null ? { maxAmount: opts.maxAmount } : {}),

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { getLang, useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
@@ -84,7 +83,6 @@ export default function LogScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [logs, setLogs] = useState<AppLog[]>([]);
   const [level, setLevel] = useState<(typeof levelFilters)[number]>('ALL');
   const [tag, setTag] = useState<(typeof tagFilters)[number]>('semua');
@@ -159,18 +157,12 @@ export default function LogScreen({ navigation }: Props) {
     return t('log.error');
   };
 
-  const go = (route: string) => navigation?.navigate(route);
-
   return (
     <View style={styles.root}>
       <ScreenHeader
         title={t('log.title')}
         sub={t('log.sub')}
-        left={
-          <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-            <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-          </TouchableOpacity>
-        }
+        onBack={() => navigation?.goBack()}
         right={
           <View style={styles.headBtns}>
             <Pressable onPress={exportLogs} hitSlop={8}>
@@ -182,7 +174,6 @@ export default function LogScreen({ navigation }: Props) {
           </View>
         }
       />
-      <DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
       <View style={styles.tabs}>
         {levelFilters.map((f) => (
           <Pressable key={f} onPress={() => setLevel(f)} style={[styles.tab, level === f && styles.tabActive]}>

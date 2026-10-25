@@ -47,7 +47,12 @@ export const SCHEMA_STATEMENTS: string[] = [
     platformFee REAL DEFAULT 0, rounding REAL DEFAULT 0, grandTotal REAL DEFAULT 0,
     paidAmount REAL DEFAULT 0, changeAmount REAL DEFAULT 0,
     paymentMethod TEXT, paymentType TEXT, memberId TEXT,
+    -- customerId (ronde-3 trisisi Q1): ref member TUNGGAL = id GO (int).
+    -- memberId kini pointer ledger deposit turunan (MC{customerId}) atau
+    -- warisan baris lama; identitas member SELALU dibaca dari customerId.
+    customerId INTEGER,
     ongkir REAL DEFAULT 0,
+    packaging REAL DEFAULT 0,
     status TEXT DEFAULT 'open', note TEXT, queueNumber TEXT, refNum TEXT,
     externalId TEXT, onlineOrderId TEXT, cashierName TEXT,
     createdAt TEXT, updatedAt TEXT, syncDate TEXT, printedCount INTEGER DEFAULT 0)`,
@@ -73,6 +78,15 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS tr_cancelmenu (
     id TEXT PRIMARY KEY, salesNum TEXT, client_id TEXT, menuId TEXT, menuName TEXT, qty REAL DEFAULT 0,
     reasonId TEXT, reasonNote TEXT, userId TEXT, cancelDate TEXT, syncDate TEXT)`,
+  // A5: jejak void-penuh lokal (LOCAL-ONLY, SENGAJA tanpa sync/outbox):
+  // head dinolkan saat void penuh sehingga nominal asli hilang dari ledger;
+  // arsip ini menyimpan snapshot-nya untuk audit kasir. Idempoten per salesNum
+  // (helper memakai INSERT OR REPLACE id `void-{salesNum}`).
+  `CREATE TABLE IF NOT EXISTS tr_voidtrail (
+    id TEXT PRIMARY KEY, salesNum TEXT, branchId TEXT,
+    grandTotal REAL DEFAULT 0, discount REAL DEFAULT 0, service REAL DEFAULT 0,
+    feeESB REAL DEFAULT 0, packaging REAL DEFAULT 0, tip REAL DEFAULT 0, ongkir REAL DEFAULT 0,
+    reasonId TEXT, reasonNote TEXT, userId TEXT, voidDate TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS tr_shiftlog (
     id TEXT PRIMARY KEY, branchId TEXT, terminalId TEXT, userId TEXT, shiftName TEXT,
     clockIn TEXT, clockOut TEXT, cashInDrawer REAL DEFAULT 0, totalSales REAL DEFAULT 0,
@@ -119,7 +133,7 @@ export const SCHEMA_STATEMENTS: string[] = [
     flagActive INTEGER DEFAULT 1, sortOrder INTEGER DEFAULT 0,
     voucherCategoryID TEXT, voucherSourceID TEXT, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_member (
-    id TEXT PRIMARY KEY, memberName TEXT, phone TEXT,
+    id TEXT PRIMARY KEY, memberName TEXT, phone TEXT, email TEXT,
     depositBalance REAL DEFAULT 0, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_voucher (
     id TEXT PRIMARY KEY, voucherCode TEXT, voucherName TEXT, amount REAL DEFAULT 0,
@@ -184,6 +198,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   // dengan shiftId lama tetap menempel (atribusi shift != tanggal nomor).
   `CREATE TABLE IF NOT EXISTS tr_sales_seq (
     terminalCode TEXT NOT NULL, ymd TEXT NOT NULL, lastN INTEGER DEFAULT 0,
+    deviceTag TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (terminalCode, ymd))`,
   // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
   // logika drain diimplementasikan lane printer belakangan (jangan drain di
@@ -202,6 +217,9 @@ export const SCHEMA_STATEMENTS: string[] = [
  */
 export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE tr_saleshead ADD COLUMN ongkir REAL DEFAULT 0',
+  // Kemasan per bill (A2): aditif untuk instalasi lama (gagal = sudah ada).
+  // Menempel pada bill cermin ongkir/tip — pindah item tak memindahkannya.
+  'ALTER TABLE tr_saleshead ADD COLUMN packaging REAL DEFAULT 0',
   'ALTER TABLE tr_salesvoucherusage ADD COLUMN voucherAmount REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashActual REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashDiff REAL DEFAULT 0',
@@ -239,4 +257,20 @@ export const MIGRATION_STATEMENTS: string[] = [
   // backfill menyalin salesNum (PK, unik). Gagal = sudah ada.
   `CREATE INDEX IF NOT EXISTS idx_saleshead_client ON tr_saleshead(client_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_saleshead_client_unique ON tr_saleshead(client_id)`,
+  // Ronde-3 trisisi Q1: ref member GO untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE tr_saleshead ADD COLUMN customerId INTEGER',
+  // A-P2-10: segmen device pada seq display untuk instalasi lama
+  // (gagal = sudah ada). Counter tetap per (terminalCode, ymd) — DB lokal
+  // per-device; tag device dicetak di nomor display agar dua device di
+  // terminal yang sama tak kembar saat sync (BE displayNo = string unik).
+  'ALTER TABLE tr_sales_seq ADD COLUMN deviceTag TEXT NOT NULL DEFAULT \'\'',
+  // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
+  'ALTER TABLE ms_member ADD COLUMN email TEXT',
+  // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
+  // idempoten; gagal = sudah ada).
+  `CREATE TABLE IF NOT EXISTS tr_voidtrail (
+    id TEXT PRIMARY KEY, salesNum TEXT, branchId TEXT,
+    grandTotal REAL DEFAULT 0, discount REAL DEFAULT 0, service REAL DEFAULT 0,
+    feeESB REAL DEFAULT 0, packaging REAL DEFAULT 0, tip REAL DEFAULT 0, ongkir REAL DEFAULT 0,
+    reasonId TEXT, reasonNote TEXT, userId TEXT, voidDate TEXT, syncDate TEXT)`,
 ];

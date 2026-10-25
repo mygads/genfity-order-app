@@ -306,6 +306,60 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
         /* lanjut kandidat berikut */
       }
     }
+    // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): user sesi kasir tak tercatat di
+    // ms_posuser (master user milik Go; kontrak pull-user belum ada — pull
+    // master tak membawa user, seed lokal hanya user demo). Sebelum menilai
+    // PIN salah, coba userId sesi aktif: pasca-login-staged-B, PIN milik sesi
+    // adalah identitas paling otoritatif. Import statis dilarang (session.ts
+    // mengimpor pin.ts — siklus); dynamic import hanya di jalur fallback ini
+    // (terbukti jalan di dev-client Hermes pada E2E HP).
+    try {
+      const { getSession, verifyGrantPin } = await import('../session');
+      const sess = getSession();
+      const sid = sess?.userId || sess?.username;
+      // HP-E2E-FIX-3 (2026-10-24): grant aktif DULU — hash PIN sesi login ini
+      // (staffPinHash) adalah pembanding paling otoritatif. Record
+      // loadPinRecord di-seed completeLogin di bawah kunci s.userId yang
+      // belum tentu sama dengan userId sesi berjalan ('2' vs email), sehingga
+      // cuma-coba-satu-sid BISA MISS walau PIN benar (terbukti di E2E HP:
+      // PIN sesi 5678 ditolak tutup-shift offline). verifyGrantPin tak
+      // membakar tally PIN (jalur terpisah) dan mengembalikan userId sesi
+      // yang cocok dengan baris absen U6 (userId ATAU cashierName).
+      try {
+        if (typeof verifyGrantPin === 'function' && verifyGrantPin(clean)) {
+          if (sid) {
+            pinAttempts = 0;
+            pinLockedUntil = 0;
+            return { ok: true, userId: sid };
+          }
+        }
+      } catch {
+        /* lanjut ke kandidat record di bawah */
+      }
+      for (const cand of [sess?.userId, sess?.username]) {
+        if (!cand || cand === sid) continue;
+        try {
+          const rec = await loadPinRecord(cand);
+          if (rec && verifyPinHash(clean, rec)) {
+            pinAttempts = 0;
+            pinLockedUntil = 0;
+            return { ok: true, userId: cand };
+          }
+        } catch {
+          /* lanjut kandidat berikut */
+        }
+      }
+      if (sid) {
+        const rec = await loadPinRecord(sid);
+        if (rec && verifyPinHash(clean, rec)) {
+          pinAttempts = 0;
+          pinLockedUntil = 0;
+          return { ok: true, userId: sid };
+        }
+      }
+    } catch {
+      /* lanjut ke penilaian PIN-salah di bawah */
+    }
     // R34 CLOSED (2026-10-17): cabang plaintext legacy + auto-upgrade
     // DIHAPUS. Kolom pembanding kini selalu NULL (migrasi satu-kali
     // migrateLegacyPinColumns di lib/seed.ts + upsert master.ts yang

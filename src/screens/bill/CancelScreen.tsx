@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong.
+import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { archiveVoidTrail } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { resolveCancelReasonPresets } from '../../lib/cancelReasons';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';import { postTableTransition } from '../../lib/terminalTable';import { releaseVoucherAtTerminal } from '../../lib/terminalVoucher';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong.
  * Tip SENGAJA tak ikut: order-level, menempel pada bill seperti ongkir —
  * void sebagian melestarikan tip (grand baru = grand lama − gross void). */
 async function loadHeadAdj(salesNum: string): Promise<{ discount: number; service: number; tax: number }> {
@@ -165,19 +165,57 @@ async function applyVoidLocal(
   const newGrand = Math.max(0, oldGrand - voidedGross);
   const fullVoid = restGross <= 0 || newGrand <= 0;
   if (fullVoid) {
+    // A5: arsip jejak lokal SEBELUM head dinolkan (audit kasir; LOCAL-ONLY,
+    // tanpa sync). Jalur History (persistVoidDb, milik W2) belum mengarsip —
+    // W2 cukup memanggil archiveVoidTrail yang sama sebelum UPDATE-nya.
+    try {
+      const snap = await queryFirst<{
+        branchId: string | null; grandTotal: number | null; discount: number | null;
+        serviceCharge: number | null; platformFee: number | null; packaging: number | null;
+        tip: number | null; ongkir: number | null;
+      }>(
+        `SELECT branchId, grandTotal, discount, serviceCharge, platformFee, packaging, tip, ongkir
+         FROM tr_saleshead WHERE salesNum = ? LIMIT 1`,
+        [orderId],
+      );
+      if (snap) {
+        await archiveVoidTrail({
+          salesNum: orderId,
+          branchId: snap.branchId,
+          grandTotal: snap.grandTotal,
+          discount: snap.discount,
+          service: snap.serviceCharge,
+          feeESB: snap.platformFee,
+          packaging: snap.packaging,
+          tip: snap.tip,
+          ongkir: snap.ongkir,
+          reasonId: reason,
+          userId: userId || null,
+          voidDate: now,
+        });
+      }
+    } catch {
+      /* abaikan: arsip best-effort, void tetap jalan */
+    }
     await run('UPDATE tr_saleshead SET status = ?, grandTotal = ?, updatedAt = ?, syncDate = NULL WHERE salesNum = ?', ['void', 0, now, orderId]);
     // Balikan void penuh (cermin persistVoidDb History G7): kuota kembali
     // HANYA untuk kode yang benar-benar terbakar (usage 'burn', head + kaki
     // tender); deposit kembali + ledger refund; dapur Batal.
     try {
-      const burned = await query<{ voucherCode: string | null }>(
-        `SELECT DISTINCT voucherCode FROM tr_salesvoucherusage
-         WHERE salesNum = ? AND status = 'burn'`,
+      const burned = await query<{ voucherCode: string | null; clientId: string | null }>(
+        `SELECT voucherCode, MAX(client_id) AS clientId FROM tr_salesvoucherusage
+         WHERE salesNum = ? AND status = 'burn' GROUP BY voucherCode`,
         [orderId],
       );
       for (const b of burned) {
         const code = String(b.voucherCode ?? '').trim();
         if (!code) continue;
+        // A12: lepas voucher di server terminal (best-effort; kuota lokal di
+        // bawah tetap pulih). Kunci idempotency = milik burn (lookup helper).
+        void releaseVoucherAtTerminal({
+          orderClientId: String(b.clientId ?? orderId),
+          code,
+        });
         try {
           await run(
             `UPDATE ms_voucher SET quota = quota + 1, status = 'available', syncDate = NULL
@@ -265,6 +303,9 @@ async function applyVoidLocal(
         } catch {
           /* abaikan */
         }
+        // A11: bebaskan meja di server terminal (best-effort; jalur lokal di
+        // atas + antrean sync tetap jadi fallback offline).
+        void postTableTransition({ tableRef: head.tableNo, status: 'AVAILABLE' });
       }
     } catch {
       /* abaikan */
@@ -359,8 +400,23 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   /** Total resmi pemanggil; 0 bila tak ada (mock 86400 tak lagi dipakai). */
   const paramTotal = Math.max(0, Math.round(Number(route?.params?.total) || 0));
   /** Live-only: mulai kosong (tanpa mock); DB kosong = empty-state, bukan fallback mock. */ const [items, setItems] = useState<CancelItem[]>([]); const [voidQty, setVoidQty] = useState<Record<string, number>>({}); const [loaded, setLoaded] = useState(false); /** Penyesuaian head untuk sisa NET U7. */ const [headAdj, setHeadAdj] = useState({ discount: 0, service: 0, tax: 0 }); /** Muat baris live tr_salesmenu; kosong/tanpa orderId = tetap [] + tandai loaded. */ useEffect(() => { let alive = true; if (!orderId) { setItems([]); setVoidQty({}); setHeadAdj({ discount: 0, service: 0, tax: 0 }); setLoaded(true); return () => { alive = false; }; } void Promise.all([loadSaleItems(orderId), loadHeadAdj(orderId)]).then(([rows, adj]) => { if (!alive) return; setItems(rows); const zero: Record<string, number> = {}; for (const r of rows) zero[r.id] = 0; setVoidQty(zero); setHeadAdj(adj); setLoaded(true); }); return () => { alive = false; }; }, [orderId]);
-  const REASONS = [t('cx_reason_1'), t('cx_reason_2'), t('cx_reason_3'), t('cx_reason_4')];
-  const [reason, setReason] = useState(REASONS[0]);
+  const FALLBACK_REASONS = [t('cx_reason_1'), t('cx_reason_2'), t('cx_reason_3'), t('cx_reason_4')];
+  const [reason, setReason] = useState(FALLBACK_REASONS[0]);
+  /** #5: preset alasan server (merchant-truth). null = belum tahu /
+   * offline-tanpa-cache → fallback hardcoded di bawah lestari. */
+  const [serverReasons, setServerReasons] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    resolveCancelReasonPresets().then(({ names, fromServer }) => {
+      if (!alive || !fromServer) return;
+      setServerReasons(names);
+      // Ganti default awal dengan preset server pertama — TAPI hormati
+      // pilihan kasir bila sudah diubah manual sebelum fetch tiba.
+      setReason((prev) => (prev === FALLBACK_REASONS[0] && !names.includes(prev) ? (names[0] ?? '') : prev));
+    }).catch(() => { /* offline: fallback hardcoded */ });
+    return () => { alive = false; };
+  }, [orderId]);
+  const REASONS = serverReasons ?? FALLBACK_REASONS;
   const [note, setNote] = useState('');
   const [approveOpen, setApproveOpen] = useState(false);
   const [authMsg, setAuthMsg] = useState(''); const [done, setDone] = useState(false);
@@ -432,6 +488,9 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
           <Text style={[styles.reasonT, reason === r && styles.reasonTOn]}>{r}</Text>
         </TouchableOpacity>
       ))}
+      {serverReasons !== null && serverReasons.length === 0 ? (
+        <Text style={styles.hint}>{t('cx_server_empty')}</Text>
+      ) : null}
       <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
       {/* S7: PIN + identitas supervisor pindah ke SupervisorApprovalDialog. */}
 

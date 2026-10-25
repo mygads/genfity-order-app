@@ -5,9 +5,10 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { nextSalesNum, getGroupPaid } from '../../lib/sales';
 import { itemTotal, type CartItem } from './CashierScreen';
+import { parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 
@@ -21,9 +22,13 @@ type SplitParams = {
   table?: string;
   customer?: string;
   memberId?: string;
+  /** Ronde-3 Q1: customerId GO (int) — diteruskan ke Pay. */
+  customerId?: number;
   ongkir?: number;
   /** Porsi voucher atas ongkir (diteruskan ke Pay → saveSale info audit). */
   ongkirCut?: number;
+  /** Biaya kemasan order (diteruskan ke Pay → saveSale ledger lokal). */
+  packaging?: number;
   /** Id penyetuju eskalasi (diteruskan ke Pay → saveSale info audit). */
   approvedBy?: string;
   voucher?: VoucherParam;
@@ -138,10 +143,20 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const [groupPaid, setGroupPaid] = useState({ paidTotal: 0, grandTotal: 0, fullyPaid: false, payCount: 0 });
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11) untuk rumus kanonik. */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
       if (alive) setTaxRate(r);
+    });
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep().then((s) => {
+      if (alive) setRoundStep(s);
     });
     return () => {
       alive = false;
@@ -163,6 +178,30 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const table = asText(params.table);
   const customer = asText(params.customer);
   const memberId = asText(params.memberId);
+  /** Ronde-3 Q1: ref GO — dibawa ke Pay tiap kunjungan. */
+  const customerId = parseCustomerId(params.customerId);
+  /** Biaya kemasan: params pemanggil menang; tanpa params = info merchant
+   * per mode (cermin CartDetail/DineIn). */
+  const [packagingFee, setPackagingFee] = useState(() => Math.max(0, Math.round(Number(params.packaging) || 0)));
+  useEffect(() => {
+    const fromCaller = Number(params.packaging);
+    if (Number.isFinite(fromCaller) && fromCaller > 0) {
+      setPackagingFee(Math.max(0, Math.round(fromCaller)));
+      return;
+    }
+    if (params.packaging != null) {
+      setPackagingFee(0);
+      return;
+    }
+    let alive = true;
+    void getPackagingFee(mode).then((v) => {
+      if (alive) setPackagingFee(v);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, params.packaging]);
 
   // Voucher order: objek kasir {code, kind, amount}, string kode (kontrak Pay), atau nominal.
   const voucherParam = params.voucher as VoucherParam;
@@ -200,9 +239,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const itemSum = itemSplits.reduce((s, v) => s + v, 0);
 
   // Rumus kanonik kasir/CartDetail (src/lib/totals.ts): voucher dibatasi nilai
-  // item (flat atau persen sebelum service/pajak), service 5% dari net,
-  // pajak inclusive info-only (setting-driven via taxRate, default 11),
-  // feeESB 5% utk agregator, bulat Rp 100.
+  // item (flat atau persen sebelum service/pajak), service server-driven
+  // (audit #1; legacy 5% dari net), pajak inclusive info-only (setting-driven
+  // via taxRate, default 11), feeESB 5% utk agregator, kemasan nominal per
+  // mode, bulat Go-lane step server (legacy Rp 100).
   const canon = totals({
     gross: itemSum,
     discount: asAmount(params.discount),
@@ -213,8 +253,14 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(voucherMin != null ? { minSpend: voucherMin } : {}),
     },
     ongkir: ongkirParam,
+    packaging: packagingFee,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
+    serviceEnabled: svcCfg.enabled,
+    serviceType: svcCfg.type,
+    serviceRate: svcCfg.rate,
+    serviceFixed: svcCfg.fixed,
+    ...(roundStep != null ? { roundStep } : {}),
   });
   // L8: representasi voucher — `discount` INCLUDES voucher, `voucher.amount`
   // adalah SUBSET porsi voucher untuk pelaporan; pembaca (Pay/saveSale)
@@ -224,12 +270,18 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const discountEff = Math.min(asAmount(params.discount), Math.max(0, itemSum - canon.voucherAmt));
   const serviceEff = params.service !== undefined ? asAmount(params.service) : canon.service;
   const feeEff = canon.feeESB;
+  // Kemasan menempel pada order (bukan item): tak diprorata per porsi item,
+  // melainkan dibagi rata per bill cermin ongkir (residual tetap dilipat ke
+  // ongkirEff agar jumlah per bill pas dengan total pemanggil).
+  const pkgEff = canon.packaging;
   // Total dari pemanggil adalah angka resmi (sudah mencakup service/ongkir/voucher/fee).
   const orderTotal = Math.max(0, Math.round(Number(params.total) || canon.total));
   // Pemanggil lama hanya kirim {items, total} tanpa rincian ongkir/voucher -
   // selisih tak membulat (termasuk pembulatan pemanggil) dilipat ke share
-  // ongkir agar jumlah per bill tetap pas dengan total.
-  const residual = orderTotal - (itemSum - canon.voucherAmt - discountEff + serviceEff + canon.ongkirNet + feeEff);
+  // ongkir agar jumlah per bill tetap pas dengan total. pkgEff dikurangkan
+  // di sini agar kemasan tak terhitung ganda (sudah dibagi eksplisit via
+  // pkgShares di bawah).
+  const residual = orderTotal - (itemSum - canon.voucherAmt - discountEff + serviceEff + canon.ongkirNet + feeEff + pkgEff);
   const ongkirEff = Math.max(0, canon.ongkirNet + residual);
   const voucherEff = canon.voucherAmt + Math.max(0, -(canon.ongkirNet + residual));
   // L24 (display saja; matematika charge di atas tak berubah): residual
@@ -240,9 +292,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const roundingShown = canon.rounding + residual;
 
   // Reaporsi tiap komponen: perItem proporsional itemSplit; rata/nominal bobot
-  // sama agar share ongkir/voucher/diskon/fee/pajak tetap diteruskan ke Pay.
+  // sama agar share ongkir/voucher/diskon/fee/pajak/kemasan tetap diteruskan ke Pay.
   // Jumlah per-bill mode perItem = orderTotal persis (matematika bayar tak berubah).
-  const { billTotals, voucherShares, discountShares, serviceShares, ongkirShares, feeShares, taxShares } = useMemo(() => {
+  const { billTotals, voucherShares, discountShares, serviceShares, ongkirShares, feeShares, taxShares, pkgShares } = useMemo(() => {
     const weights = splitMode === 'perItem' ? itemSplits : Array(splits).fill(1);
     const base = splitMode === 'perItem' ? itemSum : splits;
     const v = splitShare(voucherEff, weights, base);
@@ -251,11 +303,12 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     const o = splitShare(ongkirEff, weights, base);
     const f = splitShare(feeEff, weights, base);
     const tx = splitShare(canon.taxIncl, weights, base);
+    const pk = splitShare(pkgEff, weights, base);
     const totals = itemSplits.map((it, i) =>
-      Math.max(0, it - (v[i] as number) - (d[i] as number) + (s[i] as number) + (o[i] as number) + (f[i] as number)),
+      Math.max(0, it - (v[i] as number) - (d[i] as number) + (s[i] as number) + (o[i] as number) + (f[i] as number) + (pk[i] as number)),
     );
-    return { billTotals: totals, voucherShares: v, discountShares: d, serviceShares: s, ongkirShares: o, feeShares: f, taxShares: tx };
-  }, [itemSplits, itemSum, voucherEff, discountEff, serviceEff, ongkirEff, feeEff, canon.taxIncl, splitMode, splits]);
+    return { billTotals: totals, voucherShares: v, discountShares: d, serviceShares: s, ongkirShares: o, feeShares: f, taxShares: tx, pkgShares: pk };
+  }, [itemSplits, itemSum, voucherEff, discountEff, serviceEff, ongkirEff, feeEff, pkgEff, canon.taxIncl, splitMode, splits]);
 
   // Mode rata: total dibagi sama besar, sisa pembulatan masuk bill terakhir.
   const rataBase = splits > 0 ? Math.floor(orderTotal / splits) : 0;
@@ -317,6 +370,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(table ? { table } : {}),
       ...(customer ? { customer } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
       ...(ongkirEff > 0 ? { ongkir: ongkirEff } : {}),
       ...(ongkirCutParam > 0 ? { ongkirCut: ongkirCutParam } : {}),
       ...(approvedBy ? { approvedBy } : {}),
@@ -324,6 +378,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
       ...(discountEff > 0 ? { discount: discountEff } : {}),
       ...(serviceEff > 0 ? { service: serviceEff } : {}),
       ...(feeEff > 0 ? { feeESB: feeEff } : {}),
+      ...(pkgEff > 0 ? { packaging: pkgEff } : {}),
       ...(canon.taxIncl > 0 ? { tax: canon.taxIncl } : {}),
     });
   };
@@ -427,7 +482,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           )}
           {serviceEff > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>{t('serviceExcl')}</Text>
+              <Text style={styles.metaL}>{serviceLabel(t, svcCfg)}</Text>
               <Text style={styles.metaV}>+{rp(serviceEff)}</Text>
             </View>
           )}
@@ -443,7 +498,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
           </View>
           {feeEff > 0 && (
             <View style={styles.metaRow}>
-              <Text style={styles.metaL}>{t('feeESB')}</Text>
+              <Text style={styles.metaL}>{platformFeeLabel(t)}</Text>
               <Text style={styles.metaV}>+{rp(feeEff)}</Text>
             </View>
           )}
@@ -548,14 +603,20 @@ export default function SplitBillScreen({ navigation, route }: Props) {
                 </View>
                 {serviceEff > 0 && (
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaL}>{t('serviceExcl')}</Text>
+                    <Text style={styles.metaL}>{serviceLabel(t, svcCfg)}</Text>
                     <Text style={styles.metaV}>+{rp(serviceShares[i] as number)}</Text>
                   </View>
                 )}
                 {feeEff > 0 && (
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaL}>{t('feeESB')}</Text>
+                    <Text style={styles.metaL}>{platformFeeLabel(t)}</Text>
                     <Text style={styles.metaV}>+{rp(feeShares[i] as number)}</Text>
+                  </View>
+                )}
+                {pkgEff > 0 && (
+                  <View style={styles.metaRow}>
+                    <Text style={styles.metaL}>{t('packaging')}</Text>
+                    <Text style={styles.metaV}>+{rp(pkgShares[i] as number)}</Text>
                   </View>
                 )}
                 {ongkirEff > 0 && (

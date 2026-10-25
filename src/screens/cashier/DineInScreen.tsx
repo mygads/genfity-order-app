@@ -5,9 +5,11 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
-import { TAX_DEFAULT, defaultOngkirForMode, getTaxRate, isMarketplaceMode, totals, voucherExtras } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
+import { parseCustomerId } from '../../lib/memberRef';
 import { nextSalesNum } from '../../lib/sales';
 import { unitPrice, type CartItem } from './CashierScreen';
 
@@ -21,8 +23,11 @@ type Props = {
       mode?: string;
       items?: CartItem[];
       ongkir?: number;
+      packaging?: number;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) — diteruskan rantai ke Pay. */
+      customerId?: number;
       voucher?: Voucher;
     };
   };
@@ -81,17 +86,50 @@ export default function DineInScreen({ navigation, route }: Props) {
       : (MODES[0] ?? 'DINE IN'),
   );
   const [memberId] = useState(route?.params?.memberId ?? '');
+  /** Ronde-3 Q1: ref GO read-only (cermin memberId di atas). */
+  const [customerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
+  /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
+   * Go-lane (audit #3): legacy 5% / step 100 sampai pull server terbaca. */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  const [roundStep, setRoundStep] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     void getTaxRate().then((r) => {
       if (alive) setTaxRate(r);
     });
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    void getRoundStep(getCachedCurrency().code).then((s) => {
+      if (alive) setRoundStep(s);
+    });
     return () => {
       alive = false;
     };
   }, []);
+  /** Biaya kemasan: params pemanggil menang; tanpa params = info merchant
+   * per mode saat ini (mode bisa diganti di layar ini). */
+  const [packagingFee, setPackagingFee] = useState(Math.max(0, Math.round(Number(route?.params?.packaging) || 0)));
+  useEffect(() => {
+    const fromCaller = Number(route?.params?.packaging);
+    if (Number.isFinite(fromCaller) && fromCaller > 0) {
+      setPackagingFee(Math.max(0, Math.round(fromCaller)));
+      return;
+    }
+    if (route?.params?.packaging != null) {
+      setPackagingFee(0);
+      return;
+    }
+    let alive = true;
+    void getPackagingFee(mode).then((v) => {
+      if (alive) setPackagingFee(v);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mode, route?.params?.packaging]);
 
   /** Bill meja ini - diambil dari cart kasir via params, bukan hardcode. */
   const billItems: CartItem[] = route?.params?.items ?? [];
@@ -99,7 +137,7 @@ export default function DineInScreen({ navigation, route }: Props) {
   /** Voucher dari kasir/promo - diteruskan ke helper agar setara Cashier. */
   const voucher: Voucher | null = route?.params?.voucher ?? null;
   const ongkir = Math.max(0, route?.params?.ongkir ?? defaultOngkirForMode(route?.params?.mode));
-  /** Kanonis via helper: voucher ongkir/persen/flat, service 5%, pajak incl info-only (setting, default 11), rounding 100. */
+  /** Kanonis via helper: voucher ongkir/persen/flat, service server-driven (legacy 5%), pajak incl info-only (setting, default 11), rounding Go-lane step server. */
   const subtotalGross = active.reduce((s, c) => s + unitPrice(c) * c.qty, 0);
   const discountTotal = active.reduce((s, c) => s + c.discount, 0);
   const {
@@ -113,13 +151,20 @@ export default function DineInScreen({ navigation, route }: Props) {
     total,
     rounding,
     feeESB,
+    packaging,
   } = totals({
     gross: subtotalGross,
     discount: discountTotal,
     ongkir,
+    packaging: packagingFee,
     voucher: voucher ?? undefined,
     esbOrder: isMarketplaceMode(mode),
     taxRate,
+    serviceEnabled: svcCfg.enabled,
+    serviceType: svcCfg.type,
+    serviceRate: svcCfg.rate,
+    serviceFixed: svcCfg.fixed,
+    ...(roundStep != null ? { roundStep } : {}),
   });
   const useOngkirCut = (voucher?.kind === 'Ongkir' || voucher?.code === 'GRATISONGKIR') && ongkir > 0;
   /** Alias lama agar sisa render tetap jalan. */
@@ -160,6 +205,7 @@ export default function DineInScreen({ navigation, route }: Props) {
           ...(num ? { salesNum: num } : {}),
           ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
           ...(memberId ? { memberId } : {}),
+          ...(customerId != null ? { customerId } : {}),
           ...(guest.trim() ? { customer: guest.trim() } : {}),
         },
       });
@@ -186,8 +232,10 @@ export default function DineInScreen({ navigation, route }: Props) {
         // cut tak terhitung. Extras rate/cap/minSpend wajib agar persen
         // tak jadi flat / minSpend tak hilang di split.
         ...(ongkir > 0 ? { ongkir } : {}),
+        ...(packaging > 0 ? { packaging } : {}),
         ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
         ...(memberId ? { memberId } : {}),
+        ...(customerId != null ? { customerId } : {}),
         discount: discountTotal + voucherAmt,
       });
     })();
@@ -205,14 +253,17 @@ export default function DineInScreen({ navigation, route }: Props) {
       // struk terbaca lunas).
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(ongkirCut > 0 ? { ongkirCut } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       unpaid: true,
       // Rincian info-only agar baris struk pas dengan total (service/pajak/fee/pembulatan).
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
     });
   // Rantai Pay (kontrak PayScreen): total penuh + items/mode/table/ongkir/voucher/customer/memberId
   // + diskon belanja + rincian info-only agar Pay teruskan ke Success > Receipt.
@@ -231,9 +282,11 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
+      ...(packaging > 0 ? { packaging } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
+      ...(customerId != null ? { customerId } : {}),
     });
 
   return (
@@ -334,9 +387,14 @@ export default function DineInScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>Voucher {voucher.code}</Text><Text style={[styles.disc, isTablet && styles.priceBig]}>-{rp(voucherAmt)}</Text></View>
         )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('taxIncl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(taxIncl)}</Text></View>
-        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('serviceExcl')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
+        {service > 0 && (
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{serviceLabel(t, svcCfg)}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(service)}</Text></View>
+        )}
         {feeESB > 0 && (
-          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('feeESB')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{platformFeeLabel(t)}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(feeESB)}</Text></View>
+        )}
+        {packaging > 0 && (
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('packaging')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(packaging)}</Text></View>
         )}
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemBig]}>{t('deliveryFee')}</Text><Text style={[styles.price, isTablet && styles.priceBig]}>{rp(ongkirNet)}</Text></View>
         {voucher && useOngkirCut && (

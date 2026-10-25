@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -67,6 +67,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   const [confirmCancel, setConfirmCancel] = useState(false);
   /** Peringatan batal meja (mis. masih ada bill terbuka) - tampil di modal detail. */
   const [cancelWarn, setCancelWarn] = useState('');
+  /** Banner konflik server (A11): 409 kapasitas transisi → teks tbl.tableConflict. */
+  const [serverNote, setServerNote] = useState('');
   const [bookingVisible, setBookingVisible] = useState(false);
   const [namaBooking, setNamaBooking] = useState('');
   const [jamBooking, setJamBooking] = useState('');
@@ -97,11 +99,26 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       on = false;
     };
   }, []);
+  // A11: banner konflik server-menang (persist antar-buka; dibersihkan saat
+  // transisi AVAILABLE sukses berikutnya).
+  useEffect(() => {
+    let on = true;
+    void (async () => {
+      try {
+        const v = await getJSON<string>(TABLE_SERVER_NOTE_KEY, '');
+        if (on && v) setServerNote(v);
+      } catch {
+        /* abaikan */
+      }
+    })();
+    return () => {
+      on = false;
+    };
+  }, []);
   // F2: sumber utama = persist TableTimer (elapsed per nomor meja, tick 10 dtk);
   // fallback = snapshot lama SEATED_KEY agar durasi lama tak hilang.
   useEffect(() => { let on = true; (async () => { let byNo: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const no = canonTableNo(String(x?.id ?? '')); if (no && Number.isFinite(el) && el >= 0) byNo[no] = el; } } } catch { /* abaikan: pakai fallback */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } if (!on) return; setTables((list) => list.map((tb) => tb.status === 'terisi' || tb.status === 'gabung' ? { ...tb, seatedMin: byNo[normNo(tb.no)] ?? saved[tb.id] ?? tb.seatedMin } : tb, ), ); })().catch(() => undefined); return () => { on = false; }; }, []);
-  // Live: denah dari ms_table (id, tableNo, sectionId, capacity, status) pola
-  // MoveTableScreen; DB kosong = daftar kosong (empty-state di grid).
+  // Live: denah dari ms_table (id, tableNo, sectionId, capacity, status) pola  // MoveTableScreen; DB kosong = daftar kosong (empty-state di grid).
   useEffect(() => { let on = true; (async () => { try { await initDb(); const rows = await query<MsTableRow>('SELECT id, tableNo, sectionId, capacity, status FROM ms_table LIMIT 60'); if (!on) return; if (rows.length === 0) { setTables([]); setLiveSections(['Semua']); return; } const byNo = new Map<string, Table>(); let byTim: Record<string, number> = {}; try { const tim = await getJSON<TimerStoreRow[]>(TABLE_TIMER_TIM_KEY, []); if (Array.isArray(tim)) { for (const x of tim) { const el = Number(x?.elapsed); const k = canonTableNo(String(x?.id ?? '')); if (k && Number.isFinite(el) && el >= 0) byTim[k] = el; } } } catch { /* abaikan */ } let saved: Record<string, number> = {}; try { saved = await getJSON<Record<string, number>>(SEATED_KEY, {}); } catch { /* abaikan */ } const liveTables: Table[] = rows.map((r) => { const no = normNo(String(r.tableNo || r.id || '')); const fb = byNo.get(no); const st = mapBeStatus(r.status); const tb: Table = { id: String(r.id), no, section: String(r.sectionId || fb?.section || ''), kapasitas: Number(r.capacity) || fb?.kapasitas || 0, status: st }; if (st === 'terisi' || st === 'gabung') { const m = byTim[normNo(no)] ?? saved[String(r.id)]; if (m !== undefined) tb.seatedMin = m; } return tb; }); if (!on) return; setTables(liveTables); const secs: string[] = []; for (const tb of liveTables) { if (tb.section && !secs.includes(tb.section)) secs.push(tb.section); } setLiveSections(['Semua', ...secs]); } catch { /* SQLite belum siap - fallback konstanta tetap tampil */ } })().catch(() => undefined); return () => { on = false; }; }, []);
   // Timer durasi: tiap menit tambah 1 menit utk meja terisi/gabung + simpan snapshot.
   // Cermin ke store TableTimer via max-merge (monoton naik, anti-mundur) agar
@@ -138,6 +155,14 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     setSelected(tb);
     setMoveMode(null);
     setConfirmCancel(false);
+    // A11: segarkan banner konflik (bisa diset layar kasir saat duduki).
+    void (async () => {
+      try {
+        setServerNote(await getJSON<string>(TABLE_SERVER_NOTE_KEY, ''));
+      } catch {
+        /* abaikan */
+      }
+    })();
   };
 
   const closeModal = () => {
@@ -282,6 +307,12 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         ),
       );
       queueTableOp('table-clear', { table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
+      // A11: kosongkan meja di server terminal (best-effort; antrean sync di
+      // atas tetap jadi fallback offline; sukses AVAILABLE membersihkan banner).
+      void postTableTransition({ tableRef: no, status: 'AVAILABLE' }).then((h) => {
+        if (h.conflict === 'capacity') setServerNote('capacity');
+        else if (h.posted) setServerNote('');
+      });
       // F2: nolkan entri timer agar durasi tak terbaca basi (best-effort).
       void writeTimerStore(no, 0);
     })();
@@ -607,6 +638,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
                   </View>
                 )}
                 {cancelWarn ? <Text style={s.warn}>{cancelWarn}</Text> : null}
+                {serverNote === 'capacity' ? <Text style={s.warn}>{t('tbl.tableConflict')}</Text> : null}
                 <TouchableOpacity
                   style={s.cancelBtn}
                   onPress={closeModal}>

@@ -5,7 +5,16 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync } from '../../lib/sync';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
+  cashCloseBe,
+  clockOutBe,
+  clockOutPayload,
+  flushPendingCashCloses,
+  getCashSessionId,
+  recordPendingCashClose,
+  setPendingReviewSid,
+  shouldQueueW1,
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';type Props = { navigation?: any };interface ShiftSummary { openId: string | null; modalAwal: number; penjualanTunai: number; pengeluaran: number; pemasukan: number; fromDb: boolean;}const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0;};
 
 /** Tutup shift: hitung kas seharusnya dari SQLite, cocokkan dengan kas fisik. */export default function EndShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -99,8 +108,73 @@ import React, { useEffect, useState } from 'react';import {
     if (!shiftId) { setError(t('endshift_no_open')); return; }
     try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); }
     // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16), dibatasi cabang aktif.
-    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ } setPinVisible(false);
+    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ }
+    // W1 (SESI-FIX-APPW1): cermin clock-out + tutup sesi kas ke BE — immediate-
+    // first fire-and-forget SETELAH lokal menang di atas. Clock-out offline/
+    // error = antrekan op be-clock-out. Tutup-kas offline/error/OPEN_POS_ORDERS
+    // = catat pending-close + flush (diulang eksplisit, tahan order-belum-lunas;
+    // drain sync mengalihkan 409 OPEN_POS_ORDERS ke sini juga). 4xx lain =
+    // error jujur. PIN tak pernah ikut.
+    void (async () => {
+      try {
+        const co = await clockOutBe();
+        if (co.ok) {
+          // HP-E2E-FIX-2: clock-out tercatat di server = kontak sukses
+          // (gate E00044 membaca lastSyncMs modul sync).
+          try { noteServerContact(); } catch { /* abaikan */ }
+        } else if (shouldQueueW1(co)) {
+          try {
+            enqueueSync('other', clockOutPayload());
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* abaikan */
+      }
+      try {
+        const sid = await getCashSessionId();
+        // Tanpa sesi kas server = tak ada yang ditutup (mis. buka offline yang
+        // belum terkirim — drain open dulu via FIFO, tutup menyusul).
+        if (!sid) return;
+        const close = await cashCloseBe(sid, kasFisikNum, catatan.trim() || undefined);
+        if (close.ok) {
+          // HP-E2E-FIX-2: tutup-kas tercatat di server = kontak sukses.
+          try { noteServerContact(); } catch { /* abaikan */ }
+        }
+        if (!close.ok) {
+          const keepPending = close.reason === 'offline' || close.reason === 'error' ||
+            (close.reason === 'rejected' && close.code === 'OPEN_POS_ORDERS');
+          if (keepPending) {
+            await recordPendingCashClose({
+              sessionId: sid,
+              actualCash: Math.max(0, Math.round(kasFisikNum)),
+              note: catatan.trim() ? catatan.trim().slice(0, 500) : null,
+              at: new Date().toISOString(),
+            });
+          }
+        } else if (close.data.pendingManagerReview) {
+          // Sesi butuh review manager kedua: stash sid agar ShiftScreen
+          // menampilkan kartu approve (transport cashApproveBe + drain W1).
+          try {
+            await setPendingReviewSid(close.data.sessionId);
+          } catch {
+            /* abaikan */
+          }
+        }
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await flushPendingCashCloses();
+      } catch {
+        /* abaikan */
+      }
+    })();
+    setPinVisible(false);
     setPin('');
+    // HP-E2E-FIX-HEADER: shift lokal tertutup → guard App hitung ulang.
+    try { notifyShiftChanged(); } catch { /* abaikan */ }
     navigation?.navigate?.('Shift');
   };
 

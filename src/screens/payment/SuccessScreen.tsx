@@ -5,12 +5,16 @@ import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 import { getSession } from '../../session';
 import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
 import { getGroupPaid } from '../../lib/sales';
+import { getSettleMemberView, takeMemberChanged } from '../../lib/memberChangedStore';
 import { enqueueSync } from '../../lib/sync';
+import { postTableTransition } from '../../lib/terminalTable';
+import { getAutoPrintEnabled } from '../../lib/posConfigSync';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -30,7 +34,7 @@ type Props = {
       voucherCode?: string; approvalCode?: string; cardLast4?: string;
       bank?: string; terminal?: string; memberId?: string;
       tax?: number; vatTotal?: number; service?: number; serviceTotal?: number;
-      rounding?: number; feeESB?: number; tip?: number;
+      rounding?: number; feeESB?: number; packaging?: number; tip?: number;
       /** Kunjungan split grup: nominal + metode yang dibayar kunjungan ini. */
       splitPaid?: { amount?: number; method?: string };
     };
@@ -119,11 +123,60 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const service = route?.params?.service ?? route?.params?.serviceTotal ?? 0;
   const rounding = route?.params?.rounding ?? 0;
   const feeESB = route?.params?.feeESB ?? 0;
+  const packaging = route?.params?.packaging ?? 0;
   const tip = Math.max(0, Math.round(Number(route?.params?.tip) || 0));
   // Kunjungan split: yang dibayar + sisa grup (sisa dari DB, best-effort).
   const splitPaidParam = route?.params?.splitPaid;
   const splitPaidAmt = Math.max(0, Math.round(Number(splitPaidParam?.amount) || 0));
   const splitPaidMethod = typeof splitPaidParam?.method === 'string' ? splitPaidParam.method : '';
+  // Ronde-3 Q3/Q4: block member pasca-settle (disimpan mirror) + flag berubah.
+  // Mirror fire-and-forget → response bisa datang SETELAH mount: cek saat
+  // mount + ulang 2x terjadwal (2 dtk, 5 dtk); berhenti bila view ketemu.
+  // takeMemberChanged = consume-once (banner tak ganda).
+  const [memberChanged, setMemberChanged] = useState(false);
+  const [memberView, setMemberView] = useState<{ name: string; points: number; vouchers: number } | null>(null);
+  /** Label service mengikuti knob server (audit trisisi #1); nilai service
+   * tetap dari pemanggil (angka resmi rantai). */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  useEffect(() => {
+    let alive = true;
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    const no = String(orderNo ?? '').trim();
+    if (!no) return;
+    let alive = true;
+    let tries = 0;
+    const check = () => {
+      void (async () => {
+        try {
+          const [chg, view] = await Promise.all([takeMemberChanged(no), getSettleMemberView(no)]);
+          if (!alive) return;
+          if (chg) setMemberChanged(true);
+          if (view) {
+            setMemberView(view);
+            return;
+          }
+        } catch {
+          /* abaikan: tanpa block = tanpa banner */
+        }
+        tries += 1;
+        if (alive && tries < 3) {
+          setTimeout(check, tries === 1 ? 2000 : 5000);
+        }
+      })();
+    };
+    check();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderNo]);
   const [groupRemain, setGroupRemain] = useState<number | null>(null);
   useEffect(() => {
     if (splitPaidAmt <= 0 && !splitPaidMethod) return;
@@ -195,6 +248,9 @@ export default function SuccessScreen({ navigation, route }: Props) {
       } catch {
         /* abaikan */
       }
+      // A11: bebaskan meja di server terminal (best-effort; antrean sync di
+      // atas tetap jadi fallback offline).
+      void postTableTransition({ tableRef: tb, status: 'AVAILABLE' });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -212,10 +268,22 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const receiptParams = {
     total, method: methodLabel(method), cash, change,
     no: orderNo, items: route?.params?.items, discount,
+    ...(memberView
+      ? {
+          memberLine: [
+            memberView.name,
+            `${memberView.points} ${t('mem_points')}`,
+            t('mem_go_vouchers').replace('{n}', String(memberView.vouchers)),
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        }
+      : {}),
     ...(service > 0 ? { service } : {}),
     ...(tax > 0 ? { tax } : {}),
     ...(rounding !== 0 ? { rounding } : {}),
     ...(feeESB > 0 ? { feeESB } : {}),
+    ...(packaging > 0 ? { packaging } : {}),
     ...(voucherCode ? { voucherCode } : {}),
     ...(approvalCode ? { approvalCode } : {}),
     ...(cardLast4 ? { cardLast4 } : {}),
@@ -235,6 +303,22 @@ export default function SuccessScreen({ navigation, route }: Props) {
       ? { splitPaid: { amount: splitPaidAmt, ...(splitPaidMethod ? { method: splitPaidMethod } : {}) } }
       : {}),
   };
+  // S-F8: auto-print server (posBehavior): cetak sekali saat sukses dibuka,
+  // sama seperti tombol Cetak. Cache gagal / OFF = perilaku lama (manual).
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        if (alive && (await getAutoPrintEnabled())) doPrint();
+      } catch {
+        /* abaikan: cetak manual tetap tersedia */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const now = new Date();
   const localeTag = lang === 'en' ? 'en-US' : 'id-ID';
   const todayId = now.toLocaleDateString(localeTag, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
@@ -260,13 +344,18 @@ export default function SuccessScreen({ navigation, route }: Props) {
       </View>
       <Text style={styles.title}>{t('ok_title')}</Text>
       <Text style={styles.orderNo}>{orderNo}</Text>
+      {/* Ronde-3 Q4: banner persisten bila data member berubah antara
+          pra-settle vs response pasca-settle (poin/voucher/memberDropped). */}
+      {memberChanged ? (
+        <Text style={styles.changedBanner}>{t('mem_changed_banner')}</Text>
+      ) : null}
       <Text style={styles.dateLine}>{todayId} · {timeId}</Text>
     </>
   );
 
   // Pratinjau struk: SATU scroll milik layar (tanpa ScrollView bersarang di
   // dalam kartu), semua item tampil, urutan baris SELARAS ReceiptScreen
-  // (diskon → service → tip → feeESB → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
+  // (diskon → service → tip → feeESB → kemasan → tax → voucher → ongkir → potongan ongkir → rounding → TOTAL).
   const receipt = (
     <View style={styles.receipt}>
         <Text style={styles.shopName}>{getTerminal().branchName || 'Genfity'}</Text>
@@ -292,7 +381,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         )}
         {service > 0 && (
           <View style={styles.row}>
-            <Text style={styles.label}>{t('serviceExcl')}</Text>
+            <Text style={styles.label}>{serviceLabel(t, svcCfg)}</Text>
             <Text style={styles.value}>{rp(service)}</Text>
           </View>
         )}
@@ -304,8 +393,14 @@ export default function SuccessScreen({ navigation, route }: Props) {
         )}
         {feeESB > 0 && (
           <View style={styles.row}>
-            <Text style={styles.label}>{t('feeESB')}</Text>
+            <Text style={styles.label}>{platformFeeLabel(t)}</Text>
             <Text style={styles.value}>{rp(feeESB)}</Text>
+          </View>
+        )}
+        {packaging > 0 && (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('packaging')}</Text>
+            <Text style={styles.value}>{rp(packaging)}</Text>
           </View>
         )}
         {tax > 0 && (
@@ -369,6 +464,16 @@ export default function SuccessScreen({ navigation, route }: Props) {
           <View style={styles.row}>
             <Text style={styles.label}>{t('ok_terminal')}</Text>
             <Text style={styles.value}>{[bank, terminal].filter(Boolean).join(' · ')}</Text>
+          </View>
+        ) : null}
+        {/* Ronde-3 Q3: tampilan minimal member pasca-settle (nama samar +
+            poin + jumlah voucher); JANGAN kontak penuh/riwayat. */}
+        {memberView ? (
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('mem_title')}</Text>
+            <Text style={styles.value}>
+              {[memberView.name, `${memberView.points} ${t('mem_points')}`, t('mem_go_vouchers').replace('{n}', String(memberView.vouchers))].filter(Boolean).join(' · ')}
+            </Text>
           </View>
         ) : null}
         {isCash && (
@@ -499,6 +604,13 @@ const styles = StyleSheet.create({
   value: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
   changeValue: { fontFamily: fonts.bold, fontSize: 14, color: colors.green },
   thanks: { fontFamily: fonts.regular, fontSize: 12, color: colors.faint, textAlign: 'center' },
+  // Ronde-3 Q4: banner persisten "data member berubah" (amber, pola banner
+  // existing: teks tengah di atas kartu).
+  changedBanner: {
+    fontFamily: fonts.semibold, fontSize: 13, color: colors.amberDark,
+    backgroundColor: '#FFF6E0', borderRadius: 8, paddingHorizontal: 12,
+    paddingVertical: 6, marginTop: 10, textAlign: 'center', overflow: 'hidden',
+  },
   footer: { flexDirection: 'row', gap: 8, padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.line },
   // Tablet: bungkus 2x2 agar label panjang tidak terjepit.
   footerTablet: { flexWrap: 'wrap' },

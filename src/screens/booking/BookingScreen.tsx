@@ -11,13 +11,21 @@ import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';
+import { postTableTransition } from '../../lib/terminalTable';
+import {
+  cancelServerReservation,
+  mapResvStatusToLocal,
+  pullServerReservations,
+  GO_OP_RESV_CANCEL,
+  type ServerResv,
+} from '../../lib/posWire';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
 
 type Status = 'Terjadwal' | 'Datang' | 'Selesai';
-interface Resv { id: string; name: string; tamu: number; table: string; phone: string; note: string; date: string; time: string; status: Status; }
+interface Resv { id: string; name: string; tamu: number; table: string; phone: string; note: string; date: string; time: string; status: Status; serverId?: number; }
 
 /** Samarkan nomor HP di daftar reservasi (privasi customer). */
 function maskHp(hp: string): string {
@@ -69,7 +77,85 @@ function tableLabel(tb: { no: string; section: string; kap: number }): string {
   return `${tb.no} · ${tb.section} (${tb.kap} kursi)`;
 }
 
+/** A12: smallest-fit — meja kapasitas terkecil yang muat pax. Status hunian
+ *  slot-waktu tak diketahui lokal (ms_table = snapshot kini) → saring hanya
+ *  kapasitas; validasi akhir tetap di save() + fallback manual via chip. */
+export function smallestFit(src: LiveTable[], pax: number): LiveTable | null {
+  const n = Math.max(1, Math.round(pax) || 0);
+  let best: LiveTable | null = null;
+  for (const tb of src) {
+    if (tb.kap < n) continue;
+    if (!best || tb.kap < best.kap) best = tb;
+  }
+  return best;
+}
+
 const TABLES_FREE = CANON_TABLES.map(tableLabel);
+
+/** W2: ISO hari lokal (YYYY-MM-DD) utk memadankan label 'Hari ini'/'Besok'
+ *  dengan tanggal server. */
+function isoDayLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** W2: label tanggal lokal -> ISO server ('Hari ini'/'Besok'/mentah). */
+function resvDateToIso(date: string): string {
+  const t = date.trim();
+  if (t === 'Hari ini') return isoDayLocal(new Date());
+  if (t === 'Besok') return isoDayLocal(new Date(Date.now() + 86400000));
+  return t;
+}
+
+/** W2: ISO server (YYYY-MM-DD) -> label lokal bila cocok hari ini/besok. */
+function resvIsoToLabel(iso: string): string {
+  const t = iso.trim();
+  if (t === isoDayLocal(new Date())) return 'Hari ini';
+  if (t === isoDayLocal(new Date(Date.now() + 86400000))) return 'Besok';
+  return t;
+}
+
+/** W2: gabung baris server ke daftar lokal (lokal dulu, server menempel).
+ *  Baris lokal yang cocok persis (nama+jam+meja+tanggal) ditauthkan serverId
+ *  agar pembatalannya merambat ke BE; sisanya ditempel sebagai baris `srv-*`.
+ *  Murni (tanpa I/O) agar mudah diuji. */
+export function mergeServerResvs(
+  local: Resv[],
+  server: ServerResv[],
+): Resv[] {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const keyOf = (name: string, time: string, table: string, dateIso: string) =>
+    [norm(name), time.trim(), norm(table), dateIso.trim()].join('|');
+  const used = new Set<number>();
+  const next: Resv[] = local.map((row) => {
+    if (row.serverId != null) return row;
+    const k = keyOf(row.name, row.time, canonTableNo(row.table), resvDateToIso(row.date));
+    const hit = server.find((s) => !used.has(s.id)
+      && keyOf(s.name, s.time, canonTableNo(s.table || ''), (s.date || '').trim()) === k);
+    if (!hit) return row;
+    used.add(hit.id);
+    return { ...row, serverId: hit.id };
+  });
+  for (const s of server) {
+    if (used.has(s.id)) continue;
+    if (next.some((r) => r.serverId === s.id || r.id === `srv-${s.id}`)) continue;
+    const localStatus = mapResvStatusToLocal(s.status, s.displayStatus);
+    if (!localStatus) continue; // CANCELLED/NO_SHOW/EXPIRED/lewat: jangan tampil ganda
+    next.push({
+      id: `srv-${s.id}`,
+      name: s.name || '-',
+      tamu: s.partySize > 0 ? s.partySize : 2,
+      table: canonTableNo(s.table || '') || s.table || '-',
+      phone: s.phone || '-',
+      note: s.note || '-',
+      date: resvIsoToLabel(s.date || ''),
+      time: (s.time || '').slice(0, 5),
+      status: localStatus,
+      serverId: s.id,
+    });
+  }
+  return next;
+}
 
 /** Booking / reservasi - form + daftar, tersimpan di perangkat dan sinkron ke denah. */
 export default function BookingScreen({ navigation }: Props) {
@@ -98,6 +184,10 @@ export default function BookingScreen({ navigation }: Props) {
   const [phone, setPhone] = useState('');
   const [tamu, setPax] = useState('');
   const [table, setTable] = useState(TABLES_FREE[0] as string);
+  // A12: auto-pilih meja smallest-fit. tableManual = pengguna menimpa manual
+  // via chip; autoTable = pilihan saat ini hasil otomatis (badge lokal).
+  const [tableManual, setTableManual] = useState(false);
+  const [autoTable, setAutoTable] = useState(false);
   const [date, setDate] = useState('Hari ini');
   const [time, setTime] = useState('');
   const [note, setNote] = useState('');
@@ -119,6 +209,17 @@ export default function BookingScreen({ navigation }: Props) {
         return canonSet.has(code) ? { ...r, table: code } : r;
       });
       setList(migrated);
+      // W2: cermin reservasi server (read-only mirror) bila online; baris lokal
+      // tetap dulu, baris server menempel + tautan fuzzy pasang serverId.
+      void (async () => {
+        try {
+          const r = await pullServerReservations(100);
+          if (!on || !r.ok) return;
+          setList((prev) => mergeServerResvs(prev, r.data));
+        } catch {
+          /* abaikan: daftar lokal tetap kebenaran */
+        }
+      })();
     });
     return () => {
       on = false;
@@ -157,6 +258,18 @@ export default function BookingScreen({ navigation }: Props) {
     return () => { on = false; };
   }, []);
 
+  // A12: auto-pilih smallest-fit tiap pax berubah, selama pengguna belum
+  // menimpa manual. Sumber = ms_table lokal (badge hanya-lokal di form).
+  useEffect(() => {
+    if (tableManual) return;
+    const n = Number(tamu) || 0;
+    if (n <= 0) return;
+    const best = smallestFit(tablesSrc, n);
+    if (!best) return;
+    setTable(tableLabel(best));
+    setAutoTable(true);
+  }, [tamu, tablesSrc, tableManual]);
+
   const persist = (next: Resv[]) => {
     setList(next);
     void setJSON(bookKey, next);
@@ -167,6 +280,7 @@ export default function BookingScreen({ navigation }: Props) {
   const resetForm = () => {
     setName(''); setPhone(''); setPax(''); setTime(''); setNote('');
     setDate('Hari ini'); setTable(tablesFree[0] as string);
+    setTableManual(false); setAutoTable(false);
     setEditingId(null); setWarn('');
   };
 
@@ -265,6 +379,7 @@ export default function BookingScreen({ navigation }: Props) {
     setPax(String(r.tamu));
     const match = tablesSrc.find((tb) => tb.no === canonTableNo(r.table));
     setTable(match ? tableLabel(match) : tablesFree[0] as string);
+    setTableManual(true); setAutoTable(false);
     setDate(r.date);
     setTime(r.time);
     setNote(r.note === '-' ? '' : r.note);
@@ -302,6 +417,33 @@ export default function BookingScreen({ navigation }: Props) {
     setConfirmDel(null);
     setGateNotice('');
     if (editingId === r.id) resetForm();
+    // W2: baris tertaut server -> batalkan dulu ke BE. Offline = antrekan
+    // GO_OP_RESV_CANCEL (drain PUT); ditolak BE = baris dikembalikan + pesan jujur.
+    if (typeof r.serverId === 'number') {
+      const rowId = r.id;
+      const sid = r.serverId;
+      const snapshot = r;
+      void (async () => {
+        const res = await cancelServerReservation(
+          sid, `Batal reservasi ${r.name} meja ${r.table}`.slice(0, 120),
+        );
+        if (res.ok) return; // hapus lokal sudah jalan di bawah
+        if (res.reason === 'offline') {
+          try {
+            enqueueSync('other', {
+              op: GO_OP_RESV_CANCEL, serverId: sid,
+              reason: `Batal reservasi ${r.name} meja ${r.table}`.slice(0, 120),
+              at: new Date().toISOString(),
+            });
+          } catch {
+            /* antrean belum siap */
+          }
+          return;
+        }
+        setGateNotice(res.message || '');
+        setList((prev) => (prev.some((x) => x.id === rowId) ? prev : [...prev, snapshot]));
+      })();
+    }
     persist(list.filter((x) => x.id !== r.id));
     try {
       enqueueSync('other', {
@@ -321,6 +463,9 @@ export default function BookingScreen({ navigation }: Props) {
       } catch {
         /* master belum tersedia */
       }
+      // A11: bebaskan meja di server terminal (best-effort; antrean
+      // booking-cancel di atas tetap jadi fallback offline).
+      void postTableTransition({ tableRef: r.table, status: 'AVAILABLE' });
     })();
   };
 
@@ -359,7 +504,9 @@ export default function BookingScreen({ navigation }: Props) {
               <Text style={[styles.name, isTablet && styles.nameBig]}>{r.name} · {r.tamu} {t('guests')} · {t('c_table')} {r.table}</Text>
               <Text style={[styles.meta, isTablet && styles.metaBig]}>{maskHp(r.phone)} · {t('kit_note')}: {r.note}</Text>
               <Text style={[styles.meta, isTablet && styles.metaBig]}>
-                {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>
+                {r.date} · {r.time} · <Text style={[styles.statusBadge, { backgroundColor: statusStyle(r.status).bg, color: statusStyle(r.status).tx }]}>{r.status}</Text>{typeof r.serverId !== 'number' ? (
+                  <Text> · <Text style={[styles.statusBadge, { backgroundColor: colors.line, color: colors.muted }]}>{t('bok_local')}</Text></Text>
+                ) : null}
               </Text>
             </View>
             <Text style={styles.chev}>›</Text>
@@ -435,9 +582,12 @@ export default function BookingScreen({ navigation }: Props) {
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('bok_pax_label')}</Text>
       <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.inputBig]} value={tamu} onChangeText={setPax} placeholder={t('bok_pax_ph')} keyboardType="numeric" />
       <Text style={[styles.label, isTablet && styles.labelBig]}>{t('c_table')}</Text>
+      {autoTable && !tableManual ? (
+        <Text style={[styles.hint, isTablet && styles.hintBig]}>{t('bok_auto_table')}</Text>
+      ) : null}
       <View style={styles.chips}>
         {tablesFree.map((tb) => (
-          <TouchableOpacity key={tb} style={[styles.chip, table === tb && styles.chipOn]} onPress={() => setTable(tb)}>
+          <TouchableOpacity key={tb} style={[styles.chip, table === tb && styles.chipOn]} onPress={() => { setTable(tb); setTableManual(true); setAutoTable(false); }}>
             <Text style={[styles.chipT, table === tb && styles.chipTOn, isTablet && styles.chipTBig]}>{tb}</Text>
           </TouchableOpacity>
         ))}

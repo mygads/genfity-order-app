@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import {
+import { useEffect, useMemo, useRef, useState } from 'react';import {
   FlatList,
   Image, Modal,
   Keyboard,
@@ -7,14 +7,17 @@ import { useEffect, useMemo, useState } from 'react';import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, persistPayChangeDb, persistVoidDb } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { type Transaction, type TxnStatus } from '../../data/mock';import { loadHistory, mergeHistoryTxns, persistPayChangeDb, persistVoidDb, pullServerHistoryTxns } from '../../lib/history';import { isValidEmail, recordReceiptEmail } from '../../lib/payments';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import ManagerPinPrompt from '../../components/ManagerPinPrompt';import type { ManagerPinProvider } from '../../lib/posWire';import {
+  SUPERVISOR_ACTION_ORDER_REFUND,
+  SUPERVISOR_ACTION_ORDER_VOID,
+} from '../../lib/supervisor';import {
   useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { useConnectivity } from '../../hooks/useConnectivity';import { getSession } from '../../session';import { getSaleClientId, getSaleTip } from '../../lib/sales';import { requireAccess } from '../../lib/access';function statusColor(s: TxnStatus) {
   if (s === 'Selesai') return colors.greenDark;
   if (s === 'Void') return colors.red;
   return colors.orangeDark;}function statusBg(s: TxnStatus) {
   if (s === 'Selesai') return colors.paleGreen;
   if (s === 'Void') return colors.paleRed;
-  return colors.paleOrange;}const billNo = (t: Transaction) => t.no.replace(/^TRX/, 'BILL');const payOf = (t: Transaction, over: Record<string, string>) => over[t.id] ?? t.payment;const PAY_OPTIONS = ['Tunai', 'QRIS', 'EDC', 'Debit', 'Kredit', 'Transfer'];/** Void: tulis DB (head → void + tr_cancelmenu) + outbox/sync/server. */async function persistVoid(t: Transaction, reason: string, approvedBy?: string): Promise<void> { await persistVoidDb(t.no, reason, approvedBy);}/** Ganti metode bayar: tulis DB (payment + head) + outbox/sync/server. */async function persistPayChange(t: Transaction, method: string): Promise<void> { await persistPayChangeDb(t.no, method);}export default function HistoryScreen({ navigation }: { navigation?: { navigate: (s: string, p?: object) => void; goBack?: () => void } }) {
+  return colors.paleOrange;}const billNo = (t: Transaction) => t.no.replace(/^TRX/, 'BILL');const payOf = (t: Transaction, over: Record<string, string>) => over[t.id] ?? t.payment;const PAY_OPTIONS = ['Tunai', 'QRIS', 'EDC', 'Debit', 'Kredit', 'Transfer'];/** Void: tulis DB (head → void + tr_cancelmenu) + outbox/sync/server. */async function persistVoid(t: Transaction, reason: string, approvedBy?: string, getPin?: ManagerPinProvider): Promise<void> { await persistVoidDb(t.no, reason, approvedBy, getPin);}/** Ganti metode bayar: tulis DB (payment + head) + outbox/sync/server. */async function persistPayChange(t: Transaction, method: string): Promise<void> { await persistPayChangeDb(t.no, method);}export default function HistoryScreen({ navigation }: { navigation?: { navigate: (s: string, p?: object) => void; goBack?: () => void } }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
@@ -39,12 +42,32 @@ import { useEffect, useMemo, useState } from 'react';import {
   const [approveVoidOpen, setApproveVoidOpen] = useState(false);
   const [approveVoidPrint, setApproveVoidPrint] = useState(false);
   const [approvePayOpen, setApprovePayOpen] = useState(false);
+  // P1-1b: prompt PIN manajer transport-only untuk rantai void live — dibuka
+  // hanya bila BE menjawab 400 PIN_REQUIRED (via askManagerPin → withManagerPin
+  // di history.ts); batal = pakai hasil pertama (lalu antre jujur).
+  const [mgrPinOpen, setMgrPinOpen] = useState(false);
+  const pinResolveRef = useRef<((pin: string | null) => void) | null>(null);
+  const askManagerPin = (): Promise<string | null> =>
+    new Promise<string | null>((resolve) => {
+      pinResolveRef.current = resolve;
+      setMgrPinOpen(true);
+    });
+  const settleManagerPin = (pin: string | null) => {
+    setMgrPinOpen(false);
+    const r = pinResolveRef.current;
+    pinResolveRef.current = null;
+    if (r) r(pin);
+  };
   const [payOver, setPayOver] = useState<Record<string, string>>({});
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  /** Baris DB riil; kosong → empty-state (tanpa fallback mock). */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live) setDbTxns(rows); }); return () => { live = false; }; }, []); const base: Transaction[] = dbTxns ?? []; const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
+  /** Baris DB riil; kosong → empty-state (tanpa fallback mock). */ const [dbTxns, setDbTxns] = useState<Transaction[] | null>(null); useEffect(() => { let live = true; void loadHistory().then((rows) => { if (live) setDbTxns(rows); }); return () => { live = false; }; }, []);
+  /** W2: baris riwayat server (read-only mirror; SQLite tetap cache). */
+  const [serverTxns, setServerTxns] = useState<Transaction[]>([]);
+  useEffect(() => { let live = true; void pullServerHistoryTxns(100).then((rows) => { if (live && rows.length > 0) setServerTxns(rows); }); return () => { live = false; }; }, [online]);
+  const base: Transaction[] = mergeHistoryTxns(dbTxns ?? [], serverTxns); const STATUS_LABEL: Record<TxnStatus, string> = { Selesai: t('hist_st_done'), Batal: t('hist_st_cancel'), Void: t('hist_st_void'), }; const dates = useMemo(() => [...new Set(base.map((tr) => tr.date))], [base]);
   const payments = useMemo(() => [...new Set(base.map((tr) => tr.payment))], [base]);
 
   const list = useMemo(() => {
@@ -84,7 +107,7 @@ import { useEffect, useMemo, useState } from 'react';import {
   // kini di dalam SupervisorApprovalDialog (server → fallback PIN lokal).
 /** Tandai void di state DB langsung (tanpa overlay demo); persist via persistVoidDb. */ const markVoided = (id: string) => {
     setDbTxns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, status: 'Void' as TxnStatus } : r)) : prev)); }; /** Alasan void wajib sebelum dialog persetujuan supervisor V1 dibuka (S7: PIN pindah ke dialog). */ const voidNoteOk = voidNote.trim().length > 0; /** S7: buka dialog V1; eksekusi di runVoidApproved. */ const openVoidApproval = (print: boolean) => { if (!selected || !voidNoteOk) return; setApproveVoidPrint(print); setApproveVoidOpen(true); }; /** S7: eksekusi void sesudah dialog V1 disetujui (tanpa PIN di layar). */ const runVoidApproved = (approverUserId: string) => { const target = selected; if (!target) return; const reason = voidNote.trim(); if (!reason) return; {
-      void persistVoid(target, reason, approverUserId || undefined).catch(() => undefined); markVoided(target.id); setApproveVoidOpen(false); setConfirmVoid(false); setVoidNote(''); if (approveVoidPrint) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, voided: true, }); } } };   /** Gate RBAC order.void: deny = eskalasi ke dialog persetujuan V1 (bukan
+      void persistVoid(target, reason, approverUserId || undefined, askManagerPin).catch(() => undefined); markVoided(target.id); setApproveVoidOpen(false); setConfirmVoid(false); setVoidNote(''); if (approveVoidPrint) { navigation?.navigate('Receipt', { no: target.no, total: target.total, method: payOf(target, payOver), voidLines: target.items.map((it) => ({ name: it.name, qty: it.qty, price: it.price })), reason, voided: true, }); } } };   /** Gate RBAC order.void: deny = eskalasi ke dialog persetujuan V1 (bukan
    * hard block); fail-open (allow/db-unready) buka modal alasan biasa. */
   const guardVoidOpen = async () => {
     try {
@@ -317,7 +340,7 @@ import { useEffect, useMemo, useState } from 'react';import {
       {/* S7: ganti metode bayar via persetujuan supervisor V1 (aksi refund). */}
       <SupervisorApprovalDialog
         visible={approvePayOpen}
-        action="refund"
+        action={SUPERVISOR_ACTION_ORDER_REFUND}
         refId={selected?.id ?? ''}
         fallbackAccessKey="sale.refund"
         onApproved={() => confirmPayApproved()}
@@ -368,12 +391,19 @@ import { useEffect, useMemo, useState } from 'react';import {
       {/* S7: void transaksi via persetujuan supervisor V1 (kontrak BE baru). */}
       <SupervisorApprovalDialog
         visible={approveVoidOpen}
-        action="void"
+        action={SUPERVISOR_ACTION_ORDER_VOID}
         refId={selected?.id ?? ''}
         reasonPreset={voidNote}
         fallbackAccessKey="order.void"
         onApproved={(r) => runVoidApproved(r.supervisorUserId)}
         onCancel={() => setApproveVoidOpen(false)}
+      />
+
+      {/* P1-1b: PIN manajer transport-only — hanya bila BE menuntutnya. */}
+      <ManagerPinPrompt
+        visible={mgrPinOpen}
+        onSubmit={(pin) => settleManagerPin(pin)}
+        onCancel={() => settleManagerPin(null)}
       />
 
       <Modal visible={mailOpen} animationType="fade" transparent>
@@ -437,7 +467,8 @@ statusLabel: (s: TxnStatus) => string; emptyTitle: string; emptySub: string; t: 
                   </Text>
                 </View>
               </View>
-              <Text style={styles.cardNo}>{item.no}</Text>
+              <Text style={styles.cardNo}>{t('hist_col_trxno')}: {item.no}</Text>
+              <Text style={styles.cardNo}>{t('hist_col_billno')}: {billNo(item)}</Text>
               <View style={styles.cardBottom}>
                 <Text style={styles.cardMeta}>{item.payment}</Text>
                 <Text style={styles.cardTotal}>{rp(item.total)}</Text>

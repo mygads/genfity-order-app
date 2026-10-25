@@ -22,14 +22,20 @@ export interface EscReceipt {
   items: EscItem[];
   subtotal: number;
   discount?: number;
-  /** Service charge eksklusif (Rp). Label cetak "Service 5%". */
+  /** Service charge eksklusif (Rp). Label default "Service 5%" (legacy);
+   * pemanggil sadar-server mengisi serviceLabel dari serviceLabel() totals.ts
+   * (audit trisisi #1: 'Service {r}%' / 'Service (tetap)' / '+ estimasi'). */
   service?: number;
+  /** Label baris service untuk struk thermal; absen = 'Service 5%' legacy. */
+  serviceLabel?: string;
   /** Tip/gratuity pelanggan (Rp) — terusan penuh, bukan komponen total berjalan. */
   tip?: number;
   /** PPN inklusif 11/111 - info-only, TIDAK menambah total. */
   tax?: number;
   /** Fee platform ESB/marketplace 5% (kontrak §5). */
   feeESB?: number;
+  /** Biaya kemasan nominal (Rp utuh) — komponen bruto cermin ongkir. */
+  packaging?: number;
   voucherCode?: string;
   voucherAmount?: number;
   ongkir?: number;
@@ -247,10 +253,11 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   // eksklusif → tip (terusan) → PPN info-only → feeESB → voucher → ongkir → rounding → total.
   row2(out, 'Subtotal', money(r.subtotal), cols);
   if (r.discount) row2(out, 'Diskon', `-${money(r.discount)}`, cols);
-  if (r.service) row2(out, 'Service 5%', money(r.service), cols);
+  if (r.service) row2(out, r.serviceLabel ?? 'Service 5%', money(r.service), cols);
   if (r.tip) row2(out, 'Tip', `+${money(r.tip)}`, cols);
   if (r.tax) row2(out, 'PPN (Inkl.)', money(r.tax), cols);
   if (r.feeESB) row2(out, 'Fee Layanan', money(r.feeESB), cols);
+  if (r.packaging) row2(out, 'Kemasan', money(r.packaging), cols);
   if (r.voucherCode || r.voucherAmount) {
     row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${money(r.voucherAmount)}` : '-', cols);
   }

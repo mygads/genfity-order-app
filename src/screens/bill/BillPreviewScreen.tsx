@@ -1,13 +1,15 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
+import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
 import { getGroupPaid, nextSalesNum } from '../../lib/sales';
 import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
+import { parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type OrderItemParam = {
@@ -25,10 +27,10 @@ type Props = {
       voucherCode?: string;
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;
-      /** Fee platform agregator + pembulatan bawaan pemanggil (info-only, diteruskan). */
-      feeESB?: number; rounding?: number;
+      /** Fee platform agregator + pembulatan + kemasan bawaan pemanggil (info-only, diteruskan). */
+      feeESB?: number; rounding?: number; packaging?: number;
       mode?: string; table?: string; ongkir?: number; ongkirCut?: number;
-      customer?: string; memberId?: string;
+      customer?: string; memberId?: string; customerId?: number;
       /** Nomor order bila sudah ada (alir balik History); pratinjau baru = tanpa nomor. */
       no?: string;
       /** Identitas resto/kasir untuk kepala struk (cermin ReceiptScreen). */
@@ -49,6 +51,18 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, t } = useLang();
+  /** Label service mengikuti knob server (audit trisisi #1); nilai serviceVal
+   * tetap dari pemanggil (angka resmi rantai). */
+  const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  useEffect(() => {
+    let alive = true;
+    void getServiceConfig().then((c) => {
+      if (alive) setSvcCfg(c);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   // Order asli dari params kasir (bukan konstanta hardcode).
   const p = route?.params ?? {};
   const orderItems = p.items ?? [];
@@ -65,6 +79,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const serviceVal = p.service ?? p.serviceTotal ?? 0;
   const taxVal = p.tax ?? p.vatTotal ?? 0;
   const feeESBVal = p.feeESB ?? 0;
+  const packagingVal = Math.max(0, Math.round(Number(p.packaging) || 0));
   const roundingVal = p.rounding ?? 0;
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
@@ -192,10 +207,14 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(p.table ? { table: p.table } : {}),
     ...(ongkirVal > 0 ? { ongkir: ongkirVal } : {}),
     ...(ongkirCutVal > 0 ? { ongkirCut: ongkirCutVal } : {}),
+    // Kemasan cermin ongkir: menempel pada order PENUH (bukan per-split),
+    // diteruskan utuh via orderCtx agar Pay/Success/Receipt mencatat benar.
+    ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(p.customer ? { customer: p.customer } : {}),
     ...(p.memberId ? { memberId: p.memberId } : {}),
+    ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
   };
-  // Share proporsional service/pajak/feeESB/pembulatan untuk split parsial
+  // Share proporsional service/pajak/feeESB/kemasan/pembulatan untuk split parsial
   // (info-only struk di Pay > Success > Receipt). P5: feeESB ikut (charged
   // total grup memuatnya; Success menampilkannya) agar konsisten di keduanya.
   // Diskon/voucher tak diteruskan per-split karena total split sudah neto
@@ -207,15 +226,17 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       ...(serviceVal > 0 ? { service: Math.max(0, Math.round(serviceVal * r)) } : {}),
       ...(taxVal > 0 ? { tax: Math.max(0, Math.round(taxVal * r)) } : {}),
       ...(feeESBVal > 0 ? { feeESB: Math.max(0, Math.round(feeESBVal * r)) } : {}),
+      ...(packagingVal > 0 ? { packaging: Math.max(0, Math.round(packagingVal * r)) } : {}),
       ...(roundingVal !== 0 ? { rounding: Math.round(roundingVal * r) } : {}),
     };
   };
-  // Rincian info-only bawaan pemanggil (service/pajak/fee/pembulatan) - diteruskan
-  // agar baris struk pas dengan total di Pay > Success > Receipt.
+  // Rincian info-only bawaan pemanggil (service/pajak/fee/kemasan/pembulatan)
+  // - diteruskan agar baris struk pas dengan total di Pay > Success > Receipt.
   const breakdownCtx = {
     ...(serviceVal > 0 ? { service: serviceVal } : {}),
     ...(taxVal > 0 ? { tax: taxVal } : {}),
     ...(feeESBVal > 0 ? { feeESB: feeESBVal } : {}),
+    ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(roundingVal !== 0 ? { rounding: roundingVal } : {}),
   };
 
@@ -246,10 +267,13 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
           <View style={styles.row}><Text style={styles.item}>{t('taxIncl')}</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
         )}
         {serviceVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{t('serviceExcl')}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{serviceLabel(t, svcCfg)}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
         )}
         {feeESBVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{t('feeESB')}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
+          <View style={styles.row}><Text style={styles.item}>{platformFeeLabel(t)}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
+        )}
+        {packagingVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('packaging')}</Text><Text style={styles.price}>{rp(packagingVal)}</Text></View>
         )}
         {roundingVal !== 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.price}>{rp(roundingVal)}</Text></View>

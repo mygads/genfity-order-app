@@ -15,10 +15,12 @@
  * bind, dan login WAJIB fail-closed (dummy tak pernah sukses:
  * login pertama wajib online, SPEC §2 + Q6 CLOSED).
  */
-import { ApiPath } from '../config/server';
+import { ApiPath, apiUrl, getTerminal } from '../config/server';
 import { apiFetch, getApiMode, getDeviceId, unwrap } from './apiSource';
 // F10: validasi tag BE via parseDeviceRole (standalone, tanpa siklus impor).
 import { parseDeviceRole } from './deviceRole';
+// Ronde-3 Q5: gate memberLookupEnabled dari pos-config (murni, tanpa siklus).
+import { parseMemberLookupEnabled } from './memberRef';
 
 /** Alasan gagal jujur: BE belum dikonfigurasi vs jaringan putus. */
 export type TerminalApiReason = 'need_be' | 'offline';
@@ -823,3 +825,608 @@ export async function fetchOccupant(
     fromDummy: false,
   };
 }
+
+/** S-READINESS: kesiapan terminal (SPEC-TERMINAL-SESSION §11 baris S-READINESS).
+ * GET /api/v1/terminals/{id}/readiness {deviceId?} → {needsShift, needsCash,
+ * shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
+ * member-only; deviceId opsional — tanpanya grant dilaporkan valid:false).
+ * Fail-open jujur: {ok:false}/dummy/offline = status TAK DIKETAHUI —
+ * pemanggil JANGAN blokir (gerbang shift lokal App.tsx tetap berlaku);
+ * gate 'Shift' hanya bila server eksplisit menjawab needsShift/needsCash.
+ * Pola cermin fetchOccupant (GET + withId + unwrap + fail jujur). */
+export interface TerminalReadiness {
+  needsShift: boolean;
+  needsCash: boolean;
+  shiftOpen: boolean;
+  cashOpen: boolean;
+  grantValid: boolean;
+}
+
+export async function fetchTerminalReadiness(
+  terminalId: string,
+  opts?: { deviceId?: string },
+): Promise<TerminalApiResult<TerminalReadiness>> {
+  const dev = (opts?.deviceId ?? '').trim();
+  const r = await apiFetch(withId(ApiPath.terminalReadiness, terminalId), {
+    method: 'GET',
+    ...(dev ? { params: { deviceId: dev } } : {}),
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<TerminalReadiness>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const shift = (data.shift ?? {}) as Record<string, unknown>;
+  const cash = (data.cash ?? {}) as Record<string, unknown>;
+  const grant = (data.grant ?? {}) as Record<string, unknown>;
+  return {
+    ok: true,
+    data: {
+      needsShift: data.needsShift === true,
+      needsCash: data.needsCash === true,
+      shiftOpen: shift.open === true,
+      cashOpen: cash.open === true,
+      grantValid: grant.valid === true,
+    },
+    fromDummy: false,
+  };
+}
+
+/** S-POSCONFIG (audit-5d80): konfigurasi POS merchant per terminal.
+ * GET /api/v1/terminals/{id}/pos-config → {posBehaviorSettings,
+ * stock{alertEnabled,defaultLowStockThreshold},
+ * timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
+ * member-only; pola cermin fetchTerminalReadiness: GET + withId + unwrap +
+ * fail jujur — pemanggil seed best-effort, JANGAN blokir login bila gagal).
+ * Angka disanitasi ke default BE (threshold 5, timer 90/10).
+ * S-F: kontrak BE bertambah (deliveryFee, roundingStep, workforce,
+ * printDestinations) — semua disanitasi toleran (absen = null/default). */
+export interface TerminalDeliveryFee {
+  base: number | null;
+  perKm: number | null;
+  min: number | null;
+  max: number | null;
+}
+export interface TerminalWorkforceGates {
+  requirePinForPos: boolean;
+  requireCashRegisterForPos: boolean;
+}
+export interface TerminalPrintDestination {
+  id: number;
+  name: string;
+  role: string;
+  copies: number;
+  templateType: string;
+  selected: boolean;
+  receiptTemplateId: number | null;
+}
+export interface TerminalPosConfig {
+  stockAlertEnabled: boolean;
+  defaultLowStockThreshold: number;
+  timerDefaultLimitMin: number;
+  timerWarnBeforeMin: number;
+  posBehavior: Record<string, unknown>;
+  /** Ronde-3 Q5: gate lookup/search member (absen = enabled). */
+  memberLookupEnabled: boolean;
+  /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar (absen = OFF). */
+  requirePaymentProof: boolean;
+  /** S-F3: jadwal ongkir server (null per field = tak dikonfigurasi). */
+  deliveryFee: TerminalDeliveryFee;
+  /** S-F4: langkah pembulatan kas server (null = BE lama; pemanggil pakai default currency). */
+  roundingStep: number | null;
+  /** S-F6: gerbang workforce (absen = keduanya OFF). */
+  workforce: TerminalWorkforceGates;
+  /** S-F12/F13: destinasi cetak aktif server ([] = BE lama / belum dikonfigurasi). */
+  printDestinations: TerminalPrintDestination[];
+}
+
+function cleanPosConfigInt(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback;
+}
+
+/** S-F3: sanitasi nominal jadwal ongkir (null = tak dikonfigurasi, bukan 0). */
+function cleanFeeAmount(v: unknown): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** S-F12/F13: sanitasi satu destinasi cetak (tanpa secret di tabel BE). */
+function cleanPrintDestination(r: unknown): TerminalPrintDestination | null {
+  if (!r || typeof r !== 'object') return null;
+  const o = r as Record<string, unknown>;
+  const id = Number(o.id);
+  if (!Number.isFinite(id)) return null;
+  const copies = Number(o.copies);
+  const rid = o.receiptTemplateId;
+  return {
+    id: Math.round(id),
+    name: String(o.name ?? '').trim(),
+    role: String(o.role ?? '').trim().toLowerCase(),
+    copies: Number.isFinite(copies) && copies > 0 ? Math.round(copies) : 1,
+    templateType: String(o.templateType ?? o.template_type ?? '').trim(),
+    selected: o.selected === true,
+    receiptTemplateId: rid === undefined || rid === null || rid === '' || !Number.isFinite(Number(rid)) ? null : Math.round(Number(rid)),
+  };
+}
+
+/** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
+ * Kontrak BE paralel: flag `requirePaymentProof` (absen = OFF). Dibaca
+ * toleran: top-level ATAU nested posBehaviorSettings/posBehavior/pb ATAU
+ * paymentSettings/payment_settings (cache payment-settings) — varian
+ * snake_case ikut dibaca. Absen/error = false (perilaku lama, nol-regresi). */
+export function parseRequirePaymentProof(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const o = data as Record<string, unknown>;
+  const nested: Array<Record<string, unknown>> = [];
+  for (const k of ['posBehaviorSettings', 'posBehavior', 'pb', 'paymentSettings', 'payment_settings', 'payment', 'settings']) {
+    const v = o[k];
+    if (v && typeof v === 'object') nested.push(v as Record<string, unknown>);
+  }
+  const cands: unknown[] = [o.requirePaymentProof, o.require_payment_proof, o.proofRequired, o.proof_required];
+  for (const n of nested) cands.push(n.requirePaymentProof, n.require_payment_proof, n.proofRequired, n.proof_required);
+  for (const c of cands) {
+    if (c === undefined || c === null) continue;
+    if (typeof c === 'boolean') return c;
+    if (typeof c === 'number') return c !== 0;
+    const s = String(c).trim().toLowerCase();
+    if (s === 'true' || s === '1' || s === 'ya' || s === 'yes') return true;
+    if (s === 'false' || s === '0' || s === 'tidak' || s === 'no') return false;
+  }
+  return false;
+}
+
+export async function fetchTerminalPosConfig(
+  terminalId: string,
+): Promise<TerminalApiResult<TerminalPosConfig>> {  const r = await apiFetch(withId(ApiPath.terminalPosConfig, terminalId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<TerminalPosConfig>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const stock = (data.stock ?? {}) as Record<string, unknown>;
+  const timer = (data.timer ?? {}) as Record<string, unknown>;
+  const posBehavior = (data.posBehaviorSettings ?? {}) as Record<string, unknown>;
+  // S-F3: jadwal ongkir (BE lama = absen → semua null = perilaku lama).
+  const fee = (data.deliveryFee ?? {}) as Record<string, unknown>;
+  // S-F4: langkah pembulatan server (BE lama = absen → null = default currency).
+  const rs = data.roundingStep;
+  // S-F6: gerbang workforce (BE lama = absen → keduanya OFF).
+  const wf = (data.workforce ?? {}) as Record<string, unknown>;
+  // S-F12/F13: destinasi cetak server (BE lama = absen → [] = lokal-only).
+  const dests = Array.isArray(data.printDestinations) ? data.printDestinations : [];
+  return {
+    ok: true,
+    data: {
+      stockAlertEnabled: stock.alertEnabled !== false,
+      defaultLowStockThreshold: cleanPosConfigInt(stock.defaultLowStockThreshold, 5),
+      timerDefaultLimitMin: cleanPosConfigInt(timer.defaultLimitMin, 90),
+      timerWarnBeforeMin: cleanPosConfigInt(timer.warnBeforeMin, 10),
+      posBehavior,
+      // Q5: parse top-level + nested posBehaviorSettings/posBehavior
+      // (absen = enabled); tak pernah crash pada data asing.
+      memberLookupEnabled: parseMemberLookupEnabled(data),
+      // SESI-FINAL-APP: requirePaymentProof (absen = OFF = perilaku lama).
+      requirePaymentProof: parseRequirePaymentProof(data),
+      deliveryFee: {
+        base: cleanFeeAmount(fee.base),
+        perKm: cleanFeeAmount(fee.perKm),
+        min: cleanFeeAmount(fee.min),
+        max: cleanFeeAmount(fee.max),
+      },
+      roundingStep: (() => {
+        if (rs === undefined || rs === null || rs === '') return null;
+        const n = Number(rs);
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+      })(),
+      workforce: {
+        requirePinForPos: wf.requirePinForPos === true,
+        requireCashRegisterForPos: wf.requireCashRegisterForPos === true,
+      },
+      printDestinations: dests
+        .map(cleanPrintDestination)
+        .filter((d): d is TerminalPrintDestination => d !== null),
+    },
+    fromDummy: false,
+  };
+}
+
+/** Opname-lite kasir (audit-5d80): DRAFT create/current + item submit.
+ * Finalize/cancel tetap owner-only MerchantAuth (BE terminal_stock_count.go).
+ * ID lokal APP (string ESB) ≠ bigint server → pemanggil cocokkan via nama.
+ * Fail jujur: {ok:false} = status TAK DIKETAHUI, pemanggil tampilkan pesan. */
+export interface StockCountDraft {
+  id: number;
+  note: string;
+  startedAt: string;
+}
+
+export interface StockCountItem {
+  itemType: string;
+  itemId: number;
+  name: string;
+  snapshotQty: number;
+  countedQty: number | null;
+}
+
+function withIdAndCount(path: string, id: string, countId: string | number): string {
+  return withId(path, id).replace('{countId}', encodeURIComponent(String(countId)));
+}
+
+function numId(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+export async function fetchStockCountCurrent(
+  terminalId: string,
+): Promise<TerminalApiResult<StockCountDraft | null>> {
+  const r = await apiFetch(withId(ApiPath.terminalStockCountCurrent, terminalId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountDraft | null>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown> | null>(r.data);
+  if (!data) return { ok: true, data: null, fromDummy: false };
+  return {
+    ok: true,
+    data: { id: numId(data.id), note: str(data.note), startedAt: str(data.startedAt) },
+    fromDummy: false,
+  };
+}
+
+export async function createStockCount(
+  terminalId: string,
+  note: string,
+): Promise<TerminalApiResult<StockCountDraft>> {
+  const r = await apiFetch(withId(ApiPath.terminalStockCountCreate, terminalId), {
+    method: 'POST',
+    body: { note },
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountDraft>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { id: numId(data.id), note: '', startedAt: str(data.startedAt) },
+    fromDummy: false,
+  };
+}
+
+export async function fetchStockCountItems(
+  terminalId: string,
+  countId: number,
+): Promise<TerminalApiResult<StockCountItem[]>> {
+  const r = await apiFetch(withIdAndCount(ApiPath.terminalStockCountItems, terminalId, countId), {
+    method: 'GET',
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<StockCountItem[]>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const raw = (data.items ?? []) as Array<Record<string, unknown>>;
+  return {
+    ok: true,
+    data: raw.map((it) => ({
+      itemType: str(it.itemType),
+      itemId: numId(it.itemId),
+      name: str(it.name),
+      snapshotQty: numId(it.snapshotQty),
+      countedQty: it.countedQty === null || it.countedQty === undefined ? null : numId(it.countedQty),
+    })),
+    fromDummy: false,
+  };
+}
+
+export async function submitStockCountItem(
+  terminalId: string,
+  countId: number,
+  item: { itemType: string; itemId: number; countedQty: number },
+): Promise<TerminalApiResult<{ countedQty: number }>> {
+  const r = await apiFetch(withIdAndCount(ApiPath.terminalStockCountItems, terminalId, countId), {
+    method: 'PUT',
+    body: { itemType: item.itemType, itemId: item.itemId, countedQty: item.countedQty },
+  });
+  if (!r.ok || r.fromDummy) {
+    return fail<{ countedQty: number }>(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return { ok: true, data: { countedQty: numId(data.countedQty) }, fromDummy: false };
+}
+
+// --------------------------------------------------------------------------
+// TRISISI2 ronde-2 — klien siap-kontrak (BE-BELUM-ADA 2026-10-25 kecuali
+// transition): expenses (A10), table-transition (A11), vouchers burn/release
+// (A12). Pola fail jujur sama: {ok:false} = pemanggil fallback, BUKAN sukses.
+// 409-duplicate = sukses idempoten (catat id server).
+// --------------------------------------------------------------------------
+
+export type TerminalExpenseKind = 'EXPENSE' | 'PETTY_CASH';
+
+export interface TerminalExpenseInput {
+  clientExpenseId: string;
+  kind: TerminalExpenseKind;
+  amount: number;
+  note: string;
+  occurredAt: string;
+  /** A-P1-6: URL foto struk bila SUDAH remote (https). Lokal (file://) JANGAN
+   *  dikirim — BE menolak >2048 char; tanpa endpoint upload terminal, foto
+   *  lokal ditandai photoPending (banner + marker storage, lapor PARKED). */
+  photoUrl?: string;
+}
+
+export interface TerminalExpenseDone {
+  id: string;
+  duplicate: boolean;
+  /** Gema photoUrl dari server ('' bila tak ada). */
+  photoUrl: string;
+}
+
+function readExpensePhotoUrl(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['photoUrl', 'photo_url', 'photoURL']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 2048);
+    }
+  }
+  return '';
+}
+
+function readExistingExpenseId(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['id', 'existingId', 'existing_id', 'expenseId', 'expense_id']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    }
+  }
+  return '';
+}
+
+export async function createTerminalExpense(
+  terminalId: string,
+  inp: TerminalExpenseInput,
+): Promise<TerminalApiResult<TerminalExpenseDone>> {
+  const photoUrl = String(inp.photoUrl ?? '').trim().slice(0, 2048);
+  const r = await apiFetch(withId(ApiPath.terminalExpenses, terminalId), {
+    method: 'POST',
+    body: {
+      clientExpenseId: inp.clientExpenseId,
+      kind: inp.kind,
+      amount: Math.round(inp.amount),
+      note: inp.note.slice(0, 500),
+      occurredAt: inp.occurredAt,
+      // A-P1-6: kirim photoUrl HANYA bila sudah remote; lokal = omit
+      // (pemanggil menandai photoPending + banner).
+      ...(photoUrl ? { photoUrl } : {}),
+    },
+  });
+  if (r.fromDummy) return fail<TerminalExpenseDone>(r.status, r.fromDummy);
+  const { data } = unwrap<Record<string, unknown> | null>(r.data);
+  if (r.ok) {
+    return { ok: true, data: { id: readExistingExpenseId(data), duplicate: false, photoUrl: readExpensePhotoUrl(data) }, fromDummy: false };
+  }
+  // 409-duplicate = sukses idempoten (kontrak: 409 + existing id).
+  if (r.status === 409) {
+    const existing = readExistingExpenseId(data ?? r.data);
+    if (existing) return { ok: true, data: { id: existing, duplicate: true, photoUrl: readExpensePhotoUrl(data ?? r.data) }, fromDummy: false };
+  }
+  return failWith<TerminalExpenseDone>(r.status, r.fromDummy, r.data);
+}
+
+// --------------------------------------------------------------------------
+// SESI-FINAL-APP: upload berkas terminal (kontrak BE paralel — pakai spec
+// persis): POST /api/v1/terminals/{id}/uploads multipart {file} → 201 {url}
+// (maks 5MB sisi server; klien mengecilkan via preparePhoto JPEG 0.7).
+// Dipakai expense-foto + payment-proof (upload-dulu, bukan photoPending-only).
+// Fail jujur {ok:false}: mode non-real/offline/timeout/non-201 = pemanggil
+// fallback (photoPending/hold), BUKAN sukses palsu.
+// --------------------------------------------------------------------------
+
+export interface TerminalUploadDone {
+  /** URL publik berkas (https) dari server. */
+  url: string;
+}
+
+function guessUploadMime(uri: string): string {
+  const m = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(String(uri ?? '').trim());
+  const ext = (m?.[1] ?? '').toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
+
+function guessUploadName(uri: string): string {
+  const base = String(uri ?? '').split(/[?#]/)[0].split('/').pop()?.trim() ?? '';
+  if (/^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/.test(base) && base.includes('.')) return base;
+  return `proof-${Date.now()}.jpg`;
+}
+
+function readUploadUrl(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const r = body as Record<string, unknown>;
+  const inner = (r.data ?? r) as Record<string, unknown>;
+  for (const o of [inner, r]) {
+    for (const k of ['url', 'fileUrl', 'file_url', 'location']) {
+      const v = o[k];
+      if (typeof v === 'string' && /^https?:\/\/.+/i.test(v.trim())) return v.trim().slice(0, 2048);
+    }
+  }
+  return '';
+}
+
+/** Lazy-resolve token sesi (cermin resolveSessionToken config/server — lazy
+ * require agar nol risiko siklus impor statis). */
+function uploadSessionToken(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sess = require('../session') as typeof import('../session');
+    return String(sess.getSession()?.authToken ?? sess.getSession()?.authKey ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export async function uploadTerminalFile(
+  terminalId: string,
+  uri: string,
+): Promise<TerminalApiResult<TerminalUploadDone>> {
+  const tid = String(terminalId ?? '').trim();
+  const src = String(uri ?? '').trim();
+  if (!tid || !src) return fail<TerminalUploadDone>(400, false);
+  // Tanpa file lokal (sudah remote) = bukan tugas uploader; tanpa mode real =
+  // offline/dummy → gagal jujur (pemanggil fallback, tanpa sukses palsu).
+  if (/^https?:\/\//i.test(src)) return fail<TerminalUploadDone>(400, false);
+  if (getApiMode() !== 'real') return fail<TerminalUploadDone>(0, false);
+  try {
+    const t = getTerminal();
+    const headers: Record<string, string> = {};
+    if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
+    if (t.branchId) headers['X-Branch-Id'] = t.branchId;
+    const token = uploadSessionToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const form = new FormData();
+    form.append('file', {
+      uri: src,
+      name: guessUploadName(src),
+      type: guessUploadMime(src),
+    } as unknown as Blob);
+    const url = apiUrl(withId(ApiPath.terminalUploads, tid));
+    const res = await Promise.race([
+      fetch(url, { method: 'POST', headers, body: form }),
+      new Promise<Response>((_, reject) => {
+        setTimeout(() => reject(new Error('timeout')), 25000);
+      }),
+    ]);
+    if (res.status === 0) return fail<TerminalUploadDone>(0, false);
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    if (res.status === 201 || res.ok) {
+      const out = readUploadUrl(body);
+      if (out) return { ok: true, data: { url: out }, fromDummy: false };
+      return failWith<TerminalUploadDone>(res.status, false, body);
+    }
+    return failWith<TerminalUploadDone>(res.status, false, body);
+  } catch {
+    return fail<TerminalUploadDone>(0, false);
+  }
+}
+
+export type TerminalTableStatus = 'OCCUPIED' | 'AVAILABLE';
+
+export interface TerminalTableTransitionInput {
+  status: TerminalTableStatus;
+  guestName?: string;
+  partySize?: number;
+}
+
+export interface TerminalTableTransitionDone {
+  id: number;
+  tableNumber: string;
+  status: TerminalTableStatus;
+  statusSince: string | null;
+  guestName: string | null;
+  partySize: number | null;
+}
+
+export async function transitionTerminalTable(
+  terminalId: string,
+  tableId: number,
+  inp: TerminalTableTransitionInput,
+): Promise<TerminalApiResult<TerminalTableTransitionDone>> {
+  const path = withId(ApiPath.terminalTableTransition, terminalId)
+    .replace('{tableId}', encodeURIComponent(String(tableId)));
+  const r = await apiFetch(path, {
+    method: 'POST',
+    body: {
+      status: inp.status,
+      ...(inp.guestName ? { guestName: inp.guestName.slice(0, 120) } : {}),
+      ...(inp.partySize ? { partySize: Math.max(1, Math.min(40, Math.round(inp.partySize))) } : {}),
+    },
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<TerminalTableTransitionDone>(r.status, r.fromDummy)
+      : failWith<TerminalTableTransitionDone>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const st = String(data.status ?? '').trim().toUpperCase();
+  return {
+    ok: true,
+    data: {
+      id: numId(data.id),
+      tableNumber: str(data.tableNumber),
+      status: st === 'AVAILABLE' ? 'AVAILABLE' : 'OCCUPIED',
+      statusSince: str(data.statusSince) || null,
+      guestName: str(data.guestName) || null,
+      partySize: data.partySize === null || data.partySize === undefined ? null : numId(data.partySize),
+    },
+    fromDummy: false,
+  };
+}
+
+export interface TerminalVoucherBurnDone {
+  ok: boolean;
+  redemptionId: string;
+}
+
+export async function burnTerminalVoucher(
+  terminalId: string,
+  inp: { code: string; orderClientId: string; idempotencyKey: string },
+): Promise<TerminalApiResult<TerminalVoucherBurnDone>> {
+  const r = await apiFetch(withId(ApiPath.terminalVouchersBurn, terminalId), {
+    method: 'POST',
+    body: { code: inp.code, orderClientId: inp.orderClientId, idempotencyKey: inp.idempotencyKey },
+    idempotencyKey: inp.idempotencyKey,
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<TerminalVoucherBurnDone>(r.status, r.fromDummy)
+      : failWith<TerminalVoucherBurnDone>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { ok: data.ok !== false, redemptionId: str(data.redemptionId ?? data.id) },
+    fromDummy: false,
+  };
+}
+
+export async function releaseTerminalVoucher(
+  terminalId: string,
+  idempotencyKey: string,
+): Promise<TerminalApiResult<{ ok: boolean; released: boolean }>> {
+  const r = await apiFetch(withId(ApiPath.terminalVouchersRelease, terminalId), {
+    method: 'POST',
+    body: { idempotencyKey },
+    idempotencyKey,
+  });
+  if (!r.ok || r.fromDummy) {
+    return r.fromDummy
+      ? fail<{ ok: boolean; released: boolean }>(r.status, r.fromDummy)
+      : failWith<{ ok: boolean; released: boolean }>(r.status, r.fromDummy, r.data);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: { ok: data.ok !== false, released: data.released !== false },
+    fromDummy: false,
+  };
+}
+
+

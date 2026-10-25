@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';import { AppState, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { DISPLAY_STALE_MS } from '../../lib/display';import { useLang,
 
-type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
+type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/timezone';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
   require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang(); const [idx, setIdx] = useState(0);
+  const { lang, setLang, t, isLocked } = useLang(); const [idx, setIdx] = useState(0);
   /** APP-EVENTS (§11.4): sadar konektivitas — banner offline + penanda stale. */
   const { online } = useConnectivity();
   // Display-lock SPEC §10: kedua tag view terkunci = tanpa entri kasir.
@@ -136,7 +136,7 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
-      <View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>{online === false ? (
+      {isLocked ? null : (<View style={styles.langWrap}>{(['id', 'en'] as Lang[]).map((l) => (<TouchableOpacity key={l} onPress={() => setLang(l)} style={[styles.langBtn, lang === l && styles.langBtnOn]}><Text style={[styles.langT, lang === l && styles.langTOn]}>{l.toUpperCase()}</Text></TouchableOpacity> ))}</View>)}{online === false ? (
       <View style={styles.offlineBanner}>
         <Text style={styles.offlineBannerText}>{t('disp_offline_banner')}</Text>
       </View>
@@ -145,7 +145,7 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
         <Text style={styles.offlineBannerText}>{t('terminal_unbound_hint')}</Text>
       </View>
       ) : null}<View style={styles.hero}>
-        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
+        <Image source={require('../../../assets/genfity-logo-dark.png')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
         <Text style={[styles.shop, isTablet && styles.shopBig]}>{shopName}</Text>
         <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>
       </View>
@@ -162,7 +162,7 @@ type Lang } from '../../lib/i18n';import { useConnectivity } from '../../hooks/u
       <View style={styles.infoRow}>
         <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
           <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_hours')}</Text>
-          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val')}</Text>
+          <Text style={[styles.infoSub, isTablet && styles.infoSubBig]}>{t('idle_hours_val').replace('{tz}', getTimezoneShort())}</Text>
         </View>
         {wifiSsid ? (
           <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>

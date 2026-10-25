@@ -27,7 +27,7 @@ const AUTOCUT_KEY = 'genfity.settings.autocut';
 export default function SettingsScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { t, lang, setLang } = useLang();
+  const { t, lang, setLang, isLocked } = useLang();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [soundNewOrder, setSoundNewOrder] = useState(() => getNotif().soundNewOrder);
   const [customerDisplay, setCustomerDisplay] = useState(() => getNotif().customerDisplay);
@@ -41,6 +41,12 @@ export default function SettingsScreen({ navigation }: Props) {
   const toggleAutoCut = (v: boolean) => { setAutoCut(v); void setJSON(AUTOCUT_KEY, v); };
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
+  // Audit-5d80: panel server disembunyikan dari staf — preset + editor custom
+  // hanya muncul setelah tap 5x pada label versi (dengan gate settings.edit).
+  // Alasan: preset 'Prod' menunjuk ke server pihak ketiga (ESB), dan selektor
+  // server di tangan kasir = risiko salah arah + desync klaim terminal.
+  const [serverUnlocked, setServerUnlocked] = useState(false);
+  const [versionTaps, setVersionTaps] = useState(0);
   // F4 readout klaim: ditulis HANYA oleh alur bind terverifikasi PIN via
   // BranchPicker (tanpa input manual di layar ini); dibaca ulang tiap fokus —
   // back-navigate setelah re-bind tak remount sehingga getTerminal() per
@@ -127,6 +133,21 @@ export default function SettingsScreen({ navigation }: Props) {
       setServerEnv(e);
       setServerEnvState(e);
     });
+  };
+
+  /** Buka kunci panel server setelah 5 ketukan pada label versi (gate RBAC). */
+  const tapVersion = () => {
+    const n = versionTaps + 1;
+    if (n >= 5) {
+      setVersionTaps(0);
+      if (!serverUnlocked) {
+        void guardSettingsEdit().then((ok) => {
+          if (ok) setServerUnlocked(true);
+        });
+      }
+      return;
+    }
+    setVersionTaps(n);
   };
 
   const saveCustom = () => {
@@ -216,6 +237,8 @@ export default function SettingsScreen({ navigation }: Props) {
       <View style={styles.panel}>
         <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.server')}</Text>
         <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{getBaseUrl() || t('settings.noServer')}</Text>
+        {serverUnlocked ? (
+        <>
         <View style={styles.envRow}>
           {ENVS.map((e) => (
             <Pressable key={e} onPress={() => pickEnv(e)} style={[styles.envBtn, serverEnv === e && styles.envBtnActive]}>
@@ -236,6 +259,8 @@ export default function SettingsScreen({ navigation }: Props) {
             <AppButton size="sm" title={t('common.save')} onPress={saveCustom} fullWidth={false} style={styles.btnInline} />
           </View>
         )}
+        </>
+        ) : null}
       </View>
 
       <View style={styles.panel}>
@@ -292,6 +317,14 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
+      {/* SESI-FINAL-APP K5: backup/restore via clipboard PARKED jujur — tanpa
+          expo-clipboard/file-system/sharing di package.json (dep baru
+          dilarang), tanpa Share/file. Codec murni (lib/backupCodec) siap +
+          diuji roundtrip; baris ini SENGAJA tanpa onPress (disabled, tanpa
+          chevron) sampai dep clipboard diputuskan owner. */}
+      <MenuRow title={t('settings.backup')} sub={t('settings.backupSub')} />
+      {/* Cabang Australia (AUD): bahasa dikunci Inggris, baris pemilih disembunyikan. */}
+      {isLocked ? null : (
       <MenuRow
         title={t('settings.language')}
         sub={lang === 'id' ? 'Indonesia' : 'English'}
@@ -305,6 +338,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         }
       />
+      )}
       <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
       <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 
@@ -325,7 +359,9 @@ export default function SettingsScreen({ navigation }: Props) {
         style={styles.logoutBtn}
         textStyle={styles.logoutBtnText}
       />
-      <Text style={styles.version}>v1.0.0 - genfity-order</Text>
+      <Pressable onPress={tapVersion} accessibilityRole="button">
+        <Text style={styles.version}>v1.0.0 - genfity-order</Text>
+      </Pressable>
 
       </ScrollView>
     </View>

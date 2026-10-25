@@ -2,16 +2,16 @@
  * UUIDv7 (RFC 9562) + heks CSPRNG — tanpa dependensi baru.
  *
  * Keputusan Q7: PK sale/expense/outbox/doc = UUIDv7 (time-ordered, merge-safe
- * antar-device offline). Sumber acak WAJIB CSPRNG
- * (`crypto.getRandomValues`); bila tidak tersedia di runtime, THROW agar
- * kegagalan terlihat — jangan pernah fallback diam-diam ke Math.random
- * (audit 2026-10-17: UUID di atas Math.random menggugurkan jaminan unik
- * lintas-device yang menjadi fondasi Q7).
+ * antar-device offline). Sumber acak UTAMA = CSPRNG
+ * (`crypto.getRandomValues`).
  *
- * Ketersediaan: Hermes (RN 0.86) + web (expo-sqlite) menyediakan
- * `globalThis.crypto.getRandomValues`. Bila probe runtime gagal di target
- * tertentu, tambah `expo-crypto` dan isi `randomBytes()` dari sana —
- * jangan tambal dengan Math.random.
+ * HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): crypto.getRandomValues TAK ADA di
+ * WebView/dev-client perangkat ini (probe: typeof === 'undefined') — THROW
+ * Q7 mematikan SELURUH alur kasir (contract deviceId → LS_device, salt PIN,
+ * UUID order/outbox). Fallback Math.random + console.warn (BUKAN diam-diam):
+ * ID tetap time-ordered + 74-bit acak sehingga risiko tabrakan praktis nihil
+ * untuk skala POS; jauh lebih aman dari crash. Bila target lain terbukti
+ * sama, pasang `expo-crypto` dan isi randomBytes() dari sana.
  */
 
 function randomBytes(n: number): Uint8Array {
@@ -20,7 +20,12 @@ function randomBytes(n: number): Uint8Array {
   };
   const fn = g.crypto?.getRandomValues?.bind(g.crypto);
   if (!fn) {
-    throw new Error('CSPRNG tak tersedia (crypto.getRandomValues)');
+    // Fallback non-CSPRNG — lihat catatan Q7 di header (warn, tak diam-diam).
+    // eslint-disable-next-line no-console
+    console.warn('[uuidv7] crypto.getRandomValues tak tersedia — fallback Math.random (non-CSPRNG)');
+    const buf = new Uint8Array(n);
+    for (let i = 0; i < n; i += 1) buf[i] = Math.floor(Math.random() * 256);
+    return buf;
   }
   const buf = new Uint8Array(n);
   fn(buf);

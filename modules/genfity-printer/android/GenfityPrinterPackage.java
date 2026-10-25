@@ -1,4 +1,4 @@
-package id.genfity.posclone;
+package id.genfity.pos;
 
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;

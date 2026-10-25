@@ -200,15 +200,15 @@ export default function RecapScreen({ navigation }: Props) {
         const nm = getSession()?.name ?? getSession()?.username ?? '';
         const splitRows = paySplit
           .filter((r) => (r.nama || '').trim() && num(r.total) > 0)
-          .map((r) => ({ nama: `${(r.nama || t('sync_kind_other')).trim()} (${num(r.n)} trx)`, total: Math.round(num(r.total)) }));
-        const headMethodRows = [...methodMap.entries()].map(([nama, v]) => ({ nama: `${nama} (${v.n} trx)`, total: Math.round(v.total) }));
+          .map((r) => ({ nama: `${(r.nama || t('sync_kind_other')).trim()} (${num(r.n)} ${t('unit_trx')})`, total: Math.round(num(r.total)) }));
+        const headMethodRows = [...methodMap.entries()].map(([nama, v]) => ({ nama: `${nama} (${v.n} ${t('unit_trx')})`, total: Math.round(v.total) }));
         setDb({
           byMenu: menus.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
           customMenu: customMenus.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
-          byCat: cats.map((r) => ({ nama: r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
+          byCat: cats.map((r) => ({ nama: r.nama === 'Lainnya' ? t('sync_kind_other') : r.nama, qty: Math.round(num(r.qty)), total: Math.round(num(r.total)) })),
           byMethod: splitRows.length > 0 ? splitRows : headMethodRows,
           byMode: modes.map((r) => ({
-            nama: `${(r.salesMode || 'DINE_IN').split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')} (${r.n} trx)`,
+            nama: `${(r.salesMode || 'DINE_IN').split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')} (${r.n} ${t('unit_trx')})`,
             total: Math.round(num(r.total)),
           })),
           byUser: [...userMap.entries()].map(([nama, v]) => ({ nama, trx: v.n, total: Math.round(v.total) })),
@@ -273,7 +273,7 @@ export default function RecapScreen({ navigation }: Props) {
           <Text style={styles.heroLabel}>{t('hist_col_total')} · {rangeLabel(range)}</Text>
           <Text style={styles.heroValue}>{rp(gross)}</Text>
           <Text style={styles.heroSub}>{trxCount} {t('unit_trx')} · {hours}</Text>
-          <Text style={styles.heroNet}>Kas bersih {rp(gross - expenseTotal)} setelah pengeluaran</Text>
+          <Text style={styles.heroNet}>{t('rcp_net').replace('{n}', rp(gross - expenseTotal))}</Text>
         </View>
 
         {/* Tablet: seksi berpasangan 2 kolom agar tidak scroll panjang;
@@ -288,7 +288,7 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {byMethod.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada pembayaran.</Text>}
+          {byMethod.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_pay')}</Text>}
         </View>
         </View>
         <View style={isTablet ? styles.pairCol : undefined}>
@@ -298,12 +298,12 @@ export default function RecapScreen({ navigation }: Props) {
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
-                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} terjual</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} {t('rcp_sold')}</Text>
               </View>
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {byMenu.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+          {byMenu.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_sales')}</Text>}
         </View>
         </View>
         </View>
@@ -316,7 +316,7 @@ export default function RecapScreen({ navigation }: Props) {
             <View key={r.nama} style={styles.row}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.item, isTablet && styles.itemTablet]}>{r.nama}</Text>
-                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} terjual</Text>
+                <Text style={[styles.meta, isTablet && styles.metaTablet]}>{r.qty} {t('rcp_sold')}</Text>
               </View>
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
@@ -337,7 +337,7 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {byCat.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+          {byCat.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_sales')}</Text>}
         </View>
         </View>
         <View style={isTablet ? styles.pairCol : undefined}>
@@ -349,7 +349,7 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {byMode.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+          {byMode.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_sales')}</Text>}
         </View>
         </View>
         </View>
@@ -367,7 +367,7 @@ export default function RecapScreen({ navigation }: Props) {
               <Text style={[styles.price, isTablet && styles.priceTablet]}>{rp(r.total)}</Text>
             </View>
           ))}
-          {byUser.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>Belum ada penjualan.</Text>}
+          {byUser.length === 0 && <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('rcp_no_sales')}</Text>}
         </View>
         </View>
         <View style={isTablet ? styles.pairCol : undefined}>

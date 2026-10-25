@@ -10,7 +10,22 @@
  *   bukan jam perangkat kasir.
  */
 import type { Lang } from './i18n';
+import { getCachedCurrency } from './currency';
 import { getCachedTimezone } from './timezone';
+
+/**
+ * Locale tanggal mengikuti currency cabang, BUKAN bahasa UI (DUAL-CURRENCY
+ * §4e): cabang AUD selalu en-AU (format Sydney) walau UI berbahasa Indonesia;
+ * selain itu peta lama per bahasa (id → id-ID, en → fallback pemanggil).
+ */
+function branchLocale(lang: Lang, enFallback: string): string {
+  try {
+    if (getCachedCurrency().code === 'AUD') return 'en-AU';
+  } catch {
+    /* cache belum siap: fallback bahasa UI */
+  }
+  return lang === 'id' ? 'id-ID' : enFallback;
+}
 
 /** Nol depan untuk jam/menit ('4' → '04'). */
 function pad(n: number): string {
@@ -94,7 +109,7 @@ function inMerchantTz(d: Date, timeZone?: string): Date {
 /** Date → tanggal pendek sesuai bahasa DALAM zona merchant. */
 export function fmtDateInTz(d: Date, lang: Lang = 'id', timeZone?: string): string {
   if (Number.isNaN(d.getTime())) return '-';
-  const locale = lang === 'id' ? 'id-ID' : 'en-AU';
+  const locale = branchLocale(lang, 'en-AU');
   try {
     return new Intl.DateTimeFormat(locale, {
       day: 'numeric',

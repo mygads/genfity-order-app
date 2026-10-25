@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer, useNavigation, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useFonts } from 'expo-font';
@@ -20,6 +20,7 @@ import { flushPendingRevokes, restoreAutoSyncPrefs } from './src/lib/sync';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
+import { subscribeShiftGuard } from './src/lib/shiftGuard';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
@@ -187,6 +188,29 @@ const screenOptions = {
   animation: 'default' as const,
 };
 
+/** Soft-guard shift (dibaca ulang): instalasi fresh (tr_shiftlog kosong) =
+ * false agar demo/screenshot jalan; ada riwayat tapi tak ada yang open =
+ * true (mulai di Shift). null = DB belum siap, JANGAN ubah guard (fail-open
+ * seperti semula). Dipakai efek login + langganan shiftGuard (buka/tutup). */
+async function computeShiftClosed(): Promise<boolean | null> {
+  try {
+    await initDb();
+    const total = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_shiftlog');
+    // Fresh install: shiftlog kosong → jangan blokir.
+    if (!total || Number(total.c) === 0) return false;
+    const openRow = await queryFirst<{ c: number }>(
+      // Baris absensi (status 'absen') dikecualikan: clock-in kehadiran
+      // BUKAN shift kasir; tanpa filter, absen-masuk setelah shift tutup
+      // (clockOut NULL) terbaca "open" dan gerbang navigator bocor.
+      "SELECT COUNT(*) AS c FROM tr_shiftlog WHERE (status = 'open' OR clockOut IS NULL) AND (status IS NULL OR status <> 'absen')",
+    );
+    return Number(openRow?.c ?? 0) === 0;
+  } catch {
+    /* DB belum siap - jangan blokir kasir */
+    return null;
+  }
+}
+
 /** Guard navigator: belum login hanya bisa buka alur intro/install/Login.
  * B2 (SPEC B1/R1): tamu yang belum ter-bound mulai di BindFlow
  * (BranchPicker), yang ter-bound mulai di Login. */
@@ -231,30 +255,25 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
       return;
     }
     let alive = true;
-    (async () => {
-      try {
-        await initDb();
-        const total = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM tr_shiftlog');
-        if (!alive) return;
-        // Fresh install: shiftlog kosong → jangan blokir.
-        if (!total || Number(total.c) === 0) {
-          setShiftClosed(false);
-          return;
-        }
-        const openRow = await queryFirst<{ c: number }>(
-          // Baris absensi (status 'absen') dikecualikan: clock-in kehadiran
-          // BUKAN shift kasir; tanpa filter, absen-masuk setelah shift tutup
-          // (clockOut NULL) terbaca "open" dan gerbang navigator bocor.
-          "SELECT COUNT(*) AS c FROM tr_shiftlog WHERE (status = 'open' OR clockOut IS NULL) AND (status IS NULL OR status <> 'absen')",
-        );
-        if (alive) setShiftClosed(Number(openRow?.c ?? 0) === 0);
-      } catch {
-        /* DB belum siap - jangan blokir kasir */
-      }
-    })();
+    void computeShiftClosed().then((v) => {
+      if (alive && v !== null) setShiftClosed(v);
+    });
     return () => {
       alive = false;
     };
+  }, [loggedIn]);
+  // HP-E2E-FIX-HEADER (2026-10-24): hitung ulang guard tiap shift dibuka/
+  // ditutup (ShiftScreen/EndShiftScreen notifyShiftChanged). Tanpa ini state
+  // basi sejak login: strip basi tampil di semua layar + header tak konsisten.
+  // Strip global dihapus (guard hanya mengarahkan rute awal; status shift
+  // tampil inline di tiap layar via ScreenHeader/badge masing-masing).
+  useEffect(() => {
+    if (!loggedIn) return;
+    return subscribeShiftGuard(() => {
+      void computeShiftClosed().then((v) => {
+        if (v !== null) setShiftClosed(v);
+      });
+    });
   }, [loggedIn]);
   /** Jaring pengaman rute awal per flip login/logout. Teramati di web+HP:
    * state navigator kadang dipakai ulang lintas cabang tamu/authed sehingga
@@ -372,13 +391,6 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
   }
   return (
     <>
-      {shiftClosed ? (
-        <View style={guardStyles.notice}>
-          <Text style={guardStyles.noticeT}>
-            {t('dash_shift_closed')} - {t('shf_open_btn')}
-          </Text>
-        </View>
-      ) : null}
       <Stack.Navigator
         key={`${deviceRole}-${shiftClosed ? 'shift-closed' : 'shift-ok'}`}
         initialRouteName={home}
@@ -746,10 +758,4 @@ export default function App() {
 
 const styles = StyleSheet.create({
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.navy },
-});
-
-/** Banner pesan soft-guard shift - Indonesia, token colors.* + fonts.* yang ada. */
-const guardStyles = StyleSheet.create({
-  notice: { backgroundColor: colors.paleAmber, paddingHorizontal: 16, paddingVertical: 10 },
-  noticeT: { color: colors.amberDark, fontFamily: fonts.medium, fontSize: 12, textAlign: 'center' },
 });

@@ -25,12 +25,15 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPut,
+  getCustomBaseUrl,
+  getServerEnv,
   getTerminal,
   setCustomBaseUrl,
   setServerEnv,
 } from '../config/server';
 import { getItem, setItem } from './storage';
-import { logout } from '../session';
+import { applyRefreshedTokens, getRefreshToken, getSession, logout } from '../session';
 import { dbNowLocal } from './datefmt';
 import { initDb, queryFirst } from './db';
 import { loadPinRecord, verifyPinHash } from './pin';
@@ -76,15 +79,30 @@ if (ENV_URL) {
 
 /**
  * Mode aktif saat ini:
- * - 'real' bila EXPO_PUBLIC_API_BASE_URL terisi (backend sendiri);
+ * - 'real' bila EXPO_PUBLIC_API_BASE_URL terisi (backend sendiri) ATAU
+ *   server custom dikonfigurasi saat runtime (Tools → URL server, persist
+ *   genfity.server.env=custom + genfity.server.custom);
  * - 'dummy' bila URL kosong DAN EXPO_PUBLIC_DUMMY === '1' (eksplisit
  *   untuk screenshot/demo);
  * - 'local' untuk selain itu (default offline-first tanpa server:
  *   tanpa dial network, tanpa JSON dummy).
+ *
+ * HP-E2E-FIX-5 (2026-10-24, E2E HP Xiaomi): SEBELUM fix ini, klausa runtime
+ * TAK ADA — build dev tanpa EXPO_PUBLIC_API_BASE_URL SELALU 'local' walau
+ * user sudah set server custom di Tools. Akibat: callStaffLogin short-circuit
+ * {reached:false} TANPA dial (curl device→BE 8095 terbukti 200), login mati
+ * dengan need_be "(7-day grant)" padahal grant + server.valid. Hanya env
+ * 'custom' yang dihitung (prod/dev/staging warisan ESB TIDAK — dilarang
+ * dial server pihak ketiga diam-diam); dummy eksplisit tetap menang.
  */
 export function getApiMode(): ApiMode {
   if (readEnvBaseUrl()) return 'real';
   if (readEnvDummy() === '1') return 'dummy';
+  try {
+    if (getServerEnv() === 'custom' && getCustomBaseUrl().trim()) return 'real';
+  } catch {
+    /* abaikan — jatuh ke local */
+  }
   return 'local';
 }
 
@@ -98,14 +116,17 @@ export interface ApiResult<T = unknown> {
 }
 
 export interface FetchOpts {
-  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH';
+  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   params?: Record<string, string | number>;
   body?: unknown;
   idempotencyKey?: string;
   token?: string;
   /** S4-APP-313/GAP-1/5: sinyal abort pemanggil (timeout per-attempt /
-   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch. */
+   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch/apiPut. */
   signal?: AbortSignal;
+  /** T-AUTH-REFRESH (internal): request ini SUDAH hasil retry pasca-refresh —
+   * jangan refresh lagi (anti loop 401→refresh→401). Tak di-set pemanggil. */
+  __refreshed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +317,79 @@ function errorCodeOf(body: unknown): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// T-AUTH-REFRESH: silent refresh single-flight (cermin AuthRefresh admin).
+// 401 non-PIN → coba rotasi via POST terminal-refresh SEKALI per jendela,
+// lalu retry request asal SATU kali dengan bearer baru (lazy-resolve dari
+// sesi yang sudah applyRefreshedTokens). Semua kegagalan = false (pemanggil
+// lanjut ke unauthorizedHandler → logout, fail-closed). Tak pernah melempar.
+// Single-flight: N request 401 bersamaan = 1 POST refresh (hemat kuota
+// rate-limit 30/8 + anti race ROTASI: refresh kedua dengan token lama yang
+// sama = REPLAY → sesi di-REVOKE server!). Refresh endpoint dipanggil via
+// apiPost LANGSUNG (bukan apiFetch — anti rekursi 401).
+// ---------------------------------------------------------------------------
+let refreshInflight: Promise<boolean> | null = null;
+
+async function trySilentRefresh(): Promise<boolean> {
+  if (refreshInflight) {
+    try {
+      return await refreshInflight;
+    } catch {
+      return false;
+    }
+  }
+  const run: Promise<boolean> = (async (): Promise<boolean> => {
+    let refreshToken = '';
+    try {
+      refreshToken = await getRefreshToken();
+    } catch {
+      return false;
+    }
+    if (!refreshToken) return false;
+    // Snapshot identitas sesi SEBELUM dial (guard applyRefreshedTokens).
+    let userId = '';
+    let username = '';
+    try {
+      const s = getSession();
+      if (!s || s.offline) return false;
+      userId = String(s.userId ?? '').trim();
+      username = String(s.username ?? '').trim();
+    } catch {
+      return false;
+    }
+    let body: unknown = null;
+    try {
+      const res = await apiPost(ApiPath.terminalRefresh, { refreshToken });
+      try {
+        body = await res.json();
+      } catch {
+        return false;
+      }
+      if (!res.ok) return false;
+    } catch {
+      return false;
+    }
+    try {
+      const b = (body ?? {}) as Record<string, unknown>;
+      const d = (b.data ?? {}) as Record<string, unknown>;
+      const access = String(d.accessToken ?? '').trim();
+      const next = String(d.refreshToken ?? '').trim();
+      if (!access || !next) return false;
+      return applyRefreshedTokens({ userId, username, accessToken: access, refreshToken: next });
+    } catch {
+      return false;
+    }
+  })();
+  refreshInflight = run;
+  try {
+    return await run;
+  } catch {
+    return false;
+  } finally {
+    if (refreshInflight === run) refreshInflight = null;
+  }
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   opts?: FetchOpts,
@@ -325,7 +419,13 @@ export async function apiFetch<T = unknown>(
                   token: opts?.token,
                   signal: opts?.signal,
                 })
-              : await apiPost(path, opts?.body ?? {}, {
+              : method === 'PUT'
+                ? await apiPut(path, opts?.body ?? {}, {
+                    idempotencyKey: opts?.idempotencyKey,
+                    token: opts?.token,
+                    signal: opts?.signal,
+                  })
+                : await apiPost(path, opts?.body ?? {}, {
                   idempotencyKey: opts?.idempotencyKey,
                   token: opts?.token,
                   signal: opts?.signal,
@@ -339,6 +439,20 @@ export async function apiFetch<T = unknown>(
         if (res.status === 401) {
           const code = errorCodeOf(body);
           if (!PIN_FACTOR_401_RE.test(code)) {
+            // T-AUTH-REFRESH: 401 sesi (bukan PIN) → coba silent refresh SEKALI
+            // lalu retry request asal SATU kali dengan bearer baru. Retry
+            // membawa __refreshed agar 401 kedua langsung ke handler (anti loop).
+            if (!opts?.__refreshed) {
+              let refreshed = false;
+              try {
+                refreshed = await trySilentRefresh();
+              } catch {
+                refreshed = false;
+              }
+              if (refreshed) {
+                return apiFetch<T>(path, { ...opts, __refreshed: true });
+              }
+            }
             try {
               unauthorizedHandler({ path, status: res.status, errorCode: code });
             } catch {

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getBranchId, getServerEnv, getTerminal } from '../../config/server';import { initDb, query } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getBranchId, getServerEnv, getTerminal } from '../../config/server';import { initDb, query } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };export default function AboutScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { t } = useLang(); const [drawerOpen, setDrawerOpen] = useState(false);
+  const { t } = useLang();
   // Identitas live: cabang + terminal dari klaim terminal, printer dari
   // ms_station aktif; '-' jujur bila belum ada (tanpa contoh Poris/TRM-001).
   // M9: '' = unbound (tanpa fallback B001); label unbound di bawah.
@@ -34,16 +34,12 @@ import { useEffect, useState } from 'react';import { Image, ScrollView, StyleShe
       } catch { /* '-' jujur */ }
     })();
     return () => { on = false; };
-  }, []); const go = (route: string) => navigation?.navigate(route); return (
+  }, []); return (
     <View style={styles.root}>
-      <ScreenHeader title={t('settings.about')} left={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('settings.about')} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
       <View style={styles.hero}>{/* Tablet: hero full-bleed, isi dibatasi 1024. */}<View style={isTablet ? styles.heroInner : undefined}>
-        <Image source={require('../../../assets/images/esb_logo_white.webp')} style={styles.logo} resizeMode="contain" />
+        <Image source={require('../../../assets/genfity-logo-dark.png')} style={styles.logo} resizeMode="contain" />
         <Text style={[styles.appName, isTablet && { fontSize: 26 }]}>Genfity Order</Text>
         <Text style={styles.version}>{t('about.version')}</Text>
         <Text style={styles.heroSub}>{t('about.heroSub')}</Text>

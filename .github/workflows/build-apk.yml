@@ -5,6 +5,11 @@
 # Auto-build signed APK setiap push ke main (disimpan sebagai Actions artifact,
 # retensi 30 hari) + GitHub Release permanen setiap push tag v* (mis. v1.0.1).
 #
+# Pull request TIDAK menjalankan signed build: GitHub menahan secrets pada
+# event pull_request sehingga keystore selalu kosong dan build pasti gagal
+# ~17 menit kemudian di :app:packageRelease. PR hanya menjalankan job
+# validate-pr (install + typecheck + prebuild, tanpa secrets).
+#
 # Pola meniru job android_apk di genfity-order-main (local Gradle build di
 # runner, bukan EAS cloud) supaya konsisten dengan CCD yang sudah ada.
 #
@@ -17,6 +22,8 @@
 #     https://order.genfity.com/downloads/ (job publish-vps). Tanpa ini, APK
 #     tetap tersedia via Actions artifact + GitHub Releases, dan kartu unduh
 #     di website otomatis pakai link GitHub sampai manifest VPS tersedia.
+#   - VPS_KNOWN_HOSTS (opsional, disarankan) : pin known_hosts VPS agar Setup
+#     SSH tak perlu ssh-keyscan runtime (rapuh dari egress IP runner).
 #
 # Variables (opsional, Settings → Secrets and variables → Actions → Variables):
 #   - EXPO_PUBLIC_API_BASE_URL   : URL backend (kosong = Local Mode/offline SQLite)
@@ -46,9 +53,23 @@ permissions:
 jobs:
   build-apk:
     name: Build signed APK
+    # T-164: secrets (keystore) tidak tersedia pada event pull_request, jadi
+    # signed build hanya jalan di push (main/tag) dan workflow_dispatch.
+    # Validasi PR ditangani job validate-pr di bawah (tanpa secrets).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
+      - name: Fail fast when keystore secret is empty
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo '::error::ANDROID_KEYSTORE_BASE64 kosong. Isi repo secret ANDROID_KEYSTORE_BASE64 (+ PASSWORD/ALIAS/KEY_PASSWORD) di Settings → Secrets and variables → Actions, lalu jalankan ulang workflow. Signed build dibatalkan sebelum Gradle dimulai.'
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -154,6 +175,35 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  validate-pr:
+    name: Validate PR (no signing)
+    # T-164: pengganti build-apk untuk pull_request. Tanpa secrets, tanpa
+    # keystore, tanpa Gradle — hanya memastikan dependensi terinstal,
+    # typecheck lolos, dan expo prebuild mampu men-generate proyek android/.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Expo prebuild (generate android/)
+        env:
+          EXPO_PUBLIC_API_BASE_URL: ${{ vars.EXPO_PUBLIC_API_BASE_URL }}
+        run: npx expo prebuild --platform android --non-interactive --clean
+
   release:
     name: Publish GitHub Release
     needs: build-apk
@@ -223,15 +273,24 @@ jobs:
 
       - name: Setup SSH
         if: steps.gate.outputs.enabled == 'true'
+        env:
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          rm -f ~/.ssh/known_hosts
+          if [ -n "${VPS_KNOWN_HOSTS:-}" ]; then
+            # Pin known_hosts dari secret (hindari ssh-keyscan runtime yang
+            # rapuh terhadap drop koneksi baru dari egress IP runner).
+            printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            echo "known_hosts dari secret VPS_KNOWN_HOSTS"
+          else
           # ssh-keyscan ke VPS kadang timeout karena koneksi SSH baru di-drop
           # saat traffic CI paralel sedang tinggi (terbukti: repo main pun
           # pernah gagal di step yang sama lalu sukses di run berikutnya).
           # Coba ulang dengan backoff + timeout lebih panjang.
-          rm -f ~/.ssh/known_hosts
           for i in 1 2 3 4 5; do
             if ssh-keyscan -T 20 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>keyscan.err && [ -s ~/.ssh/known_hosts ]; then
               rm -f keyscan.err
@@ -247,6 +306,7 @@ jobs:
             fi
             sleep $((i * 15))
           done
+          fi
 
       - name: Publish to downloads folder
         if: steps.gate.outputs.enabled == 'true'

@@ -8,6 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { getApiMode } from '../../lib/apiSource';
 import { initDb, queryFirst } from '../../lib/db';
 import { removePinHash } from '../../lib/pin';
+import { clearPinChangeRequired } from '../../lib/supervisor';
 import { loadBinding, requestPinReset } from '../../lib/terminalContract';
 // APP-FIXUP (fix-app-contract D1): merchantId (scope body pin-reset server)
 // diambil dari binding/sesi — perangkat tak menyimpan merchant id terpisah.
@@ -104,6 +105,13 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
           const uid = (row?.id ?? '').trim();
           if (uid) {
             await removePinHash(uid);
+            // A-P0-1: reset server = PIN baru dari manusia → bersihkan flag
+            // wajib-ganti agar eskalasi supervisor dibuka kembali.
+            try {
+              await clearPinChangeRequired(uid);
+            } catch {
+              /* best-effort */
+            }
           } else {
             console.warn(`[forgot-pin] reset ok tapi user lokal '${u}' tak ditemukan — hash lokal tak dibersihkan`);
           }

@@ -5,7 +5,9 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { GO_OP_MOVE_TABLE, getServerOrderIdForSale } from '../../lib/posWire';
 import { initDb, query, run } from '../../lib/db';
+import { postTableTransition } from '../../lib/terminalTable';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav; route?: { params?: { from?: string } } };
@@ -170,6 +172,21 @@ export default function MoveTableScreen({ navigation, route }: Props) {
             } catch {
               /* abaikan per baris */
             }
+            // P0-3 audit paritas: sale yang sudah punya order server ikut
+            // dipindah di BE (POST move-table); tanpa onlineOrderId = lokal
+            // saja (jujur: BE tak tahu bill ini).
+            try {
+              const serverId = await getServerOrderIdForSale(m.salesNum);
+              if (serverId !== null) {
+                enqueueSync('other', {
+                  op: GO_OP_MOVE_TABLE, serverId: String(serverId),
+                  to: destCode, salesNum: m.salesNum,
+                  at: new Date().toISOString(),
+                });
+              }
+            } catch {
+              /* antrean belum siap - pindah lokal di atas tetap sah */
+            }
           }
         } catch {
           /* syncDate NULL di atas tetap menandai kotor */
@@ -180,6 +197,10 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         try {
           await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', destCode]);
         } catch { /* master meja opsional */ }
+        // A11: pindah meja di server terminal (best-effort; antrean GO_OP_MOVE_TABLE
+        // + tulis lokal di atas tetap jadi fallback offline).
+        void postTableTransition({ tableRef: src.table, status: 'AVAILABLE' });
+        void postTableTransition({ tableRef: destCode, status: 'OCCUPIED' });
       } catch {
         /* SQLite belum siap - antrean sync di atas tetap jalan */
       }

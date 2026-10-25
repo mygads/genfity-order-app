@@ -4,7 +4,7 @@ import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
-import { useLang } from '../../lib/i18n';
+import { useLang, tCur } from '../../lib/i18n';
 import { initDb, query } from '../../lib/db';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -111,7 +111,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={name} onChangeText={setName} placeholder={t('custom_name_ph')} />
       <View style={styles.duo}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.label, isTablet && styles.labelBig]}>{t('price')}</Text>
+          <Text style={[styles.label, isTablet && styles.labelBig]}>{tCur('price')}</Text>
           <AppInput boxStyle={styles.input} style={[styles.fieldText, isTablet && styles.fieldTextBig]} value={price} onChangeText={(v) => setPrice(v.replace(/[^0-9]/g, ''))} keyboardType="numeric" placeholder={rp(0)} />
         </View>
         <View style={{ flex: 1 }}>

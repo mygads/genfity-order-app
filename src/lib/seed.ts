@@ -28,12 +28,16 @@
 import { initDb, query, queryFirst, run } from './db';
 import type { BindParams } from './db';
 import { loadPinRecord, removePinHash, savePinHash } from './pin';
+import { markPinChangeRequired } from './supervisor';
 import { assertVoucherUsable, isTerminalBound, queueNoOf, saveSale } from './sales';
 import type { SaleInput } from './payments';
 import { normalizeMethod } from './payments';
-import { isMarketplaceMode, totals } from './totals';
+import { isMarketplaceMode, totals, FEE_DEFAULTS } from './totals';
 import type { TotalsResult } from './totals';
-import { uuidv7 } from './uuidv7';
+import { setCachedCurrency } from './currency';
+import { applyBranchLanguagePolicy } from './i18n';
+import { setCachedTimezone } from './timezone';
+import { randomHex, uuidv7 } from './uuidv7';
 import { trimTestUsers } from './seedUsers';
 
 // S2-C311: gate kesiapan seed — App.tsx menjalankan seedIfEmpty fire-and-forget
@@ -120,6 +124,10 @@ interface SeedOrderSpec {
   ongkir?: number;
   cash?: number;
   items: Array<{ id: string; name: string; basePrice: number; qty: number }>;
+  /** Tarif pajak eksplisit per order (default 11 PPN; order AUD = 10 GST). */
+  taxRate?: number;
+  /** Cabang pemilik order (default 'B001'; order AUD = 'B004'). */
+  branchId?: string;
 }
 
 const SEED_SPECS: SeedOrderSpec[] = [
@@ -178,7 +186,9 @@ function seedCanon(spec: SeedOrderSpec): TotalsResult {
       : null,
     ongkir: spec.ongkir ?? 0,
     esbOrder: isMarketplaceMode(spec.mode),
-    taxRate: 11,
+    taxRate: spec.taxRate ?? 11,
+    // Cabang AUD (B004) = langkah sen (1); selain itu rupiah (100).
+    roundStep: spec.branchId === AUD_TEST_BRANCH_ID ? 1 : FEE_DEFAULTS.roundStep,
   });
 }
 
@@ -194,6 +204,7 @@ function seedSaleInput(spec: SeedOrderSpec, canon: TotalsResult): SaleInput {
     vatTotal: canon.taxIncl,
     serviceTotal: canon.service,
     ...(canon.feeESB > 0 ? { feeESB: canon.feeESB } : {}),
+    ...(canon.packaging > 0 ? { packagingFee: canon.packaging } : {}),
     ...(canon.rounding !== 0 ? { rounding: canon.rounding } : {}),
     ...(spec.cash !== undefined ? { cash: spec.cash, change: Math.max(0, spec.cash - canon.total) } : { change: 0 }),
     mode: spec.mode,
@@ -248,9 +259,9 @@ async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed:
       voucherAmount, voucherCode, grandTotal, paidAmount, changeAmount,
       paymentMethod, memberId, tableNo, customerName, ongkir,
       status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
-     VALUES (?, ?, 'B001', 'T001', 'u-kasir', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'kasir', ?, ?, NULL)`,
+     VALUES (?, ?, ?, 'T001', 'u-kasir', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, 'kasir', ?, ?, NULL)`,
     [
-      no, clientId, nowSeed,
+      no, clientId, spec.branchId ?? 'B001', nowSeed,
       spec.mode === 'DINE IN' ? 'DINE_IN' : spec.mode === 'TAKE AWAY' ? 'TAKEAWAY' : spec.mode,
       gross, voucherAmt,
       canon.taxIncl, canon.service,
@@ -588,7 +599,20 @@ export async function ensureSeeded(): Promise<void> {
   );
   try {
     const rec = await loadPinRecord('u-admin');
-    if (!rec) await savePinHash('u-admin', '1234');
+    if (!rec) {
+      // A-P0-1: TANPA PIN default '1234'. Seed = PIN acak 6-digit sekali-pakai
+      // (tak ditampilkan di mana pun — tak bisa dipakai siapa pun) + flag
+      // wajib-ganti; verifyLocalEscalation menolak u-admin selama flag
+      // menyala (fail-closed bila flag tak terbaca). Alur Install/CreatePin
+      // atau Lupa PIN mengganti + membersihkan flag.
+      const oneTime = String(100000 + (parseInt(randomHex(5), 16) % 900000));
+      await savePinHash('u-admin', oneTime);
+      try {
+        await markPinChangeRequired('u-admin');
+      } catch {
+        /* flag gagal — eskalasi tetap fail-closed via isPinChangeRequired */
+      }
+    }
   } catch {
     /* seed PIN gagal — migrasi/startup berikut mencoba lagi */
   }
@@ -978,9 +1002,12 @@ export async function ensureSeeded(): Promise<void> {
  * switchSeedBranchForTest() di bawah untuk mengaktifkan cabang uji.
  *
  * SENGAJA tak jalan otomatis di ensureSeeded: default instalasi segar tetap
- * IDR (Cabang Poris, PPN 11). Pajak per-cabang belum didukung pola seed
- * (Tax PPN satu baris global) — helper menimpa global saat aktif AUD dan
- * mengembalikannya saat kembali IDR; lihat docs/DUAL-CURRENCY-STATUS.md.
+ * IDR (Cabang Poris, PPN 11). Pajak per-cabang didukung via baris
+ * ms_setting('Tax', 'PPN_<branchId>') (getTaxRate() memilih per cabang aktif;
+ * baris global Tax/PPN tetap cermin cabang aktif) — helper menulis kedua
+ * tarif (B001=11, B004=10) sehingga keduanya hidup berdampingan; timezone
+ * cabang ikut ditulis (Branch/Timezone) + cache diset tanpa perlu restart;
+ * lihat docs/DUAL-CURRENCY-STATUS.md.
  */
 export const AUD_TEST_BRANCH_ID = 'B004';
 
@@ -989,14 +1016,49 @@ const SEED_BRANCH_ROWS: Record<'IDR' | 'AUD', [string, string, string, string][]
   IDR: [
     ['Branch', 'Name', 'Genfity Cabang Poris', 'B001'],
     ['Branch', 'Currency', 'IDR', 'id'],
+    ['Branch', 'Timezone', 'Asia/Jakarta', ''],
     ['Tax', 'PPN', '11', ''],
   ],
   AUD: [
     ['Branch', 'Name', 'Genfity Sydney (Uji AUD)', 'B004'],
     ['Branch', 'Currency', 'AUD', 'en-AU'],
+    ['Branch', 'Timezone', 'Australia/Perth', ''],
     ['Tax', 'PPN', '10', ''],
   ],
 };
+
+/**
+ * Order contoh cabang AUD (DUAL-CURRENCY §4f): baseline History/Dashboard
+ * cabang uji — GST 10 + langkah sen (1), harga dolar utuh (totals() integer).
+ * Hanya di-seed dari switchSeedBranchForTest('AUD'), BUKAN ensureSeeded,
+ * agar instalasi segar tetap IDR murni. Idempoten via cek salesNum.
+ */
+const SEED_AUD_SPEC: SeedOrderSpec = {
+  salesNum: 'SEED-AUD-001', method: 'cash', mode: 'TAKE AWAY', customer: 'Jack',
+  branchId: 'B004', taxRate: 10, cash: 50,
+  items: [
+    { id: 'm-ayam-bakar', name: 'Ayam Bakar', basePrice: 25, qty: 1 },
+    { id: 'm-kopi-tubruk', name: 'Kopi Tubruk', basePrice: 5, qty: 2 },
+  ],
+};
+
+async function seedAudSampleOrder(nowSeed: string): Promise<void> {
+  const exists = await queryFirst<{ salesNum: string }>(
+    `SELECT salesNum FROM tr_saleshead WHERE salesNum = ? LIMIT 1`,
+    [SEED_AUD_SPEC.salesNum],
+  );
+  if (exists) return;
+  const canon = seedCanon(SEED_AUD_SPEC);
+  await seedSaleDirect(SEED_AUD_SPEC, canon, nowSeed);
+  const openShift = await queryFirst<{ id: string }>(
+    `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND (status IS NULL OR status <> 'absen') LIMIT 1`,
+  );
+  await run(
+    `UPDATE tr_saleshead SET branchId = ?, terminalId = 'T001', userId = 'u-kasir',
+       cashierName = 'kasir', shiftId = ? WHERE salesNum = ?`,
+    [SEED_AUD_SPEC.branchId ?? 'B004', openShift?.id ?? 'seed-shift-pagi', SEED_AUD_SPEC.salesNum],
+  );
+}
 
 /**
  * Alihkan cabang aktif seed untuk pengujian (HANYA instalasi dev/uji — fungsi
@@ -1023,6 +1085,45 @@ export async function switchSeedBranchForTest(which: 'IDR' | 'AUD'): Promise<voi
       );
     } catch (e) {
       console.warn(`[seed] switch cabang uji ${which} (${k1}/${k2}) gagal: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  // Pajak per-cabang berdampingan (DUAL-CURRENCY §4d): kedua tarif hidup
+  // bersamaan sebagai baris PPN_<branchId> (getTaxRate() memilih per cabang
+  // aktif); baris global Tax/PPN di atas tetap cermin cabang aktif (kompatibel
+  // pembaca lama). Idempoten via pola INSERT-or-UPDATE yang sama.
+  for (const [k2, v1] of [['PPN_B001', '11'], ['PPN_B004', '10']] as const) {
+    try {
+      await run(
+        `INSERT OR IGNORE INTO ms_setting (key1, key2, value1, value2, syncDate)
+         VALUES ('Tax', ?, ?, '', ?)`,
+        [k2, v1, nowSeed],
+      );
+      await run(
+        `UPDATE ms_setting SET value1 = ?, syncDate = ? WHERE key1 = 'Tax' AND key2 = ?`,
+        [v1, nowSeed, k2],
+      );
+    } catch (e) {
+      console.warn(`[seed] switch cabang uji ${which} (Tax/${k2}) gagal: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  // Sinkronkan cache in-memory agar layar langsung memakai cabang baru tanpa
+  // restart (restart tetap valid — baris lokal dibaca ulang saat boot/login).
+  const active = SEED_BRANCH_ROWS[which] ?? SEED_BRANCH_ROWS.IDR;
+  const cur = active.find(([k1, k2]) => k1 === 'Branch' && k2 === 'Currency');
+  const tz = active.find(([k1, k2]) => k1 === 'Branch' && k2 === 'Timezone');
+  try {
+    if (cur) setCachedCurrency(cur[2], cur[3]);
+    applyBranchLanguagePolicy();
+    if (tz) setCachedTimezone(tz[2]);
+  } catch {
+    /* cache gagal: baris DB tetap benar, dibaca ulang saat restart */
+  }
+  // Baseline order AUD untuk History/Dashboard cabang uji (hanya saat AUD).
+  if (which === 'AUD') {
+    try {
+      await seedAudSampleOrder(nowSeed);
+    } catch (e) {
+      console.warn(`[seed] order contoh AUD gagal: ${e instanceof Error ? e.message : e}`);
     }
   }
 }

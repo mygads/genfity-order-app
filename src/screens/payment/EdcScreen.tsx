@@ -8,8 +8,9 @@ import { useLang } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
-import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getSaleClientId } from '../../lib/sales';
-import { uuidv7 } from '../../lib/uuidv7';
+import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getOrCreatePayChainId } from '../../lib/sales';
+import { mirrorSettleToServer } from '../../lib/settleMirror';
+import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = {
@@ -20,7 +21,7 @@ type Props = {
       salesNum?: string;
       /** client_id UUIDv7 rantai bayar (APP-PRINTER-SALES, Q7): dipakai ulang, bukan dibuat baru. */
       clientId?: string;
-      splits?: { method?: string; amount?: number }[];
+      splits?: { method?: string; amount?: number; memberId?: string; customerId?: number }[];
       /** Split grup: kunjungan bayar memakai SATU salesNum + tahu total penuh. */
       splitGroup?: boolean;
       orderTotal?: number;
@@ -30,6 +31,7 @@ type Props = {
       service?: number;
       tax?: number;
       feeESB?: number;
+      packaging?: number;
       rounding?: number;
       mode?: string;
       table?: string;
@@ -38,6 +40,10 @@ type Props = {
       tip?: number;
       customer?: string;
       memberId?: string;
+      /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
+      customerId?: number;
+      /** Ronde-3 Q4: poin pra-settle (snapshot pembanding block response). */
+      memberPoin?: number;
     };
   };
 };
@@ -54,6 +60,11 @@ export default function EdcScreen({ navigation, route }: Props) {
   // Tanpa total terusan (dibuka di luar alur bayar) = 0 yang jujur; tombol
   // simpan mati sampai nominal > 0 + approval 6 digit.
   const total = Math.max(0, Math.round(Number(route?.params?.total) || 0));
+  /** Ronde-3 Q4: poin pra-settle (snapshot pembanding block response). */
+  const memberPoinParam =
+    route?.params?.memberPoin == null || !Number.isFinite(Number(route.params.memberPoin))
+      ? null
+      : Math.max(0, Math.round(Number(route.params.memberPoin)));
   const [phase, setPhase] = useState<Phase>('waiting');
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
@@ -124,12 +135,13 @@ export default function EdcScreen({ navigation, route }: Props) {
       }
       return;
     }
-    // APP-PRINTER-SALES (Q7): SATU client_id per sale (rantai Pay → head → baru).
-    // uuidv7() melempar bila CSPRNG absen: guard di-reset agar tombol Simpan
-    // tetap hidup (cermin penjagaan nextSalesNum di atas).
+    // APP-PRINTER-SALES (Q7) + P0-4: SATU client_id per sale (seed Pay menang;
+    // kunci lama uuidv7 mentah TETAP sah; baru = payment-{order}-uuidv7),
+    // dipersist SEBELUM saveSale agar retry/drain satu kunci. Hanya melempar
+    // bila CSPRNG absen: guard di-reset agar tombol Simpan tetap hidup.
     let saleClientId: string;
     try {
-      saleClientId = (p.clientId ?? '').trim() || (await getSaleClientId(orderNo)) || uuidv7();
+      saleClientId = await getOrCreatePayChainId(orderNo, (p.clientId ?? '').trim());
     } catch (e) {
       savedRef.current = false;
       if ((e as { code?: string })?.code === 'terminal-unbound') {
@@ -142,20 +154,28 @@ export default function EdcScreen({ navigation, route }: Props) {
       }
       return;
     }
-    // P7/P15: kaki terusan boleh membawa approvalCode/memberId defensif dari
-    // Pay (tipe nav params belum diperluas) — dipertahankan ke visitPay agar
-    // atribusi deposit + kode otorisasi kunjungan lalu tak hilang di EDC.
-    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string };
+    // P7/P15: kaki terusan boleh membawa approvalCode/memberId/customerId
+    // defensif dari Pay (tipe nav params belum diperluas) — dipertahankan ke
+    // visitPay agar atribusi deposit + kode otorisasi kunjungan lalu tak hilang
+    // di EDC. Ronde-3 Q1: customerId GO diteruskan; alias memberId hanya
+    // pointer ledger lokal.
+    type FwdLeg = { method?: string; amount?: number; approvalCode?: string; memberId?: string; customerId?: number };
     const fwdSplits = ((p.splits ?? []) as FwdLeg[])
-      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}) }))
+      .map((s) => ({ method: String(s?.method ?? 'split'), amount: Math.max(0, Math.round(Number(s?.amount) || 0)), ...(s?.approvalCode ? { approvalCode: String(s.approvalCode) } : {}), ...(parseCustomerId(s?.customerId) != null ? { customerId: parseCustomerId(s?.customerId) as number } : {}) }))
       .filter((s) => s.amount > 0);
     const legMemberId = ((p.splits ?? []) as FwdLeg[])
       .map((s) => String(s?.memberId ?? '').trim())
       .find((v) => v !== '') ?? '';
     const effMemberId = String(p.memberId ?? '').trim() || legMemberId;
+    // Ronde-3 Q1: ref GO = params → kaki → kunci lokal (MC{id}).
+    const effCustomerId =
+      parseCustomerId(p.customerId) ??
+      parseCustomerId(((p.splits ?? []) as FwdLeg[]).map((s) => s?.customerId).find((v) => v != null)) ??
+      customerIdFromLocalKey(effMemberId);
     const serviceParam = Math.max(0, Math.round(Number(p.service) || 0));
     const taxParam = Math.max(0, Math.round(Number(p.tax) || 0));
     const feeESBParam = Math.max(0, Math.round(Number(p.feeESB) || 0));
+    const packagingParam = Math.max(0, Math.round(Number(p.packaging) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
     const tipParam = Math.max(0, Math.round(Number(p.tip) || 0));
     const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
@@ -172,7 +192,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       const visitPay = [...fwdSplits, { method, amount: total, approvalCode: approval }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}) });
+          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}) });
         } else {
           const gInput: SaleInput = {
             method,
@@ -187,10 +207,13 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
             ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
             ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
+            ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
             ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
             approvalCode: approval,
             ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
             ...(effMemberId ? { memberId: effMemberId } : {}),
+            ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
             ...(p.table ? { tableId: p.table } : {}),
             ...(p.mode ? { mode: p.mode } : {}),
             ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -250,9 +273,11 @@ export default function EdcScreen({ navigation, route }: Props) {
         ...(serviceParam > 0 ? { service: serviceParam } : {}),
         ...(taxParam > 0 ? { tax: taxParam } : {}),
         ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
         ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
         ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
         ...(effMemberId ? { memberId: effMemberId } : {}),
+        ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
         ...(p.mode ? { mode: p.mode } : {}),
         ...(p.table ? { table: p.table } : {}),
         ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -273,10 +298,12 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
       ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       approvalCode: approval,
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(effMemberId ? { memberId: effMemberId } : {}),
+      ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
       ...(p.table ? { tableId: p.table } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -305,6 +332,9 @@ export default function EdcScreen({ navigation, route }: Props) {
       savedRef.current = false;
       return;
     }
+    // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
+    // grup = drain saja (client_id rantai bersama, hindari settle ganda).
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), clientId: saleClientId });
     navigation?.navigate('Success', {
       total: fullTotal,
       method,
@@ -321,9 +351,11 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(serviceParam > 0 ? { service: serviceParam } : {}),
       ...(taxParam > 0 ? { tax: taxParam } : {}),
       ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
+      ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
       ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
       ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}),
       ...(effMemberId ? { memberId: effMemberId } : {}),
+      ...(effCustomerId != null ? { customerId: effCustomerId } : {}),
       ...(p.mode ? { mode: p.mode } : {}),
       ...(p.table ? { table: p.table } : {}),
       ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
@@ -445,15 +477,13 @@ export default function EdcScreen({ navigation, route }: Props) {
           // nomor + client_id + kaki split + grup ikut pulang (ganti metode
           // bukan sale baru — rantai Q7 lestari).
           const p = route?.params ?? {};
-          // P1: blok issuance dijaga (cermin Qris-guard) — getSaleClientId /
-          // uuidv7 gagal = Alert + tetap di EDC, bukan pulang tanpa client_id.
+          // P1: blok issuance dijaga (cermin Qris-guard) — getOrCreate gagal
+          // (CSPRNG absen) = Alert + tetap di EDC, bukan pulang tanpa client_id.
           let backSalesNum = '';
           let backClientId = '';
           try {
             backSalesNum = (p.salesNum ?? '').trim();
-            backClientId = (p.clientId ?? '').trim()
-              || (backSalesNum ? (await getSaleClientId(backSalesNum)) ?? '' : '')
-              || uuidv7();
+            backClientId = await getOrCreatePayChainId(backSalesNum, (p.clientId ?? '').trim());
           } catch {
             appAlert(t('pay_issue_fail'));
             return;
@@ -465,6 +495,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.voucherCode ? { voucher: p.voucherCode } : {}),
             ...(p.service ? { service: p.service } : {}),
             ...(p.feeESB ? { feeESB: p.feeESB } : {}),
+            ...(p.packaging ? { packaging: p.packaging } : {}),
             ...((p.rounding ?? 0) !== 0 ? { rounding: p.rounding } : {}),
             ...(p.ongkirCut ? { ongkirCut: p.ongkirCut } : {}),
             ...(p.tip ? { tip: p.tip } : {}),
@@ -475,6 +506,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.ongkir ? { ongkir: p.ongkir } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
             ...(p.memberId ? { memberId: p.memberId } : {}),
+            ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
             ...(backSalesNum ? { salesNum: backSalesNum } : {}),
             clientId: backClientId,
             ...(p.splits ? { splits: p.splits } : {}),

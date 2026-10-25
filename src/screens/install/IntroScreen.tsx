@@ -50,7 +50,7 @@ export default function IntroScreen({ navigation }: { navigation?: Nav }) {
         contentContainerStyle={[styles.body, isTablet && wideCenterSm]}
         showsVerticalScrollIndicator={false}>
         <Image
-          source={require('../../../assets/images/esb_logo.webp')}
+          source={require('../../../assets/genfity-logo.png')}
           style={[styles.logo, isTablet && styles.logoBig]}
           resizeMode="contain"
         />

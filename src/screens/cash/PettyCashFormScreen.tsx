@@ -1,4 +1,10 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending, uploadExpensePhotoFirst, retryPendingExpensePhotos } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+  cashMoveBe,
+  cashMovePayload,
+  getCashSessionId,
+  mapArusToMoveType,
+  shouldQueueW1,
+} from '../../lib/beWorkforce';import { uuidv7 } from '../../lib/uuidv7';
 import { preparePhoto } from '../../lib/photo';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const FALLBACK_COA = ['Operasional', 'Bahan Baku', 'Gaji', 'Utilitas', 'Kas Kecil', 'Lainnya'];
 
 interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flagActive?: unknown; }/** CoA kas kecil: daftar dari pull chart-of-accounts bila tersedia di ms_setting, fallback konstanta. */async function loadCoa(): Promise<string[]> { try { await initDb(); const row = await queryFirst<{ value1: string | null }>( "SELECT value1 FROM ms_setting WHERE key1 = 'expense' AND key2 = 'coa_list'", ); if (row?.value1) { const parsed = JSON.parse(row.value1) as unknown; if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') && parsed.length > 0) { return parsed as string[]; } } } catch { /* abaikan: coba pull */ } try { const res = await apiFetch(ApiPath.pullExpenseCoa, { method: 'GET' }); const { data } = unwrap<{ items?: CoaPullItem[] }>(res.data); const pulled = Array.isArray(data?.items) ? data.items : []; const names = pulled.filter((it) => Number(it.flagActive ?? 1) !== 0).map((it) => String(it.coaName ?? it.name ?? '').trim()).filter((s) => s.length > 0); if (names.length > 0) { const uniq = [...new Set(names)]; try { await setJSON('genfity.expense.coa', uniq); } catch { /* abaikan */ } return uniq; } } catch { /* abaikan: pakai cache */ } try { const cached = await getJSON<string[]>('genfity.expense.coa', FALLBACK_COA); return cached.length > 0 ? cached : FALLBACK_COA; } catch { return FALLBACK_COA; }}export default function PettyCashFormScreen({ navigation }: Props) {
@@ -11,7 +17,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   const [catatan, setCatatan] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoErr, setPhotoErr] = useState('');
-  const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); return () => { alive = false; }; }, []);
+  const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null; photoPending?: boolean }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); void retryPendingExpensePhotos().catch(() => { /* best-effort */ }); return () => { alive = false; }; }, []);
 
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
@@ -59,13 +65,87 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
     }
   };
 
-  /** Simpan ke tr_branchexpense + dokumen foto, antrekan outbox branch-expenses, lalu tampilkan hasil. */ const save = async () => { if (!ready) return; setSaving(true); const id = uuidv7(); const now = new Date().toISOString(); const signed = arus === 'Masuk' ? jumlahNum : -jumlahNum; const sess = getSession(); const kasir = sess?.userId || sess?.username || sess?.name || ''; const branchId = getBranchId(); const note = catatan.trim() ? `${keterangan.trim()} | ${catatan.trim()}` : keterangan.trim(); try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, signed, note, kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [uuidv7(), id, photo], ); } await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert' }); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo }); }; if (done) {
+  /** Simpan ke tr_branchexpense + dokumen foto, antrekan outbox branch-expenses, lalu tampilkan hasil. */ const save = async () => { if (!ready) return; setSaving(true); const id = uuidv7(); const now = new Date().toISOString(); const signed = arus === 'Masuk' ? jumlahNum : -jumlahNum; const sess = getSession(); const kasir = sess?.userId || sess?.username || sess?.name || ''; const branchId = getBranchId(); const note = catatan.trim() ? `${keterangan.trim()} | ${catatan.trim()}` : keterangan.trim(); let finalPhoto: string | null = photo; let finalPending = false; try { await initDb(); await run( `INSERT INTO tr_branchexpense (id, branchId, coaId, coaName, amount, note, userId, expenseDate, photoPath, syncDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`, [id, branchId, coa, coa, signed, note, kasir || null, now, photo, now], ); if (photo) { await run( `INSERT INTO tr_branchexpensedocument (id, expenseId, docPath, docType, syncDate) VALUES (?, ?, ?, 'photo', NULL)`, [uuidv7(), id, photo], ); }
+      // A10: handoff endpoint terminal (immediate-first, best-effort).
+      // clientExpenseId = id baris (uuidv7 mentah, dibangun SEKALI di atas,
+      // dipakai ulang saat retry); sukses terminal = LEWATI antrean ESB
+      // (tutup ledger ganda); gagal/BE-BELUM-ADA = fallback ESB lama.
+      // SESI-FINAL-APP: upload-DULU — foto lokal diunggah SEBELUM handoff;
+      // sukses = kirim photoUrl + DB lokal dimutakhirkan ke URL remote;
+      // gagal/offline = photoPending (marker storage + banner layar hasil +
+      // retry saat mount/fokus layar kas).
+      let terminalPosted = false;
+      const alreadyRemote = isRemotePhoto(photo) ? String(photo).trim() : '';
+      let remotePhoto = alreadyRemote;
+      if (!remotePhoto && photo) {
+        remotePhoto = await uploadExpensePhotoFirst(String(photo));
+      }
+      const localPhotoOnly = !!photo && !remotePhoto;
+      try {
+        const h = await postExpenseToTerminal({
+          rowId: id,
+          clientExpenseId: id,
+          kind: 'PETTY_CASH',
+          amount: signed,
+          note,
+          occurredAt: now,
+          ...(remotePhoto ? { photoUrl: remotePhoto } : {}),
+        });
+        terminalPosted = h.posted === true;
+      } catch { /* abaikan: fallback ESB */ }
+      if (remotePhoto && remotePhoto !== photo) {
+        // Upload-dulu sukses: mutakhirkan baris lokal ke URL remote.
+        try {
+          await initDb();
+          await run('UPDATE tr_branchexpense SET photoPath = ? WHERE id = ?', [remotePhoto, id]);
+          await run("UPDATE tr_branchexpensedocument SET docPath = ? WHERE expenseId = ? AND docType = 'photo'", [remotePhoto, id]);
+        } catch { /* best-effort: handoff sudah bawa photoUrl */ }
+      }
+      if (localPhotoOnly) {
+        try { await markPhotoPending(id, String(photo)); } catch { /* best-effort */ }
+      }
+      finalPhoto = remotePhoto || photo;
+      finalPending = localPhotoOnly;
+      if (!terminalPosted) {
+        await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert', ...(localPhotoOnly ? { photoPending: true } : {}) });
+      }
+      // W1 (SESI-FIX-APPW1): cermin mutasi kas ke sesi kas server — immediate-
+      // first fire-and-forget SETELAH lokal menang di atas. Tanpa sesi server
+      // (mis. open offline belum terkirim) = langsung antrekan op be-cash-move
+      // (drain menunggu open via FIFO, lalu memakai id sesi hasil open); 4xx
+      // deterministik = error jujur (tak diantre). PIN tak pernah ikut.
+      void (async () => {
+        try {
+          const moveType = mapArusToMoveType(arus);
+          const reason = note || keterangan.trim();
+          if (!moveType || jumlahNum <= 0 || !reason) return;
+          const sid = await getCashSessionId();
+          if (sid) {
+            const mv = await cashMoveBe(sid, moveType, jumlahNum, reason);
+            if (!mv.ok && shouldQueueW1(mv)) {
+              try {
+                enqueueSync('other', cashMovePayload(moveType, jumlahNum, reason));
+              } catch {
+                /* abaikan */
+              }
+            }
+          } else {
+            try {
+              enqueueSync('other', cashMovePayload(moveType, jumlahNum, reason));
+            } catch {
+              /* abaikan */
+            }
+          }
+        } catch {
+          /* abaikan */
+        }
+      })(); } catch { /* DB belum init: alur kasir tetap jalan, data dipegang layar daftar */ } setSaving(false); setDone({ id, arus, coa, jumlah: jumlahNum, photo: finalPhoto, ...(finalPending ? { photoPending: true } : {}) }); }; if (done) {
     return (
       <View style={s.root}>
         <ScreenHeader title={t('petty.formTitle')} onBack={() => navigation?.goBack?.()} /><View style={[s.body, isTablet && wideCenterLg]}>
           <View style={s.checkCircle}><Text style={s.checkMark}>✓</Text></View>
           <Text style={s.title}>{t('petty.doneTitle')}</Text>
-          <Text style={s.sub}>{done.arus === 'Masuk' ? t('petty_flow_in') : t('petty_flow_out')} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}
+          <Text style={s.sub}>{done.arus === 'Masuk' ? t('petty_flow_in') : t('petty_flow_out')} - {done.coa} - {rp(done.jumlah)}</Text>{done.photo ? <Image source={{ uri: done.photo }} style={s.donePhoto} /> : null}{done.photoPending ? <Text style={s.pending}>{t('expense.photoPending')}</Text> : null}
           <AppButton title={t('petty.detailTitle')} onPress={() => navigation?.navigate('PettyCashDetail', { id: done.id, tanggal: new Date().toLocaleString(lang === 'en' ? 'en-US' : 'id-ID'), keterangan, coa: done.coa, arus: done.arus, jumlah: done.jumlah, kasir: getSession()?.name ?? '', disetujui: false, photo: done.photo, })} />
           <AppButton title={t('petty.viewList')} variant="secondary" onPress={() => navigation?.navigate('PettyCash')} />
           <AppButton title={t('petty.recordAgain')} variant="secondary" style={s.ghost} textStyle={s.ghostT} onPress={() => { setDone(null); setKeterangan(''); setJumlah(''); setCatatan(''); setPhoto(null); setPhotoErr(''); }} />
@@ -221,6 +301,9 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   photoBtnT: { fontFamily: fonts.semibold, fontSize: 13, color: colors.navy },
   del: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
   err: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 8 },
+  // A-P1-6: banner foto-menunggu-upload di layar hasil (kuning/merah lembut,
+  // bukan error picker).
+  pending: { fontFamily: fonts.medium, fontSize: 12, color: colors.orange, marginTop: 8, textAlign: 'center' },
   primary: { backgroundColor: colors.orange, borderRadius: 10, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
   disabled: { opacity: 0.5 },
   primaryT: { color: colors.white, fontSize: 16, fontFamily: fonts.bold },

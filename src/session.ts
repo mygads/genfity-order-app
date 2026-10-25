@@ -43,6 +43,11 @@ export interface Session {
    * C4 (SESI-C, CLOSED): HANYA di memori + SecureStore (saveAuthTokenStore) —
    * persist() di bawah men-strip-nya dari JSON AsyncStorage. */
   authToken?: string;
+  /** Refresh token sesi server (E01 + rotasi terminal-refresh T-AUTH-REFRESH).
+   * C4-extended: HANYA di memori + SecureStore (saveRefreshTokenStore) —
+   * persist() men-strip-nya dari JSON AsyncStorage, disejajarkan dengan
+   * authToken agar tak bocor lintas-user/sesi. */
+  refreshToken?: string;
   /** Waktu login ISO (dibuat saat loginEmployee/saveSession). */
   loginAt?: string;
   /** true = sesi dibuat offline dari grant cache (rekonsiliasi saat reconnect). */
@@ -191,6 +196,7 @@ function persist(): void {
     // terminalContract.ts) tetap memakai Session.authToken di memori.
     const scrubbed: Session = { ...current };
     delete scrubbed.authToken;
+    delete scrubbed.refreshToken;
     void setItem(LS_SESSION, JSON.stringify(scrubbed));
   } else void removeItem(LS_SESSION);
 }
@@ -212,13 +218,18 @@ function restore(): void {
       // Guard identitas (current === parsed): login yang menyusul restore
       // tak boleh tokennya ditimpa salinan basi user lain.
       const legacyToken = parsed.authToken ? String(parsed.authToken) : '';
+      const legacyRefresh = parsed.refreshToken ? String(parsed.refreshToken) : '';
       delete parsed.authToken;
+      delete parsed.refreshToken;
       if (legacyToken && current === parsed) {
         void saveAuthTokenStore(legacyToken)
           .then(() => {
             if (current === parsed) persist();
           })
           .catch(() => {});
+      }
+      if (legacyRefresh && current === parsed) {
+        void saveRefreshTokenStore(legacyRefresh).catch(() => {});
       }
       // C4: hidrasi malas — salinan SecureStore kembali ke memori. Guard ganda:
       // sesi hasil restore ini + BUKAN sesi offline (offline tak memegang token
@@ -227,6 +238,14 @@ function restore(): void {
         .then((t) => {
           if (t && current === parsed && !current.authToken && !current.offline) {
             current.authToken = t;
+          }
+        })
+        .catch(() => {});
+      // T-AUTH-REFRESH: hidrasi refresh token disejajarkan dengan authToken.
+      void loadRefreshTokenStore()
+        .then((t) => {
+          if (t && current === parsed && !current.refreshToken && !current.offline) {
+            current.refreshToken = t;
           }
         })
         .catch(() => {});
@@ -293,6 +312,121 @@ export async function clearAuthTokenStore(): Promise<void> {
   }
   try {
     await removeItem(LS_AUTH_TOKEN);
+  } catch {
+    /* abaikan */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T-AUTH-REFRESH: salinan persisten refreshToken di SecureStore (pola sama
+// dengan authToken di atas). Refresh token TIDAK PERNAH di AsyncStorage
+// plaintext — SecureStore dulu, fallback AsyncStorage hanya bila SecureStore
+// tak tersedia (web). Semua fungsi tak pernah melempar.
+// ---------------------------------------------------------------------------
+
+/** Kunci SecureStore (+fallback AsyncStorage) salinan persisten refreshToken. */
+const LS_REFRESH_TOKEN = 'genfity.session.refreshToken';
+
+/** Tulis salinan persisten refresh token; string kosong = buang salinan. */
+export async function saveRefreshTokenStore(token: string): Promise<void> {
+  const t = String(token ?? '').trim();
+  if (!t) {
+    await clearRefreshTokenStore();
+    return;
+  }
+  try {
+    if (await SecureStore.isAvailableAsync()) {
+      await SecureStore.setItemAsync(LS_REFRESH_TOKEN, t);
+      return;
+    }
+  } catch {
+    /* jatuh ke fallback di bawah */
+  }
+  try {
+    await setItem(LS_REFRESH_TOKEN, t);
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Baca salinan persisten refresh token; '' = tak ada. */
+export async function loadRefreshTokenStore(): Promise<string> {
+  try {
+    const raw = await SecureStore.getItemAsync(LS_REFRESH_TOKEN);
+    if (raw) return String(raw).trim();
+  } catch {
+    /* coba fallback di bawah */
+  }
+  try {
+    const fb = await getItem(LS_REFRESH_TOKEN);
+    return String(fb ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Buang salinan persisten refresh token (SecureStore + fallback). Idempoten. */
+export async function clearRefreshTokenStore(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(LS_REFRESH_TOKEN);
+  } catch {
+    /* lanjut ke fallback di bawah */
+  }
+  try {
+    await removeItem(LS_REFRESH_TOKEN);
+  } catch {
+    /* abaikan */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TAHAP-1 REMEMBER-ME: akun terakhir yang dicentang "ingat saya".
+// BUKAN rahasia: hanya username + nama tampilan (tanpa password/token) →
+// AsyncStorage cukup. Sesi/token tetap di SecureStore dan dibuang saat
+// logout; remembered ini SENGAJA bertahan melewati logout (itulah gunanya:
+// prefilling + sapaan "Halo kembali"). Dibuang hanya via "ganti pengguna"
+// atau preferensi dimatikan. Tak pernah melempar.
+// ---------------------------------------------------------------------------
+
+export interface RememberedAccount {
+  username: string;
+  name: string;
+}
+
+const LS_REMEMBERED = 'genfity.session.remembered';
+
+/** Baca akun yang diingat; null = tak ada / rusak (fail-closed). */
+export async function loadRememberedAccount(): Promise<RememberedAccount | null> {
+  try {
+    const raw = await getItem(LS_REMEMBERED);
+    if (!raw) return null;
+    const p = JSON.parse(String(raw)) as Partial<RememberedAccount>;
+    const username = String(p.username ?? '').trim();
+    if (!username) return null;
+    return { username, name: String(p.name ?? '').trim() };
+  } catch {
+    return null;
+  }
+}
+
+/** Tulis akun yang diingat; username kosong = buang (anti baris sampah). */
+export async function saveRememberedAccount(a: { username: string; name?: string }): Promise<void> {
+  const username = String(a.username ?? '').trim();
+  if (!username) {
+    await clearRememberedAccount();
+    return;
+  }
+  try {
+    await setItem(LS_REMEMBERED, JSON.stringify({ username, name: String(a.name ?? '').trim() }));
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Buang akun yang diingat. Idempoten. */
+export async function clearRememberedAccount(): Promise<void> {
+  try {
+    await removeItem(LS_REMEMBERED);
   } catch {
     /* abaikan */
   }
@@ -1148,6 +1282,60 @@ export function isLoggedIn(): boolean {
 }
 
 /**
+ * T-AUTH-REFRESH: baca refresh token sesi aktif (memori dulu, lalu
+ * SecureStore bila memori kosong — mis. sesaat sesudah restart sebelum
+ * hidrasi malas selesai). '' = tak ada (sesi offline/lokal/legacy) → silent
+ * refresh dilarang, panggil mesti gagal fail-closed (paksa login ulang).
+ * Sinkron-sampai-memori + async-hidrasi agar tak memblokir hot path 401.
+ */
+export async function getRefreshToken(): Promise<string> {
+  restore();
+  const mem = String(current?.refreshToken ?? '').trim();
+  if (mem) return mem;
+  if (!current || current.offline) return '';
+  try {
+    const stored = await loadRefreshTokenStore();
+    if (stored && current && !current.refreshToken && !current.offline) {
+      current.refreshToken = stored;
+    }
+    return stored;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * T-AUTH-REFRESH: terapkan hasil rotasi /auth/terminal-refresh ke sesi aktif
+ * (access + refresh BARU, keduanya dicermin ke SecureStore). Guard searah:
+ * hanya bila sesi masih sesi yang sama (userId/username cocok) dan bukan
+ * offline; kalau tidak, refresh hasil hangus (fail-closed, tanpa mutasi).
+ * Mengembalikan true bila diterapkan.
+ */
+export function applyRefreshedTokens(args: {
+  userId?: string;
+  username?: string;
+  accessToken: string;
+  refreshToken: string;
+}): boolean {
+  restore();
+  const access = String(args.accessToken ?? '').trim();
+  const refresh = String(args.refreshToken ?? '').trim();
+  if (!access || !refresh || !current || current.offline) return false;
+  const sameUser =
+    (args.userId && current.userId && args.userId === current.userId) ||
+    (args.username && current.username && args.username === current.username) ||
+    (!args.userId && !args.username);
+  if (!sameUser) return false;
+  current.authToken = access;
+  current.refreshToken = refresh;
+  persist();
+  void saveAuthTokenStore(access);
+  void saveRefreshTokenStore(refresh);
+  emit();
+  return true;
+}
+
+/**
  * Simpan sesi penuh (hasil E01 staff-login: user + token + konteks terminal
  * + flag offline). Dipakai alur L1; login lokal tetap via loginEmployee.
  */
@@ -1162,6 +1350,9 @@ export function saveSession(s: Session): Session {
   // sebelumnya tak bocor ke sesi/token user lain (anti token basi lintas-user).
   if (current.authToken) void saveAuthTokenStore(current.authToken);
   else void clearAuthTokenStore();
+  // T-AUTH-REFRESH: cermin salinan refresh token mengikuti sesi resmi.
+  if (current.refreshToken) void saveRefreshTokenStore(current.refreshToken);
+  else void clearRefreshTokenStore();
   emit();
   return current;
 }
@@ -1251,7 +1442,10 @@ export function loginEmployee(
   // C4: login lokal tanpa token server — salinan SecureStore basi (milik sesi
   // online user sebelumnya) WAJIB dibuang di sini; kalau tidak, restart di
   // bawah sesi lokal ini menghidrasi token user lain (bocor lintas-user).
+  // T-AUTH-REFRESH: refresh token ikut dibuang (sesi lokal tak memegang sesi
+  // server; silent refresh tanpa refresh token tak bermakna).
   void clearAuthTokenStore();
+  void clearRefreshTokenStore();
   emit();
   return current;
 }
@@ -1277,7 +1471,10 @@ export function logout(): void {
   persist();
   // C4: logout membuang salinan SecureStore (memori sudah null di atas;
   // tanpa ini salinan bertahan dan bisa terhidrasi ke sesi berikutnya).
+  // T-AUTH-REFRESH: refresh ikut dibuang — sesi berakhir, silent refresh
+  // pasca-logout dilarang (fail-closed).
   void clearAuthTokenStore();
+  void clearRefreshTokenStore();
   emit();
   // Matikan realtime + foreground service (pasangan startRealtime saat login).
   try {
@@ -1306,7 +1503,10 @@ export function logout(): void {
  */
 export function forceLogoutOnTokenLoss(reason?: string): void {
   const who = current?.userId ?? current?.username;
+  // T-AUTH-REFRESH: refresh ikut dibuang — sesi tak tepercaya = tak ada
+  // silent refresh (kalau tidak, token basi bisa diperpanjang diam-diam).
   void clearAuthTokenStore();
+  void clearRefreshTokenStore();
   try {
     clearGrant();
   } catch {

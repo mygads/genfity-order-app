@@ -1,4 +1,4 @@
-package id.genfity.posclone;
+package id.genfity.pos;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -59,7 +59,7 @@ public class GenfityPrinterModule extends ReactContextBaseJavaModule {
   private static final String NUS_RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
   private static final String WS_CHANNEL = "genfity-ws";
   private static final int WS_NOTIF_ID = 6101;
-  private static final String ACTION_USB_PERMISSION = "id.genfity.posclone.USB_PERMISSION";
+  private static final String ACTION_USB_PERMISSION = "id.genfity.pos.USB_PERMISSION";
 
   public GenfityPrinterModule(ReactApplicationContext ctx) {
     super(ctx);

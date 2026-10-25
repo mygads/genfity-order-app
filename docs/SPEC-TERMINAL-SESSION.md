@@ -2,6 +2,9 @@
 
 > Turunan terkunci dari `docs/AUDIT-TERMINAL-RBAC.md` §7–§12. Semua keputusan Q1–Q15 yang CLOSED sudah dilipat ke sini.
 > Status: DRAFT acuan — App + BE mengimplementasikan dokumen ini. Belum di-commit.
+>
+> **Bukan duplikat**: file ini = draf sisi-APP (177 baris). Kontrak sisi-BE yang dikunci ada di
+> `genfity-order/docs/SPEC-TERMINAL-SESSION.md` (~762 baris, E-numbers). Keduanya BEDA isi — sinkronisasi E-number lintas keduanya masih utang.
 
 ---
 

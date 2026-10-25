@@ -83,7 +83,7 @@ function currentBranch(): { id: string; name: string } {
 export default function QueueViewScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang, t, isLocked } = useLang();
   const { online } = useConnectivity();
   const [prep, setPrep] = useState<string[]>([]);
   const [ready, setReady] = useState<string[]>([]);
@@ -231,8 +231,8 @@ export default function QueueViewScreen() {
     staleAgeSec === null
       ? null
       : staleAgeSec < 120
-        ? `${staleAgeSec}s`
-        : `${Math.floor(staleAgeSec / 60)}m`;
+        ? t('disp_age_s').replace('{n}', String(staleAgeSec))
+        : t('disp_age_m').replace('{n}', String(Math.floor(staleAgeSec / 60)));
   /** D3: basi bila feed primer tak live ATAU jam live basi. D4: jam live
    * hanya dari kaki live (poll menulis lastPollAt, bukan lastDataAt). */
   const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);
@@ -246,6 +246,7 @@ export default function QueueViewScreen() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+      {isLocked ? null : (
       <View style={styles.langWrap}>
         {(['id', 'en'] as Lang[]).map((l) => (
           <TouchableOpacity
@@ -256,6 +257,7 @@ export default function QueueViewScreen() {
           </TouchableOpacity>
         ))}
       </View>
+      )}
       <View style={styles.hero}>
         <Text style={[styles.title, isTablet && styles.titleBig]}>{t('queue_title')}</Text>
         <Text style={[styles.branch, isTablet && styles.branchBig]}>

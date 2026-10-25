@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { pushStockCount } from '../../lib/stockCountSync';import { getRoundingSetting, initDb, query, queryFirst, run, type RoundingSetting } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
   id: string;
   name: string;
   group: string;
@@ -9,10 +9,23 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
-  const [drawerOpen, setDrawerOpen] =  useState(false);
   const [opts, setOpts] = useState<StockOpts>(DEFAULT_OPTS);
   const [items, setItems] = useState<StockItem[]>([]);
   const [queryText, setQueryText] = useState('');
+  // Opname-lite (audit-5d80): dorong hasil hitung ke draf server; finalisasi owner-only.
+  const [pushing, setPushing] = useState(false);
+  const [pushMsg, setPushMsg] = useState('');
+  const pushOpname = async () => {
+    if (pushing) return;
+    setPushing(true);
+    setPushMsg('');
+    try {
+      const tid = (getSession()?.terminalId ?? '').trim();
+      if (!tid) { setPushMsg(t('stock.opnameNoTerminal')); return; }
+      const r = await pushStockCount(tid, items.map((x) => ({ name: x.name, stock: x.stock })));
+      setPushMsg(t('stock.opnameResult').replace('{ok}', String(r.submitted)).replace('{skip}', String(r.skipped)).replace('{fail}', String(r.failed)));
+    } catch { setPushMsg(t('stock.opnameFailed')); } finally { setPushing(false); }
+  };
   // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
   const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
 
@@ -24,15 +37,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
 
   const changed = next.find((x) => x.id === id); if (changed) void persistItemStock(changed.id, changed.stock, changed.online, { track: changed.track, trackStock: opts.trackStock, allowSellEmpty: opts.allowSellEmpty }); return next; }); }; const setOpt = <K extends keyof StockOpts>(k: K, v: StockOpts[K]) => setOpts((o) => ({ ...o, [k]: v })); const q = queryText.trim().toLowerCase();
   const lowNum = Number(opts.lowLimit) || 0; const list = items.filter((x) => !q || x.name.toLowerCase().includes(q) || x.group.toLowerCase().includes(q));
-  const lowCount = items.filter((x) => x.stock <= lowNum).length; const go = (route: string) => navigation?.navigate(route);
+  const lowCount = items.filter((x) => x.stock <= lowNum).length;
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} left={
-        <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
-          <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />
-        </TouchableOpacity>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={go} />
+      <ScreenHeader title={t('stock.title')} sub={`${lowCount} ${t('dash_restock')}`} onBack={() => navigation?.goBack()} />
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('stock.tracking')}</Text>
@@ -45,17 +54,33 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Switch value={opts.lowWarn} onValueChange={(v) => setOpt('lowWarn', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         <AppInput label={t('stock.lowLimit')} value={opts.lowLimit} onChangeText={(v) => setOpt('lowLimit', v.replace(/\D/g, '').slice(0, 4))} keyboardType="numeric" placeholder="5" />
+        {/* R1: server-wins tiap sync login (posConfigSync S-F5, sengaja) —
+            kasir diberi tahu agar tak bingung bila kustomnya tertimpa. */}
+        <Text style={styles.cardSub}>{t('stock.lowLimitManaged')}</Text>
         <View style={styles.rowBetween}>
           <Text style={styles.rowLabel}>{t('stock.sellEmpty')}</Text>
           <Switch value={opts.allowSellEmpty} onValueChange={(v) => setOpt('allowSellEmpty', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         {/* REA-14: tampilkan info pembulatan hanya bila ms_setting menyimpang
-            dari default (kunci i18n: stock_round_info, {n} ganda = chained). */}
+            dari default (kunci kanonis: stock.roundInfo; fallback underscore
+            + string kosong aman bila kamus belum sinkron; {n} ganda = chained). */}
         {rounding.mode !== '' || rounding.nearest !== 0 || rounding.step !== 100 ? (
           <Text style={styles.cardSub}>
-            {t('stock_round_info').replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
+            {(t('stock.roundInfo') || t('stock_round_info')).replace('{mode}', rounding.mode !== '' ? rounding.mode : 'default').replace('{n}', String(rounding.nearest)).replace('{n}', String(rounding.step))}
           </Text>
         ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>{t('stock.opname')}</Text>
+        <Text style={styles.cardSub}>{t('stock.opnameSub')}</Text>
+        <View style={styles.rowBetween}>
+          <Text style={styles.rowLabel}>{t('stock.pushOpname')}</Text>
+          <Pressable style={[styles.pushBtn, pushing && styles.pushBtnBusy]} onPress={pushOpname} disabled={pushing}>
+            <Text style={styles.pushText}>{pushing ? '…' : t('common.save')}</Text>
+          </Pressable>
+        </View>
+        {pushMsg !== '' ? <Text style={styles.cardSub}>{pushMsg}</Text> : null}
       </View>
 
       <View style={styles.card}>
@@ -155,4 +180,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   stepTextBig: { fontSize: 18 },
   stepText: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy },
   stepVal: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 28, textAlign: 'center' },
-  empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, textAlign: 'center', marginTop: 20 },});
+  empty: { fontFamily: fonts.regular, fontSize: 13, color: colors.faint, textAlign: 'center', marginTop: 20 },
+  pushBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.navy },
+  pushBtnBusy: { opacity: 0.6 },
+  pushText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },});

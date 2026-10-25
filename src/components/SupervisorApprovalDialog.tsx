@@ -41,8 +41,9 @@ export interface SupervisorApprovalResult {
 
 interface SupervisorApprovalDialogProps {
   visible: boolean;
-  /** Preset aksi 1..64 char (void|cancel|refund|... bebas; compliment = konstanta
-   * SUPERVISOR_ACTION_COMPLIMENT_SETTLE via ExtraPaySection, bukan literal) — tampil statis. */
+  /** Preset aksi 1..64 char — void/refund WAJIB konstanta kanonis
+   * (SUPERVISOR_ACTION_ORDER_VOID/REFUND, bukan literal lowercase; compliment =
+   * SUPERVISOR_ACTION_COMPLIMENT_SETTLE via ExtraPaySection) — tampil statis. */
   action: string;
   /** Ref default (order/item id); pemanggil boleh biarkan pemohon ubah. */
   refId?: string;
