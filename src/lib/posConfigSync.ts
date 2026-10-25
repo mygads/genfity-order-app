@@ -17,16 +17,17 @@
  *   ditimpa).
  *
  * Aturan server-wins yang disepakati:
- * - Stok (`genfity.stock.opts.lowLimit`): adopsi threshold merchant HANYA
- *   bila lokal masih default/belum dikustom kasir (StockScreen DEFAULT '5').
- *   Flag local-only lain (trackStock/lowWarn/allowSellEmpty/onlineSync)
- *   tak disentuh — tak ada padanannya di server (M9-3 local-only).
- *   CATATAN threshold (#7): endpoint owner-gated BE GET+PUT
- *   /menu/stock/settings ADA dan FE SUDAH punya editornya (InventoryPanel
- *   FE — temuan awal "tanpa editor FE" terkoreksi). Terminal APP tak bisa
- *   membacanya (owner-gated), jadi APP mempertahankan seed-sekali; owner
- *   yang mengubah threshold lewat FE akan terlihat di APP hanya bila kasir
- *   belum mengkustom (sengaja, bukan bug).
+ * - Stok (`genfity.stock.opts.lowLimit`): S-F5 = adopsi threshold merchant
+ *   TANPA SYARAT tiap sync sukses + catat thresholdSyncedAt (menggantikan
+ *   aturan seed-once audit-5d80: server kini punya padanan via pos-config).
+ *   Kustom kasir di layar Stok tetap bisa, tapi sync login berikutnya
+ *   menimpa dengan nilai server (sengaja, bukan bug).
+ * - allowSellEmpty/trackStock: adopsi HANYA bila kunci eksplisit hadir di
+ *   posBehavior server (presence-check, bukan nilai): BE lama yang tak
+ *   mengirim kunci = lokal dipertahankan (tolerate absent). Kunci hadir
+ *   (termasuk false eksplisit) = server-wins + catat stockFlagsSyncedAt.
+ *   (M9-3 local-only dicabut S-F5: BE kini punya padanan allowSellEmpty/
+ *   trackStock di pos_behavior_settings JSONB.)
  * - Timer (`genfity.tabletimer.config`): seed HANYA bila belum ada cfg lokal
  *   (kasir yang sudah mengatur tak ditimpa).
  */
@@ -34,10 +35,26 @@ import { getJSON, setJSON } from './storage';
 import { fetchTerminalPosConfig } from './terminalApi';
 
 const STOCK_OPTS_KEY = 'genfity.stock.opts';
-const STOCK_DEFAULT_LOW_LIMIT = '5'; // cermin StockScreen DEFAULT_OPTS
 const TIMER_CFG_KEY = 'genfity.tabletimer.config';
 /** Ronde-3 Q5: cache flag gate lookup member. Absen = enabled (boleh lookup). */
 const MEMBER_LOOKUP_KEY = 'genfity.member.lookup';
+
+/** S-F3: cache jadwal ongkir server (null per field = tak dikonfigurasi). */
+const FEE_SCHEDULE_KEY = 'genfity.pos.deliveryFee';
+/** S-F4: cache langkah pembulatan server (absen = default currency). */
+const ROUND_STEP_KEY = 'genfity.pos.roundingStep';
+/** S-F6: cache gerbang workforce (absen = keduanya OFF). */
+const WORKFORCE_KEY = 'genfity.pos.workforce';
+/** S-F12/F13: cache destinasi cetak server ([] = BE lama/lokal-only). */
+const PRINT_DEST_KEY = 'genfity.pos.printDestinations';
+/** S-F1: cache filter tab bayar ({tunai,nontunai,online,member,lainnya}; absen = semua tampil). */
+const PAY_TABS_KEY = 'genfity.pos.paymentTabs';
+/** S-F2: cache gate promo (posDiscounts* = POS; customer* = info-only). */
+const PROMO_GATE_KEY = 'genfity.pos.promo';
+/** S-F8: cache auto-print (absen = OFF). */
+const AUTO_PRINT_KEY = 'genfity.pos.autoPrint';
+/** S-F12: cache flag notifikasi server (toleran; absen = {}). */
+const NOTIFY_FLAGS_KEY = 'genfity.pos.notify';
 
 /** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 — posPayImmediately,
  * requireTableNumberForDineIn, posCustomItems, posEditOrder). Konsumsi toleran:
@@ -106,10 +123,24 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
 
   try {
     const local = await getJSON<Record<string, unknown>>(STOCK_OPTS_KEY, {});
-    const cur = local.lowLimit === undefined || local.lowLimit === null ? '' : String(local.lowLimit);
-    if (cur === '' || cur === STOCK_DEFAULT_LOW_LIMIT) {
-      await setJSON(STOCK_OPTS_KEY, { ...local, lowLimit: String(r.data.defaultLowStockThreshold) });
+    // S-F5: threshold server-wins TANPA SYARAT + timestamp (menggantikan
+    // seed-once: nilai server selalu menang tiap sync sukses).
+    const at = new Date().toISOString();
+    const merged: Record<string, unknown> = {
+      ...local,
+      lowLimit: String(r.data.defaultLowStockThreshold),
+      thresholdSyncedAt: at,
+    };
+    // S-F5: allowSellEmpty/trackStock HANYA bila kunci eksplisit hadir di
+    // posBehavior (BE lama tanpa kunci = lokal dipertahankan).
+    const pb = (r.data.posBehavior ?? {}) as Record<string, unknown>;
+    const flagPatch: Record<string, unknown> = {};
+    if ('allowSellEmpty' in pb) flagPatch.allowSellEmpty = asBool(pb.allowSellEmpty, false);
+    if ('trackStock' in pb) flagPatch.trackStock = asBool(pb.trackStock, true);
+    if (Object.keys(flagPatch).length > 0) {
+      Object.assign(merged, flagPatch, { stockFlagsSyncedAt: at });
     }
+    await setJSON(STOCK_OPTS_KEY, merged);
   } catch {
     /* best-effort: cache stok tetap dipakai */
   }
@@ -144,6 +175,49 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   } catch {
     /* abaikan */
   }
+
+  // S-F group: cache kontrak pos-config baru (server-wins tiap sync sukses;
+  // gagal sync = cache lama dipakai; belum pernah sync = default legacy).
+  // Tiap tulis best-effort terpisah agar satu gagal tak menggugurkan lainnya.
+  const pbRaw = (r.data.posBehavior ?? {}) as Record<string, unknown>;
+  try {
+    await setJSON(FEE_SCHEDULE_KEY, {
+      base: r.data.deliveryFee.base,
+      perKm: r.data.deliveryFee.perKm,
+      min: r.data.deliveryFee.min,
+      max: r.data.deliveryFee.max,
+    });
+  } catch { /* abaikan */ }
+  try {
+    await setJSON(ROUND_STEP_KEY, { step: r.data.roundingStep });
+  } catch { /* abaikan */ }
+  try {
+    await setJSON(WORKFORCE_KEY, {
+      requirePinForPos: r.data.workforce.requirePinForPos === true,
+      requireCashRegisterForPos: r.data.workforce.requireCashRegisterForPos === true,
+    });
+  } catch { /* abaikan */ }
+  try {
+    await setJSON(PRINT_DEST_KEY, { destinations: r.data.printDestinations ?? [] });
+  } catch { /* abaikan */ }
+  try {
+    // S-F1: filter tab bayar (map metode→bool; kunci tak dikenal diabaikan
+    // saat konsumsi; absen = semua tampil).
+    await setJSON(PAY_TABS_KEY, parsePayTabs(pbRaw));
+  } catch { /* abaikan */ }
+  try {
+    // S-F2: gate promo (posDiscounts* gerbang UI POS; customer* info-only).
+    await setJSON(PROMO_GATE_KEY, parsePromoGate(pbRaw));
+  } catch { /* abaikan */ }
+  try {
+    // S-F8: auto-print (varian deprecated ikut dibaca; absen = OFF).
+    const auto = pbRaw.autoPrint ?? pbRaw.autoPrintOnPaymentConfirm ?? pbRaw.autoPrintOnOrderCreated;
+    await setJSON(AUTO_PRINT_KEY, { enabled: asBool(auto, false) });
+  } catch { /* abaikan */ }
+  try {
+    // S-F12: flag notifikasi server (toleran: objek apa adanya; absen = {}).
+    await setJSON(NOTIFY_FLAGS_KEY, parseNotifyFlags(pbRaw));
+  } catch { /* abaikan */ }
   return true;
 }
 
@@ -194,4 +268,213 @@ export async function getPosCustomItemsEnabled(): Promise<boolean> {
 /** A-P1-7: penerimaan loadItems (buka order tersimpan untuk diedit) (default ON). */
 export async function getPosEditOrderEnabled(): Promise<boolean> {
   return (await getPosFlags()).editOrder;
+}
+
+// ---------------------------------------------------------------------------
+// S-F group: parser + getter kontrak pos-config baru. Semua toleran:
+// absen/error = default legacy (perilaku hari ini), nol-regresi.
+// ---------------------------------------------------------------------------
+
+/** S-F3: jadwal ongkir server (null per field = tak dikonfigurasi). */
+export interface DeliveryFeeSchedule {
+  base: number | null;
+  perKm: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+const cleanFee = (v: unknown): number | null => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+/** S-F3: baca jadwal ongkir dari cache (null = BE lama / belum dikonfigurasi). */
+export async function getDeliveryFeeSchedule(): Promise<DeliveryFeeSchedule> {
+  try {
+    const cur = await getJSON<Partial<DeliveryFeeSchedule> | null>(FEE_SCHEDULE_KEY, null);
+    if (!cur || typeof cur !== 'object') return { base: null, perKm: null, min: null, max: null };
+    return { base: cleanFee(cur.base), perKm: cleanFee(cur.perKm), min: cleanFee(cur.min), max: cleanFee(cur.max) };
+  } catch {
+    return { base: null, perKm: null, min: null, max: null };
+  }
+}
+
+/** S-F4: langkah pembulatan server (null = BE lama; pemanggil pakai default currency). */
+export async function getServerRoundStep(): Promise<number | null> {
+  try {
+    const cur = await getJSON<{ step?: unknown } | null>(ROUND_STEP_KEY, null);
+    const s = cur?.step;
+    if (s === undefined || s === null || s === '') return null;
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** S-F6: gerbang workforce (absen/error = keduanya OFF = perilaku lama). */
+export interface WorkforceGates {
+  requirePinForPos: boolean;
+  requireCashRegisterForPos: boolean;
+}
+
+export async function getWorkforceGates(): Promise<WorkforceGates> {
+  try {
+    const cur = await getJSON<Partial<WorkforceGates> | null>(WORKFORCE_KEY, null);
+    if (!cur || typeof cur !== 'object') return { requirePinForPos: false, requireCashRegisterForPos: false };
+    return {
+      requirePinForPos: cur.requirePinForPos === true,
+      requireCashRegisterForPos: cur.requireCashRegisterForPos === true,
+    };
+  } catch {
+    return { requirePinForPos: false, requireCashRegisterForPos: false };
+  }
+}
+
+/** S-F12/F13: destinasi cetak server ([] = BE lama / lokal-only). */
+export interface PrintDestination {
+  id: number;
+  name: string;
+  role: string;
+  copies: number;
+  templateType: string;
+  selected: boolean;
+  receiptTemplateId: number | null;
+}
+
+export async function getPrintDestinations(): Promise<PrintDestination[]> {
+  try {
+    const cur = await getJSON<{ destinations?: unknown } | null>(PRINT_DEST_KEY, null);
+    const arr = cur?.destinations;
+    if (!Array.isArray(arr)) return [];
+    const out: PrintDestination[] = [];
+    for (const r of arr) {
+      if (!r || typeof r !== 'object') continue;
+      const o = r as Record<string, unknown>;
+      const id = Number(o.id);
+      if (!Number.isFinite(id)) continue;
+      const copies = Number(o.copies);
+      const rid = o.receiptTemplateId;
+      out.push({
+        id: Math.round(id),
+        name: String(o.name ?? '').trim(),
+        role: String(o.role ?? '').trim().toLowerCase(),
+        copies: Number.isFinite(copies) && copies > 0 ? Math.round(copies) : 1,
+        templateType: String(o.templateType ?? o.template_type ?? '').trim(),
+        selected: o.selected === true,
+        receiptTemplateId: rid === undefined || rid === null || rid === '' || !Number.isFinite(Number(rid)) ? null : Math.round(Number(rid)),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** S-F1: tab bayar yang tampil (kunci = id tab PayScreen; absen = semua tampil). */
+export type PayTabId = 'tunai' | 'nontunai' | 'online' | 'member' | 'lainnya';
+
+const PAY_TAB_IDS: PayTabId[] = ['tunai', 'nontunai', 'online', 'member', 'lainnya'];
+
+/** S-F1: kupas map tab dari posBehavior (flat `paymentTabs` ATAU `payTabs` ATAU
+ * kunci per-tab `show TunaiTab`/`paymentTab_<id>`; tak dikenal = tampil). */
+function parsePayTabs(pb: Record<string, unknown>): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  const src = (pb.paymentTabs ?? pb.payTabs ?? pb.enabledPaymentTabs ?? null) as Record<string, unknown> | null;
+  if (src && typeof src === 'object') {
+    for (const id of PAY_TAB_IDS) {
+      if (src[id] !== undefined && src[id] !== null) out[id] = asBool(src[id], true);
+    }
+  }
+  for (const id of PAY_TAB_IDS) {
+    if (out[id] !== undefined) continue;
+    const per = pb[`show${id.charAt(0).toUpperCase()}${id.slice(1)}Tab`] ?? pb[`paymentTab_${id}`] ?? pb[`payTab_${id}`];
+    if (per !== undefined && per !== null) out[id] = asBool(per, true);
+  }
+  return out;
+}
+
+/** S-F1: tab boleh tampil? (absen di cache = tampil = perilaku lama). */
+export async function isPayTabEnabled(id: PayTabId): Promise<boolean> {
+  try {
+    const cur = await getJSON<Record<string, unknown> | null>(PAY_TABS_KEY, null);
+    if (!cur || typeof cur !== 'object') return true;
+    const v = cur[id];
+    if (v === undefined || v === null) return true;
+    return asBool(v, true);
+  } catch {
+    return true;
+  }
+}
+
+/** S-F2: gate promo (pos* = gerbang UI POS; customer* = info-only). */
+export interface PromoGate {
+  posDiscountsEnabled: boolean;
+  customerVouchersEnabled: boolean;
+}
+
+function parsePromoGate(pb: Record<string, unknown>): PromoGate {
+  // Bentuk bersarang `orderVouchers{posDiscountsEnabled,customerEnabled}` (BE
+  // merchant_order_vouchers.go) + flat tolerant.
+  const nested = (pb.orderVouchers ?? pb.promo ?? pb.vouchers ?? null) as Record<string, unknown> | null;
+  const pos = nested && typeof nested === 'object' && (nested.posDiscountsEnabled ?? nested.posEnabled ?? null) !== undefined
+    ? (nested.posDiscountsEnabled ?? nested.posEnabled)
+    : (pb.posDiscountsEnabled ?? pb.posDiscounts ?? pb.discountsEnabled);
+  const cust = nested && typeof nested === 'object' && (nested.customerVouchersEnabled ?? nested.customerEnabled ?? null) !== undefined
+    ? (nested.customerVouchersEnabled ?? nested.customerEnabled)
+    : (pb.customerVouchersEnabled ?? pb.customerVouchers ?? null);
+  return {
+    posDiscountsEnabled: asBool(pos ?? null, true),
+    customerVouchersEnabled: asBool(cust ?? null, false),
+  };
+}
+
+/** S-F2: diskon/promo POS diizinkan? (absen = true = perilaku lama). */
+export async function getPosPromoGate(): Promise<PromoGate> {
+  try {
+    const cur = await getJSON<Partial<PromoGate> | null>(PROMO_GATE_KEY, null);
+    if (!cur || typeof cur !== 'object') return { posDiscountsEnabled: true, customerVouchersEnabled: false };
+    return {
+      posDiscountsEnabled: asBool(cur.posDiscountsEnabled, true),
+      customerVouchersEnabled: asBool(cur.customerVouchersEnabled, false),
+    };
+  } catch {
+    return { posDiscountsEnabled: true, customerVouchersEnabled: false };
+  }
+}
+
+/** S-F8: auto-print aktif? (absen/error = OFF = perilaku lama). */
+export async function getAutoPrintEnabled(): Promise<boolean> {
+  try {
+    const cur = await getJSON<{ enabled?: unknown } | null>(AUTO_PRINT_KEY, null);
+    if (!cur || cur.enabled === undefined || cur.enabled === null) return false;
+    return asBool(cur.enabled, false);
+  } catch {
+    return false;
+  }
+}
+
+/** S-F12: flag notifikasi server (toleran: objek apa adanya; absen = {}). */
+function parseNotifyFlags(pb: Record<string, unknown>): Record<string, unknown> {
+  const src = (pb.notifications ?? pb.notify ?? pb.notificationSettings ?? null) as Record<string, unknown> | null;
+  if (src && typeof src === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string') out[k] = v;
+    }
+    return out;
+  }
+  return {};
+}
+
+/** S-F12: baca flag notifikasi server ({} = BE lama / belum dikonfigurasi). */
+export async function getNotificationFlags(): Promise<Record<string, unknown>> {
+  try {
+    const cur = await getJSON<Record<string, unknown> | null>(NOTIFY_FLAGS_KEY, null);
+    if (!cur || typeof cur !== 'object') return {};
+    return cur;
+  } catch {
+    return {};
+  }
 }

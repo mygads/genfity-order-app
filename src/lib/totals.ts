@@ -47,6 +47,7 @@
  *   Pay applyVoucher) sudah menegakkan duluan.
  */
 import { initDb, query, queryFirst } from './db';
+import { getJSON } from './storage';
 
 export type TotalsVoucher = {
   code?: string;
@@ -197,10 +198,40 @@ export const FEE_DEFAULTS: {
   },
 };
 
-/** Ongkir bawaan untuk mode order; 0 bila mode tak dikenal (tetap bisa diubah manual). */
-export function defaultOngkirForMode(mode?: string): number {
+/** Ongkir bawaan untuk mode order; 0 bila mode tak dikenal (tetap bisa diubah manual).
+ * S-F3: jadwal server opsional (base/perKm/min/max dari pos-config BE) —
+ * bila base valid → base (absen = peta legacy di bawah = perilaku lama).
+ * Jarak (perKm) dihitung via calculateDeliveryFee bila jarak diketahui. */
+export function defaultOngkirForMode(mode?: string, schedule?: DeliveryFeeSchedule | null): number {
+  const base = schedule?.base;
+  if (base !== undefined && base !== null && Number.isFinite(base) && base >= 0) {
+    return Math.round(base);
+  }
   const v = FEE_DEFAULTS.ongkirByMode[(mode ?? '').trim().toUpperCase()];
   return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+/** S-F3: jadwal ongkir server (cermin BE terminal_pos_config.go: null per
+ * field = tak dikonfigurasi). */
+export interface DeliveryFeeSchedule {
+  base: number | null;
+  perKm: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+/** S-F3: hitung ongkir dari jarak (cermin BE calculateDeliveryFee:
+ * round(base + perKm*km), lalu clamp min, lalu max; invalid = 0 jujur). */
+export function calculateDeliveryFee(distanceKm: unknown, s?: DeliveryFeeSchedule | null): number {
+  if (!s) return 0;
+  const km = Number(distanceKm);
+  if (!Number.isFinite(km) || km < 0) return 0;
+  const base = s.base !== null && s.base !== undefined && Number.isFinite(s.base) && s.base >= 0 ? s.base : 0;
+  const perKm = s.perKm !== null && s.perKm !== undefined && Number.isFinite(s.perKm) && s.perKm >= 0 ? s.perKm : 0;
+  let fee = Math.round(base + perKm * km);
+  if (s.min !== null && s.min !== undefined && Number.isFinite(s.min) && s.min >= 0 && fee < s.min) fee = Math.round(s.min);
+  if (s.max !== null && s.max !== undefined && Number.isFinite(s.max) && s.max >= 0 && fee > s.max) fee = Math.round(s.max);
+  return Math.max(0, fee);
 }
 
 /**
@@ -249,12 +280,25 @@ export async function getActiveBranchId(): Promise<string> {
 }
 
 /**
- * Langkah pembulatan grand total per currency. Setting eksplisit
- * ms_setting(Rounding, Step) — dua layout ala getRoundingSetting di lib/db.ts —
- * SELALU menang; bila tak ada pakai default: IDR = FEE_DEFAULTS.roundStep
- * (100, kompatibel), AUD = 1 (sen, tanpa pembulatan ratusan).
+ * Langkah pembulatan grand total per currency. Urutan menang (S-F4):
+ * 1. cache pos-config server (`genfity.pos.roundingStep`, ditulis
+ *    syncPosConfigFromServer dari BE roundingStep currency-derived);
+ * 2. setting eksplisit ms_setting(Rounding, Step) — dua layout ala
+ *    getRoundingSetting di lib/db.ts;
+ * 3. default currency (argumen; pemanggil isi getCachedCurrency().code):
+ *    AUD = 1 (sen), selain itu FEE_DEFAULTS.roundStep (100, kompatibel).
  */
 export async function getRoundStep(currency?: string): Promise<number> {
+  try {
+    const srv = await getJSON<{ step?: unknown } | null>('genfity.pos.roundingStep', null);
+    const s = srv?.step;
+    if (s !== undefined && s !== null && s !== '') {
+      const n = Number(s);
+      if (Number.isFinite(n) && n > 0) return Math.round(n);
+    }
+  } catch {
+    /* abaikan: lanjut ke ms_setting */
+  }
   try {
     await initDb();
     const rows = await query<{

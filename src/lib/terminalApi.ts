@@ -877,7 +877,28 @@ export async function fetchTerminalReadiness(
  * timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
  * member-only; pola cermin fetchTerminalReadiness: GET + withId + unwrap +
  * fail jujur — pemanggil seed best-effort, JANGAN blokir login bila gagal).
- * Angka disanitasi ke default BE (threshold 5, timer 90/10). */
+ * Angka disanitasi ke default BE (threshold 5, timer 90/10).
+ * S-F: kontrak BE bertambah (deliveryFee, roundingStep, workforce,
+ * printDestinations) — semua disanitasi toleran (absen = null/default). */
+export interface TerminalDeliveryFee {
+  base: number | null;
+  perKm: number | null;
+  min: number | null;
+  max: number | null;
+}
+export interface TerminalWorkforceGates {
+  requirePinForPos: boolean;
+  requireCashRegisterForPos: boolean;
+}
+export interface TerminalPrintDestination {
+  id: number;
+  name: string;
+  role: string;
+  copies: number;
+  templateType: string;
+  selected: boolean;
+  receiptTemplateId: number | null;
+}
 export interface TerminalPosConfig {
   stockAlertEnabled: boolean;
   defaultLowStockThreshold: number;
@@ -886,11 +907,45 @@ export interface TerminalPosConfig {
   posBehavior: Record<string, unknown>;
   /** Ronde-3 Q5: gate lookup/search member (absen = enabled). */
   memberLookupEnabled: boolean;
+  /** S-F3: jadwal ongkir server (null per field = tak dikonfigurasi). */
+  deliveryFee: TerminalDeliveryFee;
+  /** S-F4: langkah pembulatan kas server (null = BE lama; pemanggil pakai default currency). */
+  roundingStep: number | null;
+  /** S-F6: gerbang workforce (absen = keduanya OFF). */
+  workforce: TerminalWorkforceGates;
+  /** S-F12/F13: destinasi cetak aktif server ([] = BE lama / belum dikonfigurasi). */
+  printDestinations: TerminalPrintDestination[];
 }
 
 function cleanPosConfigInt(v: unknown, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.round(n) : fallback;
+}
+
+/** S-F3: sanitasi nominal jadwal ongkir (null = tak dikonfigurasi, bukan 0). */
+function cleanFeeAmount(v: unknown): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** S-F12/F13: sanitasi satu destinasi cetak (tanpa secret di tabel BE). */
+function cleanPrintDestination(r: unknown): TerminalPrintDestination | null {
+  if (!r || typeof r !== 'object') return null;
+  const o = r as Record<string, unknown>;
+  const id = Number(o.id);
+  if (!Number.isFinite(id)) return null;
+  const copies = Number(o.copies);
+  const rid = o.receiptTemplateId;
+  return {
+    id: Math.round(id),
+    name: String(o.name ?? '').trim(),
+    role: String(o.role ?? '').trim().toLowerCase(),
+    copies: Number.isFinite(copies) && copies > 0 ? Math.round(copies) : 1,
+    templateType: String(o.templateType ?? o.template_type ?? '').trim(),
+    selected: o.selected === true,
+    receiptTemplateId: rid === undefined || rid === null || rid === '' || !Number.isFinite(Number(rid)) ? null : Math.round(Number(rid)),
+  };
 }
 
 export async function fetchTerminalPosConfig(
@@ -905,6 +960,14 @@ export async function fetchTerminalPosConfig(
   const stock = (data.stock ?? {}) as Record<string, unknown>;
   const timer = (data.timer ?? {}) as Record<string, unknown>;
   const posBehavior = (data.posBehaviorSettings ?? {}) as Record<string, unknown>;
+  // S-F3: jadwal ongkir (BE lama = absen → semua null = perilaku lama).
+  const fee = (data.deliveryFee ?? {}) as Record<string, unknown>;
+  // S-F4: langkah pembulatan server (BE lama = absen → null = default currency).
+  const rs = data.roundingStep;
+  // S-F6: gerbang workforce (BE lama = absen → keduanya OFF).
+  const wf = (data.workforce ?? {}) as Record<string, unknown>;
+  // S-F12/F13: destinasi cetak server (BE lama = absen → [] = lokal-only).
+  const dests = Array.isArray(data.printDestinations) ? data.printDestinations : [];
   return {
     ok: true,
     data: {
@@ -916,6 +979,24 @@ export async function fetchTerminalPosConfig(
       // Q5: parse top-level + nested posBehaviorSettings/posBehavior
       // (absen = enabled); tak pernah crash pada data asing.
       memberLookupEnabled: parseMemberLookupEnabled(data),
+      deliveryFee: {
+        base: cleanFeeAmount(fee.base),
+        perKm: cleanFeeAmount(fee.perKm),
+        min: cleanFeeAmount(fee.min),
+        max: cleanFeeAmount(fee.max),
+      },
+      roundingStep: (() => {
+        if (rs === undefined || rs === null || rs === '') return null;
+        const n = Number(rs);
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+      })(),
+      workforce: {
+        requirePinForPos: wf.requirePinForPos === true,
+        requireCashRegisterForPos: wf.requireCashRegisterForPos === true,
+      },
+      printDestinations: dests
+        .map(cleanPrintDestination)
+        .filter((d): d is TerminalPrintDestination => d !== null),
     },
     fromDummy: false,
   };
