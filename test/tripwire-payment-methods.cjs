@@ -101,6 +101,26 @@ function run() {
   ok(eq(rt.parsePaymentMethods({ paymentMethods: { qrisEnabled: 0 } }),
     { ...ALL_TRUE, qrisEnabled: false }),
     'PM-02: angka 0 = false');
+  // ---- Q4: paymentSettings EFEKTIF menang atas paymentMethods MENTAH ----
+  // (putusan owner 25-Okt: satukan ke key efektif; mentah deprecated R4-4).
+  ok(eq(rt.parsePaymentMethods({ paymentSettings: { qrisEnabled: false }, paymentMethods: { qrisEnabled: true } }),
+    { ...ALL_TRUE, qrisEnabled: false }),
+    'Q4-1: konflik qris, paymentSettings efektif menang (false)');
+  ok(eq(rt.parsePaymentMethods({ paymentSettings: { qrisEnabled: true }, paymentMethods: { qrisEnabled: false } }),
+    ALL_TRUE),
+    'Q4-2: konflik qris, efektif true menimpa mentah false');
+  ok(eq(rt.parsePaymentMethods({ paymentSettings: { qrisEnabled: false }, paymentMethods: { gpayEnabled: false, qrisEnabled: true } }),
+    { ...ALL_TRUE, qrisEnabled: false, gpayEnabled: false }),
+    'Q4-3: gap-fill, gpay (hanya di mentah) ikut false; qris ikut efektif');
+  ok(eq(rt.parsePaymentMethods({ paymentMethods: { codEnabled: false } }),
+    { ...ALL_TRUE, codEnabled: false }),
+    'Q4-4: efektif absen, mentah fallback (cod false)');
+  ok(eq(rt.parsePaymentMethods({ paymentSettings: {}, pos: {} }),
+    ALL_TRUE),
+    'Q4-5: efektif+mentah kosong, semua-true (legacy tampil)');
+  ok(eq(rt.parsePaymentMethods({ payment_settings: { manual_transfer_enabled: 'tidak' }, paymentMethods: { manualTransferEnabled: true } }),
+    { ...ALL_TRUE, manualTransferEnabled: false }),
+    'Q4-6: snake payment_settings efektif menang atas mentah camel');
 
   // ---- PM-03: semua-false → gerbang jelas saja; wajib tetap tampil ----
   const wallets = [{ id: 'ovo' }, { id: 'gopay' }, { id: 'qris' }, { id: 'dana' }];

@@ -1011,8 +1011,10 @@ export async function fetchTerminalPosConfig(
       // Q5: parse top-level + nested posBehaviorSettings/posBehavior
       // (absen = enabled); tak pernah crash pada data asing.
       memberLookupEnabled: parseMemberLookupEnabled(data),
-      // R4-4: snapshot metode bayar (kontrak `pos.paymentMethods`; toleran
-      // flat+nested+snake_case; absen = semua-true = tampil semua).
+      // R4-4 + Q4 (putusan owner 25-Okt): snapshot metode bayar (kontrak
+      // `pos.paymentMethods` + blok efektif `paymentSettings`; toleran
+      // flat+nested+snake_case; EFEKTIF menang per kunci atas MENTAH
+      // (deprecated); absen = semua-true = tampil semua).
       paymentMethods: parsePaymentMethods(data),
       // SESI-FINAL-APP: requirePaymentProof (absen = OFF = perilaku lama).
       requirePaymentProof: parseRequirePaymentProof(data),
