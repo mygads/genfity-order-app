@@ -6,6 +6,7 @@ import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
 import { getBinding } from '../../session';
 import { parseCustomerId } from '../../lib/memberRef';
@@ -101,7 +102,7 @@ export default function DineInScreen({ navigation, route }: Props) {
     void getServiceConfig().then((c) => {
       if (alive) setSvcCfg(c);
     });
-    void getRoundStep().then((s) => {
+    void getRoundStep(getCachedCurrency().code).then((s) => {
       if (alive) setRoundStep(s);
     });
     return () => {

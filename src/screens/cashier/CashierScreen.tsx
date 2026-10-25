@@ -27,9 +27,10 @@ import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
 import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
-import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
+import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type DeliveryFeeSchedule, type ServiceConfig } from '../../lib/totals';
+import { getCachedCurrency } from '../../lib/currency';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
-import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn } from '../../lib/posConfigSync';
+import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn, getDeliveryFeeSchedule } from '../../lib/posConfigSync';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
 import { nextSalesNum } from '../../lib/sales';
@@ -260,7 +261,9 @@ export default function CashierScreen({ navigation, route }: Props) {
     void getServiceConfig().then((c) => {
       if (alive) setSvcCfg(c);
     });
-    void getRoundStep().then((s) => {
+    // S-F4: langkah pembulatan ikut currency cabang (AUD = 1; server cache
+    // pos-config menang bila ada).
+    void getRoundStep(getCachedCurrency().code).then((s) => {
       if (alive) setRoundStep(s);
     });
     return () => {
@@ -277,16 +280,32 @@ export default function CashierScreen({ navigation, route }: Props) {
     let alive = true;
     (async () => {
       try {
-        const [c, e, p, rt] = await Promise.all([
+        const [c, e, p, rt, fee] = await Promise.all([
           getPosCustomItemsEnabled(),
           getPosEditOrderEnabled(),
           getPosPayImmediately(),
           getRequireTableNumberForDineIn(),
+          getDeliveryFeeSchedule(),
         ]);
         if (!alive) return;
         posFlagsRef.current = { custom: c, edit: e, payNow: p, reqTable: rt };
         setCustomItemsEnabled(c);
         setPayImmediately(p);
+        // S-F3: seed ongkir dari jadwal server — HANYA bila semua aman:
+        // pemanggil tak menetapkan ongkir + bukan DINE IN + keranjang masih
+        // segar + pengguna belum mengubah dari default mode. Selain itu =
+        // diam (kasir yang sedang jalan tak disentuh).
+        if (fee.base !== null && fee.base > 0) {
+          const live = liveRef.current;
+          if (
+            !live.routeOngkir &&
+            live.mode !== 'DINE IN' &&
+            live.cartEmpty &&
+            live.ongkir === defaultOngkirForMode(live.mode)
+          ) {
+            setOngkir(Math.round(fee.base));
+          }
+        }
       } catch {
         /* cache gagal = default legacy dipertahankan */
       }
@@ -393,6 +412,10 @@ export default function CashierScreen({ navigation, route }: Props) {
   // draft atau order yang dibuka (loadItems/salesNum), bukan 3 item contoh.
   // DB kosong + tanpa draft = empty-state kasir yang jujur.
   const [cart, setCart] = useState<CartItem[]>([]);
+  /** S-F3: cermin live (mode/ongkir/keranjang) untuk seed ongkir server di
+   * efek flags async — dibaca saat cache tiba, bukan saat render. */
+  const liveRef = useRef({ mode: '', ongkir: 0, cartEmpty: true, routeOngkir: false });
+  liveRef.current = { mode, ongkir, cartEmpty: cart.length === 0, routeOngkir: route?.params?.ongkir !== undefined };
   /** Muat order saat keranjang terisi: tahan dulu, minta konfirmasi hapus keranjang. */
   const [pendingLoad, setPendingLoad] = useState<CartItem[] | null>(null);
   const appliedLoad = useRef('');
