@@ -2,19 +2,26 @@ import { initDb, queryFirst } from './db';
 import { getBranchId } from '../config/server';
 
 /** Status shift terakhir dari DB lokal (tr_shiftlog).
- * Cermin logika guard navigator di App.tsx: instalasi fresh (riwayat kosong)
- * bebas agar demo/screenshot jalan; ada riwayat tapi tak ada yang open
- * berarti shift tutup dan kasir wajib diblokir sampai buka shift. */
+ * A-P1-5 fail-closed: null HANYA berarti instalasi fresh (riwayat kosong
+ * total) — dan fresh pun wajib buka shift via hasOpenShift (false).
+ * DB-error TIDAK lagi null-bebas: dikembalikan sebagai status tutup dengan
+ * flag dbError agar pemanggil memblokir + menampilkan pesan DB, bukan pesan
+ * shift-tutup yang menyesatkan. Cermin guard navigator di App.tsx TIDAK
+ * diubah (soft-guard rute awal; demo/screenshot tetap mendarat Dashboard,
+ * tetapi semua pintu kasir/deposit digerbang di sini). */
 export interface ShiftStatus {
   open: boolean;
   clockIn: string | null;
   cashInDrawer: number;
+  /** true = baris ini adalah kegagalan baca DB (blokir + pesan DB). */
+  dbError?: boolean;
 }
 
 /** Baris shift terakhir, atau null bila riwayat kosong / DB belum siap. */
 /** Baris shift terakhir (absensi dikecualikan), atau status tutup bila riwayat
- *  hanya berisi absensi, atau null bila instalasi fresh (riwayat kosong total)
- *  / DB belum siap. Hanya null yang berarti bebas (demo/screenshot). */
+ *  hanya berisi absensi, atau null bila instalasi fresh (riwayat kosong total).
+ *  DB-error BUKAN null (A-P1-5): status tutup + flag dbError (fail-closed).
+ *  null = fresh = hasOpenShift false (wajib buka shift). */
 export async function getShiftStatus(): Promise<ShiftStatus | null> {
   try {
     await initDb();
@@ -47,28 +54,51 @@ export async function getShiftStatus(): Promise<ShiftStatus | null> {
     }
     return null;
   } catch {
-    return null;
+    // A-P1-5: DB-error = BLOKIR (fail-closed), bukan bebas. null dicadangkan
+    // untuk fresh-install saja; pemanggil membedakan via flag dbError untuk
+    // menampilkan pesan DB (bukan "shift tutup").
+    return { open: false, clockIn: null, cashInDrawer: 0, dbError: true };
   }
 }
 
-/** true = boleh masuk kasir (shift buka, instalasi fresh, atau DB belum siap
- *  sehingga jangan blokir kasir). false = shift tutup. */
+/** true = boleh masuk kasir (shift buka). false = shift tutup, instalasi
+ *  fresh (wajib buka shift dulu, A-P1-5), atau DB belum siap (fail-closed). */
 export async function hasOpenShift(): Promise<boolean> {
   const st = await getShiftStatus();
-  return st === null ? true : st.open;
+  return st === null ? false : st.open;
 }
 
-/** Gerbang masuk kasir lintas-layar: bila shift tutup, sampaikan pesan lewat
- *  onBlocked lalu arahkan ke layar Shift (pola sama seperti CTA Transaksi Baru
- *  di Dashboard). Kembalikan true bila boleh lanjut ke Cashier. */
+/** Klasifikasi blokir untuk pemilihan pesan (A-P1-5): 'fresh' = instalasi
+ *  baru wajib buka shift; 'db-error' = DB belum siap (pesan DB, tanpa pesan
+ *  shift-tutup); 'closed' = shift tutup biasa; null = boleh lanjut. */
+export type ShiftBlockKind = 'fresh' | 'db-error' | 'closed';
+
+export async function getShiftBlockKind(): Promise<ShiftBlockKind | null> {
+  const st = await getShiftStatus();
+  if (st === null) return 'fresh';
+  if (st.dbError) return 'db-error';
+  return st.open ? null : 'closed';
+}
+
+/** Gerbang masuk kasir lintas-layar: bila shift tutup/fresh, sampaikan pesan
+ *  lewat onBlocked lalu arahkan ke layar Shift (pola sama seperti CTA Transaksi
+ *  Baru di Dashboard). DB-error: sampaikan dbErrorMsg (atau blockedMsg) TANPA
+ *  navigasi — layar Shift pun butuh DB, kasir cukup diam + pesan + bisa coba
+ *  lagi. Kembalikan true bila boleh lanjut ke Cashier. */
 export async function ensureShiftOpen(
   navigation:
     | { navigate: (screen: string, params?: Record<string, unknown>) => void }
     | undefined,
   blockedMsg: string,
   onBlocked?: (msg: string) => void,
+  dbErrorMsg?: string,
 ): Promise<boolean> {
-  if (await hasOpenShift()) return true;
+  const kind = await getShiftBlockKind();
+  if (kind === null) return true;
+  if (kind === 'db-error') {
+    onBlocked?.(dbErrorMsg ?? blockedMsg);
+    return false;
+  }
   onBlocked?.(blockedMsg);
   navigation?.navigate('Shift');
   return false;

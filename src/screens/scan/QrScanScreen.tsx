@@ -129,7 +129,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       return;
     }
     // Gerbang kasir: shift tutup → pesan + buka shift dulu.
-    if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setMsg))) return;
+    if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setMsg, t('shift_db_error')))) return;
     if (tab === 'member') {
       navigation?.navigate('Cashier', { memberId: clean });
       return;

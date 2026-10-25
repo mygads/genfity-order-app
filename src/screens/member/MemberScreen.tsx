@@ -32,7 +32,7 @@ import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/syn
 import { tOf, useLang, tCur } from '../../lib/i18n';
 import type { Lang } from '../../lib/i18n';
 import { getSession } from '../../session';
-import { hasOpenShift } from '../../lib/shiftGuard';
+import { getShiftBlockKind } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -717,13 +717,17 @@ export default function MemberScreen({ navigation, route }: Props) {
 
   const saveMember = async () => {
     // U4: member-create = gerbang identitas (bound terminal + shift buka, fail-closed).
+    // A-P1-5: DB-error = pesan DB (bukan "shift tutup"); fresh/closed = pesan buka-shift.
     if (!getBranchId().trim()) {
       setAddErr(t('terminal_unbound_hint'));
       return;
     }
-    if (!(await hasOpenShift())) {
-      setAddErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
-      return;
+    {
+      const blockKind = await getShiftBlockKind();
+      if (blockKind) {
+        setAddErr(blockKind === 'db-error' ? t('shift_db_error') : `${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+        return;
+      }
     }
     // M1: email opsional, tetapi bila diisi harus valid (dipakai struk email).
     const mail = email.trim();
@@ -774,13 +778,17 @@ export default function MemberScreen({ navigation, route }: Props) {
         return;
       }
       // U3: deposit-save = gerbang bound terminal + shift buka (fail-closed).
+      // A-P1-5: DB-error = pesan DB (bukan "shift tutup"); fresh/closed = pesan buka-shift.
       if (!getBranchId().trim()) {
         setDepositErr(t('terminal_unbound_hint'));
         return;
       }
-      if (!(await hasOpenShift())) {
-        setDepositErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
-        return;
+      {
+        const blockKind = await getShiftBlockKind();
+        if (blockKind) {
+          setDepositErr(blockKind === 'db-error' ? t('shift_db_error') : `${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+          return;
+        }
       }
       // Deposit cepat menolak nominal di bawah MIN_TOPUP dengan pesan.
       if (n < MIN_TOPUP) {

@@ -18,7 +18,7 @@ import { getSession } from '../../session';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { useLang, tCur } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
-import { hasOpenShift } from '../../lib/shiftGuard';
+import { getShiftBlockKind } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -187,15 +187,19 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
     if (!ready || submitBusy.current) return;
     submitBusy.current = true;
     // U3: deposit-save = gerbang bound terminal + shift buka (fail-closed).
+    // A-P1-5: DB-error = pesan DB; fresh/closed = pesan buka-shift.
     if (!getBranchId().trim()) {
       submitBusy.current = false;
       setSaveErr(t('terminal_unbound_hint'));
       return;
     }
-    if (!(await hasOpenShift())) {
-      submitBusy.current = false;
-      setSaveErr(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
-      return;
+    {
+      const blockKind = await getShiftBlockKind();
+      if (blockKind) {
+        submitBusy.current = false;
+        setSaveErr(blockKind === 'db-error' ? t('shift_db_error') : `${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+        return;
+      }
     }
     setSaveErr('');
     // A8: konfirmasi sebelum gerak uang — kasir melihat nominal + metode +

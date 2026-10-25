@@ -284,7 +284,7 @@ export default function DashboardScreen({ navigation }: Props) {
     // tanpa remount ) - shift tutup → notice + arahkan buka shift dulu.
     if (m.route === 'Cashier') {
       void (async () => {
-        if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setNotice))) return;
+        if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setNotice, t('shift_db_error')))) return;
         setNotice('');
         navigation?.navigate(m.route as string);
       })();
@@ -370,16 +370,22 @@ export default function DashboardScreen({ navigation }: Props) {
       <TouchableOpacity style={styles.cta} onPress={() => {
         // Cek live dari DB + segarkan kartu shift (state mount bisa basi sepulang Tutup Shift).
         void (async () => {
+          // A-P1-5: fresh (null) = wajib buka shift; DB-error = pesan DB tanpa
+          // navigasi; tutup = notice + arahkan Shift. Tanpa status bebas lagi.
           const st = await getShiftStatus();
-          if (st) {
-            const hhmm = String(st.clockIn ?? '').slice(11, 16);
-            setShift((prev) => ({ open: st.open, clockIn: hhmm || prev.clockIn, cash: st.cashInDrawer }));
-            if (!st.open) {
-              setNotice(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
-              navigation?.navigate('Shift');
+          if (st === null || st.dbError || !st.open) {
+            const hhmm = String(st?.clockIn ?? '').slice(11, 16);
+            setShift((prev) => ({ open: false, clockIn: hhmm || prev.clockIn, cash: st?.cashInDrawer ?? prev.cash }));
+            if (st !== null && st.dbError) {
+              setNotice(t('shift_db_error'));
               return;
             }
+            setNotice(`${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+            navigation?.navigate('Shift');
+            return;
           }
+          const hhmm = String(st.clockIn ?? '').slice(11, 16);
+          setShift((prev) => ({ open: st.open, clockIn: hhmm || prev.clockIn, cash: st.cashInDrawer }));
           setNotice('');
           navigation?.navigate('Cashier');
         })();
