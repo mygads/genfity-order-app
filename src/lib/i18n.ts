@@ -999,6 +999,8 @@ const STR: Record<string, Entry> = {
   'printers.title': { id: 'Printer', en: 'Printers' },
   'printers.sub': { id: 'Station kasir/dapur/checker/label - BT SPP - LAN - Star', en: 'Cashier/kitchen/checker/label stations - BT SPP - LAN - Star' },
   'printers.stations': { id: 'Station Printer', en: 'Printer Stations' },
+  'printers.serverTitle': { id: 'Destinasi Cetak Server', en: 'Server Print Destinations' },
+  'printers.serverHint': { id: 'Daftar acuan dari server — pencetakan tetap memakai station lokal di bawah.', en: 'Reference list from the server — printing still uses the local stations below.' },
   'printers.addStation': { id: 'Tambah Station', en: 'Add Station' },
   'printers.stationNamePh': { id: 'Nama station baru', en: 'New station name' },
   'printers.testPrint': { id: 'Uji Cetak', en: 'Test Print' },

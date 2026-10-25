@@ -14,6 +14,7 @@ import { getGroupPaid } from '../../lib/sales';
 import { getSettleMemberView, takeMemberChanged } from '../../lib/memberChangedStore';
 import { enqueueSync } from '../../lib/sync';
 import { postTableTransition } from '../../lib/terminalTable';
+import { getAutoPrintEnabled } from '../../lib/posConfigSync';
 
 type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -302,6 +303,22 @@ export default function SuccessScreen({ navigation, route }: Props) {
       ? { splitPaid: { amount: splitPaidAmt, ...(splitPaidMethod ? { method: splitPaidMethod } : {}) } }
       : {}),
   };
+  // S-F8: auto-print server (posBehavior): cetak sekali saat sukses dibuka,
+  // sama seperti tombol Cetak. Cache gagal / OFF = perilaku lama (manual).
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        if (alive && (await getAutoPrintEnabled())) doPrint();
+      } catch {
+        /* abaikan: cetak manual tetap tersedia */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const now = new Date();
   const localeTag = lang === 'en' ? 'en-US' : 'id-ID';
   const todayId = now.toLocaleDateString(localeTag, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });

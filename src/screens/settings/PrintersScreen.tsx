@@ -32,6 +32,7 @@ import { useEffect, useState } from 'react';import {
   paired: boolean;
   /** true = hasil pindai BLE (mac diawali `BLE:`), bisa langsung dipakai. */
   ble?: boolean;}const LS_STATIONS = 'genfity.printer.stations';
+import { getPrintDestinations, type PrintDestination } from '../../lib/posConfigSync';
 
 /** Baris ms_station (printerType receipt) -> Station UI. */
 interface StationRow {
@@ -144,6 +145,23 @@ function backupBindings(ss: Station[]): void {
   const [lanPort, setLanPort] = useState('9100');
   const [lanMsg, setLanMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  /** S-F12/S-F13: destinasi cetak server (hibrida: tampil bila ada; cetak
+   * tetap memakai station lokal — tanpa secret di kontrak BE). */
+  const [srvDests, setSrvDests] = useState<PrintDestination[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const ds = await getPrintDestinations();
+        if (alive) setSrvDests(ds);
+      } catch {
+        /* abaikan: lokal-only */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [preview, setPreview] = useState<{ station: string; text: string; hex: string } | null>(null);
   const [stName, setStName] = useState('');
   const [stRole, setStRole] = useState<StationRole>('Dapur');
@@ -502,6 +520,19 @@ function backupBindings(ss: Station[]): void {
           <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.bluetoothPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
           <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.usbPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
         </View>
+        {/* S-F12/S-F13: hibrida — daftar server tampil bila ada (read-only),
+            station lokal di bawah tetap acuan cetak. */}
+        {srvDests.length > 0 ? (
+          <View style={styles.stCard}>
+            <Text style={styles.stName}>{t('printers.serverTitle')}</Text>
+            {srvDests.map((d) => (
+              <Text key={d.id} style={styles.stMeta}>
+                {`${d.name || `#${d.id}`} · ${d.role || '-'} · ×${d.copies}${d.templateType ? ` · ${d.templateType}` : ''}`}
+              </Text>
+            ))}
+            <Text style={styles.stMeta}>{t('printers.serverHint')}</Text>
+          </View>
+        ) : null}
       {stations.length === 0 ? (
         <View style={styles.empty}>
           <Image source={require('../../../assets/images/empty_printer.webp')} style={styles.emptyImg} resizeMode="contain" />
