@@ -136,15 +136,27 @@ function run() {
 
   // W1-05: file W2 tak tersentuh (git: hanya tambah-baris di sync.ts/server.ts
   // yang diizinkan; posWire/layar-W2/tripwire-W2/history/apiSource = bersih).
+  // A-P1-4 (SESI-EXE2-APP, mandat brief audit — bukan lane W1): PayScreen
+  // BOLEH tersentuh SEMATA untuk gerbang PIN fail-closed + antrean-bawa-PIN.
+  // Pengecualian dipersempit via penanda kontrak (bukan blanko): tanpa
+  // ketiganya = tetap FAIL. Tak menyentuh jalur W1 (beWorkforce/shift).
+  const AP14_MARKERS = ['holdAsUnpaidOffline', 'pay_hold_unpaid', 'requiresPosPin'];
   try {
     const diff = execSync('git diff --name-only', { cwd: ROOT, encoding: 'utf8' });
     const touched = diff.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const w2Guard = ['src/lib/posWire.ts', 'src/lib/history.ts', 'src/lib/apiSource.ts',
       'src/screens/booking/BookingScreen.tsx', 'src/screens/history/KitchenScreen.tsx',
-      'src/screens/history/EsbOrderScreen.tsx', 'src/screens/payment/PayScreen.tsx',
+      'src/screens/history/EsbOrderScreen.tsx',
       'src/screens/history/HistoryScreen.tsx', 'test/tripwire-poswire-w2.cjs'];
     for (const f of w2Guard) {
       ok(!touched.includes(f), `W1-05: ${f} tak tersentuh (milik W2)`);
+    }
+    if (touched.includes('src/screens/payment/PayScreen.tsx')) {
+      const payRaw = raw('screens/payment/PayScreen.tsx');
+      ok(AP14_MARKERS.every((m) => payRaw.includes(m)),
+        'W1-05: PayScreen tersentuh HANYA untuk kontrak A-P1-4 (gerbang PIN fail-closed + antrean-bawa-PIN)');
+    } else {
+      checks++;
     }
     const st = execSync('git status --short', { cwd: ROOT, encoding: 'utf8' });
     ok(!/genfity-logo|icon\/|splash|Login|Intro|About|Idle/i.test(st),

@@ -549,9 +549,13 @@ export interface GoMerchantOp {
 function goMerchantOp(
   item: SyncItem,
 ): GoMerchantOp | { blocked: string } | null {
-  // P1-1 pagar PIN: body dibangun eksplisit per-field di bawah dan TAK
-  // pernah memuat pin — PIN supervisor hanya live via settlePosPayment /
-  // refundPosPayment / postOrderVerdict (param fungsi, tak dipersist).
+  // P1-1 pagar PIN: body dibangun eksplisit per-field di bawah. PIN
+  // supervisor live via settlePosPayment / refundPosPayment / postOrderVerdict
+  // (param fungsi, tak dipersist) — A-P1-4: antrean GO_OP_SETTLE BOLEH
+  // membawa pin HANYA bila pemanggil (PayScreen goSuccess→mirror) sudah
+  // mengumpulkannya via ManagerPinPrompt; PIN diteruskan transport-only
+  // (dipangkas) agar drain memfinalisasi, bukan memaksa kasir mengulang PIN
+  // saat live gagal. PIN salah/berubah = fail-once PIN_REQUIRED jujur.
   const p = (item.payload ?? {}) as Record<string, unknown>;
   if (item.kind !== 'other') return null;
   const op = String(p.op ?? '');
@@ -582,6 +586,10 @@ function goMerchantOp(
         // P1-2: teruskan sesi kas W1 bila pemanggil menyimpannya di payload
         // (cermin settlePosPayment); absen = BE me-resolve sendiri.
         ...(Math.round(Number(p.cashSessionId) || 0) > 0 ? { cashSessionId: Math.round(Number(p.cashSessionId)) } : {}),
+        // A-P1-4: teruskan PIN antrean (transport-only, dipangkas) bila
+        // pemanggil menyertakannya (PIN terverifikasi via prompt). Absen =
+        // perilaku lama: server menuntut PIN = fail-once PIN_REQUIRED jujur.
+        ...(String(p.pin ?? '').trim() ? { pin: String(p.pin).trim().slice(0, 128) } : {}),
       },
       method: 'POST',
       idemKey: String(p.clientId ?? item.id),
@@ -1659,10 +1667,13 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       }
       const be = beErrorOf(beBody);
       item.status = 'gagal';
-      // P1-1: PIN supervisor live-only — antrean tak pernah membawa PIN
-      // (goMerchantOp membangun body per-field tanpa pin). Bila server
-      // menuntut PIN untuk op antrean (setelan berubah tengah antre),
-      // gagalkan jujur sekali: kasir ulangi aksi secara live + PIN.
+      // P1-1: PIN supervisor live-only — antrean REFUND/CANCEL/VOID/STATUS
+      // TAK pernah membawa PIN (goMerchantOp membangun body per-field tanpa
+      // pin). A-P1-4: pengecualian SEMATA GO_OP_SETTLE — antrean BOLEH
+      // membawa pin yang dikumpulkan via ManagerPinPrompt (transport-only).
+      // Bila server menuntut PIN untuk op antrean (setelan berubah tengah
+      // antre, atau PIN salah) = gagalkan jujur sekali: kasir ulangi aksi
+      // secara live + PIN.
       item.note = (/^(PIN_REQUIRED|SUPERVISOR_PIN_)/.test(be.code)
         ? `posWire: ${be.code} — butuh PIN supervisor, ulangi live`
         : `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`).slice(0, 160);

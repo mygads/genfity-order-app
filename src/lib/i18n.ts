@@ -412,6 +412,8 @@ const STR: Record<string, Entry> = {
   pay_tender_checking: { id: 'Memeriksa kode tender…', en: 'Checking tender code…' },
   pay_tender_invalid: { id: 'Kode tender tidak valid / minimum {m}', en: 'Invalid tender code / minimum {m}' },
   pay_issue_fail: { id: 'Gagal menyiapkan pembayaran - coba lagi.', en: 'Could not start the payment - try again.' },
+  pay_hold_unpaid_title: { id: 'Pembayaran ditahan', en: 'Payment held' },
+  pay_hold_unpaid: { id: 'Belum lunas (tahan-offline): PIN manajer wajib tapi order server belum tertaut / tak bisa dipastikan. Tetap di layar ini - ulangi setelah order tertaut atau online kembali.', en: 'Still unpaid (offline hold): manager PIN is required but the server order is not linked / could not be verified. Staying on this screen - retry once the order is linked or you are back online.' },
   pay_add: { id: '+ Tambah', en: '+ Add' },
   edc_title: { id: 'EDC', en: 'EDC' },
   edc_sub: { id: 'Non-Tunai - Kartu Debit/Kredit', en: 'Non-Cash - Debit/Credit Card' },

@@ -676,6 +676,10 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(clientId ? { clientId } : {}),
             ...(custId != null ? { customerId: custId } : {}),
             ...(cashSid ? { cashSessionId: cashSid } : {}),
+            // A-P1-4: antrean ikut membawa PIN (transport-only, dipangkas).
+            // Drain meneruskannya ke /pos/payment; PIN salah/berubah =
+            // fail-once PIN_REQUIRED jujur (kasir ulangi live + PIN).
+            ...(pin ? { pin: String(pin).slice(0, 128) } : {}),
             salesNum, at: new Date().toISOString(),
           });
         } catch { /* antrean belum siap */ }
@@ -895,9 +899,20 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   // ---- Tunai actions ----
-  // P1-1b: gerbang PIN manajer (paritas FE DeletePinModal): bila merchant
-  // mewajibkan PIN payment DAN sale tertaut order server, kumpulkan PIN dulu
-  // lalu teruskan ke goSuccess → mirror live; batal = bayar dibatalkan.
+  // P1-1b: gerbang PIN manajer (paritas FE DeletePinModal): PIN dikumpulkan
+  // via ManagerPinPrompt lalu diteruskan ke goSuccess → mirror live; bila
+  // live gagal, PIN ikut antrean GO_OP_SETTLE agar drain memfinalisasi
+  // (transport-only; salah/berubah = fail-once PIN_REQUIRED jujur).
+  // A-P1-4 fail-closed: PIN wajib TAPI sid tak bisa dipastikan (null/lookup
+  // gagal/exception, atau status-wajib tak diketahui) = HOLD sebagai
+  // unpaid/offline-hold — TANPA goSuccess, TANPA navigasi Success, TANPA
+  // tulis lunas. Kasir tetap di layar (keranjang/tender utuh) + banner hold;
+  // ulangi setelah order tertaut / online kembali. TANPA persist tambahan:
+  // tagihan meja yang sudah ada tetap 'open'; keranjang baru tetap di
+  // keranjang (tanpa struk-hantu, tanpa burn voucher, tanpa debit deposit).
+  const holdAsUnpaidOffline = () => {
+    appAlert(t('pay_hold_unpaid_title'), t('pay_hold_unpaid'));
+  };
   const goSuccessGated = (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string }) => {
     void (async () => {
       try {
@@ -906,15 +921,40 @@ export default function PayScreen({ navigation, route }: Props) {
           void goSuccess(method, cash, change, detail);
           return;
         }
-        const sid = paramSalesNum ? await getServerOrderIdForSale(paramSalesNum) : null;
-        if (sid == null || !(await requiresPosPin('payment'))) {
+        // PIN dulu (tanpa sid): tak-wajib = jalur normal seperti hari ini.
+        // Tak-diketahui (exception) = anggap wajib → fail-closed di bawah.
+        let pinRequired: boolean | null = null;
+        try {
+          pinRequired = await requiresPosPin('payment');
+        } catch {
+          pinRequired = null;
+        }
+        if (pinRequired === false) {
           void goSuccess(method, cash, change, detail);
+          return;
+        }
+        // Wajib/tak-diketahui: verifikasi server butuh sid. Tanpa sid (order
+        // baru/offline-belum-taut) atau lookup gagal = HOLD, bukan goSuccess.
+        let sid: number | null = null;
+        try {
+          sid = paramSalesNum ? await getServerOrderIdForSale(paramSalesNum) : null;
+        } catch {
+          holdAsUnpaidOffline();
+          return;
+        }
+        if (pinRequired === null || sid == null) {
+          holdAsUnpaidOffline();
           return;
         }
         pinRetryRef.current = { method, cash, change, detail };
         setMgrPinOpen(true);
       } catch {
-        void goSuccess(method, cash, change, detail);
+        // A-P1-4: exception = JANGAN Success (bukan kasir-jalan).
+        try {
+          holdAsUnpaidOffline();
+        } catch {
+          /* abaikan */
+        }
       }
     })();
   };
