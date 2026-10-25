@@ -39,6 +39,60 @@ const TIMER_CFG_KEY = 'genfity.tabletimer.config';
 /** Ronde-3 Q5: cache flag gate lookup member. Absen = enabled (boleh lookup). */
 const MEMBER_LOOKUP_KEY = 'genfity.member.lookup';
 
+/** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 — posPayImmediately,
+ * requireTableNumberForDineIn, posCustomItems, posEditOrder). Konsumsi toleran:
+ * endpoint merchant-auth /menu hanya bisa dibaca JWT merchant, terminal APP tak
+ * bisa fetch langsung — cache ditulis DI SINI saat BE kelak mengekspos flag via
+ * terminal pos-config (kunci flat ATAU nested posBehavior). Absen = default
+ * legacy (perilaku hari ini), sehingga NOL-regresi sampai BE menambahkannya.
+ * customItems/editOrder default TRUE (fitur sudah hidup); payImmediately/
+ * requireTable default FALSE (alur lama: review keranjang, meja opsional). */
+const POS_FLAGS_KEY = 'genfity.pos.flags';
+export interface PosFlags {
+  payImmediately: boolean;
+  requireTable: boolean;
+  customItems: boolean;
+  editOrder: boolean;
+}
+const POS_FLAGS_DEFAULT: PosFlags = {
+  payImmediately: false,
+  requireTable: false,
+  customItems: true,
+  editOrder: true,
+};
+const asBool = (v: unknown, fb: boolean): boolean => {
+  if (v === undefined || v === null) return fb;
+  if (typeof v === 'boolean') return v;
+  const s = String(v).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'ya' || s === 'yes') return true;
+  if (s === 'false' || s === '0' || s === 'tidak' || s === 'no') return false;
+  return fb;
+};
+/** Baca satu flag dari beberapa alias (flat + nested posBehavior + snake_case)
+ * karena bentuk pasti payload terminal BE belum final saat APP ditulis. */
+function pickFlag(src: Record<string, unknown>, aliases: string[], fb: boolean): boolean {
+  for (const k of aliases) {
+    if (src[k] !== undefined && src[k] !== null) return asBool(src[k], fb);
+  }
+  const nested = src.posBehavior ?? src.pos_behavior ?? src.settings;
+  if (nested && typeof nested === 'object') {
+    const n = nested as Record<string, unknown>;
+    for (const k of aliases) {
+      if (n[k] !== undefined && n[k] !== null) return asBool(n[k], fb);
+    }
+  }
+  return fb;
+}
+function parsePosFlags(raw: unknown): PosFlags {
+  const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  return {
+    payImmediately: pickFlag(src, ['posPayImmediately', 'pos_pay_immediately', 'payImmediately', 'pay_immediately'], POS_FLAGS_DEFAULT.payImmediately),
+    requireTable: pickFlag(src, ['requireTableNumberForDineIn', 'require_table_number_for_dine_in', 'requireTable', 'require_table'], POS_FLAGS_DEFAULT.requireTable),
+    customItems: pickFlag(src, ['posCustomItems', 'pos_custom_items', 'customItems', 'custom_items'], POS_FLAGS_DEFAULT.customItems),
+    editOrder: pickFlag(src, ['posEditOrder', 'pos_edit_order', 'editOrder', 'edit_order'], POS_FLAGS_DEFAULT.editOrder),
+  };
+}
+
 export async function syncPosConfigFromServer(terminalId: string): Promise<boolean> {
   const id = (terminalId ?? '').trim();
   if (!id) return false;
@@ -82,6 +136,14 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   } catch {
     /* abaikan */
   }
+
+  // A-P1-7: cache 4 flag perilaku POS (toleran: kunci flat/nested apa pun yang
+  // kelak dikirim BE; tak ada = cache lama/default legacy dipertahankan).
+  try {
+    await setJSON(POS_FLAGS_KEY, parsePosFlags(r.data));
+  } catch {
+    /* abaikan */
+  }
   return true;
 }
 
@@ -95,4 +157,41 @@ export async function getMemberLookupEnabled(): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+/** A-P1-7: baca 4 flag perilaku POS dari cache. Absen/error = default legacy
+ * (payImmediately/requireTable OFF, customItems/editOrder ON). */
+export async function getPosFlags(): Promise<PosFlags> {
+  try {
+    const cur = await getJSON<Partial<PosFlags> | null>(POS_FLAGS_KEY, null);
+    if (!cur || typeof cur !== 'object') return { ...POS_FLAGS_DEFAULT };
+    return {
+      payImmediately: asBool(cur.payImmediately, POS_FLAGS_DEFAULT.payImmediately),
+      requireTable: asBool(cur.requireTable, POS_FLAGS_DEFAULT.requireTable),
+      customItems: asBool(cur.customItems, POS_FLAGS_DEFAULT.customItems),
+      editOrder: asBool(cur.editOrder, POS_FLAGS_DEFAULT.editOrder),
+    };
+  } catch {
+    return { ...POS_FLAGS_DEFAULT };
+  }
+}
+
+/** A-P1-7: kasir → Pay langsung tanpa review keranjang (default OFF). */
+export async function getPosPayImmediately(): Promise<boolean> {
+  return (await getPosFlags()).payImmediately;
+}
+
+/** A-P1-7: DINE IN wajib nomor meja sebelum simpan/bayar (default OFF). */
+export async function getRequireTableNumberForDineIn(): Promise<boolean> {
+  return (await getPosFlags()).requireTable;
+}
+
+/** A-P1-7: tombol + penerimaan item kustom diizinkan (default ON = hidup). */
+export async function getPosCustomItemsEnabled(): Promise<boolean> {
+  return (await getPosFlags()).customItems;
+}
+
+/** A-P1-7: penerimaan loadItems (buka order tersimpan untuk diedit) (default ON). */
+export async function getPosEditOrderEnabled(): Promise<boolean> {
+  return (await getPosFlags()).editOrder;
 }

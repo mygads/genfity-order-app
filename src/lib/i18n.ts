@@ -909,6 +909,7 @@ const STR: Record<string, Entry> = {
   ongkirTitle: { id: 'Biaya Antar (Ongkir)', en: 'Delivery Fee' },
   ongkirNominal: { id: 'Nominal (Rp)', en: 'Amount (IDR)' },
   needOngkirHint: { id: 'Ketuk Ongkir untuk isi biaya antar.', en: 'Tap Delivery Fee to enter the fee.' },
+  dineinTableRequired: { id: 'Mode Dine In wajib pilih nomor meja dulu.', en: 'Dine In mode requires a table number first.' },
   backToCashier: { id: 'Kembali ke kasir', en: 'Back to cashier' },
   dineInTitle: { id: 'Dine In', en: 'Dine In' },
   noteKitchen: { id: 'Catatan item (ke dapur)', en: 'Item note (to kitchen)' },

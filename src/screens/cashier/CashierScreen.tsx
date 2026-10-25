@@ -29,6 +29,7 @@ import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
+import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn } from '../../lib/posConfigSync';
 import type { NavVoucher } from '../../navigation/types';
 import { syncWarnLevel } from '../../lib/sync';import { flushPendingCashCloses } from '../../lib/beWorkforce';
 import { nextSalesNum } from '../../lib/sales';
@@ -266,6 +267,36 @@ export default function CashierScreen({ navigation, route }: Props) {
       alive = false;
     };
   }, []);
+  /** A-P1-7: 4 flag perilaku POS (BE merchant_pos_menu.go:85-89) via cache
+   * posConfigSync (toleran; default legacy = perilaku hari ini). Ref cermin
+   * untuk gate di dalam effect params; state untuk gate render tombol. */
+  const [customItemsEnabled, setCustomItemsEnabled] = useState(true);
+  const [payImmediately, setPayImmediately] = useState(false);
+  const posFlagsRef = useRef({ custom: true, edit: true, payNow: false, reqTable: false });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [c, e, p, rt] = await Promise.all([
+          getPosCustomItemsEnabled(),
+          getPosEditOrderEnabled(),
+          getPosPayImmediately(),
+          getRequireTableNumberForDineIn(),
+        ]);
+        if (!alive) return;
+        posFlagsRef.current = { custom: c, edit: e, payNow: p, reqTable: rt };
+        setCustomItemsEnabled(c);
+        setPayImmediately(p);
+      } catch {
+        /* cache gagal = default legacy dipertahankan */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** A-P1-7: pesan blokir inline (meja wajib) di atas CTA, gaya ctaNote. */
+  const [blockMsg, setBlockMsg] = useState('');
   /** G5: sinyal E00044 (kontrak §2/§10.4): >7 hari tanpa sync = BLOKIR Bayar
    * (tombol Bayar/CTA mati + banner blokir beraksi Sync di bawah).
    * Local Mode (tanpa server untuk sync): banner TIDAK tampil - tak ada
@@ -668,7 +699,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       setMode(p.mode);
       setShowModes(false);
     }
-    if (p.loadItems && p.loadItems.length > 0) {
+    if (p.loadItems && p.loadItems.length > 0 && posFlagsRef.current.edit) {
       const mapped = p.loadItems.map((c) => ({
         id: c.id,
         name: c.name,
@@ -694,7 +725,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       const { id, note } = p.itemNote;
       setCart((prev) => prev.map((c) => (c.id === id ? { ...c, note: note || undefined } : c)));
     }
-    if (p.customItem) {
+    if (p.customItem && posFlagsRef.current.custom) {
       const key = JSON.stringify(p.customItem);
       if (appliedCustom.current !== key) {
         appliedCustom.current = key;
@@ -888,7 +919,18 @@ export default function CashierScreen({ navigation, route }: Props) {
     return map;
   }, [activeCart, catalog]);
 
-  const goCart = () =>
+  /** A-P1-7: gerbang meja wajib (mode DINE IN + flag requireTable ON): blokir
+   * dengan pesan inline yang jujur, bukan diam. */
+  const checkTable = (): boolean => {
+    if (posFlagsRef.current.reqTable && mode === 'DINE IN' && !table.trim()) {
+      setBlockMsg(t('dineinTableRequired'));
+      return false;
+    }
+    setBlockMsg('');
+    return true;
+  };
+  const goCart = () => {
+    if (!checkTable()) return;
     navigation?.navigate('CartDetail', {
       items: cart,
       total,
@@ -901,6 +943,31 @@ export default function CashierScreen({ navigation, route }: Props) {
       ...(voucher ? { voucher } : {}),
       ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
     });
+  };
+  /** A-P1-7: jalur bayar-langsung (flag posPayImmediately ON): Kasir → Pay
+   * dengan rantai Pay penuh (mirror CartDetail.goPay; kontrak PayScreen),
+   * lewati review keranjang. Default OFF = perilaku lama via CartDetail. */
+  const goPayDirect = () => {
+    if (!checkTable()) return;
+    navigation?.navigate('Pay', {
+      items: cart,
+      total,
+      mode,
+      ...(table ? { table } : {}),
+      ongkir,
+      ...(packaging > 0 ? { packaging } : {}),
+      customer: customer.trim(),
+      ...(memberId.trim() ? { memberId: memberId.trim() } : {}),
+      ...(voucher ? { voucher } : {}),
+      ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
+      discount: discountTotal + voucherAmt,
+      ...(ongkirDiscount > 0 ? { ongkirCut: ongkirDiscount } : {}),
+      ...(service > 0 ? { service } : {}),
+      ...(taxIncl > 0 ? { tax: taxIncl } : {}),
+      ...(rounding !== 0 ? { rounding } : {}),
+      ...(feeESB > 0 ? { feeESB } : {}),
+    });
+  };
   /** Dialog nominal ongkir - dibuka dari tombol Ongkir di toolbar. */
   const openOngkir = () => {
     setOngkirDraft(String(ongkir));
@@ -1148,12 +1215,15 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('saved')}</Text>
       </TouchableOpacity>
+      {/* A-P1-7: tombol Custom disembunyikan bila flag posCustomItems OFF. */}
+      {customItemsEnabled && (
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={() => navigation?.navigate('CustomMenu')}>
         <Image source={require('../../../assets/icons/add_notes_black.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('custom')}</Text>
       </TouchableOpacity>
+      )}
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={openOngkir}>
@@ -1522,6 +1592,9 @@ export default function CashierScreen({ navigation, route }: Props) {
           <Text style={styles.grandVal}>{rp(total)}</Text>
         </View>
       </View>
+      {blockMsg ? (
+        <Text style={styles.ctaNote}>{blockMsg}</Text>
+      ) : null}
       <View style={styles.cartActions}>
         <View style={styles.cartActionsRow}>
           <TouchableOpacity style={styles.btnSave} onPress={goSaved}>
@@ -1550,7 +1623,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.btnPay, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
           disabled={activeCart.length === 0 || branchUnbound || syncBlocked}
-          onPress={goCart}>
+          onPress={payImmediately ? goPayDirect : goCart}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
           <Text style={styles.btnPayText} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)}</Text>
           <Text style={styles.btnPayArrow}>›</Text>
@@ -1736,6 +1809,9 @@ export default function CashierScreen({ navigation, route }: Props) {
         ) : null}
         {ongkir > 0 && !voucher ? (
           <Text style={styles.ctaNote}>{t('deliveryFee')} {rp(ongkirNet)} - {t('needOngkirHint')}</Text>
+        ) : null}
+        {blockMsg ? (
+          <Text style={styles.ctaNote}>{blockMsg}</Text>
         ) : null}
         <TouchableOpacity
           style={[styles.cta, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
