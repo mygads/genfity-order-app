@@ -150,12 +150,16 @@ const LS_DEVICE = 'genfity.device.id';
 // Base URL + fetch bertenggat.
 // ---------------------------------------------------------------------------
 
-function readEnv(key: string): string {
+/** Baca env EXPO_PUBLIC_*.
+ * HARUS akses literal process.env.X (bukan kunci dinamis/globalThis) agar
+ * babel-preset-expo meng-inline nilainya saat bundle; akses dinamis tak
+ * ter-inline sehingga di HP selalu '' (kontrak absen) walau env di-bake. */
+function readTerminalEnv(): string {
   try {
-    const p = globalThis as {
-      process?: { env?: Record<string, string | undefined> };
-    };
-    return (p.process?.env?.[key] ?? '').trim();
+    const v =
+      process.env.EXPO_PUBLIC_TERMINAL_API_BASE_URL ||
+      process.env.EXPO_PUBLIC_API_BASE_URL;
+    return (typeof v === 'string' ? v : '').trim();
   } catch {
     return '';
   }
@@ -163,7 +167,7 @@ function readEnv(key: string): string {
 
 /** Base URL kontrak; '' = kontrak absen (degrade offline jujur). */
 export function contractBase(): string {
-  const raw = readEnv('EXPO_PUBLIC_TERMINAL_API_BASE_URL') || readEnv('EXPO_PUBLIC_API_BASE_URL');
+  const raw = readTerminalEnv();
   const b = raw.replace(/\/+$/, '');
   if (!b) return '';
   // Hindari /api/v1 ganda bila env sudah menunjuk ke root versi.

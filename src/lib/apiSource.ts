@@ -41,25 +41,24 @@ import { randomHex as randomHexCsprng } from './uuidv7';
 
 export type ApiMode = 'dummy' | 'real' | 'local';
 
-/** Baca EXPO_PUBLIC_API_BASE_URL tanpa bergantung ke tipe Node. */
+/** Baca EXPO_PUBLIC_API_BASE_URL.
+ * HARUS akses literal process.env.X (bukan via globalThis/kunci dinamis)
+ * agar babel-preset-expo meng-inline nilainya saat bundle; akses dinamis
+ * tak ter-inline sehingga di HP selalu '' (Local mode) walau env di-bake. */
 export function readEnvBaseUrl(): string {
   try {
-    const p = (globalThis as {
-      process?: { env?: Record<string, string | undefined> };
-    }).process;
-    return (p?.env?.['EXPO_PUBLIC_API_BASE_URL'] ?? '').trim();
+    const v = process.env.EXPO_PUBLIC_API_BASE_URL;
+    return (typeof v === 'string' ? v : '').trim();
   } catch {
     return '';
   }
 }
 
-/** Baca flag screenshot/demo eksplisit EXPO_PUBLIC_DUMMY tanpa tipe Node. */
+/** Baca flag screenshot/demo eksplisit EXPO_PUBLIC_DUMMY (literal, lih. atas). */
 export function readEnvDummy(): string {
   try {
-    const p = (globalThis as {
-      process?: { env?: Record<string, string | undefined> };
-    }).process;
-    return (p?.env?.['EXPO_PUBLIC_DUMMY'] ?? '').trim();
+    const v = process.env.EXPO_PUBLIC_DUMMY;
+    return (typeof v === 'string' ? v : '').trim();
   } catch {
     return '';
   }
