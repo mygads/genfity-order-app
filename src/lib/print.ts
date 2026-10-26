@@ -164,15 +164,22 @@ async function defaultStation(): Promise<ResolvedStation | null> {
     const bound = pool.filter((s) => scopeRank(s, scope) === 0);
     // R8: `connected` = penanda preferensi manual ("favorit"), BUKAN hasil
     // verifikasi liveness — kirim gagal tetap antre persisten, bukan drop.
+    // S12-guard: posisi fallback buta-role (bound[0]/pool[0]) tidak boleh
+    // mendaratkan struk kasir ke station dapur/checker/label — lebih baik
+    // tetap antre daripada salah-cetak. isDefault/isDefault+connected/Kasir
+    // eksplisit tetap dihormati (niat user); role kosong/unknown = boleh
+    // (station legacy tanpa role).
+    const nonKitchenFallback = (arr: StoredStation[]) =>
+      arr.find((s) => !/dapur|kitchen|bar|checker|label/i.test(String(s.role ?? '')));
     const cands = [
       bound.find((s) => s.isDefault && s.connected),
       bound.find((s) => s.isDefault),
       bound.find((s) => s.role === 'Kasir'),
-      bound[0],
+      nonKitchenFallback(bound),
       pool.find((s) => s.isDefault && s.connected),
       pool.find((s) => s.isDefault),
       pool.find((s) => s.role === 'Kasir'),
-      pool[0],
+      nonKitchenFallback(pool),
     ];
     // R7: lewati station tanpa alamat (targetOf null) — coba kandidat
     // berikutnya yang bisa dikirimi, bukan gagal karena pilihan pertama buntu.
