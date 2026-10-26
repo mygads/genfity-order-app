@@ -34,6 +34,7 @@ import {
   beErrorOf,
   isReplaySuccess,
   mapPayMethodToBe,
+  type BePayMethod,
 } from './posWire';
 // W1 (SESI-FIX-APPW1): nama op + helper sesi-kas satu sumber di beWorkforce
 // (arah impor sync -> beWorkforce, cermin posWire; beWorkforce TAK mengimpor
@@ -574,7 +575,7 @@ function goMerchantOp(
   if (op === GO_OP_SETTLE) {
     const method = String(p.method ?? '').trim().toUpperCase();
     const amount = Math.max(0, Math.round(Number(p.amountPaid ?? p.amount) || 0));
-    if (!['CASH_ON_COUNTER', 'CARD_ON_COUNTER', 'QRIS', 'SPLIT', 'COMPLIMENT'].includes(method) || amount <= 0) {
+    if (!['CASH_ON_COUNTER', 'CARD_ON_COUNTER', 'QRIS', 'SPLIT', 'COMPLIMENT', 'MANUAL_TRANSFER'].includes(method) || amount <= 0) {
       return { blocked: 'posWire: settle butuh method enum BE + nominal > 0' };
     }
     return {
@@ -584,6 +585,9 @@ function goMerchantOp(
         paymentMethod: method,
         amountPaid: amount,
         ...(p.changeAmount !== undefined ? { changeAmount: Math.round(Number(p.changeAmount) || 0) } : {}),
+        // APP-9: ref transfer (approvalCode kaki) ikut sebagai notes agar
+        // terekam di payments.notes/metadata BE, bukan hilang di jalan.
+        ...(String(p.notes ?? '').trim() ? { notes: String(p.notes).trim().slice(0, 500) } : {}),
         ...(p.tipAmount ? { tipAmount: Math.round(Number(p.tipAmount) || 0) } : {}),
         ...(p.voucherCode ? { voucherCode: String(p.voucherCode).slice(0, 64) } : {}),
         // P1-2: teruskan sesi kas W1 bila pemanggil menyimpannya di payload
@@ -1458,6 +1462,109 @@ export async function postImmediate(path: string, body: Record<string, unknown>)
   }
 }
 
+// ---------------------------------------------------------------------------
+// APP-9 (HP-E2E 2026-10-26): perbaikan sale-lunas-tanpa-settle. Pra-APP-9,
+// transfer bank MANUAL ("Mark as Paid") tak punya padanan enum BE sehingga
+// drain-link (pushLightItem) SKIP settle secara diam-diam: order tiba di
+// server (create terkirim) tapi payment PENDING selamanya, dan push berikut
+// tak pernah memperbaikinya (tautan link-block hanya jalan sekali, tepat
+// setelah create). Sapuan ini, dijalankan tiap awal pushAll (best-effort,
+// tak pernah melempar), mengantren GO_OP_SETTLE untuk sale lokal yang:
+// lunas-penuh + tertaut onlineOrderId numerik + TANPA baris settle apa pun
+// di outbox (status apa saja — fail-once PIN dsb. dihormati, tak dibangkitkan).
+// Idempoten: idemKey = client_id rantai sale; replay BE (kunci-sama =
+// sukses-tersimpan, PAYMENT_ALREADY_RECORDED = replay-sukses) membuat
+// enqueue-ganda aman. Campuran ber-transfer dilewati (semantik SPLIT BE =
+// tunai+kartu, tak bisa mewakili transfer).
+// ---------------------------------------------------------------------------
+type StrandedSaleRow = {
+  salesNum: string;
+  client_id: string | null;
+  grandTotal: number | null;
+  paidAmount: number | null;
+  onlineOrderId: string | null;
+  tip: number | null;
+  voucherCode: string | null;
+  customerId: number | null;
+};
+
+async function repairUnsettledSales(): Promise<number> {
+  try {
+    await initDb();
+  } catch {
+    return 0;
+  }
+  let heads: StrandedSaleRow[];
+  try {
+    heads = await all<StrandedSaleRow>(
+      `SELECT salesNum, client_id, grandTotal, paidAmount, onlineOrderId, tip, voucherCode, customerId
+       FROM tr_saleshead
+       WHERE onlineOrderId GLOB '[0-9]*'
+         AND grandTotal > 0 AND paidAmount >= grandTotal
+         AND UPPER(COALESCE(status, '')) NOT IN ('VOID', 'BATAL', 'CANCELLED', 'REFUNDED')`,
+    );
+  } catch {
+    return 0;
+  }
+  if (!heads || heads.length === 0) return 0;
+  let fixed = 0;
+  for (const h of heads) {
+    try {
+      const no = String(h.salesNum ?? '').trim();
+      const sid = parseInt(String(h.onlineOrderId ?? '').trim(), 10);
+      const amt = Math.max(0, Math.round(Number(h.grandTotal) || 0));
+      if (!no || !Number.isFinite(sid) || sid <= 0 || amt <= 0) continue;
+      // Sudah punya settle (status apa pun) = bukan korban skip-diam — lewati.
+      const dup = outbox.some(
+        (o) =>
+          String(((o.payload ?? {}) as { op?: unknown }).op ?? '') === GO_OP_SETTLE &&
+          String(((o.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '') === no,
+      );
+      if (dup) continue;
+      let legs: Array<{ paymentMethod?: unknown; refNo?: unknown }>;
+      try {
+        legs = await all<{ paymentMethod?: unknown; refNo?: unknown }>(
+          `SELECT paymentMethod, refNo FROM tr_salespayment WHERE salesNum = ?`,
+          [no],
+        );
+      } catch {
+        continue;
+      }
+      if (!legs || legs.length === 0) continue;
+      const bem = legs.map((l) => mapPayMethodToBe(l.paymentMethod));
+      if (!bem.every((m): m is BePayMethod => m != null)) continue;
+      const uniq = [...new Set<string>(bem)];
+      if (uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER')) continue;
+      const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
+      const method =
+        only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' ||
+        only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER'
+          ? only
+          : 'SPLIT';
+      const ref = String(legs[0]?.refNo ?? '').trim();
+      const tipN = Math.max(0, Math.round(Number(h.tip) || 0));
+      const vch = String(h.voucherCode ?? '').trim();
+      const cid = String(h.client_id ?? '').trim();
+      enqueueSync('other', {
+        op: GO_OP_SETTLE,
+        serverId: sid,
+        method,
+        amountPaid: amt,
+        ...(tipN > 0 ? { tipAmount: tipN } : {}),
+        ...(vch ? { voucherCode: vch.slice(0, 64) } : {}),
+        ...(ref && uniq.length === 1 ? { notes: ref.slice(0, 500) } : {}),
+        ...(cid ? { clientId: cid } : {}),
+        salesNum: no,
+        at: new Date().toISOString(),
+      });
+      fixed += 1;
+    } catch {
+      /* lanjut baris berikut */
+    }
+  }
+  return fixed;
+}
+
 export async function pushAll(): Promise<PushResult> {
   hydrate();
   if (getServerEnv() !== 'custom') {
@@ -1481,6 +1588,13 @@ export async function pushAll(): Promise<PushResult> {
     } catch {
       /* restore best-effort - drain memori tetap jalan */
     }
+  }
+  // APP-9: antrekan settle untuk sale-lunas-tanpa-settle (korban skip-diam
+  // pra-APP-9, mis. transfer MANUAL) sebelum drain berjalan.
+  try {
+    await repairUnsettledSales();
+  } catch {
+    /* best-effort */
   }
   let sent = 0;
   let failed = 0;
@@ -2108,7 +2222,8 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       const lp = (item.payload ?? {}) as {
         op?: unknown; salesNum?: unknown; method?: unknown;
         grandTotal?: unknown; total?: unknown; tipTotal?: unknown;
-        voucherCode?: unknown;
+        voucherCode?: unknown; approvalCode?: unknown;
+        payments?: Array<{ approvalCode?: unknown }>;
       };
       const linkNo = String(lp.salesNum ?? '').trim();
       if (item.kind === 'order' && !String(lp.op ?? '') && linkNo) {
@@ -2148,6 +2263,12 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
               try {
                 const tipN = Math.round(Number(lp.tipTotal) || 0);
                 const vch = String(lp.voucherCode ?? '').trim();
+                // APP-9: ref kaki (transfer "Mark as Paid", EDC approval)
+                // ikut sebagai notes settle → payments.notes/metadata BE.
+                const legs = Array.isArray(lp.payments) ? lp.payments : [];
+                const ref = String(
+                  (legs[0] ?? {}).approvalCode ?? lp.approvalCode ?? '',
+                ).trim();
                 enqueueSync('other', {
                   op: GO_OP_SETTLE,
                   serverId: linkId,
@@ -2155,6 +2276,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
                   amountPaid: amt,
                   ...(tipN > 0 ? { tipAmount: tipN } : {}),
                   ...(vch ? { voucherCode: vch.slice(0, 64) } : {}),
+                  ...(ref ? { notes: ref.slice(0, 500) } : {}),
                   ...(lightCid ? { clientId: lightCid } : {}),
                   salesNum: linkNo,
                   at: new Date().toISOString(),

@@ -334,7 +334,7 @@ export default function EdcScreen({ navigation, route }: Props) {
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), clientId: saleClientId });
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), notes: approval, clientId: saleClientId });
     navigation?.navigate('Success', {
       total: fullTotal,
       method,

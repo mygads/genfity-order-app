@@ -1204,7 +1204,8 @@ export async function appendGroupPayment(
   // rantai per salesNum via getOrCreatePayChainId) → replay BE = 'terkirim'.
   // Syarat: grand > 0, serverId tertaut (tanpa itu drain BLOCKED — kasus
   // create-belum-push ditutup link-block A1), SEMUA kaki punya padanan enum
-  // BE (deposit/member/transfer = skip total, paritas gate A4), dan belum ada
+  // BE (deposit/member = skip total, paritas gate A4; transfer MANUAL kini
+  // mapped — APP-9; campuran ber-transfer dilewati di bawah), dan belum ada
   // settle antre/gagal untuk salesNum ini (twin S6 + cek outbox).
   if (outFullyPaid && outGrand > 0 && outGroupClientId) {
     try {
@@ -1212,10 +1213,15 @@ export async function appendGroupPayment(
       const allMapped = bem.every((m): m is BePayMethod => m != null);
       if (allMapped) {
         const uniq = [...new Set<string>(bem)];
+        // APP-9: campuran ber-transfer (mis. tunai+transfer) TAK bisa diwakilkan
+        // SPLIT (semantik BE = tunai+kartu) → skip settle, ledger lokal tetap
+        // sah (perilaku lama pra-APP-9 lestari untuk kasus campuran ini).
+        // Campuran non-transfer (tunai+kartu) tetap SPLIT seperti sebelumnya.
+        if (uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER')) return;
         const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
         const bemSingle: BePayMethod =
-          only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT'
-            ? only
+          only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER'
+            ? (only as BePayMethod)
             : 'SPLIT';
         const serverId = await getServerOrderIdForSale(no);
         if (serverId != null) {
@@ -1234,6 +1240,8 @@ export async function appendGroupPayment(
             } catch {
               /* abaikan: BE me-resolve */
             }
+            // APP-9: ref kaki tunggal (transfer/EDC) ikut sebagai notes.
+            const gRef = String(legs[0]?.approvalCode ?? '').trim();
             enqueueSync(
               'other',
               {
@@ -1242,6 +1250,7 @@ export async function appendGroupPayment(
                 method: bemSingle,
                 amountPaid: outGrand,
                 ...(outOwnerCustomer != null ? { customerId: outOwnerCustomer } : {}),
+                ...(gRef && uniq.length === 1 ? { notes: gRef.slice(0, 500) } : {}),
                 ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
                 clientId: outGroupClientId,
                 salesNum: no,

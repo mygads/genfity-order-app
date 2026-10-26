@@ -463,9 +463,9 @@ export default function PayScreen({ navigation, route }: Props) {
 
   // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof,
   // cache pos-config; absen = OFF = perilaku lama). Berlaku HANYA untuk metode
-  // yang dicerminkan ke GO (mapPayMethodToBe != null): deposit/member/transfer
-  // = ledger lokal + antre ESB tanpa padanan settle → proof tak bisa ditempel
-  // (PARKED jujur, bukan diblokir). proofUrl ditempel ke settle + antrean
+  // yang dicerminkan ke GO (mapPayMethodToBe != null): deposit/member =
+  // ledger lokal + antre ESB tanpa padanan settle → proof tak bisa ditempel
+  // (PARKED jujur, bukan diblokir). transfer MANUAL kini mirrored (APP-9). proofUrl ditempel ke settle + antrean
   // GO_OP_SETTLE; tanpa proofUrl = HOLD (tanpa goSuccess palsu).
   const [requireProof, setRequireProof] = useState(false);
   const [proofUri, setProofUri] = useState<string | null>(null);
@@ -777,13 +777,15 @@ export default function PayScreen({ navigation, route }: Props) {
     salesNum: string, methodLabel: string, amount: number,
     tip: number, voucherCode: string | undefined, clientId: string | undefined,
     pin?: string, customerId?: number | null, prevPoints?: number | null,
+    notes?: string,
   ) => {
     void (async () => {
       try {
         const serverId = await getServerOrderIdForSale(salesNum);
         if (serverId == null) return;
-        // A4: deposit/member/transfer TAK punya padanan enum BE — cermin
-        // server DILARANG untuk ketiganya (hanya ledger lokal + antre ESB).
+        // A4 (APP-9: transfer kini MIRRORED via MANUAL_TRANSFER): deposit/member
+        // TAK punya padanan enum — cermin server DILARANG untuk keduanya
+        // (hanya ledger lokal + antre ESB).
         const beMethod = mapPayMethodToBe(methodLabel);
         if (!beMethod) return;
         let cashSid: number | undefined;
@@ -796,6 +798,8 @@ export default function PayScreen({ navigation, route }: Props) {
         }
         // Ronde-3 Q1: customerId GO (int) bila member ditempel.
         const custId = parseCustomerId(customerId);
+        // APP-9: ref kaki (transfer/EDC approvalCode) ikut sebagai notes.
+        const notesClean = String(notes ?? '').trim().slice(0, 500);
         // SESI-FINAL-APP: proofUrl https≤2048 ditempel aditif (settle jalan
         // tanpa proof bila kosong — BE menolak jujur via 409 PROOF_REQUIRED).
         const proofClean = /^https:\/\/.{1,2040}$/i.test(proofUrl.trim()) ? proofUrl.trim().slice(0, 2048) : '';
@@ -803,6 +807,7 @@ export default function PayScreen({ navigation, route }: Props) {
           serverId, method: beMethod, amountPaid: amount,
           ...(tip > 0 ? { tipAmount: tip } : {}),
           ...(voucherCode ? { voucherCode } : {}),
+          ...(notesClean ? { notes: notesClean } : {}),
           ...(clientId ? { idempotencyKey: clientId } : {}),
           ...(custId != null ? { customerId: custId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),
@@ -834,6 +839,7 @@ export default function PayScreen({ navigation, route }: Props) {
             op: GO_OP_SETTLE, serverId, method: beMethod, amountPaid: amount,
             ...(tip > 0 ? { tipAmount: tip } : {}),
             ...(voucherCode ? { voucherCode } : {}),
+            ...(notesClean ? { notes: notesClean } : {}),
             ...(clientId ? { clientId } : {}),
             ...(custId != null ? { customerId: custId } : {}),
             ...(cashSid ? { cashSessionId: cashSid } : {}),
@@ -932,7 +938,7 @@ export default function PayScreen({ navigation, route }: Props) {
           await saveSale(gInput);
           recordSale(gInput);
           // W2: cermin lunas grup ke BE bila tertaut order server.
-          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam);
+          mirrorSettleToServer(paramSalesNum, method, orderTotalFull, 0, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam, detail?.approvalCode);
         }
       } catch (e) {
         // Gate bound (D3-03): unbound = belum klaim → pesan klaim-terminal,
@@ -1036,7 +1042,7 @@ export default function PayScreen({ navigation, route }: Props) {
     // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
     recordSale(input);
     // W2: cermin lunas ke BE bila tertaut order server.
-    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam);
+    mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam, detail?.approvalCode);
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,

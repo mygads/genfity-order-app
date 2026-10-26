@@ -8,9 +8,9 @@
  * P1-2: sesi kas W1 yang diketahui disertakan (atribusi setoran benar);
  * tak diketahui = BE me-resolve sendiri. Tak pernah melempar.
  *
- * Deposits-gate (paritas PayScreen): deposit/member/transfer TAK punya
- * padanan enum BE — cermin server DILARANG untuk ketiganya (hanya ledger
- * lokal + antre ESB).
+ * Deposits-gate (paritas PayScreen): deposit/member TAK punya padanan
+ * enum BE — cermin server DILARANG untuk keduanya (hanya ledger lokal +
+ * antre ESB). Transfer MANUAL kini mirrored (APP-9).
  *
  * Grup split: kunjungan grup SENGAJA tak memanggil helper ini — semua
  * kunjungan berbagi SATU client_id rantai (Q7) sehingga immediate ganda
@@ -45,6 +45,8 @@ export type MirrorSettleInput = {
   /** Ronde-3 Q4: dipanggil SEKALI saat immediate settle menjawab (2xx/409
    *  replay = sukses; offline/blocked/ditolak = tak dipanggil). */
   onSettled?: (r: SettleResult & { memberChanged?: boolean }) => void;
+  /** APP-9: ref kaki (EDC approval / QRIS refCode) → notes settle. */
+  notes?: string;
   /** SESI-FINAL-APP: URL foto bukti bayar (https) — diteruskan aditif ke
    *  settlePosPayment + antrean GO_OP_SETTLE. Absen = perilaku lama. */
   proofUrl?: string;
@@ -69,15 +71,18 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
       const custId = parseCustomerId(inp.customerId);
       // SESI-FINAL-APP: proofUrl https ≤2048 diteruskan aditif (lainnya =
       // dihilangkan; settle jalan, BE menolak jujur bila diwajibkan).
+      // APP-9: ref kaki ikut sebagai notes.
       const proofClean = /^https:\/\/.{1,2040}$/i.test(String(inp.proofUrl ?? '').trim())
         ? String(inp.proofUrl ?? '').trim().slice(0, 2048)
         : '';
+      const notesClean = String(inp.notes ?? '').trim().slice(0, 500);
       const res = await settlePosPayment({
         serverId,
         method: beMethod,
         amountPaid: inp.amount,
         ...(inp.tip && inp.tip > 0 ? { tipAmount: inp.tip } : {}),
         ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
+        ...(notesClean ? { notes: notesClean } : {}),
         ...(custId != null ? { customerId: custId } : {}),
         ...(inp.clientId ? { idempotencyKey: inp.clientId } : {}),
         ...(cashSid ? { cashSessionId: cashSid } : {}),
@@ -124,6 +129,7 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
           amountPaid: inp.amount,
           ...(inp.tip && inp.tip > 0 ? { tipAmount: inp.tip } : {}),
           ...(inp.voucherCode ? { voucherCode: inp.voucherCode } : {}),
+          ...(notesClean ? { notes: notesClean } : {}),
           ...(custId != null ? { customerId: custId } : {}),
           ...(inp.clientId ? { clientId: inp.clientId } : {}),
           ...(cashSid ? { cashSessionId: cashSid } : {}),

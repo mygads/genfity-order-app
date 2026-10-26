@@ -561,14 +561,19 @@ export function voidMerchantOrder(serverId: number, reason?: string, pin?: strin
 // 409 PAYMENT_ALREADY_RECORDED / ORDER_ALREADY_REFUNDED / ORDER_CLOSED +
 // replayed:true = sukses idempoten.
 // ---------------------------------------------------------------------------
-export type BePayMethod = 'CASH_ON_COUNTER' | 'CARD_ON_COUNTER' | 'QRIS' | 'SPLIT' | 'COMPLIMENT';
+export type BePayMethod = 'CASH_ON_COUNTER' | 'CARD_ON_COUNTER' | 'QRIS' | 'SPLIT' | 'COMPLIMENT' | 'MANUAL_TRANSFER';
 
 /**
  * Petakan label metode lokal → enum BE. null = tak ada padanan → BLOCKED
- * (jangan map diam-diam: deposit/member/transfer bank bukan enum BE).
+ * (jangan map diam-diam: deposit/member bukan enum BE).
+ * APP-9 (HP-E2E 2026-10-26): transfer bank MANUAL kini punya padanan BE
+ * MANUAL_TRANSFER (migrasi 00206 + validasi settle) — tak lagi BLOCKED diam.
  */
 export function mapPayMethodToBe(method: unknown): BePayMethod | null {
   const m = String(method ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
+  // Transfer bank manual (label mentah 'transfer' dari extraLabelToMethod +
+  // varian) — cek DULU agar tak tertelan pola lain.
+  if (/transfer|manualtransfer|banktransfer/.test(m)) return 'MANUAL_TRANSFER';
   if (/^qris$/.test(m) || /qris|ovo|gopay|dana|shopee|wallet|online/.test(m)) {
     if (/tunai|cash/.test(m)) return 'CASH_ON_COUNTER';
     return 'QRIS';
