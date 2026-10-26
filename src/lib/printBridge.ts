@@ -17,7 +17,8 @@ import { apiFetch, unwrap } from './apiSource';
 import { fromBase64 } from './escpos';
 import type { EscKitchenTicket, EscReceipt } from './escpos';
 import type { PrinterTarget, PrintResult } from '../native/printer';
-import type { ServerHistoryEntry } from './posWire';
+import type { ServerHistoryEntry, ServerOrderDetail } from './posWire';
+import { AppState } from 'react-native';
 
 export interface ServerPrintJob {
   id: number;
@@ -306,11 +307,162 @@ async function findAutoOrder(
 }
 
 /**
- * Render + cetak job AUTO (KONTRAK FINAL): ambil order detail via API yang
- * sudah ada → rakit ESC/POS memakai cache template BE (receiptTemplate.ts;
- * tanpa template = perilaku legacy byte-identik) + currency cabang → cetak
- * ke stations non-dapur (templateType customer, broadcast per cols/cut) atau
- * station dapur (templateType kitchen). Gagal kirim/printer absen = byte
+ * Tiket dapur dari DETAIL penuh BE (sumber utama AUTO kitchen): items +
+ * addons (dilipat ke baris note `+ addon`) + notes + meja/mode/waktu.
+ * templateType kitchen HANYA ke station dapur (printKitchenTicket) — tak
+ * pernah ke station kasir (tiket dapur tanpa harga).
+ */
+async function printDetailKitchenTicket(
+  printLib: typeof import('./print'),
+  detail: ServerOrderDetail,
+  orderId: string,
+): Promise<AutoPrintOutcome> {
+  const ticket: EscKitchenTicket = {
+    station: 'dapur',
+    no: String(detail.orderNumber || detail.id || orderId),
+    ...(detail.tableNumber ? { table: detail.tableNumber } : {}),
+    ...(detail.orderType ? { mode: detail.orderType } : {}),
+    ...((detail.paidAt || detail.createdAt) ? { time: detail.paidAt || detail.createdAt } : {}),
+    items: detail.items.map((it) => {
+      const addonPart = it.addons.length > 0 ? `+ ${it.addons.map((a) => a.name).join(', + ')}` : '';
+      const noteParts = [String(it.note ?? '').trim(), addonPart].filter((s) => s);
+      return {
+        name: String(it.name || '-'),
+        qty: Math.max(1, Math.round(it.qty) || 1),
+        ...(noteParts.length > 0 ? { note: noteParts.join(' | ') } : {}),
+      };
+    }),
+  };
+  const res = await printLib.printKitchenTicket('dapur', ticket);
+  if (res.ok) return { state: 'printed', via: 'stations', detail: res.printer };
+  if (res.queued) return { state: 'printed', via: 'queue', detail: res.queuedId ?? '' };
+  return { state: 'failed', errorCode: 'PRINT_FAILED', lastError: String(res.detail ?? res.reason ?? 'kitchen send failed') };
+}
+
+/**
+ * Struk pelanggan dari DETAIL penuh BE (sumber utama AUTO customer): cermin
+ * ReceiptScreen.doPrint — subtotal, discount, service (+serviceLabel sadar
+ * server via totals.ts), tip, tax info-only, packaging, voucherCode,
+ * delivery (ongkir), total, method, paid/change (tunai + toggle template),
+ * cashier (paidBy BE) + meja/pelanggan, datetime, thanks/footer/branding
+ * template. templateType customer HANYA ke stations non-dapur (broadcast
+ * printReceiptData di print.ts).
+ */
+async function printDetailReceipt(
+  printLib: typeof import('./print'),
+  detail: ServerOrderDetail,
+  orderId: string,
+): Promise<AutoPrintOutcome> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const tplLib = require('./receiptTemplate') as typeof import('./receiptTemplate');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getCachedCurrency } = require('./currency') as typeof import('./currency');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getTerminal } = require('../config/server') as typeof import('../config/server');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const totalsLib = require('./totals') as typeof import('./totals');
+  const tplOn = await tplLib.hasReceiptTemplate();
+  const tpl = await tplLib.getReceiptTemplateToggles();
+  const tp = tplOn ? tpl : null;
+  const lang = getLang();
+  const tplLang = (tpl.receiptLanguage ?? lang) as 'id' | 'en';
+  let svcCfg = totalsLib.SERVICE_LEGACY;
+  try {
+    svcCfg = await totalsLib.getServiceConfig();
+  } catch {
+    /* label service legacy */
+  }
+  const svcLabel = totalsLib.serviceLabel((k: string) => tOf(k, lang), svcCfg);
+  let shopName = 'Genfity';
+  try {
+    shopName = String(getTerminal()?.branchName ?? '').trim() || 'Genfity';
+  } catch {
+    /* default */
+  }
+  const no = String(detail.orderNumber || detail.id || orderId);
+  const orderType = String(detail.orderType ?? '');
+  const cashierLineTpl = [
+    tp && tp.showCashierName ? detail.cashierName : '',
+    tp && !tp.showTableNumber ? '' : detail.tableNumber,
+    tp && !(tp.showCustomerName || tp.showCustomerPhone) ? '' : detail.customerName,
+  ].map((s) => String(s ?? '').trim()).filter((s) => s).join(' · ');
+  const cashierLineLegacy = [detail.cashierName, detail.tableNumber, detail.customerName]
+    .map((s) => String(s ?? '').trim()).filter((s) => s).join(' · ');
+  const method = String(detail.paymentMethod ?? '');
+  const isCash = /cash|tunai/i.test(method);
+  const receipt: EscReceipt = {
+    shop: (!tp || tp.showMerchantName) ? shopName.toUpperCase() : '',
+    trx: tplOn
+      ? [tpl.showOrderNumber ? `No: ${no}` : '', tpl.showOrderType ? orderType : '']
+        .map((s) => s.trim()).filter((s) => s).join(' - ')
+      : `No: ${no}${orderType ? ` - ${orderType}` : ''}`,
+    ...((tplOn ? cashierLineTpl : cashierLineLegacy) ? { cashier: tplOn ? cashierLineTpl : cashierLineLegacy } : {}),
+    ...(((!tp || tp.showDateTime) && (detail.paidAt || detail.createdAt))
+      ? { datetime: String(detail.paidAt || detail.createdAt) } : {}),
+    currency: getCachedCurrency().code,
+    items: detail.items.map((it) => ({
+      name: String(it.name || '-'),
+      qty: Math.max(1, Math.round(it.qty) || 1),
+      price: Math.max(0, Math.round(it.price) || 0),
+      ...(tp?.showItemNotes && it.note ? { note: String(it.note) } : {}),
+      ...(tp?.showAddons
+        ? { addons: it.addons.map((a) => ({ name: a.name, price: tp?.showAddonPrices ? Math.max(0, Math.round(a.price) || 0) : 0 })) }
+        : {}),
+    })),
+    subtotal: Math.max(0, Math.round(detail.subtotal) || 0),
+    ...((tp && !tp.showSubtotal) ? { hideSubtotal: true } : {}),
+    ...((detail.discount > 0 && (!tp || tp.showDiscount))
+      ? { discount: Math.max(0, Math.round(detail.discount)) } : {}),
+    ...((detail.service > 0 && (!tp || tp.showServiceCharge))
+      ? { service: Math.max(0, Math.round(detail.service)), ...(svcLabel ? { serviceLabel: svcLabel } : {}) }
+      : {}),
+    ...((detail.tip > 0) ? { tip: Math.max(0, Math.round(detail.tip)) } : {}),
+    ...((detail.tax > 0 && (!tp || tp.showTax))
+      ? { tax: Math.max(0, Math.round(detail.tax)) } : {}),
+    ...((detail.packaging > 0 && (!tp || tp.showPackagingFee))
+      ? { packaging: Math.max(0, Math.round(detail.packaging)) } : {}),
+    ...(detail.voucherCode ? { voucherCode: detail.voucherCode } : {}),
+    ...((detail.delivery > 0 && (!tp || tp.showDeliveryFee))
+      ? { ongkir: Math.max(0, Math.round(detail.delivery)) } : {}),
+    total: Math.max(0, Math.round(detail.total) || 0),
+    ...((tp && !tp.showTotal) ? { hideTotal: true } : {}),
+    ...(((!tp || tp.showPaymentMethod) && method) ? { method } : {}),
+    ...((isCash && detail.amountPaid > 0 && (!tp || tp.showAmountPaid))
+      ? { paid: Math.max(0, Math.round(detail.amountPaid)) } : {}),
+    ...((isCash && detail.changeAmount > 0 && (!tp || tp.showChange))
+      ? { change: Math.max(0, Math.round(detail.changeAmount)) } : {}),
+    ...(tplOn
+      ? {
+        thanks: tpl.showThankYouMessage
+          ? (tpl.customThankYouMessage || (tplLang === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!'))
+          : '',
+      }
+      : { thanks: tOf('rc_thanks', lang) }),
+    ...(tplOn && tpl.showCustomFooterText && tpl.customFooterText ? { footer: tpl.customFooterText } : {}),
+    ...(tplOn && tpl.showGenfityBranding
+      ? { branding: tplLang === 'en' ? 'Powered by Genfity' : 'Diberdayakan oleh Genfity' }
+      : {}),
+  };
+  const res = await printLib.printReceiptData(receipt);
+  if (res.ok) return { state: 'printed', via: 'stations', detail: res.printer };
+  if (res.queued) return { state: 'printed', via: 'queue', detail: res.queuedId ?? '' };
+  return { state: 'failed', errorCode: 'PRINT_FAILED', lastError: String(res.detail ?? res.reason ?? 'receipt send failed') };
+}
+
+/**
+ * Render + cetak job AUTO (KONTRAK FINAL): ambil DETAIL PENUH order via
+ * fetchMerchantOrderDetail (posWire → MerchantOrderDetailGet) — 1:1 website:
+ * orderItems (+addons, notes), subtotal, discount, tax, service,
+ * packaging, delivery, tip, total, paid, change, payment method, cashier —
+ * lalu rakit ESC/POS memakai cache template BE (receiptTemplate.ts; tanpa
+ * template = perilaku legacy byte-identik) + currency cabang → cetak ke
+ * stations non-dapur (templateType customer, broadcast per cols/cut) atau
+ * station dapur (templateType kitchen). Snapshot pullServerHistory HANYA
+ * fallback bila detail gagal (blocked non-numerik / 404 / parse) — baris
+ * yang tak dibawa riwayat (service/packaging/delivery/tip/paid/change)
+ * dihilangkan jujur di jalur fallback. Gagal kirim/printer absen = byte
  * MASUK antrean offline printqueue via print.ts (kind receipt/kitchen;
  * drain kind-aware, retry bounded) — bukan hangus, bukan spam retry.
  * Tak pernah melempar; ack tetap milik pemanggil.
@@ -320,17 +472,37 @@ export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrint
   if (!orderId) {
     return { state: 'failed', errorCode: 'AUTO_NO_ORDER', lastError: 'Job AUTO tanpa orderId di metadata' };
   }
+  const tplType = String(job.metadata?.templateType ?? '').trim().toLowerCase();
+  const isKitchen = tplType === 'kitchen' || tplType === 'dapur' || tplType === 'tiket_dapur';
+  // Lazy-require ala fanoutReceiptAuto: print.ts menarik native/printer —
+  // impor statis berisiko siklus modul saat app boot.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const printLib = require('./print') as typeof import('./print');
+  // SUMBER UTAMA: detail penuh BE (MerchantOrderDetailGet). Offline di sini
+  // = unavailable jujur (order tak tersedia); blocked/error = fallback
+  // riwayat di bawah (no display non-numerik, 404, respons buruk).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fetchMerchantOrderDetail } = require('./posWire') as typeof import('./posWire');
+    const r = await fetchMerchantOrderDetail(orderId);
+    if (r.ok) {
+      try {
+        if (isKitchen) return await printDetailKitchenTicket(printLib, r.data, orderId);
+        return await printDetailReceipt(printLib, r.data, orderId);
+      } catch {
+        return { state: 'failed', errorCode: 'AUTO_RENDER_FAILED', lastError: 'render exception' };
+      }
+    }
+    if (r.reason === 'offline') return { state: 'unavailable', reason: 'offline' };
+  } catch {
+    /* jatuh ke fallback riwayat */
+  }
   const found = await findAutoOrder(orderId);
   if ('offline' in found) return { state: 'unavailable', reason: 'offline' };
   if ('missing' in found) return { state: 'unavailable', reason: 'not-found' };
   const entry = found.entry;
-  const tplType = String(job.metadata?.templateType ?? '').trim().toLowerCase();
   try {
-    // Lazy-require ala fanoutReceiptAuto: print.ts menarik native/printer —
-    // impor statis berisiko siklus modul saat app boot.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const printLib = require('./print') as typeof import('./print');
-    if (tplType === 'kitchen' || tplType === 'dapur' || tplType === 'tiket_dapur') {
+    if (isKitchen) {
       const ticket: EscKitchenTicket = {
         station: 'dapur',
         no: String(entry.orderNumber || entry.id || orderId),
@@ -547,4 +719,147 @@ export async function pollServerPrintJobs(
     sent.detail ?? sent.reason,
   );
   return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-poll job terminal (tugas B): interval 20 detik, SATU loop global
+// (idempoten — start ganda = no-op, anti double dengan poller bridge lain).
+// Tiap tick: AppState active + sesi login + terminal ter-bind (branchId +
+// terminalCode klaim) + mode online + id BE terminal via daftar cabang →
+// SATU siklus pollServerPrintJobs (claim → cetak/ack). Job AUTO tak butuh
+// printer siap (printAutoServerJob mengantre persisten bila printer absen);
+// job MANUAL non-AUTO memakai station struk default (drain-target receipt).
+// Guard anti-overlap: tick yang masih jalan menahan tick berikut (jaringan
+// lambat tak menumpuk klaim). Berhenti via stop (unbind/logout/cleanup efek
+// App) + AppState listener dilepas. Tak pernah melempar; diam saat
+// prasyarat tak terpenuhi (tanpa spam status).
+// Tombol tarik manual (PrintersScreen.pullServerJobs) tetap ada dan tak
+// berubah — loop ini hanya otomatisasi siklus yang sama.
+// ---------------------------------------------------------------------------
+export const TERMINAL_AUTO_PRINT_POLL_MS = 20000;
+
+let terminalAutoPollTimer: ReturnType<typeof setInterval> | null = null;
+let terminalAutoPollBusy = false;
+let terminalAutoPollAppSub: { remove: () => void } | null = null;
+/**
+ * printFn disuntik pemanggil (App menyuntik printBytes native/printer) —
+ * modul ini TETAP tanpa impor nilai native/printer (tripwire PB-4; poll
+ * semua runtime, diuji tanpa RN). Tanpa suntikan = tick diam (tak klaim).
+ */
+export type TerminalAutoPollPrintFn = (
+  target: PrinterTarget,
+  bytes: Uint8Array,
+) => Promise<PrintResult>;
+
+let terminalAutoPollPrintFn: TerminalAutoPollPrintFn | null = null;
+
+async function terminalAutoPollTick(): Promise<void> {
+  if (terminalAutoPollBusy) return;
+  terminalAutoPollBusy = true;
+  try {
+    try {
+      if (AppState.currentState !== 'active') return;
+    } catch {
+      /* best-effort: lanjut */
+    }
+    // Lazy-require ala fanoutReceiptAuto (anti siklus saat boot).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSession } = require('../session') as typeof import('../session');
+    let me: unknown = null;
+    try {
+      me = getSession();
+    } catch {
+      me = null;
+    }
+    if (!me) return;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTerminal } = require('../config/server') as typeof import('../config/server');
+    let termCode = '';
+    let branchId = '';
+    try {
+      const g = getTerminal();
+      termCode = String(g?.terminalCode ?? '').trim().toUpperCase();
+      branchId = String(g?.branchId ?? '').trim();
+    } catch {
+      /* unbound */
+    }
+    if (!termCode || !branchId) return;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isOnlineMode } = require('./posWire') as typeof import('./posWire');
+    let online = false;
+    try {
+      online = isOnlineMode();
+    } catch {
+      online = false;
+    }
+    if (!online) return;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fetchBranchTerminals } = require('./terminalApi') as typeof import('./terminalApi');
+    const list = await fetchBranchTerminals(branchId);
+    if (!list.ok) return;
+    const hit = list.data.terminals.find(
+      (x) => String(x.terminalCode ?? '').trim().toUpperCase() === termCode,
+    );
+    const beId = String(hit?.terminalId ?? '').trim();
+    if (!beId) return;
+    // Target untuk job non-AUTO (raw payload): station struk default
+    // (cermin resolveDrainTarget receipt). Job AUTO mengabaikan target +
+    // printFn ini (render internal via print.ts + antre persisten).
+    let target: PrinterTarget = { transport: 'loopback' };
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const printLib = require('./print') as typeof import('./print');
+      const d = await printLib.resolveDrainTarget({ name: '', kind: 'receipt' });
+      if (d && d.target) target = d.target;
+    } catch {
+      /* fallback loopback */
+    }
+    const fn = terminalAutoPollPrintFn;
+    if (!fn) return;
+    await pollServerPrintJobs(beId, target, fn);
+  } catch {
+    /* tak pernah melempar */
+  } finally {
+    terminalAutoPollBusy = false;
+  }
+}
+
+/** Nyalakan loop auto-poll (idempoten). printFn disuntik pemanggil (App
+ * menyuntik printBytes) agar modul tetap bebas impor native. Tick pertama
+ * langsung jalan agar job tak menunggu satu interval penuh. */
+export function startTerminalAutoPrintPoll(printFn?: TerminalAutoPollPrintFn): void {
+  if (printFn) terminalAutoPollPrintFn = printFn;
+  if (terminalAutoPollTimer) return;
+  void terminalAutoPollTick();
+  terminalAutoPollTimer = setInterval(() => {
+    void terminalAutoPollTick();
+  }, TERMINAL_AUTO_PRINT_POLL_MS);
+  try {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void terminalAutoPollTick();
+    });
+    terminalAutoPollAppSub = sub;
+  } catch {
+    terminalAutoPollAppSub = null;
+  }
+}
+
+/** Matikan loop auto-poll (unbind/logout/cleanup). Idempoten. */
+export function stopTerminalAutoPrintPoll(): void {
+  if (terminalAutoPollTimer) {
+    clearInterval(terminalAutoPollTimer);
+    terminalAutoPollTimer = null;
+  }
+  try {
+    terminalAutoPollAppSub?.remove();
+  } catch {
+    /* abaikan */
+  }
+  terminalAutoPollAppSub = null;
+  terminalAutoPollBusy = false;
+}
+
+/** true bila loop auto-poll sedang hidup (diagnostik/tests). */
+export function isTerminalAutoPrintPolling(): boolean {
+  return terminalAutoPollTimer !== null;
 }

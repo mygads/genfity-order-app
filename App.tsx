@@ -17,6 +17,8 @@ import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { subscribeTerminalEvents } from './src/lib/sse';
 import { getApiMode } from './src/lib/apiSource';
 import { flushPendingRevokes, restoreAutoSyncPrefs } from './src/lib/sync';
+import { startTerminalAutoPrintPoll, stopTerminalAutoPrintPoll } from './src/lib/printBridge';
+import { printBytes } from './src/native/printer';
 import { pullMaster } from './src/lib/master';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
@@ -703,15 +705,31 @@ export default function App() {
       // K1: watcher takeover sesi (SATU-SATUNYA langganan kick sesi; display.ts
       // hanya transport display). Lihat startTakeoverWatch di bawah.
       const stopTakeover = startTakeoverWatch();
+      // AUTO-PRINT terminal jobs (printBridge FULL): SATU loop global 20 dtk
+      // (start idempoten — tak double dengan poller bridge lain; manual di
+      // PrintersScreen tetap ada). Hidup hanya saat bound; cleanup efek
+      // (unbind/logout) + cabang else mematikan loop.
+      if (bound) startTerminalAutoPrintPoll(printBytes);
+      else stopTerminalAutoPrintPoll();
       return () => {
         try {
           stopTakeover?.();
         } catch {
           /* abaikan */
         }
+        try {
+          stopTerminalAutoPrintPoll();
+        } catch {
+          /* abaikan */
+        }
       };
     } else {
       stopRealtime();
+      try {
+        stopTerminalAutoPrintPoll();
+      } catch {
+        /* abaikan */
+      }
     }
     return undefined;
   }, [loggedIn, bound]);

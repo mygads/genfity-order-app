@@ -285,6 +285,11 @@ export const ApiPath = {
   merchantCustomerSearch: 'api/merchant/customers/search', // GET (?q,take,cursor) → {data:[{id,name,email,phone,orderCount,totalSpent,pointsBalance,loyaltyMember}]}
   merchantEmailDeliverySettings: 'api/merchant/email-delivery-settings', // GET → {data:{emailDeliverySettings:{sendInvoiceEmail,...}}}
   merchantOrderSendReceipt: 'api/merchant/orders/{orderId}/send-receipt', // POST {email} → antrean completed-email (isPosInvoice)
+  // AUTO-PRINT APP (detail penuh 1:1 website): GET order merchant lengkap
+  // (orderItems+addons, tipAmount, packagingFeeAmount, deliveryFeeAmount,
+  // payment paid/change, paidBy) — MerchantOrderDetailGet (router.go merchant).
+  // '{orderId}' diganti caller via .replace() ala merchantOrderSendReceipt.
+  merchantOrderDetailGet: 'api/merchant/orders/{orderId}', // GET → {data:{...detail}}
 } as const;
 
 /** E28: kunci policy grant offline (server-wins via terminal-settings, default 7 hari). */

@@ -938,3 +938,163 @@ export async function sendPosReceiptEmail(
     return { ok: false, reason: 'offline', message: wireTr('offline') };
   }
 }
+
+// ---------------------------------------------------------------------------
+// AUTO-PRINT APP (detail penuh 1:1 website): GET
+// api/merchant/orders/{orderId} (MerchantOrderDetailGet) — satu-satunya
+// sumber ber-items LENGKAP: orderItems (+addons, notes), subtotal, discount,
+// tax, serviceCharge, packagingFee, deliveryFee, tip, total, payment
+// (method, amountPaid, changeAmount, paidBy) — menggantikan snapshot
+// pullServerHistory untuk render job AUTO (riwayat tetap fallback).
+// Non-desimal (no display TRX-…) = BLOCKED (BE readPathInt64 numerik saja;
+// pemanggil jatuh ke fallback riwayat yang bisa padankan no display).
+// Tak pernah melempar (offline = {ok:false, reason:'offline'}).
+// ---------------------------------------------------------------------------
+export interface ServerOrderDetailAddon {
+  name: string;
+  price: number;
+  qty: number;
+}
+
+export interface ServerOrderDetailItem {
+  name: string;
+  qty: number;
+  price: number;
+  note?: string;
+  addons: ServerOrderDetailAddon[];
+}
+
+export interface ServerOrderDetail {
+  id: string;
+  orderNumber: string;
+  orderType: string;
+  tableNumber: string;
+  customerName: string;
+  /** Nama kasir penyelesaian (payment.paidBy.name BE) — kosong bila absen. */
+  cashierName: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  service: number;
+  packaging: number;
+  delivery: number;
+  tip: number;
+  total: number;
+  paymentMethod: string;
+  amountPaid: number;
+  changeAmount: number;
+  createdAt: string;
+  paidAt: string;
+  /** Label diskon sumber voucher (orderDiscounts BE) — kosong bila tak ada. */
+  voucherCode: string;
+  items: ServerOrderDetailItem[];
+}
+
+export async function fetchMerchantOrderDetail(
+  orderRef: string | number,
+): Promise<GoResult<ServerOrderDetail>> {
+  const ref = String(orderRef ?? '').trim();
+  if (!isDecimalId(ref)) {
+    return { ok: false, reason: 'blocked', message: wireTr('blocked') };
+  }
+  if (!isOnlineMode()) return { ok: false, reason: 'offline', message: wireTr('offline') };
+  try {
+    const path = String(ApiPath.merchantOrderDetailGet).replace('{orderId}', encodeURIComponent(ref));
+    const res = await withTimeoutMs(apiFetch(path, { method: 'GET' }));
+    if (res.fromDummy || res.status === 0) {
+      return { ok: false, reason: 'offline', message: wireTr('offline') };
+    }
+    if (!res.ok) {
+      const be = beErrorOf(res.data ?? null);
+      return {
+        ok: false,
+        reason: 'error',
+        code: be.code || String(res.status),
+        message: wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` }),
+      };
+    }
+    const { data } = unwrap<unknown>(res.data);
+    if (!data || typeof data !== 'object') {
+      return { ok: false, reason: 'error', code: 'BAD_RESPONSE', message: wireTr('rejected', { m: 'bad response' }) };
+    }
+    const o = data as Record<string, unknown>;
+    if (!isDecimalId(o.id)) {
+      return { ok: false, reason: 'error', code: 'BAD_RESPONSE', message: wireTr('rejected', { m: 'bad response' }) };
+    }
+    const pay = (o.payment ?? {}) as Record<string, unknown>;
+    const paidBy = (pay.paidBy ?? {}) as Record<string, unknown>;
+    const cust = (o.customer ?? {}) as Record<string, unknown>;
+    const rawItems = Array.isArray(o.orderItems) ? o.orderItems : [];
+    const items: ServerOrderDetailItem[] = [];
+    for (const raw of rawItems) {
+      if (!raw || typeof raw !== 'object') continue;
+      const m = raw as Record<string, unknown>;
+      const name = strOf(m.menuName ?? m.menu_name ?? m.name) || '-';
+      const qty = Math.max(1, Math.round(Number(m.quantity ?? m.qty) || 1));
+      const unitRaw = Math.round(Number(m.menuPrice ?? m.menu_price ?? m.price) || 0);
+      const subRaw = Math.round(Number(m.subtotal) || 0);
+      const price = unitRaw > 0 ? unitRaw : subRaw > 0 && qty > 0 ? Math.round(subRaw / qty) : 0;
+      const rawAddons = Array.isArray(m.addons) ? m.addons : [];
+      const addons: ServerOrderDetailAddon[] = [];
+      for (const ra of rawAddons) {
+        if (!ra || typeof ra !== 'object') continue;
+        const a = ra as Record<string, unknown>;
+        const an = strOf(a.addonName ?? a.addon_name ?? a.name);
+        if (!an) continue;
+        addons.push({
+          name: an,
+          price: Math.max(0, Math.round(Number(a.addonPrice ?? a.addon_price ?? a.price) || 0)),
+          qty: Math.max(1, Math.round(Number(a.quantity ?? a.qty) || 1)),
+        });
+      }
+      items.push({
+        name,
+        qty,
+        price: Math.max(0, price),
+        ...(strOf(m.notes ?? m.note) ? { note: strOf(m.notes ?? m.note) } : {}),
+        addons,
+      });
+    }
+    let voucherCode = '';
+    const rawDiscounts = Array.isArray(o.orderDiscounts) ? o.orderDiscounts : [];
+    for (const rd of rawDiscounts) {
+      if (!rd || typeof rd !== 'object') continue;
+      const d = rd as Record<string, unknown>;
+      if (/VOUCHER/i.test(strOf(d.source))) {
+        const label = strOf(d.label);
+        if (label) {
+          voucherCode = label;
+          break;
+        }
+      }
+    }
+    return {
+      ok: true,
+      data: {
+        id: String(o.id).trim(),
+        orderNumber: strOf(o.orderNumber ?? o.order_number) || String(o.id).trim(),
+        orderType: strOf(o.orderType ?? o.order_type),
+        tableNumber: strOf(o.tableNumber ?? o.table_number),
+        customerName: strOf(cust.name ?? o.customerName ?? o.customer_name) || '-',
+        cashierName: strOf(paidBy.name),
+        subtotal: numOf(o.subtotal),
+        discount: numOf(o.discountAmount ?? o.discount_amount ?? o.discount),
+        tax: numOf(o.taxAmount ?? o.tax_amount ?? o.tax),
+        service: numOf(o.serviceChargeAmount ?? o.service_charge_amount ?? o.service),
+        packaging: numOf(o.packagingFeeAmount ?? o.packaging_fee_amount ?? o.packaging),
+        delivery: numOf(o.deliveryFeeAmount ?? o.delivery_fee_amount ?? o.delivery),
+        tip: numOf(o.tipAmount ?? o.tip_amount ?? o.tip),
+        total: numOf(o.totalAmount ?? o.total_amount ?? o.total),
+        paymentMethod: strOf(pay.paymentMethod ?? pay.payment_method ?? pay.requestedPaymentMethod),
+        amountPaid: numOf(pay.amountPaid ?? pay.amount_paid ?? pay.amount),
+        changeAmount: numOf(pay.changeAmount ?? pay.change_amount),
+        createdAt: strOf(o.placedAt ?? o.placed_at ?? o.createdAt ?? o.created_at),
+        paidAt: strOf(pay.paidAt ?? pay.paid_at ?? pay.customerPaidAt ?? o.completedAt ?? o.completed_at),
+        voucherCode,
+        items,
+      },
+    };
+  } catch {
+    return { ok: false, reason: 'offline', message: wireTr('offline') };
+  }
+}
