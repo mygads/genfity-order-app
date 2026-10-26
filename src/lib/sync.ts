@@ -18,6 +18,9 @@ import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
 import { logoutRevoke } from './terminalApi';
+// HP-E2E (2026-10-26): drain expense via handoff terminal (terminalExpense
+// TAK mengimpor sync — arah impor satu arah, tanpa siklus).
+import { isRemotePhoto, postExpenseToTerminal } from './terminalExpense';
 import { uuidv7 } from './uuidv7';
 import {
   ALLOWED_BE_TRANSITIONS,
@@ -1052,16 +1055,133 @@ function conflictTag(code: string): string {
 }
 
 /**
+ * HP-E2E (2026-10-26): handoff drain-time satu expense → endpoint terminal Go.
+ * Baris lokal menyimpan amount NEGATIF (konvensi ledger kas); kontrak BE
+ * menuntut amount > 0 — postExpenseToTerminal menormalisasi abs() + guard
+ * nol/NaN. clientExpenseId = uuid di balik prefix EX- (ExpenseScreen) atau
+ * uuid mentah (PettyCash) — SAMA dengan handoff immediate-first layar,
+ * sehingga retry/drain = replay idempoten (409-duplicate = sukses, tanpa
+ * ledger ganda). Sukses → markClean + watermark; true = terkirim.
+ * Tak pernah melempar; false = pemanggil menandai 'gagal' jujur (retry).
+ */
+async function drainExpenseToTerminal(rowId: string): Promise<boolean> {
+  const id = String(rowId ?? '').trim();
+  if (!id) return false;
+  try {
+    await initDb();
+  } catch {
+    return false;
+  }
+  let row: { id: string; amount: number | null; note: string | null; expenseDate: string | null; createdAt: string | null; photoPath: string | null } | null = null;
+  try {
+    row = await queryFirst(
+      'SELECT id, amount, note, expenseDate, createdAt, photoPath FROM tr_branchexpense WHERE id = ?',
+      [id],
+    );
+  } catch {
+    return false;
+  }
+  if (!row) return false;
+  const isExp = String(row.id ?? '').startsWith('EX-');
+  try {
+    const h = await postExpenseToTerminal({
+      rowId: id,
+      clientExpenseId: isExp ? String(row.id).slice(3) : String(row.id),
+      kind: (isExp ? 'EXPENSE' : 'PETTY_CASH') as 'EXPENSE' | 'PETTY_CASH',
+      amount: Math.round(Number(row.amount ?? 0) || 0),
+      note: String(row.note ?? '').slice(0, 500),
+      occurredAt: String(row.expenseDate ?? row.createdAt ?? new Date().toISOString()),
+      // Foto lokal (file://) = omit — alur photoPending/retry yang mengurus;
+      // remote (https, sudah di-upload) = ikut sebagai photoUrl.
+      ...(isRemotePhoto(row.photoPath) ? { photoUrl: String(row.photoPath).trim().slice(0, 2048) } : {}),
+    });
+    if (h.posted !== true) return false;
+    try {
+      await markClean('tr_branchexpense', id);
+    } catch {
+      /* abaikan: server sudah pegang baris */
+    }
+    try {
+      await setWatermark('tr_branchexpense', { push: new Date().toISOString() });
+    } catch {
+      /* abaikan */
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * HP-E2E (2026-10-26): kuras satu baris fisik tr_branchexpense via handoff
+ * terminal (bukan path ESB legacy — 404 vs Go). Sukses/409-duplikat =
+ * 'sent' (DELETE antrean fisik + markClean + watermark); gagal = 'gagal'
+ * jujur (retry push berikut). Baris DB hilang lokal (dihapus kasir) =
+ * 'sent' + DELETE (tak ada yang bisa dikirim; cegah racun breaker S4).
+ */
+async function pushExpensePhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'> {
+  const rowId = String(row.orderID ?? '').trim();
+  if (!rowId) {
+    try {
+      await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  }
+  let exists = false;
+  try {
+    await initDb();
+    const hit = await queryFirst<{ id: string }>(
+      'SELECT id FROM tr_branchexpense WHERE id = ?',
+      [rowId],
+    );
+    exists = !!hit;
+  } catch {
+    return 'failed';
+  }
+  if (!exists) {
+    try {
+      await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  }
+  if (!(await drainExpenseToTerminal(rowId))) {
+    try {
+      await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'failed';
+  }
+  try {
+    await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+  } catch {
+    /* abaikan */
+  }
+  return 'sent';
+}
+
+/**
  * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
  * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
  * (ms_*, local-only M9-3) atau tanpa endpoint push. Untuk ms_* pemanggil
  * (drain) memfinalkan status 'lokal' — bukan antre, bukan gagal.
+ *
+ * HP-E2E (2026-10-26): tr_branchexpense TIDAK lewat tablePushPath — path ESB
+ * legacy (v1/push/branch-expenses) 404 vs Go → 'gagal' tiap push + trip
+ * breaker S4. Expense punya padanan Go (POST api/v1/terminals/{id}/expenses,
+ * idempoten via clientExpenseId) → drain via pushExpensePhysicalRow di bawah.
  */
 async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
   const table = String(row.tableName ?? '');
   // Master (ms_*) local-only (M9-3): backend Go tak punya endpoint push
   // master dan pull server-wins menimpa edit lokal. Jangan kirim.
   if (!table || table.startsWith('ms_')) return 'skipped';
+  // HP-E2E-FIX (2026-10-26): expense → handoff terminal Go (lihat helper).
+  if (table === 'tr_branchexpense') return pushExpensePhysicalRow(row);
   // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): tr_shiftlog tanpa padanan Go —
   // absensi offline-only eksplisit (S9/PP-010, AttendanceScreen); data shift
   // dibawa W1 be-cash-open/be-cash-close ke endpoint Go workforce. Transport
@@ -1545,6 +1665,27 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     item.local = true;
     item.note = tr('sync.localOnly');
     return 'skipped';
+  }
+  // HP-E2E (2026-10-26): twin ringan expense (op insert/update layar
+  // Expense/PettyCash) → handoff terminal Go via drainExpenseToTerminal
+  // (cermin drain fisik pushExpensePhysicalRow). Path legacy ESB
+  // (v1/push/branch-expenses) 404 vs Go. Sukses = 'terkirim'; gagal =
+  // 'gagal' jujur (retry — offline/transien adalah kasus utamanya).
+  // Op expense-approve/expense-unapprove tak tersentuh (tanpa padanan BE).
+  if (
+    item.kind === 'other' &&
+    itemTable === 'tr_branchexpense' &&
+    (String(rawPayloadEarly.op ?? '') === 'insert' || String(rawPayloadEarly.op ?? '') === 'update')
+  ) {
+    const expRowId = String((rawPayloadEarly as { rowId?: unknown }).rowId ?? '').trim();
+    if (await drainExpenseToTerminal(expRowId)) {
+      item.status = 'terkirim';
+      item.note = 'posWire: expense terkirim (idempoten)';
+      return 'sent';
+    }
+    item.status = 'gagal';
+    item.note = 'posWire: expense gagal (retry)';
+    return 'failed';
   }
   // GO-POS COMPAT: sale-create diterjemahkan ke body bentuk-POS
   // (orderType/items/clientId-displayNo) menuju api/merchant/orders/pos;

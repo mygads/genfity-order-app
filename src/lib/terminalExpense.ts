@@ -248,12 +248,20 @@ export async function postExpenseToTerminal(inp: ExpenseHandoffInput): Promise<E
   }
   const cid = String(inp.clientExpenseId ?? '').trim();
   if (!cid) return NOT_POSTED;
+  // HP-E2E (2026-10-26): ledger lokal menyimpan expense NEGATIF (-jumlahNum;
+  // ExpenseScreen + PettyCashFormScreen menulis amount negatif), kontrak
+  // terminal menuntut amount > 0 (BE 400 VALIDATION_ERROR bila <= 0 — expense
+  // tak pernah sampai server + fallback ESB 404 vs Go). Normalisasi di choke
+  // point ini agar semua pemanggil (layar + retry foto + drain sync.ts)
+  // otomatis benar. Nol/NaN = NOT_POSTED (form memvalidasi jumlahNum > 0).
+  const amt = Math.abs(Math.round(Number(inp.amount) || 0));
+  if (!(amt > 0)) return NOT_POSTED;
   try {
     const r = await withTimeoutMs(
       createTerminalExpense(tid, {
         clientExpenseId: cid,
         kind: inp.kind,
-        amount: Math.round(inp.amount),
+        amount: amt,
         note: String(inp.note ?? '').slice(0, 500),
         occurredAt: inp.occurredAt,
         // A-P1-6: kirim photoUrl HANYA bila remote; >2048 char = omit
