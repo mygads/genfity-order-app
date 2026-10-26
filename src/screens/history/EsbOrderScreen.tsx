@@ -232,7 +232,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
         }}
       />
 
-      <Modal visible={selected !== null} animationType="slide" transparent>
+      <Modal visible={selected !== null} animationType="slide" transparent onRequestClose={() => setSelected(null)}>
         <View style={[styles.sheetWrap, isTablet && styles.sheetWrapTablet]}>
           <View style={[styles.sheet, isTablet && styles.sheetTablet]}>
             <View style={styles.sheetHandle} />
@@ -325,7 +325,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
           </View>
         </View>
       </Modal>
-      <Modal visible={rejectFor !== null} animationType="fade" transparent>
+      <Modal visible={rejectFor !== null} animationType="fade" transparent onRequestClose={() => setRejectFor(null)}>
         <View style={[styles.sheetWrap, isTablet && styles.sheetWrapTablet]}>
           <View style={[styles.sheet, isTablet && styles.sheetTablet]}>
             <View style={styles.sheetHandle} />
