@@ -148,6 +148,10 @@ const DIRTY_PK: Record<string, string | string[]> = {
   tr_branchexpensedocument: 'id',
   ms_menu: 'id',
   ms_branchmenu: ['branchId', 'menuId'],
+  ms_addoncategory: 'id',
+  ms_addon: 'id',
+  ms_menuaddon: ['menuId', 'categoryId'],
+  ms_branchaddon: ['branchId', 'addonId'],
   ms_category: 'id',
   ms_table: 'id',
   ms_paymentmethod: 'id',
@@ -167,7 +171,7 @@ const DIRTY_PK: Record<string, string | string[]> = {
  * Tandai baris sebagai kotor (syncDate = NULL) agar ikut push berikutnya.
  * Kembalikan jumlah baris yang diubah; 0 bila tabel tak dikenal / DB gagal.
  * PK komposit (ms_branchmenu: [branchId, menuId]) memakai id gabungan
- * `${branchId}:${menuId}` sesuai pemanggil MenuManagement/Stock.
+ * `${branchId}:${menuId}` sesuai pemanggil StockManagement/Stock.
  */
 export async function markDirty(table: string, id: string): Promise<number> {
   const pk = DIRTY_PK[table];

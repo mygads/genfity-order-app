@@ -10,7 +10,7 @@
  * boleh fallback ke domain ESB).
  */
 import { apiGet, getBranchId } from '../config/server';
-import { initDb, run } from './db';
+import { initDb, queryFirst, run } from './db';
 import { persistReceiptPrefs } from './posSyncReceipt';
 import { fetchDefaultReceiptTemplate, persistReceiptTemplate } from './receiptTemplate';
 import { setWatermark } from './sync';
@@ -20,6 +20,21 @@ export class GoCatalogUnavailable extends Error {
     super('backend bukan Go (/pos/menu 404)');
     this.name = 'GoCatalogUnavailable';
   }
+}
+
+interface GoAddonItem {
+  id: number;
+  name: string;
+  price: number;
+  isActive: boolean;
+  trackStock: boolean;
+  stockQty?: number | null;
+}
+
+interface GoAddonCategory {
+  id: number;
+  name: string;
+  addonItems?: GoAddonItem[] | null;
 }
 
 interface GoMenuItem {
@@ -32,6 +47,8 @@ interface GoMenuItem {
   categoryId?: number | null;
   trackStock: boolean;
   stockQty?: number | null;
+  hasAddons?: boolean;
+  addonCategories?: GoAddonCategory[] | null;
 }
 
 interface GoCategory {
@@ -126,17 +143,22 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       ? num(m.promoPrice)
       : num(m.price);
     const active = m.isActive ? 1 : 0;
+    // trackStock milik server (cermin BE menus.track_stock): server-wins.
+    // Menentukan apakah qty lokal ikut turun saat penjualan + derivasi Habis
+    // (paritas BE orders decrement + filter publik track=false → tampil).
+    const tracked = m.trackStock === true ? 1 : 0;
     await run(
-      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, trackStock, flagActive, syncDate)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET menuName = excluded.menuName,
          categoryId = excluded.categoryId, price = excluded.price,
-         imageUrl = excluded.imageUrl, flagActive = excluded.flagActive,
-         syncDate = excluded.syncDate`,
-      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), active, now],
+         imageUrl = excluded.imageUrl, trackStock = excluded.trackStock,
+         flagActive = excluded.flagActive, syncDate = excluded.syncDate`,
+      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), tracked, active, now],
     );
-    // Stok cabang: habis = trackStock + stockQty <= 0. stationId lokal
-    // dipertahankan (alamat printer milik layar Printer).
+    // Stok cabang: habis = trackStock + stockQty <= 0. stationId +
+    // lowThreshold lokal dipertahankan (printer milik layar Printer; ambang
+    // milik Stock Management — pull tak mengirim keduanya).
     const qty = m.stockQty !== undefined && m.stockQty !== null ? num(m.stockQty) : 0;
     const soldOut = m.trackStock && m.stockQty !== undefined && m.stockQty !== null && num(m.stockQty) <= 0 ? 1 : 0;
     await run(
@@ -147,6 +169,54 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
          syncDate = excluded.syncDate`,
       [branchId, id, qty, soldOut, active, now],
     );
+    // Relasi menu→kategori addon (label "Varian" kartu Stock Management).
+    // Dihapus per-menu lalu ditulis ulang agar kategori yang dilepas di web
+    // ikut hilang (server-wins penuh, pola ms_category di atas).
+    await run('DELETE FROM ms_menuaddon WHERE menuId = ?', [id]);
+    const cats = Array.isArray(m.addonCategories) ? m.addonCategories : [];
+    for (const c of cats) {
+      const cid = String(c?.id ?? '').trim();
+      if (!cid) continue;
+      await run(
+        `INSERT OR IGNORE INTO ms_addoncategory (id, categoryName, flagActive, syncDate)
+         VALUES (?, ?, 1, ?)`,
+        [cid, str(c?.name) ?? cid, now],
+      );
+      await run(
+        `INSERT OR IGNORE INTO ms_menuaddon (menuId, categoryId, syncDate)
+         VALUES (?, ?, ?)`,
+        [id, cid, now],
+      );
+      const items = Array.isArray(c?.addonItems) ? c.addonItems : [];
+      for (const a of items) {
+        const aid = String(a?.id ?? '').trim();
+        if (!aid) continue;
+        const aTracked = a?.trackStock === true ? 1 : 0;
+        const aActive = a?.isActive === false ? 0 : 1;
+        const aPrice = num(a?.price, 0);
+        await run(
+          `INSERT INTO ms_addon (id, categoryId, addonName, price, trackStock, flagActive, syncDate)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET categoryId = excluded.categoryId,
+             addonName = excluded.addonName, price = excluded.price,
+             trackStock = excluded.trackStock, flagActive = excluded.flagActive,
+             syncDate = excluded.syncDate`,
+          [aid, cid, str(a?.name) ?? aid, aPrice, aTracked, aActive, now],
+        );
+        // Stok cabang addon: pola ms_branchmenu; lowThreshold lokal
+        // dipertahankan (pull tak mengirimnya, milik Stock Management).
+        const aQty = a?.stockQty !== undefined && a?.stockQty !== null ? num(a.stockQty) : 0;
+        const aSold = a?.trackStock === true && a?.stockQty !== undefined && a?.stockQty !== null && num(a.stockQty) <= 0 ? 1 : 0;
+        await run(
+          `INSERT INTO ms_branchaddon (branchId, addonId, qty, flagSoldOut, flagActive, syncDate)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(branchId, addonId) DO UPDATE SET qty = excluded.qty,
+             flagSoldOut = excluded.flagSoldOut, flagActive = excluded.flagActive,
+             syncDate = excluded.syncDate`,
+          [branchId, aid, aQty, aSold, aActive, now],
+        );
+      }
+    }
   }
 
   // Mata uang + PPN milik server (cermin currency.ts + totals.ts getTaxRate).
@@ -233,5 +303,13 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
 
   await setWatermark('menu', { pull: now });
   await setWatermark('branchmenu', { pull: now });
-  return { per: { menu: menuItems.length, branchmenu: menuItems.length }, at: now };
+  let addonCount = 0;
+  try {
+    const r = await queryFirst<{ c: number }>('SELECT COUNT(*) AS c FROM ms_addon');
+    addonCount = Number(r?.c ?? 0) || 0;
+  } catch {
+    /* abaikan */
+  }
+  await setWatermark('addon', { pull: now });
+  return { per: { menu: menuItems.length, branchmenu: menuItems.length, addon: addonCount }, at: now };
 }

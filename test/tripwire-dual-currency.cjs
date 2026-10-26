@@ -55,8 +55,11 @@ function run() {
     'DC-a: NOL render SIDEBAR_IDS mentah (semua jalur lewat visibleTabs)');
 
   // ---- (b) Varian label A$ + helper tCur ----
+  // SESI-STOCKMGMT-EXE: 'menu.price_aud' dihapus bersama layarnya — satu-satunya
+  // konsumen tCur('menu.price') (MenuManagementScreen) sudah punah; layar baru
+  // pakai rp() sadar-currency (tanpa kunci _aud). Sisa audKeys = kontrak tCur aktif.
   const audKeys = ['price_aud', 'mem_nominal_label_aud', 'vou_kind_discount_aud',
-    'top_custom_label_aud', 'ongkirNominal_aud', 'discItemRp_aud', 'unitPriceRp_aud', 'menu.price_aud'];
+    'top_custom_label_aud', 'ongkirNominal_aud', 'discItemRp_aud', 'unitPriceRp_aud'];
   const totalsRaw = readRaw('lib/totals.ts');
   const seedRaw = readRaw('lib/seed.ts');
   for (const k of audKeys) {
@@ -73,18 +76,24 @@ function run() {
   const tCurSites = [];
   for (const f of ['screens/cashier/CashierScreen.tsx', 'screens/cashier/CartDetailScreen.tsx',
     'screens/cashier/CustomMenuScreen.tsx', 'screens/member/MemberScreen.tsx',
-    'screens/member/TopupDepositScreen.tsx', 'screens/member/VoucherScreen.tsx',
-    'screens/settings/MenuManagementScreen.tsx']) {
+    'screens/member/TopupDepositScreen.tsx', 'screens/member/VoucherScreen.tsx']) {
     const n = (read(f).match(/tCur\('/g) || []).length;
     if (n) tCurSites.push(`${f}:${n}`);
   }
   const tCurTotal = tCurSites.reduce((a, s) => a + Number(s.split(':')[1]), 0);
-  ok(tCurTotal >= 10, `DC-b: >=10 call-site tCur (ketemu ${tCurTotal}: ${tCurSites.join(', ')})`);
+  ok(tCurTotal >= 8, `DC-b: >=8 call-site tCur (ketemu ${tCurTotal}: ${tCurSites.join(', ')})`);
   ok(/tCur\('ongkirNominal'\)/.test(read('screens/cashier/CashierScreen.tsx')) &&
     /tCur\('discItemRp'\)/.test(read('screens/cashier/CashierScreen.tsx')),
     'DC-b: CashierScreen label nominal via tCur (ongkirNominal, discItemRp)');
-  ok(/tCur\('menu\.price'\)/.test(read('screens/settings/MenuManagementScreen.tsx')),
-    "DC-b: MenuManagementScreen label harga via tCur('menu.price')");
+  // SESI-STOCKMGMT-EXE: MenuManagementScreen → StockManagementScreen (rename).
+  // Layar stok baru tak pakai label tCur('menu.price'); harga inline via rp()
+  // sadar-currency (theme: IDR 'Rp '+rpNum / AUD 'A$'+desimal, paritas FE).
+  const mgmtDc = read('screens/settings/StockManagementScreen.tsx');
+  const mgmtDcRaw = readRaw('screens/settings/StockManagementScreen.tsx');
+  ok(/rp\(row\.price\)/.test(mgmtDc),
+    'DC-b: StockManagementScreen harga via rp() sadar-currency (bukan hardcode)');
+  ok(!/Rp/.test(mgmtDcRaw),
+    'DC-b: StockManagementScreen tanpa literal Rp (A$ via rp() otomatis)');
 
   // ---- (c) Label jam operasional sadar-zona ----
   ok(/idle_hours_val: \{[^}]*\{tz\}/.test(i18n) && /'help\.contact': \{[^}]*\{tz\}/.test(i18n),

@@ -22,7 +22,7 @@ import { uuidv7 } from './uuidv7';
 import { GO_OP_SETTLE, getServerOrderIdForSale, mapPayMethodToBe, type BePayMethod } from './posWire';
 import { burnVoucherAtTerminal } from './terminalVoucher';
 import { getCashSessionId } from './beWorkforce';
-import { getItem, setItem } from './storage';
+import { getItem, getJSON, setItem } from './storage';
 import * as DisplayBus from './display';
 
 const r = (n: number) => Math.round(n);
@@ -557,6 +557,16 @@ export async function saveSale(s: SaleInput): Promise<string> {
       headStatus, queueNumber, cashier, now, now,
     ],
   );
+  // Opt global pelacakan perangkat (LS_OPTS layar Stok): bila kasir
+  // mematikan pelacakan, penjualan tak menurunkan qty (flag Habis ikut tak
+  // diturunkan) — cermin Derivasi kanonis stockWrite.
+  let deviceTrack = true;
+  try {
+    const o = await getJSON<{ trackStock?: boolean }>('genfity.stock.opts', {});
+    if (o && o.trackStock === false) deviceTrack = false;
+  } catch {
+    /* abaikan */
+  }
   for (const it of items) {
     // Id baris dipakai ulang sebagai salesMenuId extras agar move/split
     // menemukan addon-nya (sebelumnya extras menunjuk id cart -> orphan).
@@ -581,15 +591,26 @@ export async function saveSale(s: SaleInput): Promise<string> {
         [uid('se'), smId, salesNum, clientId, m.name, m.name, it.qty, r(m.price), r(m.price * it.qty)],
       );
     }
-    // Stok cabang ikut turun per item terjual (qty NULL = tak dilacak, tak
-    // diubah); tembus <= 0 otomatis flagSoldOut agar kasir + alert low-stock
-    // Dashboard konsisten (paritas logika StockScreen; opt allowSellEmpty
-    // bisa membuka lagi dari layar Stok). Custom-menu (tanpa baris
-    // branchmenu) tak kena apa-apa.
+    // Stok cabang ikut turun per item terjual HANYA bila dilacak server
+    // (cermin BE orders decrement: AND track_stock = true). qty NULL = tak
+    // dilacak, tak diubah; tembus <= 0 otomatis flagSoldOut agar kasir +
+    // alert low-stock Dashboard konsisten (paritas aturan kanonis
+    // stockWrite; opt allowSellEmpty membuka lagi dari layar Stok).
+    // Custom-menu (tanpa baris branchmenu) tak kena apa-apa.
     try {
       const branch = branchId;
       const soldQty = Math.max(0, Math.round(Number(it.qty) || 0));
-      if (branch && it.id && soldQty > 0) {
+      let tracked = true;
+      try {
+        const tw = await queryFirst<{ trackStock: number | null }>(
+          'SELECT trackStock FROM ms_menu WHERE id = ?',
+          [String(it.id ?? '')],
+        );
+        if (tw && (tw.trackStock ?? 1) === 0) tracked = false;
+      } catch {
+        /* anggap dilacak (perilaku lama) */
+      }
+      if (branch && it.id && soldQty > 0 && tracked && deviceTrack) {
         await run(
           `UPDATE ms_branchmenu SET qty = qty - ?, syncDate = NULL
             WHERE branchId = ? AND menuId = ? AND qty IS NOT NULL`,

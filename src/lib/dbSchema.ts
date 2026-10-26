@@ -117,11 +117,12 @@ export const SCHEMA_STATEMENTS: string[] = [
   // --- Master katalog ---
   `CREATE TABLE IF NOT EXISTS ms_branchmenu (
     branchId TEXT NOT NULL, menuId TEXT NOT NULL, stationId TEXT, qty REAL DEFAULT 0,
-    flagSoldOut INTEGER DEFAULT 0, flagActive INTEGER DEFAULT 1, syncDate TEXT,
+    lowThreshold INTEGER, flagSoldOut INTEGER DEFAULT 0, flagActive INTEGER DEFAULT 1, syncDate TEXT,
     PRIMARY KEY (branchId, menuId))`,
   `CREATE TABLE IF NOT EXISTS ms_menu (
     id TEXT PRIMARY KEY, menuName TEXT, categoryId TEXT, price REAL DEFAULT 0,
-    imageUrl TEXT, stationId TEXT, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+    imageUrl TEXT, stationId TEXT, trackStock INTEGER DEFAULT 1,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_category (
     id TEXT PRIMARY KEY, categoryName TEXT, sortOrder INTEGER DEFAULT 0,
     flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
@@ -183,6 +184,25 @@ export const SCHEMA_STATEMENTS: string[] = [
     menuId TEXT PRIMARY KEY, menuName TEXT, price REAL DEFAULT 0,
     stock REAL DEFAULT 0, gofoodId TEXT, grabId TEXT,
     flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  // Stock Management (menu + addon, cermin BE menus/addon_items + FE
+  // InventoryPanel): master addon dari pull /pos/menu (posMenuAddonCategory/
+  // posMenuAddonItem), stok cabang per-addon di ms_branchaddon (pola
+  // ms_branchmenu). trackStock server-wins; lowThreshold lokal (pull tak
+  // mengirimnya, di-push via branch-menu). ms_menuaddon = relasi menu→kategori
+  // addon untuk label "Varian" di kartu menu.
+  `CREATE TABLE IF NOT EXISTS ms_addoncategory (
+    id TEXT PRIMARY KEY, categoryName TEXT,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_addon (
+    id TEXT PRIMARY KEY, categoryId TEXT, addonName TEXT, price REAL DEFAULT 0,
+    trackStock INTEGER DEFAULT 1, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ms_menuaddon (
+    menuId TEXT NOT NULL, categoryId TEXT NOT NULL, syncDate TEXT,
+    PRIMARY KEY (menuId, categoryId))`,
+  `CREATE TABLE IF NOT EXISTS ms_branchaddon (
+    branchId TEXT NOT NULL, addonId TEXT NOT NULL, qty REAL DEFAULT 0,
+    lowThreshold INTEGER, flagSoldOut INTEGER DEFAULT 0, flagActive INTEGER DEFAULT 1, syncDate TEXT,
+    PRIMARY KEY (branchId, addonId))`,
   // Log aplikasi lokal (LogScreen): tulis-lokal saja, tanpa syncDate/push.
   `CREATE TABLE IF NOT EXISTS tr_applog (
     id TEXT PRIMARY KEY, level TEXT, tag TEXT, message TEXT, detail TEXT,
@@ -266,6 +286,12 @@ export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE tr_sales_seq ADD COLUMN deviceTag TEXT NOT NULL DEFAULT \'\'',
   // M1 (loyalty): email capture member untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE ms_member ADD COLUMN email TEXT',
+  // Stock Management: flag lacak stok menu milik server (cermin BE
+  // menus.track_stock; pull server-wins) + ambang rendah lokal per baris
+  // cabang (pull tak mengirimnya; di-push via branch-menu). Instalasi lama
+  // (gagal = sudah ada).
+  'ALTER TABLE ms_menu ADD COLUMN trackStock INTEGER DEFAULT 1',
+  'ALTER TABLE ms_branchmenu ADD COLUMN lowThreshold INTEGER',
   // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
   // idempoten; gagal = sudah ada).
   `CREATE TABLE IF NOT EXISTS tr_voidtrail (

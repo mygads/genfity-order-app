@@ -73,7 +73,7 @@ import SyncScreen from './src/screens/settings/SyncScreen';
 import LogScreen from './src/screens/settings/LogScreen';
 import AboutScreen from './src/screens/settings/AboutScreen';
 import HelpScreen from './src/screens/settings/HelpScreen';
-import MenuManagementScreen from './src/screens/settings/MenuManagementScreen';
+import StockManagementScreen from './src/screens/settings/StockManagementScreen';
 import IdleScreen from './src/screens/display/IdleScreen';
 import TopupDepositScreen from './src/screens/member/TopupDepositScreen';
 import PettyCashScreen from './src/screens/cash/PettyCashScreen';
@@ -445,7 +445,7 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
       <Stack.Screen name="Log" component={LogScreen} options={{ title: t('title_log'), headerShown: false }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ title: t('title_about'), headerShown: false }} />
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: t('title_help'), headerShown: false }} />
-      <Stack.Screen name="MenuManagement" component={MenuManagementScreen} options={{ title: t('title_menu'), headerShown: false }} />
+      <Stack.Screen name="StockManagement" component={StockManagementScreen} options={{ title: t('stockMgmt.title'), headerShown: false }} />
       <Stack.Screen name="Idle" component={IdleScreen} options={{ title: t('title_idle'), headerShown: false }} />
       <Stack.Screen name="TopupDeposit" component={TopupDepositScreen} options={{ title: t('title_topup'), headerShown: false }} />
       <Stack.Screen name="PettyCash" component={PettyCashScreen} options={{ title: t('title_petty'), headerShown: false }} />
@@ -583,7 +583,7 @@ export default function App() {
             /* DB belum siap - notifikasi tetap dikirim */
           }
           void notifyLocal(tr('ws.soldoutTitle'), `${menuId} - ${tr('ws.soldoutBody')}`, {
-            route: 'MenuManagement',
+            route: 'StockManagement',
             menuId,
           });
         })();

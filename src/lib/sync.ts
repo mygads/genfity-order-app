@@ -20,7 +20,7 @@ import { getItem, setItem, getJSON } from './storage';
 import { logoutRevoke } from './terminalApi';
 // HP-E2E (2026-10-26): drain expense via handoff terminal (terminalExpense
 // TAK mengimpor sync — arah impor satu arah, tanpa siklus).
-import { isRemotePhoto, postExpenseToTerminal } from './terminalExpense';
+import { boundTerminalId, isRemotePhoto, postExpenseToTerminal } from './terminalExpense';
 import { uuidv7 } from './uuidv7';
 import {
   ALLOWED_BE_TRANSITIONS,
@@ -205,11 +205,12 @@ function hydrate(): void {
 
 /**
  * Endpoint push per tabel. Tabel master (ms_*) local-only (M9-3): backend Go
- * tak punya domain/ep push master (cek schema.sql: tanpa tabel menu) dan
- * pull master server-wins — sehingga dikembalikan null dan tidak dikirim ke
- * order/finish. Keputusan M9-3: push-master tak didefinisikan; sebagai ganti
- * edit master dinyatakan local-only jujur di UI (master.localOnlyNote +
- * kartu "Hanya di perangkat ini" di SyncScreen).
+ * tak punya endpoint push master generik dan pull master server-wins —
+ * sehingga dikembalikan null dan tidak dikirim ke order/finish. (Kecuali
+ * ms_branchmenu/ms_branchaddon: Opsi A memberi endpoint push terminal khusus
+ * (ApiPath.pushBranchMenu) yang dikuras via pushBranchMenuPhysicalRow —
+ * BUKAN via tablePushPath ini, karena butuh substitusi {id} terminal + baca
+ * qty/ambang LIVE. Pull tetap server-wins sehingga dapat menimpa edit lokal.)
  */
 function tablePushPath(table: string): string | null {
   if (table === 'tr_branchexpense' || table === 'tr_branchexpensedocument') return ApiPath.pushExpense;
@@ -292,15 +293,18 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
   return ApiPath.pushOrderFinish;
 }
 
-// M9-3 (diputuskan): endpoint push master (sold-out / branch-menu /
-// station) TIDAK didefinisikan — backend Go tak punya domain master
+// M9-3 (diputuskan, SEBAGIAN tertutup Opsi A): endpoint push master (sold-out
+// / station) TIDAK didefinisikan — backend Go tak punya domain master
 // (tanpa tabel menu di schema.sql) sehingga kontrak push-master butuh
 // proyek lintas-repo tersendiri, bukan tambahan path di sini. Sebagai ganti:
 // edit master = local-only jujur (status 'lokal' + kartu SyncScreen +
-// master.localOnlyNote di layar penyunting). Bila BE kelak punya domain
-// master (mis. main/update-branch-menu), daftarkan di ApiPath +
-// tablePushPath dan aktifkan lagi antrean ringan untuk ms_* di
-// enqueueOutbox.
+// master.localOnlyNote di layar penyunting). PENGECUALIAN Opsi A:
+// ms_branchmenu + ms_branchaddon kini PUNYA endpoint (POST
+// api/v1/terminals/{id}/branch-menu, BE TerminalBranchMenuUpdate, type
+// menu|addon) — dikuras via pushBranchMenuPhysicalRow.
+// Antrean RINGAN (light twin via pathFor/tablePushPath) tetap mati untuk
+// SEMUA ms_* termasuk keduanya (butuh substitusi {id} + live-read yang
+// hanya ada di drain fisik); yang aktif = antrean FISIK keduanya.
 
 // ---------------------------------------------------------------------------
 // GO-POS COMPAT (wire-app): backend Go TIDAK melayani path bentuk-ESB
@@ -1169,10 +1173,142 @@ async function pushExpensePhysicalRow(row: PhysicalQueueRow): Promise<'sent' | '
 }
 
 /**
+ * Opsi A penutup M9-3: kuras satu baris fisik ms_branchmenu (menu) /
+ * ms_branchaddon (addon) via endpoint terminal Go
+ * (POST api/v1/terminals/{id}/branch-menu, absolute-set type menu|addon).
+ * 'sent' = DELETE + markClean + watermark; 'failed' = 'gagal' jujur (retry);
+ * 'skipped' = racun _dead4xx (tak dihitung, tak trip breaker; kartu tetap
+ * 'gagal'). Qty + ambang dibaca LIVE saat drain (bukan payload antrean)
+ * sehingga edit beruntun koalesensi — last-write-wins aman.
+ * 401 = apiFetch yang mengurus (silent-refresh sekali → logout); helper tak
+ * pernah melempar agar drain tak mati.
+ */
+async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
+  // APP-8: racun deterministik yang sudah ditandai = lewati diam-diam.
+  try {
+    if (row.payload) {
+      const pm = JSON.parse(row.payload) as Record<string, unknown>;
+      if (pm && typeof pm._dead4xx === 'string' && (pm._dead4xx as string)) return 'skipped';
+    }
+  } catch {
+    /* payload rusak = coba kirim apa adanya di bawah */
+  }
+  const table = String(row.tableName ?? '');
+  const isAddon = table === 'ms_branchaddon';
+  const idCol = isAddon ? 'addonId' : 'menuId';
+  const bodyType = isAddon ? 'addon' : 'menu';
+  const composite = String(row.orderID ?? '').trim();
+  const sep = composite.lastIndexOf(':');
+  const branch = sep > 0 ? composite.slice(0, sep).trim() : '';
+  const menuIdRaw = sep > 0 ? composite.slice(sep + 1).trim() : '';
+  const numId = Number(menuIdRaw);
+  if (!branch || !menuIdRaw || !Number.isFinite(numId) || Math.round(numId) <= 0) {
+    // Baris racun (format id gabungan rusak) = DELETE agar tak starvasi drain.
+    try {
+      await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  }
+  const tid = boundTerminalId();
+  if (!tid) return 'failed'; // unbound = retry setelah claim; baris utuh.
+  let live: { qty: number | null; lowThreshold: number | null } | null = null;
+  try {
+    await initDb();
+    live = await queryFirst<{ qty: number | null; lowThreshold: number | null }>(
+      `SELECT qty, lowThreshold FROM ${isAddon ? 'ms_branchaddon' : 'ms_branchmenu'} WHERE branchId = ? AND ${idCol} = ?`,
+      [branch, menuIdRaw],
+    );
+  } catch {
+    return 'failed';
+  }
+  if (!live) {
+    // Baris sumber dihapus lokal (menu dihapus) = tak ada yang dikirim.
+    try {
+      await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+    } catch {
+      /* abaikan */
+    }
+    return 'sent';
+  }
+  const qty = Math.max(0, Math.round(Number(live.qty) || 0));
+  const lt = live.lowThreshold === null || live.lowThreshold === undefined
+    ? null
+    : Math.max(0, Math.min(100000, Math.round(Number(live.lowThreshold))));
+  const markFailed = async (dead?: string): Promise<'failed'> => {
+    try {
+      if (dead) {
+        await run('UPDATE tr_esoprocessqueue SET status = ?, payload = ? WHERE id = ?', [
+          'gagal',
+          JSON.stringify({ table, rowId: composite, op: row.op, _dead4xx: dead }),
+          row.id,
+        ]);
+      } else {
+        await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+      }
+    } catch {
+      /* abaikan */
+    }
+    return 'failed';
+  };
+  const codeOf = (body: unknown): string => {
+    try {
+      const b = body as Record<string, unknown>;
+      const v = b?.error ?? (b?.data as Record<string, unknown> | undefined)?.error;
+      return typeof v === 'string' ? v.trim() : '';
+    } catch {
+      return '';
+    }
+  };
+  try {
+    const path = ApiPath.pushBranchMenu.replace('{id}', encodeURIComponent(tid));
+    const r = await apiFetch(path, {
+      method: 'POST',
+      body: lt === null
+        ? { type: bodyType, id: Math.round(numId), stockQty: qty }
+        : { type: bodyType, id: Math.round(numId), stockQty: qty, lowStockThreshold: lt },
+    });
+    // local/dummy/offline-buta = retry, bukan sukses palsu.
+    if (!r || r.fromDummy) return markFailed();
+    if (r.ok) {
+      try {
+        await run('DELETE FROM tr_esoprocessqueue WHERE id = ?', [row.id]);
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await markClean(table, composite);
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await setWatermark(table, { push: new Date().toISOString() });
+      } catch {
+        /* abaikan */
+      }
+      return 'sent';
+    }
+    // Opname DRAFT berjalan di server = retry jujur (tanpa marker racun).
+    if (r.status === 409 && /STOCK_COUNT_IN_PROGRESS/i.test(codeOf(r.data))) return markFailed();
+    // 4xx deterministik (menu tak dikenal/validasi) = racun: tandai _dead4xx
+    // agar siklus berikut 'skipped' ala APP-8 (kartu tetap 'gagal').
+    if (r.status >= 400 && r.status < 500) {
+      return markFailed(`HTTP ${r.status}${codeOf(r.data) ? ` ${codeOf(r.data)}` : ''}`.slice(0, 32));
+    }
+    return markFailed();
+  } catch {
+    return markFailed();
+  }
+}
+
+/**
  * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
  * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
- * (ms_*, local-only M9-3) atau tanpa endpoint push. Untuk ms_* pemanggil
- * (drain) memfinalkan status 'lokal' — bukan antre, bukan gagal.
+ * lain (ms_* local-only M9-3) atau tanpa endpoint push — ms_branchmenu dan
+ * ms_branchaddon DIKECUALIKAN (Opsi A: drain sendiri via
+ * pushBranchMenuPhysicalRow). Untuk ms_* pemanggil (drain) memfinalkan
+ * status 'lokal' — bukan antre, bukan gagal.
  *
  * HP-E2E (2026-10-26): tr_branchexpense TIDAK lewat tablePushPath — path ESB
  * legacy (v1/push/branch-expenses) 404 vs Go → 'gagal' tiap push + trip
@@ -1181,7 +1317,12 @@ async function pushExpensePhysicalRow(row: PhysicalQueueRow): Promise<'sent' | '
  */
 async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
   const table = String(row.tableName ?? '');
-  // Master (ms_*) local-only (M9-3): backend Go tak punya endpoint push
+  // Opsi A (penutup M9-3): ms_branchmenu PUNYA endpoint push terminal
+  // (ApiPath.pushBranchMenu) — kuras via helper di atas (baca qty LIVE saat
+  // drain agar edit beruntun koalesensi, last-write-wins). ms_* LAIN tetap
+  // local-only (tanpa endpoint push) + pull server-wins.
+  if (table === 'ms_branchmenu' || table === 'ms_branchaddon') return pushBranchMenuPhysicalRow(row);
+  // Master lain (ms_*, local-only M9-3): backend Go tak punya endpoint push
   // master dan pull server-wins menimpa edit lokal. Jangan kirim.
   if (!table || table.startsWith('ms_')) return 'skipped';
   // HP-E2E-FIX (2026-10-26): expense → handoff terminal Go (lihat helper).
@@ -1672,7 +1813,12 @@ export async function pushAll(): Promise<PushResult> {
         failed += 1;
         consecFails += 1;
       } else if (
-        String(e.row.tableName ?? '').startsWith('ms_') ||
+        // Opsi A: ms_branchmenu/ms_branchaddon DIKECUALIKAN — sudah punya
+        // drain sendiri (pushBranchMenuPhysicalRow); 'skipped' darinya = racun
+        // _dead4xx yang kartunya tetap 'gagal' (bukan 'lokal').
+        (String(e.row.tableName ?? '').startsWith('ms_') &&
+          String(e.row.tableName ?? '') !== 'ms_branchmenu' &&
+          String(e.row.tableName ?? '') !== 'ms_branchaddon') ||
         // HP-E2E-FIX (2026-10-24): tr_shiftlog ikut difinalkan 'lokal'
         // (lihat pushPhysicalRow — absensi offline-only, shift dibawa W1).
         String(e.row.tableName ?? '') === 'tr_shiftlog'
@@ -2640,6 +2786,8 @@ export async function enqueueOutbox(
   // Tabel master tidak masuk antrean ringan: kontrak §5 tidak punya endpoint
   // push master sehingga pengiriman ke order/finish adalah endpoint salah
   // (M9-3). Perubahan tetap tersimpan lokal (syncDate NULL + outbox fisik).
+  // Opsi A: fisik ms_branchmenu DIKURAS via pushBranchMenuPhysicalRow
+  // (endpoint terminal khusus); ms_* lain tetap 'lokal' di drain.
   if (table.startsWith('ms_')) return;
   try {
     enqueueSync('other', { table, rowId, op });

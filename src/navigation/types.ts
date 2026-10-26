@@ -78,7 +78,9 @@ export type RootStackParamList = {
   Log: undefined;
   About: undefined;
   Help: undefined;
-  MenuManagement: undefined;
+  /** Cermin FE /admin/dashboard/menu/stock: kelola stok + tandai habis
+      per menu dan per addon/varian. */
+  StockManagement: undefined;
   Idle: undefined;
   TopupDeposit: { memberId?: string; nama?: string; saldo?: number } | undefined;
   PettyCash: undefined;

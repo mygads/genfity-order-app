@@ -3,8 +3,10 @@
 //  C-01: lib/catalogImages — prefetch via Image.prefetch bawaan RN
 //        (TANPA expo-file-system/sharing), cache sesi + cap, fail-closed
 //        (tak pernah melempar), hanya https≤2048.
-//  C-02: MenuManagement downloadImage — URL valid → prefetch verifikasi;
-//        'ok' HANYA bila prefetch sukses (gagal = missing + imgFail).
+//  C-02: StockManagement lazy-prefetch — tiap imageUrl unik →
+//        prefetchCatalogImage(u, 8000) fire-and-forget saat load;
+//        re-render (imgRev) bila ada yang terverifikasi; offline/gagal =
+//        placeholder (fail-closed, tanpa tombol unduh per-item).
 //  C-03: render graceful — remote HANYA bila isCatalogImageReady;
 //        onError → placeholder lokal (tanpa ikon rusak); tanpa URL =
 //        placeholder seperti dulu.
@@ -43,18 +45,20 @@ function run() {
   ok(/\.catch\(\(\) => false\)/.test(libRaw),
     'C-01: fail-closed (tak pernah melempar)');
 
-  // ---- C-02: downloadImage ----
-  const menu = read('screens/settings/MenuManagementScreen.tsx');
-  const menuRaw = readRaw('screens/settings/MenuManagementScreen.tsx');
+  // ---- C-02: lazy prefetch saat load (pengganti tombol unduh per-item) ----
+  const menu = read('screens/settings/StockManagementScreen.tsx');
+  const menuRaw = readRaw('screens/settings/StockManagementScreen.tsx');
   ok(/prefetchCatalogImage/.test(menu),
-    'C-02: downloadImage verifikasi via prefetchCatalogImage');
-  ok(/const okFetch = await prefetchCatalogImage\(url\)/.test(menuRaw),
-    'C-02: ok HANYA bila prefetch sukses (gagal = missing + imgFail)');
+    'C-02: StockManagement verifikasi thumb via prefetchCatalogImage');
+  ok(/prefetchCatalogImage\(u, 8000\)/.test(menuRaw),
+    'C-02: prefetch tiap URL unik saat load (fire-and-forget, timeout 8s)');
+  ok(/setImgRev\(\(x\) => x \+ 1\)/.test(menuRaw),
+    'C-02: re-render setelah verifikasi (placeholder → remote)');
   ok(!/downloadAsync/.test(menuRaw),
     'C-02: tanpa downloadAsync (dep tak ada — URL remote dipakai apa adanya)');
 
   // ---- C-03: render graceful ----
-  ok(/isCatalogImageReady\(m\.imageUrl\)/.test(menuRaw),
+  ok(/isCatalogImageReady\(row\.imageUrl\)/.test(menuRaw),
     'C-03: remote HANYA bila terverifikasi prefetch');
   ok(/onError=/.test(menuRaw) && /noteCatalogImageError/.test(menu),
     'C-03: onError → placeholder lokal (tanpa ikon rusak)');
