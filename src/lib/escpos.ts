@@ -8,6 +8,12 @@ export interface EscItem {
   name: string;
   qty: number;
   price: number;
+  /** Catatan item (★ di website; `*` ASCII di thermal). APP-11: hanya diisi
+   * bila template aktif + showItemNotes; legacy tak mengoper = tak tampil. */
+  note?: string;
+  /** Modifier/addon (nama + harga satuan). APP-11: hanya diisi bila template
+   * aktif + showAddons; harga satuan tampil bila showAddonPrices. */
+  addons?: { name: string; price: number }[];
 }
 
 export interface EscReceipt {
@@ -57,6 +63,19 @@ export interface EscReceipt {
    *  label / station tanpa autocut). Diisi pemanggil dari station.autocut ??
    *  setelan global autocut. */
   cut?: boolean;
+  /** APP-11: baris kontak header (telpon/email) dari template website
+   * (showPhone/showEmail). Absen = tak dirender (byte-identik legacy). */
+  contact?: string;
+  /** APP-11: baris terima-kasih. undefined = 'Terima kasih' (legacy);
+   * string kosong = sembunyikan (template showThankYouMessage=false). */
+  thanks?: string;
+  /** APP-11: baris branding "Powered by Genfity" (template
+   * showGenfityBranding). Absen = tak dirender (byte-identik legacy). */
+  branding?: string;
+  /** APP-11: sembunyikan baris Subtotal / TOTAL (template showSubtotal /
+   * showTotal mati). Absen/false = tampil (byte-identik legacy). */
+  hideSubtotal?: boolean;
+  hideTotal?: boolean;
   total: number;
   method?: string;
   /** Tunai diterima (Rp). */
@@ -233,7 +252,9 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   }
   push(out, ESC, 0x61, 1); // rata tengah
   push(out, GS, 0x21, 0x11); // judul 2x
-  text(out, r.shop);
+  // APP-11: shop kosong = baris nama disembunyikan (template showMerchantName
+  // mati); legacy selalu mengoper non-kosong sehingga byte-identik.
+  if (r.shop) text(out, r.shop);
   push(out, GS, 0x21, 0x00); // ukuran normal
   if (r.addr) text(out, r.addr);
   if (r.trx) text(out, r.trx);
@@ -247,11 +268,19 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   const money = (n: number): string => escMoney(n, r.currency);
   for (const i of r.items) {
     row2(out, `${i.qty}x ${i.name}`, money(i.qty * i.price), cols);
+    if (i.note) text(out, `  * ${i.note}`);
+    for (const a of i.addons ?? []) {
+      // Harga addon: kanan bila >0 (cermin kertas `+ nama Rp`), nama saja
+      // bila 0 (showAddonPrices mati di pemanggil).
+      if (a.price > 0) row2(out, `  + ${a.name}`, money(a.price * i.qty), cols);
+      else text(out, `  + ${a.name}`);
+    }
   }
   text(out, '-'.repeat(cols));
   // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
   // eksklusif → tip (terusan) → PPN info-only → feeESB → voucher → ongkir → rounding → total.
-  row2(out, 'Subtotal', money(r.subtotal), cols);
+  // APP-11: hideSubtotal/hideTotal = toggle website; legacy tak mengoper.
+  if (!r.hideSubtotal) row2(out, 'Subtotal', money(r.subtotal), cols);
   if (r.discount) row2(out, 'Diskon', `-${money(r.discount)}`, cols);
   if (r.service) row2(out, r.serviceLabel ?? 'Service 5%', money(r.service), cols);
   if (r.tip) row2(out, 'Tip', `+${money(r.tip)}`, cols);
@@ -264,9 +293,11 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.ongkir) row2(out, 'Ongkir', money(r.ongkir), cols);
   if (r.ongkirCut) row2(out, 'Potongan Ongkir', `-${money(r.ongkirCut)}`, cols);
   if (r.rounding) row2(out, 'Pembulatan', money(r.rounding), cols);
-  push(out, ESC, 0x45, 1); // tebal
-  row2(out, 'TOTAL', money(r.total), cols);
-  push(out, ESC, 0x45, 0);
+  if (!r.hideTotal) {
+    push(out, ESC, 0x45, 1); // tebal
+    row2(out, 'TOTAL', money(r.total), cols);
+    push(out, ESC, 0x45, 0);
+  }
   if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${money(r.paid)}` : r.method, cols);
   if (r.change) row2(out, 'Kembali', money(r.change), cols);
   if (r.qr) {
@@ -274,7 +305,14 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
     for (const b of buildQrBytes(r.qr)) out.push(b);
   }
   push(out, ESC, 0x61, 1);
-  text(out, r.footer ?? 'Terima kasih');
+  // APP-11: kontak header + thanks/branding dari template; default
+  // thanks = 'Terima kasih' menjaga byte-identik legacy bila pemanggil
+  // tak mengoper thanks (test-print station, arsip lama).
+  if (r.contact) text(out, r.contact);
+  const thanks = r.thanks === undefined ? 'Terima kasih' : r.thanks;
+  if (thanks) text(out, thanks);
+  if (r.footer) text(out, r.footer);
+  if (r.branding) text(out, r.branding);
   push(out, LF, LF, LF, LF);
   if (r.cut !== false) push(out, GS, 0x56, 0x00); // potong kertas
   return Uint8Array.from(out);

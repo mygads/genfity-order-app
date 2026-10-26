@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';import { getCachedCurrency } from '../../lib/currency';import { fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run, all } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getServerOrderIdForSale, isInvoiceEmailEnabled, sendPosReceiptEmail, serverIdForTxnKey } from '../../lib/posWire';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';import { getReceiptPrefs, RECEIPT_PREFS_DEFAULT, type ReceiptPrefs } from '../../lib/posSyncReceipt';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; packaging?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; memberLine?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';import { getCachedCurrency } from '../../lib/currency';import { fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { initDb, run, all } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getServerOrderIdForSale, isInvoiceEmailEnabled, sendPosReceiptEmail, serverIdForTxnKey } from '../../lib/posWire';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';import { getReceiptPrefs, RECEIPT_PREFS_DEFAULT, type ReceiptPrefs } from '../../lib/posSyncReceipt';
+import { getReceiptTemplateToggles, hasReceiptTemplate, RECEIPT_TEMPLATE_DEFAULTS, type ReceiptTemplateToggles } from '../../lib/receiptTemplate';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; packaging?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; memberLine?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); // Tanpa params = nilai kosong yang jujur (bukan TRX/#148/QRIS/Bawa Pulang karangan).
@@ -44,6 +45,11 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const subtotal  = hasItems ? itemsSum : Math.max(0, total + discount + ongkirCut - ongkir - service - rounding - packaging - feeESB - tip);
 
   const cashierLine = [route?.params?.cashier ?? getSession()?.name ?? getSession()?.username ?? '', route?.params?.table ?? route?.params?.customer ?? ''].filter((s) => s && s.trim()).join(' · ');
+  // APP-11: pecahan kasir vs meja/pelanggan untuk gerbang template terpisah
+  // (website: ShowCashierName vs ShowTableNumber vs ShowCustomer*).
+  const cashierNameOnly = route?.params?.cashier ?? getSession()?.name ?? getSession()?.username ?? '';
+  const tableCustRaw = route?.params?.table ?? route?.params?.customer ?? '';
+  const tableCustIsTable = (route?.params?.table ?? '') !== '';
   // Ronde-3 Q3: baris member minimal pra-format dari Success (nama samar +
   // poin + voucher); tampil bila dikirim pemanggil. Dideklarasikan di atas
   // (paper/shareText di bawah memakainya).
@@ -64,17 +70,49 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   // kosong = baris alamat disembunyikan.
   // A3: preferensi struk server-wins (ms_setting Receipt/..., default tampil
   // semua). Params eksplisit pemanggil tetap menang atas preferensi.
-  const [rcPrefs, setRcPrefs] = useState<ReceiptPrefs>(RECEIPT_PREFS_DEFAULT);/** Label service mengikuti knob server (audit trisisi #1); nilai service tetap dari pemanggil (angka resmi rantai). */const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);useEffect(() => { let alive = true; void getServiceConfig().then((c) => { if (alive) setSvcCfg(c); }); return () => { alive = false; }; }, []);
+  const [rcPrefs, setRcPrefs] = useState<ReceiptPrefs>(RECEIPT_PREFS_DEFAULT);
+  // APP-11: template struk website (server-wins). tplOn = merchant punya
+  // template aktif (pernah pull TemplateJSON); mati = perilaku lama
+  // byte-identik di kertas, thermal, dan teks bagikan.
+  const [tpl, setTpl] = useState<ReceiptTemplateToggles>({ ...RECEIPT_TEMPLATE_DEFAULTS });
+  const [tplOn, setTplOn] = useState(false);/** Label service mengikuti knob server (audit trisisi #1); nilai service tetap dari pemanggil (angka resmi rantai). */const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);useEffect(() => { let alive = true; void getServiceConfig().then((c) => { if (alive) setSvcCfg(c); }); return () => { alive = false; }; }, []);
   const shopName = route?.params?.shopName ?? getTerminal().branchName ?? 'Genfity';
   const shopAddr = route?.params?.shopAddr ?? '';
   // A3: footer default dari preferensi server bila pemanggil tak mengoper.
-  const customFooter = route?.params?.footer ?? (rcPrefs.showFooter ? rcPrefs.footerText : '');
+  // APP-11: bila template aktif, footer/thanks/QR/branding ikut toggle
+  // website; footer param pemanggil tetap menang di kedua mode.
+  const tp = tplOn ? tpl : null;
+  const tplLang: 'id' | 'en' = tpl.receiptLanguage ?? lang;
+  const customFooter = route?.params?.footer
+    ?? (tplOn
+      ? (tpl.showCustomFooterText ? (tpl.customFooterText ?? '') : '')
+      : (rcPrefs.showFooter ? rcPrefs.footerText : ''));
+  const thanksText = !tplOn
+    ? t('rc_thanks')
+    : (tpl.showThankYouMessage
+      ? (tpl.customThankYouMessage || (tplLang === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!'))
+      : '');
+  // Website: "Powered by <domain-frontend>"; domain milik BE (FrontendURL)
+  // tak dikenal HP sehingga HP memakai nama brand saja (deviasi tercatat).
+  const brandingText = tplOn && tpl.showGenfityBranding
+    ? (tplLang === 'en' ? 'Powered by Genfity' : 'Diberdayakan oleh Genfity')
+    : '';
+  // Baris kasir versi template: nama kasir vs meja/pelanggan digerbang
+  // terpisah ala website (ShowCashierName vs ShowTableNumber vs ShowCustomer*).
+  const cashierLineTpl = [
+    tpl.showCashierName ? cashierNameOnly : '',
+    (tableCustIsTable ? tpl.showTableNumber : (tpl.showCustomerName || tpl.showCustomerPhone)) ? tableCustRaw : '',
+  ].filter((s) => s && s.trim()).join(' · ');
+  const cashierLineShown = tplOn ? cashierLineTpl : cashierLine;
   // APP-PRINTER-SALES (Q7): QR struk membawa client_id rantai bayar (kunci
   // upsert server). Kosong = struk tanpa QR (arsip lama / tanpa rantai).
   // R24: sale void penuh tak membawa QR bayar.
-  const receiptQr = rcPrefs.showQris && !isVoidSale && (route?.params?.clientId ?? '').trim() && no
+  // APP-11: gerbang QR = showTrackingQRCode bila template aktif (legacy:
+  // rcPrefs.showQris — hasil identik bila tpl mati).
+  const receiptQrBase = !isVoidSale && (route?.params?.clientId ?? '').trim() && no
     ? buildSaleQrPayload((route?.params?.clientId ?? '').trim(), no, Math.round(total))
     : '';
+  const receiptQr = (tplOn ? tpl.showTrackingQRCode : rcPrefs.showQris) ? receiptQrBase : '';
   // P12: kunjungan split = nominal + metode kunjungan ini (cermin Success —
   // navigation/types Receipt sudah membawa splitPaid, layar wajib merender).
   const splitPaidAmt = Math.max(0, Math.round(Number(route?.params?.splitPaid?.amount) || 0));
@@ -86,6 +124,20 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
     void getReceiptPrefs().then((p) => {
       if (alive) setRcPrefs(p);
     });
+    // APP-11: template website efektif (async; default perilaku-lama bila
+    // merchant belum pull / BE lama tanpa endpoint template).
+    void (async () => {
+      try {
+        const on = await hasReceiptTemplate();
+        const tg = await getReceiptTemplateToggles();
+        if (alive) {
+          setTplOn(on);
+          setTpl(tg);
+        }
+      } catch {
+        /* abaikan — legacy */
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -104,7 +156,7 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
       appAlert(t('hist_deny_title'), t('rc_void_title'));
       return;
     }
-    setPrinting(true); setPrintQueued(false); try { const res = await printForTag({ receipt: { shop: shopName.toUpperCase(), addr: shopAddr, trx: `No: ${no} - ${modeLabel}`, cashier: cashierLine, datetime: `${todayId} ${timeId}`, currency: getCachedCurrency().code, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), })), subtotal: Math.round(subtotal), ...(discount > 0 ? { discount: Math.round(discount) } : {}), ...(service > 0 ? { service, serviceLabel: serviceLabel(t, svcCfg) } : {}), ...(tax > 0 && rcPrefs.showTax ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(packaging > 0 ? { packaging } : {}), ...(tip > 0 ? { tip } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 ? { ongkir: Math.round(ongkir) } : {}), ...(ongkirCut > 0 ? { ongkirCut: Math.round(ongkirCut) } : {}), ...(isUnpaidPreview ? { unpaid: true } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), method, ...(isCash && cash > 0 ? { paid: Math.round(cash), change: Math.round(change) } : {}), ...(customFooter ? { footer: customFooter } : {}), ...(receiptQr ? { qr: receiptQr } : {}), } }); if (!res.ok && res.queued) { setPrintQueued(true); } if (res.ok && res.bytes > 0) { try { await initDb(); // R26: tandai tercetak hanya pada cetakan pertama (conditional
+    setPrinting(true); setPrintQueued(false); try { const res = await printForTag({ receipt: { shop: ((!tp || tp.showMerchantName) ? shopName.toUpperCase() : ''), addr: ((!tp || tp.showAddress) ? shopAddr : ''), trx: tplOn ? [tpl.showOrderNumber ? `No: ${no}` : '', tpl.showOrderType ? modeLabel : ''].filter((s) => s).join(' - ') : `No: ${no} - ${modeLabel}`, cashier: cashierLineShown || undefined, ...((!tp || tp.showDateTime) ? { datetime: `${todayId} ${timeId}` } : {}), currency: getCachedCurrency().code, items: (cartItems ?? []).map((it) => ({ name: it.name, qty: it.qty, price: Math.round(lineTotal(it) / Math.max(1, it.qty)), ...(tp?.showItemNotes && it.note ? { note: it.note } : {}), ...(tp?.showAddons ? { addons: (it.modifiers ?? []).map((m) => ({ name: m.name, price: (tp?.showAddonPrices ? Math.round(m.price) : 0) })) } : {}), })), subtotal: Math.round(subtotal), ...((tp && !tp.showSubtotal) ? { hideSubtotal: true } : {}), ...(discount > 0 && (!tp || tp.showDiscount) ? { discount: Math.round(discount) } : {}), ...(service > 0 && (!tp || tp.showServiceCharge) ? { service, serviceLabel: serviceLabel(t, svcCfg) } : {}), ...(tax > 0 && (tp?.showTax ?? rcPrefs.showTax) ? { tax } : {}), ...(feeESB > 0 ? { feeESB } : {}), ...(packaging > 0 && (!tp || tp.showPackagingFee) ? { packaging } : {}), ...(tip > 0 ? { tip } : {}), ...(voucherCode ? { voucherCode } : {}), ...(ongkir > 0 && (!tp || tp.showDeliveryFee) ? { ongkir: Math.round(ongkir) } : {}), ...(ongkirCut > 0 && (!tp || tp.showDeliveryFee) ? { ongkirCut: Math.round(ongkirCut) } : {}), ...(isUnpaidPreview ? { unpaid: true } : {}), ...(rounding !== 0 ? { rounding } : {}), total: Math.round(total), ...((tp && !tp.showTotal) ? { hideTotal: true } : {}), ...((!tp || tp.showPaymentMethod) ? { method } : {}), ...((isCash && cash > 0 && (!tp || tp.showAmountPaid)) ? { paid: Math.round(cash) } : {}), ...((isCash && cash > 0 && (!tp || tp.showChange)) ? { change: Math.round(change) } : {}), ...(tplOn ? { thanks: thanksText } : {}), ...(customFooter ? { footer: customFooter } : {}), ...(brandingText ? { branding: brandingText } : {}), ...(receiptQr ? { qr: receiptQr } : {}), } }); if (!res.ok && res.queued) { setPrintQueued(true); } if (res.ok && res.bytes > 0) { try { await initDb(); // R26: tandai tercetak hanya pada cetakan pertama (conditional
         // UPDATE — tak ada kolom lastPrintAt di skema, skema milik lane
         // lain sehingga tak ditambah di sini).
         await run( 'UPDATE tr_saleshead SET printedCount = 1, syncDate = NULL WHERE salesNum = ? AND COALESCE(printedCount, 0) = 0', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
@@ -121,37 +173,51 @@ import { useEffect, useRef, useState } from 'react';import { Modal, ScrollView, 
   const paper = (<View style={[styles.paper, isTablet && styles.paperTablet]}>
       {isVoidSale ? <Text style={styles.voidTitle}>{t('rc_void_title')}</Text> : null}
       {isUnpaidPreview ? <Text style={styles.voidTitle}>{t('rc_unpaid')}</Text> : null}
-      <Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text>{shopAddr ? <Text style={styles.addr}>{shopAddr}</Text> : null}<Text style={styles.line}>No: {no}    {modeLabel}</Text>
-      <Text style={styles.line}>{cashierLine}</Text>
-      <Text style={styles.line}>{todayId} · {timeId}</Text>
+      {(!tp || tp.showMerchantName) ? (<Text style={[styles.shop, isTablet && styles.shopTablet]}>{shopName}</Text>) : null}{shopAddr && (!tp || tp.showAddress) ? (<Text style={styles.addr}>{shopAddr}</Text>) : null}{(!tp || tp.showOrderNumber || tp.showOrderType) ? (tp ? (<>{tp.showOrderNumber ? (<Text style={styles.line}>No: {no}</Text>) : null}{tp.showOrderType && modeLabel ? (<Text style={styles.line}>{modeLabel}</Text>) : null}</>) : (<Text style={styles.line}>No: {no}    {modeLabel}</Text>)) : null}
+      {cashierLineShown ? (<Text style={styles.line}>{cashierLineShown}</Text>) : null}
+      {(!tp || tp.showDateTime) ? (<Text style={styles.line}>{todayId} · {timeId}</Text>) : null}
       <View style={styles.div} />
-      {hasItems ? ( cartItems.map((it) => (<View key={it.id}><View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{it.qty}x {it.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(lineTotal(it))}</Text></View>{(it.modifiers ?? []).map((m) => (<Text key={m.name} style={styles.note}>    + {m.name} {rp(m.price * it.qty)}</Text> ))}</View> )) ) : null}
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('c_subtotal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(subtotal)}</Text></View>{discount > 0 && (
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_discount')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(discount)}</Text></View> )}{service > 0 && (
+      {hasItems ? ( cartItems.map((it) => (<View key={it.id}><View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{it.qty}x {it.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(lineTotal(it))}</Text></View>{(!tp || tp.showAddons ? (it.modifiers ?? []) : []).map((m) => (<Text key={m.name} style={styles.note}>    + {m.name}{(!tp || tp.showAddonPrices) ? ` ${rp(m.price * it.qty)}` : ''}</Text> ))}{(tp?.showItemNotes && it.note) ? (<Text style={styles.note}>    ★ {it.note}</Text>) : null}</View> )) ) : null}
+      {(!tp || tp.showSubtotal) ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('c_subtotal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(subtotal)}</Text></View>) : null}{discount > 0 && (!tp || tp.showDiscount) && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_discount')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(discount)}</Text></View> )}{service > 0 && (!tp || tp.showServiceCharge) && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{serviceLabel(t, svcCfg)}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(service)}</Text></View> )}{tip > 0 && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('pay_tip_row')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>+{rp(tip)}</Text></View> )}{feeESB > 0 && (
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{platformFeeLabel(t)}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(feeESB)}</Text></View> )}{packaging > 0 && (
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('packaging')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(packaging)}</Text></View> )}{tax > 0 && rcPrefs.showTax && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{platformFeeLabel(t)}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(feeESB)}</Text></View> )}{packaging > 0 && (!tp || tp.showPackagingFee) && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('packaging')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(packaging)}</Text></View> )}{tax > 0 && (tp?.showTax ?? rcPrefs.showTax) && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ok_tax')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(tax)}</Text></View> )}{voucherCode ? (
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_voucher')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_approval')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_terminal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{edcLine}</Text></View> ) : null}{memberLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('mem_title')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{memberLine}</Text></View> ) : null}{ongkir > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{ongkirCut > 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_ongkir_cut')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(ongkirCut)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rounding')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
-      <View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>
-      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(total)}</Text></View>{splitPaidAmt > 0 && (
+      <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_voucher')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{voucherCode}</Text></View> ) : null}{approvalCode ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_approval')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{approvalCode}{cardLast4 ? ` ••${cardLast4}` : ''}</Text></View> ) : null}{edcLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_terminal')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{edcLine}</Text></View> ) : null}{memberLine ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('mem_title')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{memberLine}</Text></View> ) : null}{ongkir > 0 && (!tp || tp.showDeliveryFee) && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('ongkir')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(ongkir)}</Text></View> )}{ongkirCut > 0 && (!tp || tp.showDeliveryFee) && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_ongkir_cut')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(ongkirCut)}</Text></View> )}{rounding !== 0 && (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rounding')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(rounding)}</Text></View> )}<View style={styles.div} />
+      {(!tp || tp.showTotal) ? (<View style={styles.row}><Text style={[styles.total, isTablet && styles.totalTablet]}>{t('c_total').toUpperCase()}</Text><Text style={[styles.total, isTablet && styles.totalTablet]}>{rp(total)}</Text></View>) : null}
+      {(!tp || tp.showPaymentMethod) ? (<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{method}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(total)}</Text></View>) : null}{splitPaidAmt > 0 && (
       <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('suc_paid').replace('{m}', splitPaidMethod ? ` (${splitPaidMethod})` : '')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(splitPaidAmt)}</Text></View> )}{hasVoid && (<><View style={styles.div} /><Text style={styles.voidTitle}>{t('rc_void_title')}</Text>{voidLines.map((l) => (<View key={l.name} style={styles.row}><Text style={styles.voidItem}>{l.qty}x {l.name}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(l.qty * l.price)}</Text></View> ))}{voidReason ? <Text style={styles.note}>{t('rc_void_reason')}: {voidReason}</Text> : null}<View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_void_total')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-{rp(voidTotal)}</Text></View></> )}
-      {isCash && cash > 0 ? (
+      {tplOn ? (
+        <>
+          {(tpl.showAmountPaid && isCash && cash > 0) ? (
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_cashin')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(cash)}</Text></View>
+          ) : null}
+          {(tpl.showChange && isCash && cash > 0) ? (
+          <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_change')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(change)}</Text></View>
+          ) : null}
+        </>
+      ) : (isCash && cash > 0 ? (
         <>
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_cashin')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(cash)}</Text></View>
           <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_change')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(change)}</Text></View>
         </>
       ) : (
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('rc_change')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{rp(0)}</Text></View>
-      )}
-      <Text style={styles.thanks}>{t('rc_thanks')}</Text>{customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}
+      ))}
+      {thanksText ? (<Text style={styles.thanks}>{thanksText}</Text>) : null}{customFooter ? <Text style={styles.footerNote}>{customFooter}</Text> : null}{brandingText ? <Text style={styles.footerNote}>{brandingText}</Text> : null}
     </View>
   );
 
   // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
-  const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...(it.modifiers ?? []).map((m) => ` + ${m.name} ${rp(m.price * it.qty)}`), ]) : [];
-  const shareText = [ ...(isUnpaidPreview ? [`** ${t('rc_unpaid')} **`] : []), `${shopName} - Struk ${no} - ${mode}`, `${todayId} ${timeId}`, ...shareItemLines, `${t('c_subtotal')}: ${rp(subtotal)}`, ...(discount > 0 ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 ? [`${serviceLabel(t, svcCfg)}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${platformFeeLabel(t)}: ${rp(feeESB)}`] : []), ...(packaging > 0 ? [`${t('packaging')}: ${rp(packaging)}`] : []), ...(tip > 0 ? [`${t('pay_tip_row')}: +${rp(tip)}`] : []), ...(tax > 0 && rcPrefs.showTax ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(memberLine ? [`${t('mem_title')}: ${memberLine}`] : []), ...(ongkir > 0 ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(ongkirCut > 0 ? [`${t('rc_ongkir_cut')}: -${rp(ongkirCut)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), `${t('c_total').toUpperCase()}: ${rp(total)}`, `${method}: ${rp(total)}`, ...(splitPaidAmt > 0 ? [`${t('suc_paid').replace('{m}', splitPaidMethod ? ` (${splitPaidMethod})` : '')}: ${rp(splitPaidAmt)}`] : []), ...(isCash && cash > 0 ? [`${t('rc_cashin')}: ${rp(cash)}`, `${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(customFooter ? [customFooter] : []), ].join('\n');
+  // APP-11: gerbang template yang sama dengan kertas (thanks/branding hanya
+  // di mode template — legacy tak pernah memilikinya di teks bagikan).
+  const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...((!tp || tp.showAddons) ? (it.modifiers ?? []) : []).map((m) => ` + ${m.name}${(!tp || tp.showAddonPrices) ? ` ${rp(m.price * it.qty)}` : ''}`), ...((tp?.showItemNotes && it.note) ? [`★ ${it.note}`] : []), ]) : [];
+  const shareHead = tplOn
+    ? [tpl.showMerchantName ? shopName : '', [tpl.showOrderNumber ? `Struk ${no}` : '', tpl.showOrderType ? mode : ''].filter((s) => s).join(' - ')].filter((s) => s).join(' - ')
+    : `${shopName} - Struk ${no} - ${mode}`;
+  const shareText = [ ...(isUnpaidPreview ? [`** ${t('rc_unpaid')} **`] : []), ...(shareHead ? [shareHead] : []), ...((!tp || tp.showDateTime) ? [`${todayId} ${timeId}`] : []), ...shareItemLines, ...((!tp || tp.showSubtotal) ? [`${t('c_subtotal')}: ${rp(subtotal)}`] : []), ...(discount > 0 && (!tp || tp.showDiscount) ? [`${t('rc_discount')}: -${rp(discount)}`] : []), ...(service > 0 && (!tp || tp.showServiceCharge) ? [`${serviceLabel(t, svcCfg)}: ${rp(service)}`] : []), ...(feeESB > 0 ? [`${platformFeeLabel(t)}: ${rp(feeESB)}`] : []), ...(packaging > 0 && (!tp || tp.showPackagingFee) ? [`${t('packaging')}: ${rp(packaging)}`] : []), ...(tip > 0 ? [`${t('pay_tip_row')}: +${rp(tip)}`] : []), ...(tax > 0 && (tp?.showTax ?? rcPrefs.showTax) ? [`${t('ok_tax')}: ${rp(tax)}`] : []), ...(voucherCode ? [`${t('rc_voucher')}: ${voucherCode}`] : []), ...(approvalCode ? [`${t('rc_approval')}: ${approvalCode}${cardLast4 ? ` ••${cardLast4}` : ''}`] : []), ...(memberLine ? [`${t('mem_title')}: ${memberLine}`] : []), ...(ongkir > 0 && (!tp || tp.showDeliveryFee) ? [`${t('ongkir')}: ${rp(ongkir)}`] : []), ...(ongkirCut > 0 && (!tp || tp.showDeliveryFee) ? [`${t('rc_ongkir_cut')}: -${rp(ongkirCut)}`] : []), ...(rounding !== 0 ? [`${t('rounding')}: ${rp(rounding)}`] : []), ...((!tp || tp.showTotal) ? [`${t('c_total').toUpperCase()}: ${rp(total)}`] : []), ...((!tp || tp.showPaymentMethod) ? [`${method}: ${rp(total)}`] : []), ...(splitPaidAmt > 0 ? [`${t('suc_paid').replace('{m}', splitPaidMethod ? ` (${splitPaidMethod})` : '')}: ${rp(splitPaidAmt)}`] : []), ...(isCash && cash > 0 && (!tp || tp.showAmountPaid) ? [`${t('rc_cashin')}: ${rp(cash)}`] : []), ...(isCash && cash > 0 && (!tp || tp.showChange) ? [`${t('rc_change')}: ${rp(change)}`] : []), ...(hasVoid ? [ `${t('rc_void_title')}:`, ...voidLines.map((l) => `${l.qty}x ${l.name} -${rp(l.qty * l.price)}`), ...(voidReason ? [`${t('rc_void_reason')}: ${voidReason}`] : []), ] : []), ...(tplOn && thanksText ? [thanksText] : []), ...(customFooter ? [customFooter] : []), ...(tplOn && brandingText ? [brandingText] : []), ].join('\n');
   const [mailOpen, setMailOpen] = useState(false);
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');

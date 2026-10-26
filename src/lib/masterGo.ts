@@ -12,6 +12,7 @@
 import { apiGet, getBranchId } from '../config/server';
 import { initDb, run } from './db';
 import { persistReceiptPrefs } from './posSyncReceipt';
+import { fetchDefaultReceiptTemplate, persistReceiptTemplate } from './receiptTemplate';
 import { setWatermark } from './sync';
 
 export class GoCatalogUnavailable extends Error {
@@ -220,6 +221,15 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
   );
   // A3: preferensi struk milik server (hanya tulis bila BE mengirim kuncinya).
   await persistReceiptPrefs(merchant, run);
+  // APP-11: template struk website (server-wins; 404/BE lama = tak tulis =
+  // cache lokal utuh). Best-effort: gagal pull template tak boleh
+  // menggagalkan katalog (kontrak katalog tetap hijau).
+  try {
+    const tpl = await fetchDefaultReceiptTemplate();
+    await persistReceiptTemplate(tpl, run);
+  } catch {
+    /* abaikan — render fallback ke default perilaku-lama */
+  }
 
   await setWatermark('menu', { pull: now });
   await setWatermark('branchmenu', { pull: now });
