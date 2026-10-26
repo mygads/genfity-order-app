@@ -43,9 +43,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
-          "image": "./assets/splash-genfity.png",
-          "imageWidth": 200
+          "backgroundColor": "#172372",
+          "image": "./assets/genfity-logo-dark.png",
+          "imageWidth": 280
         }
       ],
       "expo-sqlite",
