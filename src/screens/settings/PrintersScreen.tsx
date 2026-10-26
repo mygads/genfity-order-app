@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { fetchReceiptTemplates, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { fetchReceiptTemplates, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -635,6 +635,30 @@ function backupBindings(ss: Station[]): void {
         return;
       }
       const { job } = claimed;
+      // KONTRAK FINAL AUTO: source=AUTO (atau payload kosong + metadata.orderId)
+      // = render lokal dari order server + template BE, BUKAN cetak byte kosong.
+      if (isAutoPrintJob(job)) {
+        const auto = await printAutoServerJob(job);
+        if (auto.state === 'printed') {
+          await ackTerminalPrintJob(beId, job.id, job.leaseToken, true);
+          setStatusMsg(
+            auto.via === 'queue'
+              ? t('printers.serverAutoQueued').replace('{x}', String(job.id))
+              : t('printers.serverPrinted').replace('{x}', String(job.id)),
+          );
+        } else if (auto.state === 'unavailable') {
+          const ack = await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'ORDER_UNAVAILABLE', `order ${String(job.metadata?.orderId ?? job.orderId ?? '')} ${auto.reason}`);
+          setStatusMsg(
+            t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', String(ack.status ?? 'QUEUED')),
+          );
+        } else {
+          const ack = await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, auto.errorCode, auto.lastError);
+          setStatusMsg(
+            t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', String(ack.status ?? 'QUEUED')),
+          );
+        }
+        return;
+      }
       let bytes: Uint8Array;
       try {
         bytes = fromBase64(job.payload);

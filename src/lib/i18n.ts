@@ -1020,6 +1020,7 @@ const STR: Record<string, Entry> = {
   'printers.serverPull': { id: 'Tarik & Cetak Antrean Server', en: 'Pull & Print Server Queue' },
   'printers.serverPulling': { id: 'Menarik antrean server...', en: 'Pulling server queue...' },
   'printers.serverPrinted': { id: 'Job server #{x} tercetak.', en: 'Server job #{x} printed.' },
+  'printers.serverAutoQueued': { id: 'Job server #{x} masuk antrean cetak (keluar saat printer siap).', en: 'Server job #{x} queued for printing (prints when a printer is ready).' },
   'printers.serverFailed': { id: 'Job server #{x} gagal ({e}).', en: 'Server job #{x} failed ({e}).' },
   'printers.serverEmpty': { id: 'Antrean server kosong.', en: 'Server queue empty.' },
   'printers.serverError': { id: 'Tarik antrean gagal ({n}).', en: 'Queue pull failed ({n}).' },

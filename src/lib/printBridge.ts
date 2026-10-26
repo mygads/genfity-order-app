@@ -15,7 +15,9 @@
 import { ApiPath } from '../config/server';
 import { apiFetch, unwrap } from './apiSource';
 import { fromBase64 } from './escpos';
+import type { EscKitchenTicket, EscReceipt } from './escpos';
 import type { PrinterTarget, PrintResult } from '../native/printer';
+import type { ServerHistoryEntry } from './posWire';
 
 export interface ServerPrintJob {
   id: number;
@@ -27,6 +29,27 @@ export interface ServerPrintJob {
   payloadHash: string;
   leaseToken: string;
   leaseExpiresInSeconds: number;
+  /**
+   * KONTRAK FINAL AUTO (BE menulis, APP merender): metadata JSON
+   * {orderId, paymentId?, templateType:'customer'|'kitchen'}.
+   * payload_base64 job AUTO = '' (kosong) — JANGAN dicetak buta
+   * (lihat isAutoPrintJob + printAutoServerJob di bawah).
+   */
+  metadata: AutoJobMetadata | null;
+}
+
+/** Metadata kontrak job AUTO terminal_print_jobs. */
+export interface AutoJobMetadata {
+  orderId?: string;
+  paymentId?: string;
+  templateType?: string;
+}
+
+/** Ambil string metadata toleran snake_case/camelCase ala posWire. */
+function metaStr(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' && Number.isFinite(v)) return String(Math.round(v));
+  return '';
 }
 
 export type ClaimOutcome =
@@ -51,6 +74,21 @@ function asJob(raw: unknown): ServerPrintJob | null {
   const u = unwrap<Record<string, unknown>>(raw);
   const j = (u.data as Record<string, unknown>)?.job as Record<string, unknown> | undefined;
   if (!j || typeof j.id !== 'number' || typeof j.payload !== 'string' || typeof j.leaseToken !== 'string') return null;
+  let metadata: AutoJobMetadata | null = null;
+  const rm = j.metadata;
+  if (rm && typeof rm === 'object') {
+    const m = rm as Record<string, unknown>;
+    const orderId = metaStr(m.orderId ?? m.order_id);
+    const paymentId = metaStr(m.paymentId ?? m.payment_id);
+    const templateType = metaStr(m.templateType ?? m.template_type);
+    if (orderId || paymentId || templateType) {
+      metadata = {
+        ...(orderId ? { orderId } : {}),
+        ...(paymentId ? { paymentId } : {}),
+        ...(templateType ? { templateType } : {}),
+      };
+    }
+  }
   return {
     id: j.id,
     orderId: typeof j.orderId === 'string' ? j.orderId : null,
@@ -61,6 +99,7 @@ function asJob(raw: unknown): ServerPrintJob | null {
     payloadHash: typeof j.payloadHash === 'string' ? j.payloadHash : '',
     leaseToken: j.leaseToken,
     leaseExpiresInSeconds: typeof j.leaseExpiresInSeconds === 'number' ? j.leaseExpiresInSeconds : 0,
+    metadata,
   };
 }
 
@@ -223,6 +262,167 @@ export async function fanoutReceiptAuto(input: {
   }
 }
 
+/** Klaim satu job FIFO untuk terminal ini. */
+export function isAutoPrintJob(job: ServerPrintJob): boolean {
+  if (!job) return false;
+  // KONTRAK FINAL: source='AUTO' (payload_base64='' + metadata.orderId).
+  // Bentuk lama/toleran: payload kosong + metadata.orderId ikut AUTO agar
+  // byte kosong tak pernah keluar kertas.
+  if (String(job.source ?? '').trim().toUpperCase() === 'AUTO') return true;
+  return !String(job.payload ?? '').trim() && !!String(job.metadata?.orderId ?? '').trim();
+}
+
+export type AutoPrintOutcome =
+  // `printed` = kertas keluar ATAU byte aman di antrean lokal persisten
+  // (via='queue'; drain kind-aware mengurasnya — tak hangus, retry bounded).
+  | { state: 'printed'; via: 'stations' | 'queue'; detail: string }
+  | { state: 'failed'; errorCode: string; lastError: string }
+  // `unavailable` = order/template tak tersedia (offline): pemanggil ack
+  // FAILED ORDER_UNAVAILABLE agar BE me-retry via backoff — tanpa spam.
+  | { state: 'unavailable'; reason: 'offline' | 'not-found' };
+
+/**
+ * Cari order server untuk job AUTO via API yang sudah ada
+ * (pullServerHistory — satu-satunya snapshot ber-items; active tak membawa
+ * items sehingga tak bisa dirender). Cocok id ATAU nomor display.
+ */
+async function findAutoOrder(
+  orderId: string,
+): Promise<{ entry: ServerHistoryEntry } | { offline: true } | { missing: true }> {
+  const want = String(orderId ?? '').trim();
+  if (!want) return { missing: true };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { pullServerHistory } = require('./posWire') as typeof import('./posWire');
+    const r = await pullServerHistory(100);
+    if (!r.ok) return { offline: true };
+    const hit = (r.data ?? []).find(
+      (e) => String(e.id ?? '').trim() === want || String(e.orderNumber ?? '').trim() === want,
+    );
+    return hit ? { entry: hit } : { missing: true };
+  } catch {
+    return { offline: true };
+  }
+}
+
+/**
+ * Render + cetak job AUTO (KONTRAK FINAL): ambil order detail via API yang
+ * sudah ada → rakit ESC/POS memakai cache template BE (receiptTemplate.ts;
+ * tanpa template = perilaku legacy byte-identik) + currency cabang → cetak
+ * ke stations non-dapur (templateType customer, broadcast per cols/cut) atau
+ * station dapur (templateType kitchen). Gagal kirim/printer absen = byte
+ * MASUK antrean offline printqueue via print.ts (kind receipt/kitchen;
+ * drain kind-aware, retry bounded) — bukan hangus, bukan spam retry.
+ * Tak pernah melempar; ack tetap milik pemanggil.
+ */
+export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrintOutcome> {
+  const orderId = String(job.metadata?.orderId ?? job.orderId ?? '').trim();
+  if (!orderId) {
+    return { state: 'failed', errorCode: 'AUTO_NO_ORDER', lastError: 'Job AUTO tanpa orderId di metadata' };
+  }
+  const found = await findAutoOrder(orderId);
+  if ('offline' in found) return { state: 'unavailable', reason: 'offline' };
+  if ('missing' in found) return { state: 'unavailable', reason: 'not-found' };
+  const entry = found.entry;
+  const tplType = String(job.metadata?.templateType ?? '').trim().toLowerCase();
+  try {
+    // Lazy-require ala fanoutReceiptAuto: print.ts menarik native/printer —
+    // impor statis berisiko siklus modul saat app boot.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const printLib = require('./print') as typeof import('./print');
+    if (tplType === 'kitchen' || tplType === 'dapur' || tplType === 'tiket_dapur') {
+      const ticket: EscKitchenTicket = {
+        station: 'dapur',
+        no: String(entry.orderNumber || entry.id || orderId),
+        ...(entry.tableNumber ? { table: entry.tableNumber } : {}),
+        ...(entry.orderType ? { mode: entry.orderType } : {}),
+        ...((entry.paidAt || entry.createdAt) ? { time: entry.paidAt || entry.createdAt } : {}),
+        items: (entry.items ?? []).map((it) => ({
+          name: String(it.name ?? '-'),
+          qty: Math.max(1, Math.round(Number(it.qty) || 1)),
+          ...(it.note ? { note: String(it.note) } : {}),
+        })),
+      };
+      const res = await printLib.printKitchenTicket('dapur', ticket);
+      if (res.ok) return { state: 'printed', via: 'stations', detail: res.printer };
+      if (res.queued) return { state: 'printed', via: 'queue', detail: res.queuedId ?? '' };
+      return { state: 'failed', errorCode: 'PRINT_FAILED', lastError: String(res.detail ?? res.reason ?? 'kitchen send failed') };
+    }
+    // Struk pelanggan: gerbang template cermin ReceiptScreen.doPrint
+    // (tplOn + tp; tanpa TemplateJSON = legacy). Riwayat server tak membawa
+    // service/packaging/tip/feeESB/paid/change — baris itu dihilangkan jujur
+    // (bukan dikarang), method + tendered tak ditampilkan tanpa data.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tplLib = require('./receiptTemplate') as typeof import('./receiptTemplate');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCachedCurrency } = require('./currency') as typeof import('./currency');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTerminal } = require('../config/server') as typeof import('../config/server');
+    const tplOn = await tplLib.hasReceiptTemplate();
+    const tpl = await tplLib.getReceiptTemplateToggles();
+    const tp = tplOn ? tpl : null;
+    const lang = getLang();
+    const tplLang = (tpl.receiptLanguage ?? lang) as 'id' | 'en';
+    let shopName = 'Genfity';
+    try {
+      shopName = String(getTerminal()?.branchName ?? '').trim() || 'Genfity';
+    } catch {
+      /* default */
+    }
+    const no = String(entry.orderNumber || entry.id || orderId);
+    const orderType = String(entry.orderType ?? '');
+    const custParts = [
+      ...(tp && !tp.showTableNumber ? [] : [entry.tableNumber]),
+      ...(tp && !tp.showCustomerName ? [] : [entry.customerName]),
+    ].map((s) => String(s ?? '').trim()).filter((s) => s);
+    const receipt: EscReceipt = {
+      shop: (!tp || tp.showMerchantName) ? shopName.toUpperCase() : '',
+      trx: tplOn
+        ? [tpl.showOrderNumber ? `No: ${no}` : '', tpl.showOrderType ? orderType : '']
+          .map((s) => s.trim()).filter((s) => s).join(' - ')
+        : `No: ${no}${orderType ? ` - ${orderType}` : ''}`,
+      ...(custParts.length > 0 ? { cashier: custParts.join(' · ') } : {}),
+      ...(((!tp || tp.showDateTime) && (entry.paidAt || entry.createdAt))
+        ? { datetime: String(entry.paidAt || entry.createdAt) } : {}),
+      currency: getCachedCurrency().code,
+      items: (entry.items ?? []).map((it) => ({
+        name: String(it.name ?? '-'),
+        qty: Math.max(1, Math.round(Number(it.qty) || 1)),
+        price: Math.max(0, Math.round(Number(it.price) || 0)),
+        ...(tp?.showItemNotes && it.note ? { note: String(it.note) } : {}),
+      })),
+      subtotal: Math.max(0, Math.round(Number(entry.subtotal) || 0)),
+      ...((tp && !tp.showSubtotal) ? { hideSubtotal: true } : {}),
+      ...((Number(entry.discount) > 0 && (!tp || tp.showDiscount))
+        ? { discount: Math.max(0, Math.round(Number(entry.discount))) } : {}),
+      ...((Number(entry.tax) > 0 && (!tp || tp.showTax))
+        ? { tax: Math.max(0, Math.round(Number(entry.tax))) } : {}),
+      total: Math.max(0, Math.round(Number(entry.total) || 0)),
+      ...((tp && !tp.showTotal) ? { hideTotal: true } : {}),
+      ...(((!tp || tp.showPaymentMethod) && entry.paymentMethod) ? { method: String(entry.paymentMethod) } : {}),
+      ...(tplOn
+        ? {
+          thanks: tpl.showThankYouMessage
+            ? (tpl.customThankYouMessage || (tplLang === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!'))
+            : '',
+        }
+        : { thanks: tOf('rc_thanks', lang) }),
+      ...(tplOn && tpl.showCustomFooterText && tpl.customFooterText ? { footer: tpl.customFooterText } : {}),
+      ...(tplOn && tpl.showGenfityBranding
+        ? { branding: tplLang === 'en' ? 'Powered by Genfity' : 'Diberdayakan oleh Genfity' }
+        : {}),
+    };
+    const res = await printLib.printReceiptData(receipt);
+    if (res.ok) return { state: 'printed', via: 'stations', detail: res.printer };
+    if (res.queued) return { state: 'printed', via: 'queue', detail: res.queuedId ?? '' };
+    return { state: 'failed', errorCode: 'PRINT_FAILED', lastError: String(res.detail ?? res.reason ?? 'receipt send failed') };
+  } catch {
+    return { state: 'failed', errorCode: 'AUTO_RENDER_FAILED', lastError: 'render exception' };
+  }
+}
+
 /** Klaim satu job FIFO untuk terminal ini. */export async function claimTerminalPrintJob(terminalIdBe: string | number): Promise<ClaimOutcome> {
   if (!String(terminalIdBe ?? '').trim()) return { state: 'error', status: 400 };
   const r = await apiFetch(fillPrintPath(ApiPath.terminalPrintClaim, terminalIdBe), { method: 'POST', body: {} });
@@ -292,6 +492,11 @@ export async function ackTerminalPrintJob(
  * - kirim gagal/exception → ack FAILED (printer siap retry via BE backoff).
  * - decode base64 rusak → ack FAILED INVALID_PAYLOAD (racun antrean jangan
  *   muter selamanya; BE habiskan attempt lalu FAILED final).
+ * - KONTRAK FINAL AUTO: source=AUTO (atau payload kosong + metadata.orderId)
+ *   → JANGAN cetak byte kosong; render ESC/POS dari order server + template
+ *   BE via printAutoServerJob (customer → stations non-dapur, kitchen →
+ *   station dapur). Order tak tersedia (offline) → ack FAILED
+ *   ORDER_UNAVAILABLE (BE backoff retry; tanpa spam, tanpa hangus).
  */
 export async function pollServerPrintJobs(
   terminalIdBe: string | number,
@@ -301,6 +506,21 @@ export async function pollServerPrintJobs(
   const claimed = await claimTerminalPrintJob(terminalIdBe);
   if (claimed.state !== 'job') return claimed;
   const { job } = claimed;
+  if (isAutoPrintJob(job)) {
+    const auto = await printAutoServerJob(job);
+    if (auto.state === 'printed') {
+      await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, true);
+      return { state: 'printed', jobId: job.id };
+    }
+    const code = auto.state === 'unavailable'
+      ? 'ORDER_UNAVAILABLE'
+      : auto.errorCode;
+    const err = auto.state === 'unavailable'
+      ? `order ${String(job.metadata?.orderId ?? job.orderId ?? '')} ${auto.reason}`
+      : auto.lastError;
+    const ack = await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, false, code, err);
+    return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
+  }
   let bytes: Uint8Array;
   try {
     bytes = fromBase64(job.payload);
