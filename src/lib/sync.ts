@@ -1764,8 +1764,19 @@ export async function pushAll(): Promise<PushResult> {
 function isDeterministicFailNote(note: unknown): boolean {
   const s = String(note ?? '').trim();
   if (!s || s.includes('(retry)')) return false;
-  if (/^(posWire|beWorkforce):/.test(s)) return true;
-  if (/^HTTP 4\d\d\b/.test(s)) return true;
+  // APP-10 (HP-E2E 2026-10-26): 401/403/429 = TRANSIEN (token kedaluwarsa →
+  // relogin sembuh; rate-limit → cooldown sembuh). TERBUKTI: settle transfer
+  // order 9 gagal 401 saat token basi ("posWire: 401 — Authorization token
+  // required") lalu di-skip SELAMANYA pasca-relogin — antrean mati diam-diam.
+  // Kecualikan kode-transien dari fail-once; 4xx lain tetap final.
+  if (/^(posWire|beWorkforce):/.test(s)) {
+    if (/\b(401|403|429)\b/.test(s)) return false;
+    return true;
+  }
+  if (/^HTTP 4\d\d\b/.test(s)) {
+    if (/^HTTP (401|403|429)\b/.test(s)) return false;
+    return true;
+  }
   return false;
 }
 
