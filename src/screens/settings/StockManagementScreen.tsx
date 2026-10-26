@@ -33,6 +33,8 @@ interface StockRow {
   serverTrack: boolean;
   active: boolean;
   qty: number;
+  /** Template harian server (NULL = tanpa template → tombol reset tak tampil). */
+  template: number | null;
   threshold: number | null;
   soldOut: boolean;
 }
@@ -154,6 +156,16 @@ function ItemCard(props: {
           <Text style={styles.outText}>{t('stockMgmt.markOut')}</Text>
         </Pressable>
       </View>
+      {/* FE handleResetToTemplate: kirim qty = template via jalur absolut yang sama
+          (persistBranchQty → drain Opsi A). Guard `tracked && template != null`
+          cermin FE `disabled={item.dailyStockTemplate === null}`. */}
+      {tracked && row.template !== null && row.template !== undefined ? (
+        <View style={styles.resetRow}>
+          <Pressable style={[styles.resetBtn, busy && styles.btnBusy]} onPress={() => saveQty(row.template as number)} disabled={busy}>
+            <Text style={styles.resetText}>{t('stockMgmt.resetTpl').replace('{n}', String(row.template))}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {tracked ? (
         <View style={styles.thRow}>
           <Text style={styles.rowLabel}>{t('stockMgmt.threshold')} ({t('stockMgmt.filterHealthy')}: &gt;{lowEff})</Text>
@@ -189,6 +201,8 @@ export default function StockManagementScreen({ navigation }: Props) {
   const [filter, setFilter] = useState<'all' | 'healthy' | 'low' | 'out'>('all');
   const [queryText, setQueryText] = useState('');
   const [tick, setTick] = useState(0);
+  /** Guard tombol reset-semua (FE handleResetSelected/all → sekuensial absolut). */
+  const [resettingAll, setResettingAll] = useState(false);
   /** Re-render saat prefetch sesi-ini selesai (placeholder → remote terverifikasi). */
   const [, setImgRev] = useState(0);
 
@@ -211,12 +225,12 @@ export default function StockManagementScreen({ navigation }: Props) {
           id: string; menuName: string | null; categoryName: string | null;
           price: number | null; imageUrl: string | null; trackStock: number | null;
           flagActive: number | null; qty: number | null; lowThreshold: number | null;
-          flagSoldOut: number | null;
+          flagSoldOut: number | null; stockTemplate: number | null;
         }>(
           `SELECT m.id AS id, m.menuName AS menuName, c.categoryName AS categoryName,
                   m.price AS price, m.imageUrl AS imageUrl, m.trackStock AS trackStock,
                   m.flagActive AS flagActive, b.qty AS qty, b.lowThreshold AS lowThreshold,
-                  b.flagSoldOut AS flagSoldOut
+                  b.flagSoldOut AS flagSoldOut, m.stockTemplate AS stockTemplate
            FROM ms_menu m
            LEFT JOIN ms_branchmenu b ON b.menuId = m.id AND b.branchId = ?
            LEFT JOIN ms_category c ON c.id = m.categoryId
@@ -229,11 +243,12 @@ export default function StockManagementScreen({ navigation }: Props) {
           id: string; addonName: string | null; categoryName: string | null;
           price: number | null; trackStock: number | null; flagActive: number | null;
           qty: number | null; lowThreshold: number | null; flagSoldOut: number | null;
-          parents: string | null;
+          parents: string | null; stockTemplate: number | null;
         }>(
           `SELECT a.id AS id, a.addonName AS addonName, c.categoryName AS categoryName,
                   a.price AS price, a.trackStock AS trackStock, a.flagActive AS flagActive,
                   b.qty AS qty, b.lowThreshold AS lowThreshold, b.flagSoldOut AS flagSoldOut,
+                  a.stockTemplate AS stockTemplate,
                   (SELECT GROUP_CONCAT(m.menuName, ', ') FROM ms_menuaddon ma
                     JOIN ms_menu m ON m.id = ma.menuId WHERE ma.categoryId = a.categoryId) AS parents
            FROM ms_addon a
@@ -255,6 +270,7 @@ export default function StockManagementScreen({ navigation }: Props) {
           serverTrack: (r.trackStock ?? 1) === 1,
           active: (r.flagActive ?? 1) === 1,
           qty: cleanQty(r.qty, 0),
+          template: r.stockTemplate !== null && r.stockTemplate !== undefined ? Number(r.stockTemplate) : null,
           threshold: r.lowThreshold !== null && r.lowThreshold !== undefined ? Number(r.lowThreshold) : null,
           soldOut: (r.flagSoldOut ?? 0) === 1,
         }));
@@ -268,6 +284,7 @@ export default function StockManagementScreen({ navigation }: Props) {
           serverTrack: (r.trackStock ?? 1) === 1,
           active: (r.flagActive ?? 1) === 1,
           qty: cleanQty(r.qty, 0),
+          template: r.stockTemplate !== null && r.stockTemplate !== undefined ? Number(r.stockTemplate) : null,
           threshold: r.lowThreshold !== null && r.lowThreshold !== undefined ? Number(r.lowThreshold) : null,
           soldOut: (r.flagSoldOut ?? 0) === 1,
         }));
@@ -315,6 +332,34 @@ export default function StockManagementScreen({ navigation }: Props) {
   const lowCount = withStatus.filter((x) => x.status === 'low').length;
   const healthyCount = withStatus.filter((x) => x.status === 'healthy').length;
 
+  // Baris layak-reset: dilacak + punya template (cermin guard FE
+  // `dailyStockTemplate === null → disabled`). Multi-select ala FE
+  // handleResetSelected tak ada di APP (tanpa selection UX) → reset-semua.
+  const tplEligible = withStatus.filter(
+    ({ r, tracked }) => tracked && r.template !== null && r.template !== undefined,
+  );
+
+  // FE performResetAllToTemplate: absolut per item via jalur yang sama
+  // (persistBranchQty → drain Opsi A). Sekuensial agar antrean drain
+  // deterministik; flag lokal dari state (sumber yang sama dengan `tracked`).
+  const resetAll = async () => {
+    if (resettingAll || tplEligible.length === 0) return;
+    setResettingAll(true);
+    try {
+      const maps = { menu: flagsMenu, addon: flagsAddon } as const;
+      for (const { r } of tplEligible) {
+        const local = maps[r.kind].get(r.id);
+        await persistBranchQty(r.kind, r.id, cleanQty(r.template as number, r.qty), {
+          globalTrack,
+          localTrack: local?.track ?? true,
+        });
+      }
+      refresh();
+    } finally {
+      setResettingAll(false);
+    }
+  };
+
   return (
     <View style={styles.root}>
       <ScreenHeader
@@ -347,6 +392,14 @@ export default function StockManagementScreen({ navigation }: Props) {
             </Pressable>
           ))}
         </View>
+        {/* Reset massal template (pengganti FE reset-terpilih; APP tanpa selection UX). */}
+        {tplEligible.length > 0 ? (
+          <View style={styles.resetAllWrap}>
+            <Pressable style={[styles.resetAllBtn, resettingAll && styles.btnBusy]} onPress={resetAll} disabled={resettingAll}>
+              <Text style={styles.resetAllText}>{t('stockMgmt.resetAll').replace('{n}', String(tplEligible.length))}</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {/* Tablet: 2 kolom; phone 1 kolom. */}
         <View style={isTablet ? styles.gridTablet : undefined}>
           {list.map(({ r, tracked, lowEff, status }) => (
@@ -422,6 +475,12 @@ const styles = StyleSheet.create({
   outBtn: { borderRadius: 8, backgroundColor: colors.red, paddingHorizontal: 12, paddingVertical: 9 },
   outText: { fontFamily: fonts.bold, fontSize: 11, color: colors.white },
   btnBusy: { opacity: 0.6 },
+  resetRow: { flexDirection: 'row', marginTop: 8 },
+  resetBtn: { flex: 1, borderRadius: 8, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.navy, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 12 },
+  resetText: { fontFamily: fonts.bold, fontSize: 11, color: colors.navy },
+  resetAllWrap: { paddingHorizontal: 16, paddingTop: 10 },
+  resetAllBtn: { borderRadius: 10, backgroundColor: colors.navy, alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14 },
+  resetAllText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   thRow: { marginTop: 10, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 },
   rowLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.text },
   thInputRow: { flexDirection: 'row', gap: 8, marginTop: 6, alignItems: 'center' },

@@ -122,7 +122,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS ms_menu (
     id TEXT PRIMARY KEY, menuName TEXT, categoryId TEXT, price REAL DEFAULT 0,
     imageUrl TEXT, stationId TEXT, trackStock INTEGER DEFAULT 1,
-    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+    stockTemplate INTEGER, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_category (
     id TEXT PRIMARY KEY, categoryName TEXT, sortOrder INTEGER DEFAULT 0,
     flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
@@ -195,7 +195,8 @@ export const SCHEMA_STATEMENTS: string[] = [
     flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_addon (
     id TEXT PRIMARY KEY, categoryId TEXT, addonName TEXT, price REAL DEFAULT 0,
-    trackStock INTEGER DEFAULT 1, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+    trackStock INTEGER DEFAULT 1, stockTemplate INTEGER,
+    flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
   `CREATE TABLE IF NOT EXISTS ms_menuaddon (
     menuId TEXT NOT NULL, categoryId TEXT NOT NULL, syncDate TEXT,
     PRIMARY KEY (menuId, categoryId))`,
@@ -292,6 +293,11 @@ export const MIGRATION_STATEMENTS: string[] = [
   // (gagal = sudah ada).
   'ALTER TABLE ms_menu ADD COLUMN trackStock INTEGER DEFAULT 1',
   'ALTER TABLE ms_branchmenu ADD COLUMN lowThreshold INTEGER',
+  // Reset-ke-template (paritas FE handleResetToTemplate): template harian
+  // milik server (pos/menu dailyStockTemplate, server-wins saat pull).
+  // NULL = tanpa template → tombol reset tak tampil (cermin FE guard).
+  'ALTER TABLE ms_menu ADD COLUMN stockTemplate INTEGER',
+  'ALTER TABLE ms_addon ADD COLUMN stockTemplate INTEGER',
   // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
   // idempoten; gagal = sudah ada).
   `CREATE TABLE IF NOT EXISTS tr_voidtrail (

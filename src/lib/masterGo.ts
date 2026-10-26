@@ -29,6 +29,7 @@ interface GoAddonItem {
   isActive: boolean;
   trackStock: boolean;
   stockQty?: number | null;
+  dailyStockTemplate?: number | null;
 }
 
 interface GoAddonCategory {
@@ -47,6 +48,7 @@ interface GoMenuItem {
   categoryId?: number | null;
   trackStock: boolean;
   stockQty?: number | null;
+  dailyStockTemplate?: number | null;
   hasAddons?: boolean;
   addonCategories?: GoAddonCategory[] | null;
 }
@@ -147,14 +149,20 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     // Menentukan apakah qty lokal ikut turun saat penjualan + derivasi Habis
     // (paritas BE orders decrement + filter publik track=false → tampil).
     const tracked = m.trackStock === true ? 1 : 0;
+    // Template harian milik server (cermin BE menus.daily_stock_template):
+    // server-wins (NULL = tanpa template → tombol reset tak tampil, cermin
+    // FE guard item.dailyStockTemplate === null).
+    const tpl = m.dailyStockTemplate !== undefined && m.dailyStockTemplate !== null
+      ? Math.max(0, Math.round(Number(m.dailyStockTemplate))) : null;
     await run(
-      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, trackStock, flagActive, syncDate)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, trackStock, stockTemplate, flagActive, syncDate)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET menuName = excluded.menuName,
          categoryId = excluded.categoryId, price = excluded.price,
          imageUrl = excluded.imageUrl, trackStock = excluded.trackStock,
+         stockTemplate = excluded.stockTemplate,
          flagActive = excluded.flagActive, syncDate = excluded.syncDate`,
-      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), tracked, active, now],
+      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), tracked, tpl, active, now],
     );
     // Stok cabang: habis = trackStock + stockQty <= 0. stationId +
     // lowThreshold lokal dipertahankan (printer milik layar Printer; ambang
@@ -194,14 +202,19 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
         const aTracked = a?.trackStock === true ? 1 : 0;
         const aActive = a?.isActive === false ? 0 : 1;
         const aPrice = num(a?.price, 0);
+        // Template harian addon milik server (cermin BE
+        // addon_items.daily_stock_template): server-wins, NULL = tanpa template.
+        const aTpl = a?.dailyStockTemplate !== undefined && a?.dailyStockTemplate !== null
+          ? Math.max(0, Math.round(Number(a.dailyStockTemplate))) : null;
         await run(
-          `INSERT INTO ms_addon (id, categoryId, addonName, price, trackStock, flagActive, syncDate)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO ms_addon (id, categoryId, addonName, price, trackStock, stockTemplate, flagActive, syncDate)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET categoryId = excluded.categoryId,
              addonName = excluded.addonName, price = excluded.price,
-             trackStock = excluded.trackStock, flagActive = excluded.flagActive,
+             trackStock = excluded.trackStock, stockTemplate = excluded.stockTemplate,
+             flagActive = excluded.flagActive,
              syncDate = excluded.syncDate`,
-          [aid, cid, str(a?.name) ?? aid, aPrice, aTracked, aActive, now],
+          [aid, cid, str(a?.name) ?? aid, aPrice, aTracked, aTpl, aActive, now],
         );
         // Stok cabang addon: pola ms_branchmenu; lowThreshold lokal
         // dipertahankan (pull tak mengirimnya, milik Stock Management).

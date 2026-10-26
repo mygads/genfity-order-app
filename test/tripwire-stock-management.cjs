@@ -38,7 +38,8 @@ function run() {
   // ---- SM-KEYS: kunci baru ada, kunci yatim bersih ----
   const needKeys = ['stockMgmt.title', 'stockMgmt.tabAll', 'stockMgmt.tabMenu',
     'stockMgmt.tabAddon', 'stockMgmt.filterHealthy', 'stockMgmt.filterLow',
-    'stockMgmt.filterOut', 'stockMgmt.markOut', 'stockMgmt.threshold',
+    'stockMgmt.filterOut', 'stockMgmt.markOut', 'stockMgmt.resetTpl',
+    'stockMgmt.resetAll', 'stockMgmt.threshold',
     'stockMgmt.useGlobal', 'stockMgmt.tracked', 'stockMgmt.untracked',
     'stockMgmt.readonlyNote', 'nav_menu_mgmt'];
   const missingKeys = needKeys.filter((k) => !i18n.includes(`'${k}'`) && !i18n.includes(`${k}:`));
@@ -80,6 +81,25 @@ function run() {
     'SM-USE-4: Tandai Habis = set qty 0 (cermin FE, bukan flag)');
   ok(/GROUP_CONCAT/.test(mgmt),
     'SM-USE-5: kartu addon cantumkan menu induk (Varian)');
+  // Reset-to-template (audit reset 2026-10-26): BE ekspos dailyStockTemplate
+  // di /pos/menu → APP simpan → tombol reset kirim qty absolut via drain Opsi A.
+  const rawMgmt = readRaw('screens/settings/StockManagementScreen.tsx');
+  ok(/m\.stockTemplate AS stockTemplate/.test(rawMgmt) && /a\.stockTemplate AS stockTemplate/.test(rawMgmt),
+    'SM-USE-6: SELECT baca stockTemplate menu + addon');
+  ok(/saveQty\(row\.template/.test(mgmt) && /stockMgmt\.resetTpl/.test(mgmt),
+    'SM-USE-7: tombol reset per-kartu kirim qty = template (guard tracked+template)');
+  ok(/tplEligible/.test(mgmt) && /resetAll/.test(mgmt) && /stockMgmt\.resetAll/.test(mgmt),
+    'SM-USE-8: tombol reset-semua hanya baris tracked+bertemplate, sekuensial absolut');
+
+  // ---- SM-TPL: template server tersimpan lokal (server-wins, NULL = tanpa tombol) ----
+  const schemaTpl = read('lib/dbSchema.ts');
+  const tplCols = (schemaTpl.match(/stockTemplate/g) || []).length;
+  ok(tplCols >= 4,
+    `SM-SCHEMA-3: kolom stockTemplate ada (menu+addon CREATE & ALTER, temu ${tplCols})`);
+  const masterGo = read('lib/masterGo.ts');
+  const tplUpserts = (masterGo.match(/stockTemplate = excluded\.stockTemplate/g) || []).length;
+  ok(/dailyStockTemplate/.test(masterGo) && tplUpserts >= 2,
+    `SM-TPL-1: pull /pos/menu simpan template menu + addon (server-wins, temu ${tplUpserts})`);
 
   // ---- SM-SYNC: drain Opsi A table-aware addon ----
   const sync = read('lib/sync.ts');
