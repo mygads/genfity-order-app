@@ -115,11 +115,17 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
     [withMoved, tab, typeFilter, history],
   );
 
-  const setStatus = (id: string, s: EsbStatusLocal, reason?: string) => { const prev: EsbStatusLocal = moved[id] ?? ((base.find((o) => o.id === id)?.status as EsbStatusLocal | undefined) ?? 'Baru'); setMoved((m) => ({ ...m, [id]: s })); setSelected((sel) => (sel && sel.id === id ? { ...sel, status: s, ...(reason ? { rejectReason: reason } : {}) } : sel)); if (reason) setRejectOf((r) => ({ ...r, [id]: reason })); emitEsbStatus(id, s, reason); const row = base.find((o) => o.id === id);
+  const setStatus = (id: string, s: EsbStatusLocal, reason?: string) => { const row0 = base.find((o) => o.id === id);
+  // W2-step (E2E-HP 2026-10-26): baris server maju SATU langkah mengikuti mesin
+  // status BE (ACCEPTED->IN_PROGRESS->READY). Lompat langsung ke READY dari
+  // ACCEPTED ditolak pagar klien (posWire) + BE, sehingga Complete macet.
+  const stepTarget = (row0 && typeof row0.serverId === 'number' && s === 'Selesai' && row0.serverStatus === 'ACCEPTED') ? 'IN_PROGRESS' : null;
+  const optimistic: EsbStatusLocal = stepTarget ? 'Diproses' : s;
+  const prev: EsbStatusLocal = moved[id] ?? ((base.find((o) => o.id === id)?.status as EsbStatusLocal | undefined) ?? 'Baru'); setMoved((m) => ({ ...m, [id]: optimistic })); setSelected((sel) => (sel && sel.id === id ? { ...sel, status: optimistic, ...(reason ? { rejectReason: reason } : {}) } : sel)); if (reason) setRejectOf((r) => ({ ...r, [id]: reason })); emitEsbStatus(id, optimistic, reason); const row = base.find((o) => o.id === id);
   // W2: baris server (id srv-*) -> kontrak Go; baris ESB lokal ikut jalur lama.
   if (row && typeof row.serverId === 'number') {
     const sid = row.serverId;
-    const target = s === 'Diproses' ? 'ACCEPTED' : s === 'Selesai' ? 'READY' : null;
+    const target = s === 'Diproses' ? 'ACCEPTED' : s === 'Selesai' ? (stepTarget ?? 'READY') : null;
     void (async () => {
       const res = s === 'Batal'
         ? await cancelMerchantOrder(sid, reason)
