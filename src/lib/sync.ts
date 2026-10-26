@@ -1190,6 +1190,17 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
   // transport → drain memfinalkan 'lokal' pola M9-3 di bawah (bukan antre,
   // bukan gagal; baris tetap tampil di Sync sebagai "Hanya di perangkat ini").
   if (table === 'tr_shiftlog') return 'skipped';
+  // APP-8: baris fisik yang sudah 'gagal' deterministik (_dead4xx di payload,
+  // dikupas dari wire body di bawah pola _conflict409) = 'skipped' (S10).
+  // Kartu tetap 'gagal'; tanpa hitungan failed, tanpa trip breaker S4.
+  if (String(row.status ?? '') === 'gagal' && row.payload) {
+    try {
+      const pm = JSON.parse(row.payload) as Record<string, unknown>;
+      if (pm && typeof pm._dead4xx === 'string' && (pm._dead4xx as string)) return 'skipped';
+    } catch {
+      /* payload rusak = retry jujur di bawah */
+    }
+  }
   const path = tablePushPath(table);
   if (!path) return 'skipped';
   try {
@@ -1302,9 +1313,27 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
       /* abaikan */
     }
     return 'sent';
-  } catch {
+  } catch (e) {
+    // APP-8: 4xx deterministik (404 kontrak/validasi) = tandai _dead4xx di
+    // payload (dikupas dari wire body pola _conflict409) agar siklus berikut
+    // 'skipped' — bukan 'failed' tiap push + trip breaker S4. 5xx/timeout/
+    // jaringan = retry jujur (tanpa marker). Kartu fisik tetap 'gagal'.
+    const msg = e instanceof Error ? e.message : '';
     try {
-      await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+      if (/^HTTP 4\d\d\b/.test(msg.trim()) && row.payload) {
+        try {
+          const p = JSON.parse(row.payload) as Record<string, unknown>;
+          await run('UPDATE tr_esoprocessqueue SET status = ?, payload = ? WHERE id = ?', [
+            'gagal',
+            JSON.stringify({ ...p, _dead4xx: msg.trim().slice(0, 32) }),
+            row.id,
+          ]);
+        } catch {
+          await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+        }
+      } else {
+        await run("UPDATE tr_esoprocessqueue SET status = 'gagal' WHERE id = ?", [row.id]);
+      }
     } catch {
       /* abaikan */
     }
@@ -1611,6 +1640,22 @@ export async function pushAll(): Promise<PushResult> {
 }
 
 /**
+ * HP-E2E (2026-10-26, APP-8): fail-once untuk 4xx deterministik.
+ * 'gagal' + catatan deterministik (tanpa '(retry)') = server PASTI menolak
+ * lagi (validasi/404 kontrak/tak ada transisi/PIN) → siklus berikut 'skipped'
+ * (kartu tetap tampil 'gagal' + alasan; tanpa hitungan failed, tanpa request
+ * ulang, tanpa trip breaker S4). Catatan transien SELALU mengandung '(retry)'
+ * (jaringan/timeout/5xx/429) → tetap di-retry. Pola S10/C8.
+ */
+function isDeterministicFailNote(note: unknown): boolean {
+  const s = String(note ?? '').trim();
+  if (!s || s.includes('(retry)')) return false;
+  if (/^(posWire|beWorkforce):/.test(s)) return true;
+  if (/^HTTP 4\d\d\b/.test(s)) return true;
+  return false;
+}
+
+/**
  * Dorong satu item ringan (path endpoint tidak berubah). 'sent'/'failed' /
  * 'failed-once' dihitung pushAll; 'skipped' = master-local-only atau cermin
  * lokal (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya)
@@ -1622,6 +1667,10 @@ export async function pushAll(): Promise<PushResult> {
  * counterpart-less baru tak boleh menjeda drain seolah jaringan putus.
  */
 async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'failed-once' | 'skipped'> {
+  // APP-8: 4xx deterministik yang SUDAH 'gagal' = jangan kirim ulang tiap
+  // push (siklus berikut 'skipped'; kartu tetap 'gagal' + alasan jujur).
+  // Transien ('(retry)' di note) lolos ke jalur retry masing-masing.
+  if (item.status === 'gagal' && isDeterministicFailNote(item.note)) return 'skipped';
   // Perubahan master lokal (ms_*) local-only (M9-3, tanpa endpoint push):
   // lewati agar tidak terkirim ke order/finish; baris tetap kotor
   // (syncDate NULL) + tercatat di tr_esoprocessqueue (status 'lokal' oleh
