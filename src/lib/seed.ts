@@ -414,7 +414,8 @@ export async function ensureSeeded(): Promise<void> {
   // user aman (terverifikasi di layar pemilik):
   //   - member buatan user = `M` + 6 digit Date.now() (MemberScreen:456),
   //     takkan sama dengan 'M003' (4 char);
-  //   - menu buatan user = `m-${Date.now()}` huruf kecil (MenuManagementScreen),
+  //   - menu buatan user = `m-${Date.now()}` huruf kecil (format layar menu lama;
+  //     StockManagement kini read-only nama/harga, kelola di web),
   //     takkan sama dengan 'M001'..'M008' huruf besar;
   //   - meja tak punya jalur buat-buat lokal (denah hanya dari seed/pull);
   //   - shift buatan user = `shift-${Date.now()}` (ShiftScreen);

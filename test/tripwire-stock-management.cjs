@@ -65,12 +65,14 @@ function run() {
   ok(/tracked && qty<=0/.test(lib.replace(/\s+/g, '')) || /deriveSoldOut/.test(lib),
     'SM-LIB-4: derivasi Habis kanonis dilacak && qty<=0');
 
-  // ---- SM-USE: kedua layar pakai lib bersama ----
+  // ---- SM-USE: pembagian layar (audit 2026-10-26) ----
+  // Stock = lembar hitung opname + opts/toggle (TANPA tulis absolut);
+  // StockManagement = satu-satunya penulis stok absolut.
   const stock = read('screens/settings/StockScreen.tsx');
-  ok(/persistBranchQty/.test(stock),
-    'SM-USE-1: StockScreen pakai persistBranchQty (lib kanonis)');
+  ok(!/persistBranchQty/.test(stock),
+    'SM-USE-1: StockScreen tanpa tulis absolut (stepper = entri hitung opname lokal)');
   ok(!/INSERT INTO ms_branchmenu/.test(stock),
-    'SM-USE-2: StockScreen tanpa SQL tulis sendiri (via lib)');
+    'SM-USE-2: StockScreen tanpa SQL tulis sendiri');
   const mgmt = read('screens/settings/StockManagementScreen.tsx');
   ok(/persistBranchQty/.test(mgmt) && /setBranchThreshold/.test(mgmt) && /getAllLocalFlags/.test(mgmt),
     'SM-USE-3: StockManagement pakai persist+threshold+bulk-flags');

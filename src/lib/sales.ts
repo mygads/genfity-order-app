@@ -366,7 +366,7 @@ export async function archiveVoidTrail(s: VoidTrailSnapshot): Promise<void> {
 
 /**
  * Stasiun kerja satu menu untuk kolom tr_salesmenu.stationId (L17, read-only):
- * cermin pola baca routing print (MenuManagementScreen: SELECT qty, stationId
+ * cermin pola baca routing print (StockManagementScreen: SELECT qty, stationId
  * FROM ms_branchmenu WHERE branchId = ? AND menuId = ?) lalu fallback
  * ms_menu.stationId. Null bila tak ketemu — penjualan tetap sah, tiket dapur
  * memakai rute default sisi layar dapur.

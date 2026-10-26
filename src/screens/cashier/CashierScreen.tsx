@@ -570,7 +570,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         if (!alive) return;
         if (rows.length === 0) { if (alive) setDbProducts([]); return; }
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
-        // Kamus id -> nama kategori (pola MenuManagementScreen) agar chip/label
+        // Kamus id -> nama kategori (pola StockManagementScreen) agar chip/label
         // memakai nama ramah; jatuh ke id mentah bila kamus kosong.
         let catName = new Map<string, string>();
         try {
