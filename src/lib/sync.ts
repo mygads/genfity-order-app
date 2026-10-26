@@ -2977,7 +2977,9 @@ export async function restoreAutoSyncPrefs(): Promise<void> {
       SYNC_OPTS_KEY,
       { autoSync: true, syncOnWifi: false },
     );
-    applyAutoSyncPrefs({ auto: o.autoSync !== false, wifiOnly: o.syncOnWifi === true });
+    // Audit 2026-10-26: opsi wifi-only dihapus — pulihkan selalu ke jaringan
+    // apa pun (abaikan simpanan syncOnWifi lama agar tak mengunci wifi).
+    applyAutoSyncPrefs({ auto: o.autoSync !== false, wifiOnly: false });
   } catch {
     /* preferensi tak terbaca — timer tetap mati, SyncScreen yang menyalakan */
   }

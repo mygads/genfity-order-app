@@ -179,6 +179,20 @@ function str(v: unknown, fb = ''): string {
   return String(v);
 }
 
+/** Tugas E: nama user yang digantikan dari tookOver BE
+ * ({kickedUserId, kickedUserName, ...}). Nama = data (bukan prosa) sehingga
+ * ditempel mentah ke notice tanpa kunci i18n baru; '' = tak disebut BE. */
+function kickedNameOf(body: Record<string, unknown>): string {
+  const tko = body.tookOver as Record<string, unknown> | undefined;
+  return str(tko?.kickedUserName ?? tko?.kickedName ?? body.kickedUserName).trim();
+}
+
+/** Tempel nama user yang digantikan ke teks notice ('' = tanpa nama). */
+function withKickedName(base: string, body: Record<string, unknown>): string {
+  const n = kickedNameOf(body);
+  return n ? `${base} (${n})` : base;
+}
+
 /** Kupas envelope {data} bila BE membungkus respons. */
 function unwrapData<T>(body: unknown): T {
   if (body && typeof body === 'object' && 'data' in (body as Record<string, unknown>)) {
@@ -938,6 +952,7 @@ export default function LoginScreen({ navigation }: Props) {
    * blokir — server sudah merevoke sesi lama). */
   const [takeover, setTakeover] = useState<null | {
     kickedUserId: string;
+    kickedUserName: string;
     payload: Record<string, unknown>;
     pin: string;
   }>(null);
@@ -1263,7 +1278,7 @@ export default function LoginScreen({ navigation }: Props) {
           // offline-path; user-abort → langsung offline-path tanpa retry.
           const devId = await withTimeout(getContractDeviceId(), 5000).catch(() => '');
           const stageA = await callStaffLogin(
-            { username: uname, password, deviceId: devId },
+            { username: uname, password, deviceId: devId, clientType: 'app' },
             { signal: loginSignal },
           );
           if (stageA.reached && stageA.status >= 200 && stageA.status < 300 && str(stageA.body.stage) === 'pick-terminal') {
@@ -1316,6 +1331,7 @@ export default function LoginScreen({ navigation }: Props) {
             username: uname,
             password,
             deviceId,
+            clientType: 'app',
             ...(ctx.terminalCode ? { terminalCode: ctx.terminalCode } : {}),
             ...(termPin.trim() ? { terminalPin: termPin.trim() } : {}),
           },
@@ -1329,8 +1345,9 @@ export default function LoginScreen({ navigation }: Props) {
           if (kickedUserId || first.body.wasKicked === true || first.body.kicked === true) {
             // K1: user BARU dikabari via kunci kicked_msg (tak ada frame
             // SESSION_KICKED push sisi server — kick = revoke grant +
-            // takeover event ke device baru).
-            setNotice(t('kicked_msg'));
+            // takeover event ke device baru). Nama dari tookOver
+            // ditempel bila BE menyebutnya (tugas E).
+            setNotice(withKickedName(t('kicked_msg'), first.body));
           }
           setCandidate({ kind: 'online', username: uname, password, payload: first.body });
           setStaffPin('');
@@ -1463,6 +1480,7 @@ export default function LoginScreen({ navigation }: Props) {
             username: data.username,
             password: data.password,
             deviceId: data.deviceId,
+            clientType: 'app',
             terminalCode: term.code,
             ...(Number.isFinite(merchantNum) && merchantNum > 0 ? { merchantId: merchantNum } : {}),
             ...(pin.trim() ? { terminalPin: pin.trim() } : {}),
@@ -1502,7 +1520,8 @@ export default function LoginScreen({ navigation }: Props) {
           const tookOver = second.body.tookOver as Record<string, unknown> | undefined;
           const kickedUserId = str(tookOver?.kickedUserId ?? second.body.kickedUserId);
           if (kickedUserId || second.body.wasKicked === true || second.body.kicked === true) {
-            setNotice(t('kicked_msg'));
+            // tookOver tahap-B: kabari + nama bila ada (tugas E).
+            setNotice(withKickedName(t('kicked_msg'), second.body));
           }
           setPickA(null);
           setPickPin('');
@@ -1801,6 +1820,7 @@ export default function LoginScreen({ navigation }: Props) {
             password: candidate.password,
             terminalCode: ctx.terminalCode,
             deviceId,
+            clientType: 'app',
           },
           { signal: pinSignal },
         );
@@ -1840,8 +1860,9 @@ export default function LoginScreen({ navigation }: Props) {
           const kickedUserId = str(tookOver?.kickedUserId ?? p.kickedUserId);
           if (kickedUserId) {
             // K1: login baru menang — kabari + minta konfirmasi user baru
-            // SEBELUM sesi dibuat (takeover_title/takeover_msg).
-            setTakeover({ kickedUserId, payload: p, pin });
+            // SEBELUM sesi dibuat (takeover_title/takeover_msg). Nama dari
+            // tookOver ditampilkan bila BE menyebutnya (tugas E).
+            setTakeover({ kickedUserId, kickedUserName: kickedNameOf(p), payload: p, pin });
             return;
           }
           if (rpv.reached && rpv.status >= 200 && rpv.status < 300) {
@@ -2447,7 +2468,7 @@ export default function LoginScreen({ navigation }: Props) {
             <Text style={styles.pinTitle}>{t('takeover_title')}</Text>
             <Text style={styles.pinSub}>{t('takeover_msg')}</Text>
             {takeover ? (
-              <Text style={styles.pinSub}>{takeover.kickedUserId}</Text>
+              <Text style={styles.pinSub}>{takeover.kickedUserName || takeover.kickedUserId}</Text>
             ) : null}
             <AppButton
               size="md"

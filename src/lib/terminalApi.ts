@@ -238,6 +238,144 @@ export async function fetchBranchTerminals(
 }
 
 /**
+ * Fleet terminal cabang (BE kontrak baru): GET
+ * /api/v1/branches/{branchId}/terminals/fleet → per terminal boundUser
+ * (channel app|web|both) + stations[] (destinationId/name/role/kind/
+ * selected/templateType/printer{printerConnected,paperSize,...}). Parsing
+ * toleran: kunci asing/absen = default aman, tanpa melempar (fail jujur
+ * {ok:false} hanya untuk offline/dummy/BE-error).
+ */
+export type FleetStationKind = 'kasir' | 'dapur' | 'keduanya';
+
+export interface FleetStation {
+  destinationId: number;
+  destinationName: string;
+  role: string;
+  kind: FleetStationKind;
+  selected: boolean;
+  templateType: string;
+  receiptTemplateId: number | null;
+  printerConnected: boolean;
+  paperSize: string;
+}
+
+export interface FleetTerminal {
+  terminalId: string;
+  terminalCode: string;
+  name: string;
+  tag: string;
+  /** Kanal user terikat: 'app' | 'web' | 'both' | '' (tak diketahui). */
+  boundChannel: string;
+  stations: FleetStation[];
+}
+
+function cleanFleetKind(v: unknown): FleetStationKind {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (s === 'dapur' || s === 'kitchen') return 'dapur';
+  if (s === 'kasir' || s === 'cashier' || s === 'counter') return 'kasir';
+  return 'keduanya';
+}
+
+function cleanFleetStation(r: unknown): FleetStation | null {
+  if (!r || typeof r !== 'object') return null;
+  const o = r as Record<string, unknown>;
+  const id = Number(o.destinationId ?? o.id);
+  if (!Number.isFinite(id)) return null;
+  const printer = (o.printer ?? {}) as Record<string, unknown>;
+  const rid = o.receiptTemplateId;
+  return {
+    destinationId: Math.round(id),
+    destinationName: String(o.destinationName ?? o.name ?? '').trim(),
+    role: String(o.role ?? '').trim().toLowerCase(),
+    kind: cleanFleetKind(o.kind),
+    selected: o.selected === true,
+    templateType: String(o.templateType ?? o.template_type ?? '').trim(),
+    receiptTemplateId: rid === undefined || rid === null || rid === '' || !Number.isFinite(Number(rid)) ? null : Math.round(Number(rid)),
+    printerConnected: printer.printerConnected === true || printer.printer_connected === true,
+    paperSize: String(printer.paperSize ?? printer.paper_size ?? '').trim(),
+  };
+}
+
+function cleanFleetTerminal(t: unknown): FleetTerminal | null {
+  if (!t || typeof t !== 'object') return null;
+  const o = t as Record<string, unknown>;
+  const terminalId = str(o.terminalId ?? o.id);
+  if (!terminalId) return null;
+  const bound = (o.boundUser ?? o.bound_user ?? {}) as Record<string, unknown>;
+  const stations = Array.isArray(o.stations) ? o.stations : [];
+  const rawTag = str(o.tag).trim().toLowerCase();
+  return {
+    terminalId,
+    terminalCode: str(o.terminalCode ?? o.code),
+    name: str(o.name),
+    tag: parseDeviceRole(rawTag) ?? '',
+    boundChannel: String(bound.channel ?? o.channel ?? '').trim().toLowerCase(),
+    stations: stations
+      .map(cleanFleetStation)
+      .filter((s): s is FleetStation => s !== null),
+  };
+}
+
+export async function fetchTerminalFleet(
+  branchId: string,
+): Promise<TerminalApiResult<{ branchId: string; terminals: FleetTerminal[] }>> {
+  const id = (branchId ?? '').trim();
+  if (!id) return fail(400, false);
+  const r = await apiFetch(withId(ApiPath.terminalFleet, id), { method: 'GET' });
+  if (!r.ok || r.fromDummy) {
+    return fail(r.status, r.fromDummy);
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  const arr = Array.isArray(data) ? data : (data as { terminals?: unknown })?.terminals;
+  const terminals = (Array.isArray(arr) ? arr : [])
+    .map(cleanFleetTerminal)
+    .filter((t): t is FleetTerminal => t !== null);
+  return { ok: true, data: { branchId: id, terminals }, fromDummy: false };
+}
+
+/**
+ * Update destinasi print-bridge (cermin PrintBridgeTab web):
+ * PATCH /api/merchant/print-bridge/destinations/{destinationId}
+ * {terminalId (0 = lepas), kind (kasir/dapur/keduanya), receiptTemplateId?,
+ * selected?} → {updated, routingVersion}. Fail jujur (offline/BE-error =
+ * {ok:false}; pemanggil tampilkan pesan + andalkan cache lokal).
+ */
+export interface UpdateDestinationInput {
+  terminalId?: number;
+  kind?: FleetStationKind;
+  receiptTemplateId?: number | null;
+  selected?: boolean;
+}
+
+export async function updatePrintDestination(
+  destinationId: number,
+  update: UpdateDestinationInput,
+): Promise<TerminalApiResult<{ updated: boolean; routingVersion: number }>> {
+  if (!Number.isFinite(destinationId)) return fail(400, false);
+  const body: Record<string, unknown> = {};
+  if (update.terminalId !== undefined) body.terminalId = update.terminalId;
+  if (update.kind !== undefined) body.kind = update.kind;
+  if (update.receiptTemplateId !== undefined) body.receiptTemplateId = update.receiptTemplateId;
+  if (update.selected !== undefined) body.selected = update.selected;
+  const r = await apiFetch(withId(ApiPath.merchantPrintDestination, String(Math.round(destinationId))), {
+    method: 'PATCH',
+    body,
+  });
+  if (!r.ok || r.fromDummy) {
+    return failWith(r.status, r.fromDummy, rawErrorBody(r));
+  }
+  const { data } = unwrap<Record<string, unknown>>(r.data);
+  return {
+    ok: true,
+    data: {
+      updated: data.updated !== false,
+      routingVersion: Number(data.routingVersion ?? 0) || 0,
+    },
+    fromDummy: false,
+  };
+}
+
+/**
  * E02: cek PIN terminal tanpa efek (UX bind). Fail-closed: dummy/offline
  * tak pernah {valid:true} — hanya jawaban BE asli yang dipercaya.
  */
@@ -274,7 +412,7 @@ export async function bindTerminal(
   deviceId: string,
 ): Promise<TerminalApiResult<BindData>> {
   const r = await apiFetch(withId(ApiPath.terminalBind, terminalId), {
-    body: { pin, deviceId },
+    body: { pin, deviceId, clientType: 'app' },
   });
   if (!r.ok || r.fromDummy) {
     return failWith<BindData>(r.status, r.fromDummy, rawErrorBody(r));
@@ -315,7 +453,7 @@ export async function claimTerminalPin(
   deviceId: string,
 ): Promise<TerminalApiResult<ClaimData>> {
   const r = await apiFetch(withId(ApiPath.terminalClaim, terminalId), {
-    body: { pin, deviceId },
+    body: { pin, deviceId, clientType: 'app' },
   });
   if (!r.ok || r.fromDummy) {
     return failWith<ClaimData>(r.status, r.fromDummy, rawErrorBody(r));
@@ -359,6 +497,9 @@ export interface StaffLoginInput {
   terminalPin?: string;
   merchantId?: number;
   deviceId?: string;
+  /** Klien pemanggil — APP selalu 'app' (BE menyimpan + claim mengembalikan
+   * tookOver:{kickedUserName,...}). */
+  clientType?: string;
 }
 
 export async function staffLogin(

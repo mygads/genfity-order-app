@@ -1,7 +1,20 @@
 import { useEffect, useState } from 'react';import { AppState, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { DISPLAY_STALE_MS } from '../../lib/display';import { useLang,
 
 type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/timezone';import { useConnectivity } from '../../hooks/useConnectivity';import { ensureShiftOpen } from '../../lib/shiftGuard';import { initDb, query } from '../../lib/db';import { getBranchId, getTerminal } from '../../config/server';import { getBinding, subscribeSession } from '../../session';import { getDeviceRole, normalizeTag, subscribeDeviceRole, FULL_FEATURE_TAGS, VIEW_TAGS } from '../../lib/deviceRole';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const PROMO_IMAGES = [
-  require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. */export default function IdleScreen({ navigation }: Props) {
+  require('../../../assets/images/application_banner.webp'), require('../../../assets/images/esb_logo_white.webp'), require('../../../assets/images/application_banner.webp'),];/** * Layar idle / display promosi saat kasir tidak dipakai. Ketuk utk kembali order. * Keputusan eksplisit: fullscreen tanpa ScreenHeader by design (display promosi * untuk pelanggan); toggle bahasa kecil di kanan atas untuk operator. * Tata letak meniru customer-display website: bar header (logo + status + jam), * banner promo full-bleed saat idle, kartu sambutan netral bila tanpa promo. *//** Jam kecil di bar header (komponen sendiri agar tick tak me-render ulang * seluruh layar). */
+function ClockView({ isTablet }: { isTablet: boolean }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 10000);
+    return () => clearInterval(timer);
+  }, []);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    <View style={styles.clockBox}>
+      <Text style={[styles.clockText, isTablet && styles.clockTextBig]}>{`${p(now.getHours())}:${p(now.getMinutes())}`}</Text>
+    </View>
+  );
+}export default function IdleScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t, isLocked } = useLang(); const [idx, setIdx] = useState(0);
@@ -132,6 +145,7 @@ type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/ti
     return () => clearInterval(timer);
   }, [promos.length]);
 
+  const hasPromo = dbPromos.length > 0;
   const promo = promos[idx];
 
   return (
@@ -144,21 +158,38 @@ type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/ti
       <View style={styles.offlineBanner}>
         <Text style={styles.offlineBannerText}>{t('terminal_unbound_hint')}</Text>
       </View>
-      ) : null}<View style={styles.hero}>
-        <Image source={require('../../../assets/genfity-logo-dark.png')} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
-        <Text style={[styles.shop, isTablet && styles.shopBig]}>{shopName}</Text>
-        <Text style={[styles.heroSub, isTablet && styles.heroSubBig]}>{t('idle_welcome')}</Text>
+      ) : null}<View style={styles.header}>
+        <View style={styles.logoBox}>
+          <Image source={require('../../../assets/genfity-logo-dark.png')} style={styles.logoBoxImg} resizeMode="contain" />
+        </View>
+        <View style={styles.headerTitle}>
+          <Text style={[styles.headerShop, isTablet && styles.headerShopBig]} numberOfLines={1}>{shopName}</Text>
+          <View style={[styles.pill, online === false && styles.pillOff]}>
+            <View style={[styles.pillDot, online === false ? styles.pillDotOff : styles.pillDotOn]} />
+            <Text style={[styles.pillText, online === false ? styles.pillTextOff : styles.pillTextOn]}>{online === false ? t('idle_status_offline') : t('idle_status_live')}</Text>
+          </View>
+        </View>
+        <ClockView isTablet={isTablet} />
       </View>
-      <View style={styles.promoCard}>
-        <Image source={PROMO_IMAGES[idx % PROMO_IMAGES.length]} style={[styles.promoImg, isTablet && styles.promoImgTablet]} resizeMode="contain" />
-        <Text style={[styles.promoTitle, isTablet && styles.promoTitleBig]}>{promo.title}</Text>
-        <Text style={[styles.promoDesc, isTablet && styles.promoDescBig]}>{promo.desc}</Text>
-        <View style={styles.dots}>
-          {promos.map((p, i) => (
-            <TouchableOpacity key={p.id} onPress={() => setIdx(i)} style={[styles.dot, i === idx && styles.dotActive]} />
-          ))}
+      {hasPromo ? (
+      <View style={[styles.promoHero, isTablet && styles.promoHeroTablet]}>
+        <Image source={PROMO_IMAGES[idx % PROMO_IMAGES.length]} style={styles.promoBanner} resizeMode="cover" />
+        <View style={styles.promoOverlay}>
+          <Text style={[styles.promoTitleOver, isTablet && styles.promoTitleOverBig]} numberOfLines={2}>{promo.title}</Text>
+          <Text style={[styles.promoDescOver, isTablet && styles.promoDescOverBig]} numberOfLines={2}>{promo.desc}</Text>
+          <View style={styles.dotsOver}>
+            {promos.map((p, i) => (
+              <TouchableOpacity key={p.id} onPress={() => setIdx(i)} style={[styles.dot, i === idx && styles.dotActive]} />
+            ))}
+          </View>
         </View>
       </View>
+      ) : (
+      <View style={styles.welcomeCard}>
+        <Text style={[styles.welcomeShop, isTablet && styles.welcomeShopBig]}>{shopName}</Text>
+        <Text style={[styles.welcomeSub, isTablet && styles.welcomeSubBig]}>{t('idle_welcome')}</Text>
+      </View>
+      )}
       <View style={styles.infoRow}>
         <View style={[styles.infoBox, isTablet && styles.infoBoxTablet]}>
           <Text style={[styles.infoTitle, isTablet && styles.infoTitleBig]}>{t('idle_hours')}</Text>
@@ -189,19 +220,38 @@ type Lang } from '../../lib/i18n';import { getTimezoneShort } from '../../lib/ti
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.navyDark },
   body: { padding: 16, paddingBottom: 40 },
-  langWrap: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }, langBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.navy }, langBtnOn: { backgroundColor: colors.white, borderColor: colors.white }, langT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navyTint }, langTOn: { color: colors.navy }, hero: { alignItems: 'center', marginTop: 20 },
-  logo: { width: 130, height: 64 },
-  /* Tablet: logo lebih besar agar terbaca dari jauh. */
-  logoTablet: { width: 180, height: 88 },
-  shop: { fontFamily: fonts.bold, fontSize: 24, color: colors.white, marginTop: 8, textAlign: 'center' },
-  shopBig: { fontSize: 36 }, heroSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, marginTop: 4, textAlign: 'center' },
-  heroSubBig: { fontSize: 16 }, promoCard: { backgroundColor: colors.white, borderRadius: 16, padding: 18, marginTop: 20, alignItems: 'center' },
-  promoImg: { width: '100%', height: 150 },
-  /* Tablet: gambar promo lebih tinggi agar mengisi layar display. */
-  promoImgTablet: { height: 240 },
-  promoTitle: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 12, textAlign: 'center' },
-  promoTitleBig: { fontSize: 24 }, promoDesc: { fontFamily: fonts.regular, fontSize: 14, color: colors.muted, marginTop: 4, textAlign: 'center' },
-  promoDescBig: { fontSize: 16 }, dots: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  langWrap: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }, langBtn: { borderWidth: 1, borderColor: colors.navy, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.navy }, langBtnOn: { backgroundColor: colors.white, borderColor: colors.white }, langT: { fontFamily: fonts.bold, fontSize: 11, color: colors.navyTint }, langTOn: { color: colors.navy }, header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, backgroundColor: colors.navy, borderRadius: 14, padding: 10 },
+  headerTitle: { flex: 1, minWidth: 0 },
+  headerShop: { fontFamily: fonts.bold, fontSize: 17, color: colors.white },
+  headerShopBig: { fontSize: 22 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, alignSelf: 'flex-start', borderWidth: 1, borderColor: colors.green, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  pillOff: { borderColor: colors.red },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
+  pillDotOn: { backgroundColor: colors.green },
+  pillDotOff: { backgroundColor: colors.red },
+  pillText: { fontFamily: fonts.bold, fontSize: 11 },
+  pillTextOn: { color: colors.green },
+  pillTextOff: { color: colors.red },
+  clockBox: { backgroundColor: colors.navyDark, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  clockText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
+  clockTextBig: { fontSize: 17 },
+  logoBox: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  logoBoxImg: { width: 36, height: 36 },
+  welcomeCard: { backgroundColor: colors.navy, borderRadius: 16, padding: 28, marginTop: 12, alignItems: 'center' },
+  welcomeShop: { fontFamily: fonts.bold, fontSize: 26, color: colors.white, textAlign: 'center' },
+  welcomeShopBig: { fontSize: 34 },
+  welcomeSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.navyTint, marginTop: 6, textAlign: 'center' },
+  welcomeSubBig: { fontSize: 16 },
+  promoHero: { height: 220, borderRadius: 16, overflow: 'hidden', marginTop: 12, backgroundColor: colors.navy },
+  /* Tablet: banner promo lebih tinggi agar mengisi layar display. */
+  promoHeroTablet: { height: 320 },
+  promoBanner: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
+  promoOverlay: { flex: 1, justifyContent: 'flex-end', padding: 14, backgroundColor: 'rgba(0,0,0,0.35)' },
+  promoTitleOver: { fontFamily: fonts.bold, fontSize: 20, color: colors.white },
+  promoTitleOverBig: { fontSize: 26 },
+  promoDescOver: { fontFamily: fonts.regular, fontSize: 13, color: colors.white, marginTop: 2, opacity: 0.9 },
+  promoDescOverBig: { fontSize: 15 },
+  dotsOver: { flexDirection: 'row', gap: 8, marginTop: 10 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.line },
   dotActive: { backgroundColor: colors.orange },
   infoRow: { flexDirection: 'row', gap: 8, marginTop: 14 },

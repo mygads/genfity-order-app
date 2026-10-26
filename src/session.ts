@@ -662,6 +662,100 @@ export function exitBranchAll(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Reclaim tanpa login ulang (tugas E): sesi direclaim dari tempat lain →
+// device kembali ke PILIH TERMINAL dengan token auth tetap tersimpan (TANPA
+// login ulang). Beda dengan revokeKickedSession (yang melempar ke Login
+// dengan sesi+token dibuang) dan exitBranchAll (logout penuh).
+// ---------------------------------------------------------------------------
+
+type ReclaimListener = () => void;
+const reclaimListeners = new Set<ReclaimListener>();
+
+/** Langganan momen reclaim (GuardedStacks navigasi ke TerminalPicker). */
+export function subscribeReclaim(fn: ReclaimListener): () => void {
+  reclaimListeners.add(fn);
+  return () => {
+    reclaimListeners.delete(fn);
+  };
+}
+
+function emitReclaim(): void {
+  reclaimListeners.forEach((l) => {
+    try {
+      l();
+    } catch {
+      /* abaikan */
+    }
+  });
+}
+
+/**
+ * Lepas binding terminal TAPI pertahankan sesi + token auth (memori +
+ * SecureStore tak disentuh — tanpa logout, tanpa clearAuthTokenStore).
+ * - Binding dihapus di SEMUA store (sesi, kontrak v1, server store).
+ * - Grant HANYA triple device ini yang dicabut (pola grant-map F1).
+ * - Field terminal sesi digunduli (terminalId/Code/Tag dikosongkan;
+ *   branchId/outlet dipertahankan untuk param picker) lalu persist.
+ * - Realtime dimatikan (feed milik terminal lama); hidup lagi saat
+ *   login/bind berikut.
+ * Kembali true bila ada binding/sesi yang dilepas. Tak pernah melempar.
+ */
+export function releaseBindingForReclaim(): boolean {
+  try {
+    const hadBinding = binding !== null;
+    const hadSession = current !== null;
+    if (!hadBinding && !hadSession) return false;
+    const deviceId = String(current?.deviceId ?? binding?.deviceId ?? '').trim();
+    try {
+      if (deviceId) clearGrantsForDevice(deviceId);
+    } catch {
+      /* abaikan */
+    }
+    binding = null;
+    void removeItem(LS_BINDING);
+    try {
+      const tc = require('./lib/terminalContract') as typeof import('./lib/terminalContract');
+      void Promise.resolve(tc.clearBinding()).catch(() => {
+        /* abaikan: cermin best-effort */
+      });
+    } catch {
+      /* abaikan: cermin best-effort */
+    }
+    try {
+      const srv = require('./config/server') as typeof import('./config/server');
+      srv.setTerminal({ terminalCode: '', branchId: '', branchName: '' });
+    } catch {
+      /* abaikan: cermin best-effort */
+    }
+    // Gunduli field terminal sesi (branchId/outlet = konteks picker).
+    if (current) {
+      current.terminalId = '';
+      current.terminalCode = '';
+      current.terminalTag = '';
+      persist();
+    }
+    postLoginRoute = null;
+    emit();
+    try {
+      const { stopRealtime } = require('./lib/realtime') as typeof import('./lib/realtime');
+      stopRealtime();
+    } catch {
+      /* abaikan */
+    }
+    try {
+      const { setWsForeground } = require('./native/printer') as typeof import('./native/printer');
+      void setWsForeground(false);
+    } catch {
+      /* abaikan */
+    }
+    emitReclaim();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Grant cache offline L1 (SPEC-TERMINAL-SESSION §4 + Q6 CLOSED)
 // ---------------------------------------------------------------------------
 

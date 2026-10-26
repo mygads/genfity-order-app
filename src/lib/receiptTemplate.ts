@@ -154,6 +154,32 @@ type TemplateListResponse = {
 };
 
 /**
+ * Ambil SEMUA template struk merchant (BE kontrak baru dipakai layar pilih
+ * template per station): GET api/merchant/thermal-receipt-templates →
+ * {data:{templates:[{id,name,templateType,isDefault,settings}]}}. Kembali []
+ * bila offline, 404 (BE lama), 401, atau kosong. Tak pernah melempar untuk
+ * 404/jaringan (pola branchsettings-skip).
+ */
+export async function fetchReceiptTemplates(): Promise<ReceiptTemplateRef[]> {
+  let res: Response;
+  try {
+    res = await apiGet('api/merchant/thermal-receipt-templates');
+  } catch {
+    return [];
+  }
+  if (res.status === 404 || !res.ok) return [];
+  let body: TemplateListResponse;
+  try {
+    body = (await res.json()) as TemplateListResponse;
+  } catch {
+    return [];
+  }
+  const items = body?.data?.templates ?? [];
+  if (!Array.isArray(items)) return [];
+  return items.filter((t) => t && Number.isFinite(Number(t.id)));
+}
+
+/**
  * Ambil template struk pelanggan default merchant. Kembali null bila offline,
  * 404 (BE lama), 401 (sesi basi — pemanggil yang menangani), atau kosong.
  * Tak pernah melempar untuk 404/jaringan (pola branchsettings-skip).

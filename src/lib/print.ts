@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { appAlert } from './appAlert';
-import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, type EscKitchenTicket, type EscQueueSlip, type EscReceipt } from './escpos';
+import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toBase64, type EscKitchenTicket, type EscQueueSlip, type EscReceipt } from './escpos';
 import { getTerminal } from '../config/server';
 import { getJSON } from './storage';
 import { openCashDrawer, printBytes, type PrinterTarget } from '../native/printer';
@@ -19,12 +19,15 @@ function prn(key: string, vars?: Record<string, string | number>): string {
 }
 
 export type PrintOutcome =
-  | { ok: true; bytes: number; printer: string }
+  // `payloadBase64` (tugas G): byte struk yang dirender — pemanggil
+  // fan-out AUTO memakainya ulang tanpa render ganda. Hanya diisi jalur
+  // struk (bukan tiket/slip; bukan web-OS-print yang tanpa byte).
+  | { ok: true; bytes: number; printer: string; payloadBase64?: string }
   // `queued` = byte aman di `tr_printqueue` (offline/printer putus), BUKAN
   // sudah keluar kertas. Layar yang bisa diedit (ReceiptScreen) menampilkan
   // status pending dari flag ini; penjaga lama (`res.ok && res.bytes > 0`)
   // tetap tidak menaikkan printedCount / menendang laci untuk job antre.
-  | { ok: false; reason: 'no-printer' | 'need-dev-client' | 'connect-failed' | 'send-failed'; detail?: string; queued?: true; queuedId?: string };
+  | { ok: false; reason: 'no-printer' | 'need-dev-client' | 'connect-failed' | 'send-failed'; detail?: string; queued?: true; queuedId?: string; payloadBase64?: string };
 
 interface StoredStation {
   id: string;
@@ -38,6 +41,12 @@ interface StoredStation {
   autocut?: boolean;
   isDefault?: boolean;
   connected?: boolean;
+  /**
+   * Kind server (kasir/dapur/keduanya; fleet sync tugas A): 'dapur' =
+   * dikecualikan dari broadcast struk kasir. Absen = 'keduanya' (kecuali
+   * role Dapur warisan = 'dapur'), lihat effectiveKind di bawah.
+   */
+  kind?: 'kasir' | 'dapur' | 'keduanya';
   /**
    * Binding terminal (APP-PRINTER, audit row 11): station = address book yang
    * diikat ke satu terminalCode (+branchId via PrintersScreen). Tanpa binding
@@ -194,6 +203,51 @@ async function defaultStation(): Promise<ResolvedStation | null> {
     return null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Kind efektif satu station (tugas C): kind eksplisit fleet (tugas A) menang;
+ * tanpa kind = role Dapur warisan → 'dapur', selainnya 'keduanya' (default
+ * picker kind). Dipakai broadcast struk (kecuali 'dapur') + tiket dapur.
+ */
+export type StationKind = 'kasir' | 'dapur' | 'keduanya';
+
+export function effectiveKind(s: { kind?: unknown; role?: unknown }): StationKind {
+  const k = String(s.kind ?? '').trim().toLowerCase();
+  if (k === 'dapur' || k === 'kitchen') return 'dapur';
+  if (k === 'kasir' || k === 'cashier' || k === 'counter') return 'kasir';
+  if (k === 'keduanya' || k === 'both') return 'keduanya';
+  const role = String(s.role ?? '').trim().toLowerCase();
+  if (/dapur|kitchen|bar/.test(role)) return 'dapur';
+  return 'keduanya';
+}
+
+/**
+ * SEMUA station terikat terminal aktif untuk struk kasir (tugas C):
+ * pool rank 0 (bound) + kind efektif BUKAN dapur + target kirim valid.
+ * Urutan: isDefault dulu, lalu sisanya (stabil). Kosong = tak ada yang layak
+ * (pemanggil fallback ke defaultStation legacy / antre tanpa-target).
+ */
+export async function boundReceiptStations(): Promise<ResolvedStation[]> {
+  try {
+    const stations = await getJSON<StoredStation[]>(LS_STATIONS, []);
+    const scope = activeScope();
+    const bound = stations.filter((s) => scopeRank(s, scope) === 0);
+    const eligible = bound.filter((s) => effectiveKind(s) !== 'dapur');
+    eligible.sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true));
+    const out: ResolvedStation[] = [];
+    const seen = new Set<string>();
+    for (const s of eligible) {
+      if (!s || seen.has(s.id)) continue;
+      seen.add(s.id);
+      const target = targetOf(s);
+      if (!target) continue;
+      out.push({ target, name: s.name, cols: s.cpl === 48 ? 48 : 32, autocut: s.autocut, role: s.role });
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 
@@ -355,10 +409,12 @@ export async function printForTag(input: TagPrintInput): Promise<PrintOutcome> {
 }
 
 /**
- * Cetak struk nyata (PAY-04): rakit ESC/POS 32-kolom + kirim ke printer
- * default. Web (Expo web / Playwright): dialog cetak OS. Native: BT/LAN/USB
- * via modul printer; tanpa dev-client / tanpa printer terkonfigurasi =
- * dialog penjelas, bukan cetak diam-diam.
+ * Cetak struk nyata (PAY-04): rakit ESC/POS + BROADCAST ke SEMUA station
+ * terikat terminal (tugas C; kind dapur dikecualikan). Satu aksi kasir =
+ * render sekali per kombinasi (cols,cut), kirim per station (paper size /
+ * cpl / autocut per station tetap dipakai). Web (Expo web / Playwright):
+ * dialog cetak OS. Native: BT/LAN/USB via modul printer; tanpa dev-client /
+ * tanpa printer terkonfigurasi = dialog penjelas, bukan cetak diam-diam.
  */
 export async function printReceiptData(r: EscReceipt, opts?: { stationId?: string }): Promise<PrintOutcome> {
   if (
@@ -370,9 +426,113 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
     return { ok: true, bytes: 0, printer: 'OS print' };
   }
   // Override station eksplisit (dipertahankan) → target aktif 1:1 ter-scoping.
-  const d = opts?.stationId
-    ? (await stationByKey(opts.stationId)) ?? (await defaultStation())
-    : await defaultStation();
+  if (opts?.stationId) {
+    return printReceiptToSingle(
+      r,
+      (await stationByKey(opts.stationId)) ?? (await defaultStation()),
+    );
+  }
+  // Broadcast: semua station terikat non-dapur. Kosong (belum ada binding) =
+  // fallback legacy defaultStation tunggal agar setup lama tak pecah.
+  const targets = await boundReceiptStations();
+  if (targets.length === 0) {
+    return printReceiptToSingle(r, await defaultStation());
+  }
+  if (targets.length === 1) {
+    return printReceiptToSingle(r, targets[0] as ResolvedStation);
+  }
+  // Render sekali per (cols,cut) — byte dirakit per grup, bukan per station.
+  const groups = new Map<string, { cols: 32 | 48; cut: boolean; bytes: Uint8Array; stations: ResolvedStation[] }>();
+  for (const t of targets) {
+    const cols = r.cols ?? t.cols;
+    const cut = r.cut ?? t.autocut ?? (await globalAutocut());
+    const key = `${cols}/${cut ? 1 : 0}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        cols,
+        cut,
+        bytes: buildReceiptBytes({ ...r, cols, cut }),
+        stations: [],
+      };
+      groups.set(key, g);
+    }
+    g.stations.push(t);
+  }
+  let sentBytes = 0;
+  let sentCount = 0;
+  const sentNames: string[] = [];
+  const failedNames: string[] = [];
+  let lastReason = '';
+  let lastDetail: string | undefined;
+  let needDevClient = false;
+  for (const g of groups.values()) {
+    for (const t of g.stations) {
+      let res;
+      try {
+        res = await printBytes(t.target, g.bytes);
+      } catch {
+        res = { ok: false, reason: 'send-failed', detail: 'printFn threw' } as const;
+      }
+      if ((res as { ok: boolean }).ok) {
+        sentBytes += (res as { ok: true; bytes: number }).bytes;
+        sentCount += 1;
+        sentNames.push(t.name);
+      } else {
+        const fr = res as { ok: false; reason: string; detail?: string };
+        failedNames.push(t.name);
+        lastReason = fr.reason;
+        lastDetail = fr.detail;
+        if (fr.reason === 'need-dev-client') needDevClient = true;
+        // Gagal per station = antre persisten (target station itu; drain
+        // kind-aware mengurasnya saat jalur hidup) — bukan Alert-and-drop.
+        await enqueuePrintJob(g.bytes, t.target, {
+          name: t.name,
+          kind: 'receipt',
+          label: r.trx ?? '',
+        });
+      }
+    }
+  }
+  if (sentCount > 0) {
+    if (failedNames.length > 0) {
+      appAlert(
+        prn('prn_receipt_title'),
+        prn('prn_send_fail', { p: failedNames.join(', '), e: lastDetail ?? lastReason }),
+      );
+    }
+    // Sukses kirim = momen kuras piggyback antrean (best-effort).
+    void drainPrintQueue({ resolveTarget: resolveDrainTarget });
+    // Tugas G: byte grup pertama = payload fan-out AUTO (satu payload per
+    // request; varian lebar kertas per station milik jalur lokal saja).
+    const firstBytes = groups.values().next().value?.bytes as Uint8Array | undefined;
+    return {
+      ok: true,
+      bytes: sentBytes,
+      printer: sentNames.join(', '),
+      ...(firstBytes ? { payloadBase64: toBase64(firstBytes) } : {}),
+    };
+  }
+  appAlert(
+    prn('prn_receipt_title'),
+    needDevClient
+      ? prn('prn_preview_receipt', { n: String(groups.values().next().value?.bytes.length ?? 0), p: failedNames.join(', ') })
+      : prn('prn_send_fail', { p: failedNames.join(', '), e: lastDetail ?? lastReason }),
+  );
+  const failBytes = groups.values().next().value?.bytes as Uint8Array | undefined;
+  return {
+    ok: false,
+    reason: 'send-failed',
+    detail: lastDetail ?? lastReason,
+    ...(failBytes ? { payloadBase64: toBase64(failBytes) } : {}),
+  };
+}
+
+/**
+ * Jalur tunggal (override station eksplisit / fallback legacy): perilaku lama
+ * — kirim 1:1, gagal = antre persisten + outcome `queued`.
+ */
+async function printReceiptToSingle(r: EscReceipt, d: ResolvedStation | null): Promise<PrintOutcome> {
   if (!d) {
     appAlert(
       prn('prn_receipt_title'),
@@ -391,6 +551,8 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   // Lebar kertas ikut station (chip 32/48 di Pengaturan Printer) kecuali
   // pemanggil sudah menentukan sendiri. R10: cut = payload ?? station ?? global.
   const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? d.cols, cut: r.cut ?? d.autocut ?? (await globalAutocut()) });
+  // Tugas G: byte payload diikutkan ke outcome untuk fan-out AUTO.
+  const payloadBase64 = toBase64(bytes);
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     appAlert(
@@ -406,13 +568,13 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
       kind: 'receipt',
       label: r.trx ?? '',
     });
-    if (queuedId) return { ok: false, reason: res.reason, detail: res.detail, queued: true, queuedId };
-    return { ok: false, reason: res.reason, detail: res.detail };
+    if (queuedId) return { ok: false, reason: res.reason, detail: res.detail, queued: true, queuedId, payloadBase64 };
+    return { ok: false, reason: res.reason, detail: res.detail, payloadBase64 };
   }
   // Sukses kirim = momen kuras piggyback antrean (best-effort; reconnect /
   // test-print memicu drain eksplisit dari lane-nya masing-masing).
   void drainPrintQueue({ resolveTarget: resolveDrainTarget });
-  return { ok: true, bytes: res.bytes, printer: d.name };
+  return { ok: true, bytes: res.bytes, printer: d.name, payloadBase64 };
 }
 
 /**

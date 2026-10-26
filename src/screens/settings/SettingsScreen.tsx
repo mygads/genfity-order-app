@@ -11,10 +11,9 @@ import { appAlert } from '../../lib/appAlert';
 import { getSession, getBinding, logout, subscribeSession } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, type ServerEnv } from '../../config/server';
 import { getNotif, setNotif } from '../../config/device';
-import { getLastSync, pushAll } from '../../lib/sync';
 import { requireAccess } from '../../lib/access';
 import { terminalLogout } from '../../lib/terminalApi';
-import { getJSON, setJSON } from '../../lib/storage';import { pullMaster } from '../../lib/master';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';
+import { getJSON, setJSON } from '../../lib/storage';
 import { getDeviceRole, subscribeDeviceRole, normalizeTag, VIEW_TAGS } from '../../lib/deviceRole';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -23,6 +22,14 @@ type Props = { navigation?: Nav };
 const ENVS: ServerEnv[] = ['prod', 'dev', 'staging', 'custom'];
 const ENV_LABEL: Record<ServerEnv, string> = { prod: 'Prod', dev: 'Dev', staging: 'Staging', custom: 'Custom' };
 const AUTOCUT_KEY = 'genfity.settings.autocut';
+// PUTUSAN OWNER 2026-10-26: "Pengaturan Cetakan Menu" (routing menu→station)
+// disembunyikan dulu — dianggap belum aktif. Ubah ke true untuk menampilkan
+// kembali tanpa menghapus layar MenuPrinting.
+const MENU_PRINTING_VISIBLE = false;
+// PUTUSAN OWNER 2026-10-26: baris "Scan QR" di Pengaturan disembunyikan dulu
+// (layar QrScan tetap ada — dipakai Member + Login). Ubah ke true untuk
+// menampilkan kembali tanpa menghapus layar.
+const MENU_SCAN_VISIBLE = false;
 
 export default function SettingsScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -71,36 +78,9 @@ export default function SettingsScreen({ navigation }: Props) {
   })();
   const activeTag = boundTag ?? normalizeTag(deviceRole) ?? 'full_access';
   const isViewLocked = (VIEW_TAGS as string[]).includes(activeTag);
-  const [syncBusy, setSyncBusy] = useState<'push' | 'pull' | null>(null);
-  const [syncMsg, setSyncMsg] = useState('');
-  // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
-  // kosong = dummy/offline, sync panel tetap jalan tanpa server).
-  const [posVer, setPosVer] = useState('');
-  const [verifyMsg, setVerifyMsg] = useState('');
-  const [verifyBusy, setVerifyBusy] = useState(false);
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const v = await fetchPosVersion();
-        if (!live || v.fromDummy || !v.latestVersion) return;
-        setPosVer(`v${v.latestVersion} / min v${v.minVersion}`);
-      } catch { /* offline - tanpa info versi */ }
-    })();
-    return () => { live = false; };
-  }, []);
-  const doVerify = async () => {
-    if (verifyBusy) return;
-    setVerifyBusy(true);
-    setVerifyMsg('');
-    try {
-      const r = await notifyTerminalVerification('verified');
-      if (r.ok && !r.fromDummy) setVerifyMsg(t('term_verify_ok'));
-    } catch { /* offline - panel tetap jalan */ } finally {
-      setVerifyBusy(false);
-    }
-  };
-  const [lastPush, setLastPush] = useState(() => getLastSync() || '');
+  // Audit 2026-10-26: panel sync manual (push/pull + terminal-check) dihapus
+  // dari Pengaturan — push/pull + status ada di layar Sync; validitas terminal
+  // dicek otomatis server di setiap apiFetch/pull (401 → logout).
 
   const go = (route: string) => navigation?.navigate(route);
 
@@ -161,48 +141,18 @@ export default function SettingsScreen({ navigation }: Props) {
       try {
         setCustomBaseUrl(customUrl);
       } catch (e) {
-        setSyncMsg(e instanceof Error ? e.message : String(e));
+        appAlert(t('settings.server'), e instanceof Error ? e.message : String(e));
       }
     });
   };
 
-  /** Push/pull langsung dari Pengaturan (pola sama dengan SyncScreen).
-   * Guard custom-only melempar pesan Indonesia yang diteruskan apa adanya. */
-  const doPush = async () => {
-    if (syncBusy) return;
-    setSyncBusy('push');
-    setSyncMsg('');
-    try {
-      const r = await pushAll();
-      const last = getLastSync();
-      if (last) setLastPush(last);
-      setSyncMsg(`${t('sync.sent')}: ${r.sent}, ${t('sync.failed')}: ${r.failed}`);
-    } catch (e) {
-      setSyncMsg(e instanceof Error ? e.message : t('sync.failed'));
-    } finally {
-      setSyncBusy(null);
-    }
-  };
-
-  const doPull = async () => {
-    if (syncBusy) return;
-    setSyncBusy('pull');
-    setSyncMsg('');
-    try {
-      await pullMaster();
-      setSyncMsg(`${t('sync.lastPull')}: ${new Date().toLocaleString(lang === 'en' ? 'en-US' : 'id-ID')}`);
-    } catch (e) {
-      setSyncMsg(e instanceof Error ? e.message : t('sync.failed'));
-    } finally {
-      setSyncBusy(null);
-    }
-  };
-
-  /** F12: ganti tulis tag/identitas lokal dengan CTA re-bind — tag adalah hak
-   * server (ditetapkan saat bind terverifikasi PIN di BranchPicker); tulis
-   * lokal akan desync dari binding server, dan adoptTerminalBinding sendiri
-   * melakukan logout + clearGrant sehingga tak pantas dipicu dari sini. */
-  const goReclaim = () => navigation?.navigate('SelectBranch');
+  /** Tugas F ("Ganti terminal" tanpa logout): masuk alur pilih cabang +
+   * terminal DI DALAM sesi (rute BranchPicker stack authed) — tanpa logout
+   * manual. Catatan jujur: bind terminal BARU yang terverifikasi PIN tetap
+   * mengakhiri sesi staff via adoptTerminalBinding (okupansi tunggal per
+   * device, by design) sehingga login ulang diperlukan SETELAH klaim baru;
+   * yang dihapus di sini hanyalah langkah logout-manual sebelum memilih. */
+  const goSwitchTerminal = () => navigation?.navigate('BranchPicker');
 
   const pickLang = (l: Lang) => setLang(l);
 
@@ -226,13 +176,13 @@ export default function SettingsScreen({ navigation }: Props) {
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.terminalServer')}</Text>
       {isViewLocked ? null : (
       <>
-      <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={goReclaim} />
+      <MenuRow title={t('settings.terminal')} sub={terminalSub} onPress={goSwitchTerminal} />
       <View style={styles.panel}>
         <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('settings.claimTerminal')}</Text>
         <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('settings.claimSub')}</Text>
         <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{activeTag}</Text>
         <View style={styles.syncRow}>
-          <AppButton size="md" title={t('rebind_button')} onPress={goReclaim} fullWidth={false} style={styles.btnFlexNavy} />
+          <AppButton size="md" title={t('rebind_button')} onPress={goSwitchTerminal} fullWidth={false} style={styles.btnFlexNavy} />
         </View>
       </View>
       </>
@@ -266,24 +216,14 @@ export default function SettingsScreen({ navigation }: Props) {
         ) : null}
       </View>
 
-      <View style={styles.panel}>
-        <Text style={[styles.cardTitle, isTablet && styles.cardTitleBig]}>{t('sync.title')}</Text>
-        <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{lastPush ? `${t('sync.lastPush')}: ${lastPush}` : t('settings.syncSub')}</Text>
-        <View style={styles.syncRow}>
-          <AppButton size="md" title={syncBusy === 'push' ? t('sync.pushing') : t('sync.pushNow')} onPress={doPush} disabled={!!syncBusy} fullWidth={false} style={styles.btnFlexNavy} />
-          <AppButton size="md" title={syncBusy === 'pull' ? t('sync.pulling') : t('sync.pullNow')} onPress={doPull} disabled={!!syncBusy} variant="secondary" fullWidth={false} style={styles.btnFlex} />
-        </View>
-        {syncMsg ? <Text style={styles.syncMsg}>{syncMsg}</Text> : null}
-        {posVer ? <Text style={[styles.cardSub, isTablet && styles.cardSubBig]}>{t('about.terminal')} - POS {posVer}</Text> : null}
-        <View style={styles.syncRow}>
-          <AppButton size="sm" title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.syncBtn} />
-        </View>
-        {verifyMsg ? <Text style={styles.syncMsg}>{verifyMsg}</Text> : null}
-      </View>
-
+      {/* Audit 2026-10-26: panel sync manual dihapus — push/pull + status ada
+        di layar Sync (MenuRow Data & Bantuan di bawah); identitas terminal
+        terlihat di baris klaim + panel server di atas. */}
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.printerPrint')}</Text>
       <MenuRow title={t('settings.printConn')} sub={t('settings.printConnSub')} onPress={() => go('Printers')} />
-      <MenuRow title={t('settings.menuPrint')} sub={t('settings.menuPrintSub')} onPress={() => go('MenuPrinting')} />
+      {MENU_PRINTING_VISIBLE ? (
+        <MenuRow title={t('settings.menuPrint')} sub={t('settings.menuPrintSub')} onPress={() => go('MenuPrinting')} />
+      ) : null}
       <MenuRow
         title={t('settings.autoCut')}
         sub={t('settings.autoCutSub')}
@@ -315,17 +255,13 @@ export default function SettingsScreen({ navigation }: Props) {
         <Switch value={customerDisplay} onValueChange={(v) => { setCustomerDisplay(v); setNotif({ customerDisplay: v }); }} trackColor={{ true: colors.green, false: colors.stroke }} />
       } />
       <MenuRow title={t('settings.idle')} sub={t('settings.idleSub')} onPress={() => go('Idle')} />
+      {MENU_SCAN_VISIBLE ? (
       <MenuRow title={t('settings.scanQr')} sub={t('settings.scanQrSub')} onPress={() => go('QrScan')} />
+      ) : null}
 
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
-      {/* SESI-FINAL-APP K5: backup/restore via clipboard PARKED jujur — tanpa
-          expo-clipboard/file-system/sharing di package.json (dep baru
-          dilarang), tanpa Share/file. Codec murni (lib/backupCodec) siap +
-          diuji roundtrip; baris ini SENGAJA tanpa onPress (disabled, tanpa
-          chevron) sampai dep clipboard diputuskan owner. */}
-      <MenuRow title={t('settings.backup')} sub={t('settings.backupSub')} />
       {/* Cabang Australia (AUD): bahasa dikunci Inggris, baris pemilih disembunyikan. */}
       {isLocked ? null : (
       <MenuRow
@@ -463,7 +399,6 @@ const styles = StyleSheet.create({
   customRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   formFlex: { flex: 1 },
   btnInline: { marginTop: 0 },
-  btnFlex: { marginTop: 0, flex: 1 },
   btnFlexNavy: { marginTop: 0, flex: 1, backgroundColor: colors.navy },
   logoutBtn: { marginTop: 22, marginHorizontal: 16, backgroundColor: colors.paleRed },
   logoutBtnText: { color: colors.red },
@@ -483,12 +418,6 @@ const styles = StyleSheet.create({
   saveBtn: { borderRadius: 10, backgroundColor: colors.navy, paddingHorizontal: 16, justifyContent: 'center', marginTop: 6 },
   saveBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
   syncRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  syncBtn: { flex: 1, borderRadius: 10, backgroundColor: colors.navy, paddingVertical: 11, alignItems: 'center' },
-  syncBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
-  syncBtnPull: { flex: 1, borderRadius: 10, borderWidth: 1, borderColor: colors.navy, paddingVertical: 11, alignItems: 'center' },
-  syncBtnPullText: { fontFamily: fonts.bold, fontSize: 12, color: colors.navy },
-  syncBtnDisabled: { opacity: 0.4 },
-  syncMsg: { fontFamily: fonts.medium, fontSize: 12, color: colors.navy, marginTop: 8 },
   fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.muted, marginTop: 10 },
   centerWrap: {
     flex: 1,

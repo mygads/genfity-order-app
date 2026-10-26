@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp } from '../../theme';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLang, tCur } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
@@ -184,6 +185,9 @@ function MenuThumb({ size = 52 }: { size?: number }) {
 export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= TABLET_BP;
+  // Inset status bar (jam/notif HP) — paritas ScreenHeader (insets.top + 12),
+  // karena header kasir kustom (judul kiri + burger + badge) tak pakai ScreenHeader.
+  const insets = useSafeAreaInsets();
   const { lang, t } = useLang();
   const { online, wsConnected } = useConnectivity();
   // Badge 3-state (mirror DashboardScreen): hijau+Online bila jaringan & WS up,
@@ -1214,7 +1218,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   };
 
   const renderHeader = () => (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
       <View style={styles.headerLeft}>
         <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={12} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
           <Image source={require('../../../assets/icons/burger.webp')} style={styles.hamburgerIcon} resizeMode="contain" />
@@ -1901,6 +1905,8 @@ const styles = StyleSheet.create({
    *  paddingHorizontal 12, paddingBottom 12, hitSlop 12) agar tinggi navy
    *  identik semua layar. Beda disengaja: judul rata kiri (outlet + shift),
    *  tombol burger (layar akar tanpa back), badge koneksi kanan.
+   *  paddingTop = insets.top + 12 via renderHeader (paritas ScreenHeader)
+   *  agar tak nempel status bar HP Android edge-to-edge.
    *  HP-E2E 2026-10-24. */
   header: {
     backgroundColor: colors.navy,

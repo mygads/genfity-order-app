@@ -64,8 +64,166 @@ function asJob(raw: unknown): ServerPrintJob | null {
   };
 }
 
-/** Klaim satu job FIFO untuk terminal ini. */
-export async function claimTerminalPrintJob(terminalIdBe: string | number): Promise<ClaimOutcome> {
+export interface FanoutJob {
+  destinationId: number;
+  destinationName: string;
+  kind: string;
+  jobId: number;
+  duplicate: boolean;
+}
+
+export interface FanoutOutcome {
+  ok: boolean;
+  terminalId?: string;
+  jobs: FanoutJob[];
+  error?: string;
+}
+
+/**
+ * Fan-out cetak (BE kontrak baru): POST
+ * /api/v1/terminals/{id}/print-fanout
+ * {orderId?,idempotencyKey,source:'MANUAL'|'AUTO',payloadBase64,metadata?} →
+ * 201 {data:{terminalId,jobs:[{destinationId,destinationName,kind,jobId,
+ * duplicate}]}}. Station kind dapur otomatis dikecualikan BE untuk MANUAL.
+ * Tak pernah melempar: offline/BE-error = {ok:false} (pemanggil fallback ke
+ * antrean lokal printqueue).
+ */
+export async function postPrintFanout(
+  terminalIdBe: string | number,
+  input: {
+    idempotencyKey: string;
+    source: 'MANUAL' | 'AUTO';
+    payloadBase64: string;
+    orderId?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<FanoutOutcome> {
+  if (!String(terminalIdBe ?? '').trim()) return { ok: false, jobs: [], error: 'terminalId required' };
+  if (!input.idempotencyKey.trim() || !input.payloadBase64.trim()) {
+    return { ok: false, jobs: [], error: 'idempotencyKey + payloadBase64 required' };
+  }
+  let r;
+  try {
+    r = await apiFetch(fillPrintPath(ApiPath.terminalPrintFanout, terminalIdBe), {
+      method: 'POST',
+      body: {
+        ...(input.orderId ? { orderId: input.orderId } : {}),
+        idempotencyKey: input.idempotencyKey,
+        source: input.source,
+        payloadBase64: input.payloadBase64,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      },
+    });
+  } catch {
+    return { ok: false, jobs: [], error: 'offline' };
+  }
+  if (!r.ok) return { ok: false, jobs: [], error: 'fanout failed' };
+  const u = unwrap<Record<string, unknown>>(r.data);
+  const d = (u.data ?? {}) as Record<string, unknown>;
+  const jobs = Array.isArray(d.jobs) ? d.jobs : [];
+  return {
+    ok: true,
+    terminalId: typeof d.terminalId === 'string' ? d.terminalId : undefined,
+    jobs: jobs
+      .map((j) => {
+        if (!j || typeof j !== 'object') return null;
+        const o = j as Record<string, unknown>;
+        const jobId = Number(o.jobId ?? o.id);
+        const destId = Number(o.destinationId);
+        if (!Number.isFinite(jobId) || !Number.isFinite(destId)) return null;
+        return {
+          destinationId: Math.round(destId),
+          destinationName: typeof o.destinationName === 'string' ? o.destinationName : '',
+          kind: typeof o.kind === 'string' ? o.kind : '',
+          jobId: Math.round(jobId),
+          duplicate: o.duplicate === true,
+        } satisfies FanoutJob;
+      })
+      .filter((j): j is FanoutJob => j !== null),
+  };
+}
+
+/**
+ * Tugas G: fan-out OTOMATIS struk pasca-bayar (source AUTO).
+ * Dipanggil fire-and-forget dari ReceiptScreen.doPrint saat autoPrint
+ * pasca-Success (bukan cetak manual — manual tak membuat server jobs).
+ * - idempotencyKey = client_id rantai bayar (stabil per sale; BE dedup
+ *   per station `{base}:station-{destinationId}`, replay ganda aman).
+ * - orderId = id order server numerik bila tertaut (BE menolak non-numerik;
+ *   tanpa tautan = dihilangkan, bukan 'TRX-…' display).
+ * - terminalIdBe diresolve dari klaim device (branchId+terminalCode →
+ *   daftar terminal cabang); tanpa klaim/BE-id = {ok:false} jujur.
+ * - Gagal/offline = fallback antrean lokal persisten (kind 'receipt',
+ *   target null → drain kind-aware; tak pernah melempar). Anti-ganda:
+ *   pemanggil meneruskan `alreadyQueued` dari outcome lokal (jalur lokal
+ *   print.ts SUDAH mengantre per-station saat kirim gagal) — fallback di
+ *   sini hanya jalan bila lokal BELUM mengantre.
+ */
+export async function fanoutReceiptAuto(input: {
+  orderNo: string;
+  clientId: string;
+  payloadBase64: string;
+  /** true = jalur lokal SUDAH mengantre byte ini (outcome `queued`) —
+   * fallback lokal dilewati agar drain tak mencetak ganda. */
+  alreadyQueued?: boolean;
+}): Promise<FanoutOutcome> {
+  const fail = (error: string): FanoutOutcome => ({ ok: false, jobs: [], error });
+  const payloadBase64 = String(input?.payloadBase64 ?? '').trim();
+  const clientId = String(input?.clientId ?? '').trim().slice(0, 120);
+  const orderNo = String(input?.orderNo ?? '').trim();
+  if (!payloadBase64 || !clientId) return fail('payload + clientId required');
+  try {
+    // Lazy-require: terminalApi mengimpor session (lazy) — impor statis di
+    // sini berisiko siklus modul saat app boot (pola sama session.ts).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getTerminal } = require('../config/server') as typeof import('../config/server');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fetchBranchTerminals } = require('./terminalApi') as typeof import('./terminalApi');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getServerOrderIdForSale } = require('./posWire') as typeof import('./posWire');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { enqueuePrint } = require('./printqueue') as typeof import('./printqueue');
+    const g = getTerminal();
+    const termCode = String(g?.terminalCode ?? '').trim().toUpperCase();
+    const branchId = String(g?.branchId ?? '').trim();
+    if (!termCode || !branchId) return fail('terminal-unclaimed');
+    const list = await fetchBranchTerminals(branchId);
+    if (!list.ok) return fail(`fleet-${list.status}`);
+    const hit = list.data.terminals.find(
+      (x) => String(x.terminalCode ?? '').trim().toUpperCase() === termCode,
+    );
+    const beId = String(hit?.terminalId ?? '').trim();
+    if (!beId) return fail('no-terminal-id');
+    let orderId: string | undefined;
+    try {
+      const sid = await getServerOrderIdForSale(orderNo);
+      if (typeof sid === 'number' && Number.isFinite(sid) && sid > 0) orderId = String(Math.round(sid));
+    } catch {
+      /* tanpa tautan server = orderId dihilangkan */
+    }
+    const r = await postPrintFanout(beId, {
+      ...(orderId ? { orderId } : {}),
+      idempotencyKey: clientId,
+      source: 'AUTO',
+      payloadBase64,
+      metadata: { salesNum: orderNo, origin: 'payment-auto' },
+    });
+    if (!r.ok && !input.alreadyQueued) {
+      // Fallback offline: byte selamat di antrean lokal persisten.
+      try {
+        const { fromBase64: b64dec } = require('./escpos') as typeof import('./escpos');
+        await enqueuePrint(b64dec(payloadBase64), null, { kind: 'receipt', label: `auto-fanout:${orderNo}` });
+      } catch {
+        /* antre lokal gagal pun tak melempar — outcome jujur di bawah */
+      }
+    }
+    return r;
+  } catch {
+    return fail('offline');
+  }
+}
+
+/** Klaim satu job FIFO untuk terminal ini. */export async function claimTerminalPrintJob(terminalIdBe: string | number): Promise<ClaimOutcome> {
   if (!String(terminalIdBe ?? '').trim()) return { state: 'error', status: 400 };
   const r = await apiFetch(fillPrintPath(ApiPath.terminalPrintClaim, terminalIdBe), { method: 'POST', body: {} });
   if (!r.ok) {

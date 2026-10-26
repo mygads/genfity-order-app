@@ -139,7 +139,7 @@ export const ApiPath = {
   // E13 /tag khusus (ganti tag via E11 PATCH generik), E17–E22 scope-terminal
   // (scope-merchant ada, auth berbeda), E23, E24, E25-consume. E04/E10/E11/E12
   // SUDAH ADA (mendarat 2026-10-17). '{id}'/'{viewId}' diganti caller.
-  staffLogin: 'api/v1/auth/terminal-login', // E01 POST LOGIN-FIRST F1 (single-stage, BUKAN dua kredensial): {username,password,deviceId,terminalCode?,terminalPin?,merchantId?} → tahap-A {stage:'pick-terminal'} tanpa terminalCode, tahap-B sesi penuh + pinRequired SELALU. `staffPin` TAK ADA (server abaikan); PIN user SELALU langkah 2 via E29 (cek hybrid berversi, bukan gate buta).
+  staffLogin: 'api/v1/auth/terminal-login', // E01 POST LOGIN-FIRST F1 (single-stage, BUKAN dua kredensial): {username,password,deviceId,clientType:'app',terminalCode?,terminalPin?,merchantId?} → tahap-A {stage:'pick-terminal'} tanpa terminalCode, tahap-B sesi penuh + pinRequired SELALU. `staffPin` TAK ADA (server abaikan); PIN user SELALU langkah 2 via E29 (cek hybrid berversi, bukan gate buta).
   terminalRefresh: 'api/v1/auth/terminal-refresh', // T-AUTH-REFRESH POST {refreshToken} → rotasi {accessToken, refreshToken, expiresIn, merchantId} (cermin AuthRefresh admin, skop sesi terminal POS; replay → REVOKE + 401)
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
@@ -182,6 +182,9 @@ export const ApiPath = {
   terminalStockCountCreate: 'api/v1/terminals/{id}/stock-counts', // POST {note}
   terminalStockCountCurrent: 'api/v1/terminals/{id}/stock-counts/current', // GET DRAFT berjalan
   terminalStockCountItems: 'api/v1/terminals/{id}/stock-counts/{countId}/items', // GET items + PUT submit {itemType,itemId,countedQty}
+  // Opsi A penutup M9-3 (BE TerminalBranchMenuUpdate): dorong stok absolut
+  // satu item dari kasir. '{id}' diganti caller (terminalIdBe numerik BE).
+  pushBranchMenu: 'api/v1/terminals/{id}/branch-menu', // POST {type:'menu'|'addon',id,stockQty,lowStockThreshold?}
   // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
   terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
   terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}
@@ -241,6 +244,21 @@ export const ApiPath = {
   terminalPrintEnqueue: 'api/v1/terminals/{id}/print-jobs', // POST {idempotencyKey,source?,payloadBase64,metadata?,maxAttempts?} → 201 (+200 duplicate)
   terminalPrintClaim: 'api/v1/terminals/{id}/print-jobs/claim', // POST → 200 {job} | 204 kosong
   terminalPrintAck: 'api/v1/terminals/{id}/print-jobs/{jobId}/ack', // POST {leaseToken,status,errorCode?,lastError?} → 200 | 409 lease basi
+  // Print-fanout (BE kontrak baru): POST {orderId?,idempotencyKey,source:
+  // 'MANUAL'|'AUTO',payloadBase64,metadata?} → 201 {data:{terminalId,
+  // jobs:[{destinationId,destinationName,kind,jobId,duplicate}]}}. Station kind
+  // dapur otomatis dikecualikan BE untuk print manual (kasir). Contoh key:
+  // manual:{orderId}:{nonce} / auto:{orderId}:{paymentId}.
+  terminalPrintFanout: 'api/v1/terminals/{id}/print-fanout',
+  // Fleet terminal cabang (BE kontrak baru): GET → per terminal boundUser
+  // (channel app|web|both) + stations[] (destinationId/name/role/kind/
+  // selected/templateType/printer{printerConnected,paperSize,...}). Bearer
+  // otomatis via needsSessionBearer (prefix api/).
+  terminalFleet: 'api/v1/branches/{id}/terminals/fleet',
+  // Update destinasi print-bridge (dipakai PrintBridgeTab web):
+  // PATCH {terminalId (0 = lepas), kind (kasir/dapur/keduanya),
+  // receiptTemplateId?, selected?, ...} → {updated, routingVersion}.
+  merchantPrintDestination: 'api/merchant/print-bridge/destinations/{id}',
   // ---- W1 (wiring-1): kontrak merchant Go untuk shift/clock + sesi kas +
   // tutup-hari (grup /api/merchant, MerchantAuth — token sesi cermin W2).
   // '{sessionId}' diganti caller via .replace('{sessionId}',

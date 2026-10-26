@@ -8,7 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, revokeKickedSession, setKickNotice, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, releaseBindingForReclaim, setKickNotice, subscribeReclaim, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { seedIfEmpty } from './src/lib/seed';
@@ -140,7 +140,9 @@ function isTakeoverForMe(data: unknown): { forMe: boolean; kickedUserId: string 
 /**
  * Pasang watcher takeover SSE untuk sesi aktif; kembalikan stop-fn (no-op
  * bila prasyarat tak terpenuhi). Event `takeover` untuk sesi kami →
- * notice kicked_msg + cabut sesi+grant lokal (revokeKickedSession).
+ * notice kicked_msg + RECLAIM: lepas binding tapi PERTAHANKAN sesi+token
+ * (releaseBindingForReclaim), lalu kembali ke PILIH TERMINAL tanpa login
+ * ulang (navigasi via subscribeReclaim di App; tugas E).
  */
 function startTakeoverWatch(): () => void {
   const noop = () => {};
@@ -152,9 +154,9 @@ function startTakeoverWatch(): () => void {
     return subscribeTerminalEvents(terminalId, (e) => {
       try {
         if (!/takeover/.test(String(e?.type ?? ''))) return;
-        const { forMe, kickedUserId } = isTakeoverForMe(e?.data);
+        const { forMe } = isTakeoverForMe(e?.data);
         if (!forMe) return;
-        if (revokeKickedSession(kickedUserId || undefined)) {
+        if (releaseBindingForReclaim()) {
           try {
             setKickNotice(tr('kicked_msg'));
           } catch {
@@ -396,6 +398,13 @@ function GuardedStacks({ loggedIn, bound }: { loggedIn: boolean; bound: boolean 
         initialRouteName={home}
         screenOptions={screenOptions}>
       <Stack.Screen name="Login" component={LoginScreen} options={{ title: t('title_login'), headerShown: false }} />
+      {/* Tugas E/F: pilih terminal di DALAM sesi — reclaim kembali ke
+          PILIH TERMINAL tanpa login ulang; Ganti terminal tanpa logout.
+          Rute sama dengan stack tamu; konteks cabang via params reclaim
+          atau pilihan cabang manual. */}
+      <Stack.Screen name="BranchPicker" component={SelectBranchScreen} options={{ title: t('title_branch'), headerShown: false }} />
+      <Stack.Screen name="TerminalPicker" component={TerminalPickerScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="TerminalPin" component={TerminalPinScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: t('title_dashboard'), headerShown: false }} />
       <Stack.Screen name="Cashier" component={CashierScreen} options={{ title: t('title_cashier'), headerShown: false }} />
       <Stack.Screen name="CartDetail" component={CartDetailScreen} options={{ title: t('title_cart'), headerShown: false }} />
@@ -481,6 +490,24 @@ export default function App() {
       setBound(getBinding() !== null);
     } catch {
       /* binding tak terbaca — anggap unbound (fail-safe ke BindFlow) */
+    }
+  }), []);
+
+  /** Tugas E: reclaim → kembali ke PILIH TERMINAL dengan sesi + token auth
+   * utuh (TANPA login ulang). Params cabang dari sesi (branchName opsional
+   * → fallback nama merchant/branchId). Guard: tanpa sesi/cabang = diam
+   * (pengguna tetap bisa lewat Ganti terminal manual di Pengaturan). */
+  useEffect(() => subscribeReclaim(() => {
+    try {
+      const me = getSession();
+      if (!me) return;
+      const branchId = String(me.branchId ?? '').trim();
+      if (!branchId) return;
+      const branchName = String(me.merchantName ?? '').trim() || branchId;
+      (navRef.current as unknown as { navigate?: (n: string, p?: object) => void })
+        ?.navigate?.('TerminalPicker', { branchId, branchName });
+    } catch {
+      /* abaikan */
     }
   }), []);
 
@@ -623,13 +650,14 @@ export default function App() {
         void notifyLocal(tr('ws.shiftTitle'), String(p.message ?? ''), { route: 'Shift' });
       }
       // SPEC §7/Q13 KICK-NO-LOCAL-REVOKE + kick-no-live-notify: sesi perangkat
-      // ini digantikan login lain → cabut sesi + grant lokal agar sesi basi tak
-      // bisa dipakai lagi, lalu notif kick langsung (perangkat BARU sudah
-      // dikabari via tookOver/kickedUserId di alur login/bind). Pencocokan
-      // pola kick/takeover/revoke/logout di sini MURNI sisi-klien
-      // (future-proof — server TAK PERNAH push frame SESSION_KICKED; deteksi
-      // utama = event `takeover` SSE via startTakeoverWatch). Tanpa identitas
-      // yang cocok dengan sesi aktif = abaikan (bukan untuk kami).
+      // ini digantikan login lain → RECLAIM (tugas E): lepas binding tapi
+      // PERTAHANKAN sesi+token, lalu kembali ke PILIH TERMINAL tanpa login
+      // ulang (navigasi via subscribeReclaim; notif menunjuk TerminalPicker).
+      // Perangkat BARU sudah dikabari via tookOver/kickedUserId di alur
+      // login/bind. Pencocokan pola kick/takeover/revoke/logout di sini MURNI
+      // sisi-klien (future-proof — server TAK PERNAH push frame SESSION_KICKED;
+      // deteksi utama = event `takeover` SSE via startTakeoverWatch). Tanpa
+      // identitas yang cocok dengan sesi aktif = abaikan (bukan untuk kami).
       if (/session|kick|takeover|revoke|logout/i.test(String(msg.type ?? ''))) {
         const p = msg.payload as {
           kickedUserId?: unknown; userId?: unknown; kicked?: unknown;
@@ -643,14 +671,14 @@ export default function App() {
         const forMe =
           (!!named && (named === (me?.userId ?? '') || named === (me?.username ?? ''))) ||
           (flagged && (!term || (!!myTerminal && term === myTerminal)));
-        if (forMe && revokeKickedSession(named || undefined)) {
+        if (forMe && releaseBindingForReclaim()) {
           const body = tr('kicked_msg');
           try {
             setKickNotice(body);
           } catch {
             /* abaikan */
           }
-          void notifyLocal(tr('takeover_title'), body, { route: 'Login' });
+          void notifyLocal(tr('takeover_title'), body, { route: 'TerminalPicker' });
         }
       }
       // Kontrak §7.1: tarik ulang domain yang diminta server.

@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { pollServerPrintJobs } from '../../lib/printBridge';import { fetchBranchTerminals } from '../../lib/terminalApi';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { fetchReceiptTemplates, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -17,6 +17,17 @@ import { useEffect, useState } from 'react';import {
   autocut: boolean;
   isDefault: boolean;
   connected: boolean;
+  /**
+   * Kind server (kasir/dapur/keduanya; tugas A): default 'keduanya'; 'dapur'
+   * = dikecualikan dari broadcast struk kasir (lihat effectiveKind
+   * lib/print). Disimpan di cache JSON (tanpa kolom DB baru) + disinkron ke
+   * BE via update-destination (BE = sumber kebenaran, lokal = cache).
+   */
+  kind?: StationKind;
+  /** Liveness nyata (tugas D): ISO time uji kirim terakhir + terakhir sukses.
+   * `connected` hanya true pasca test-print nyata, bukan flag manual. */
+  lastCheckedAt?: string;
+  lastOkAt?: string;
   /**
    * Binding terminal (APP-PRINTER, audit row 11): station = address book yang
    * diikat ke terminalCode klaim device ini (+branchId). Tanpa binding =
@@ -163,6 +174,98 @@ function backupBindings(ss: Station[]): void {
       alive = false;
     };
   }, []);
+  /** Fleet server (tugas A/B): cache offline-first + daftar template struk BE.
+   * `fleet` = terminal cabang + stations (kind/selected/template per
+   * destination); `templates` = daftar template untuk picker per station. */
+  const [fleet, setFleet] = useState<FleetTerminal[]>([]);
+  const [fleetLoading, setFleetLoading] = useState(false);
+  const [templates, setTemplates] = useState<ReceiptTemplateRef[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const cached = await getFleetCache();
+        if (alive && cached) setFleet(cached.terminals);
+      } catch {
+        /* abaikan: lokal-only */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** Tarik fleet cabang + daftar template dari BE (server-wins ke cache). */
+  const syncFleet = async () => {
+    if (fleetLoading) return;
+    let branch = '';
+    try {
+      branch = String(activeTerm.branchId ?? '').trim() || String(getBranchId() ?? '').trim();
+    } catch {
+      branch = '';
+    }
+    if (!branch) {
+      setStatusMsg(t('printers.serverNeedClaim'));
+      return;
+    }
+    setFleetLoading(true);
+    setStatusMsg(t('printers.fleetSyncing'));
+    try {
+      const [fr, tpl] = await Promise.all([syncFleetFromServer(branch), fetchReceiptTemplates()]);
+      if (!fr.ok) {
+        setStatusMsg(t('printers.fleetFail').replace('{n}', 'offline'));
+        return;
+      }
+      setFleet(fr.terminals);
+      setTemplates(tpl);
+      const n = fr.terminals.reduce((a, x) => a + x.stations.length, 0);
+      setStatusMsg(t('printers.fleetSynced').replace('{n}', String(n)));
+    } finally {
+      setFleetLoading(false);
+    }
+  };
+  /** Sinkron satu station lokal ke BE (terminalId+kind; tugas A). */
+  const syncOneStation = async (s: Station) => {
+    let branch = '';
+    let termCode = '';
+    let termIdBe = '';
+    try {
+      const g = getTerminal();
+      branch = String(g.branchId ?? '').trim();
+      termCode = String(g.terminalCode ?? '').trim();
+      termIdBe = String(g.terminalIdBe ?? '').trim();
+    } catch {
+      /* abaikan */
+    }
+    if (!termCode || !branch) {
+      setStatusMsg(t('printers.serverNeedClaim'));
+      return;
+    }
+    const kind = effectiveKind({ kind: s.kind, role: s.role });
+    const r = await syncStationToServer(branch, termCode, s.name, termIdBe, { kind });
+    if (r.ok) {
+      setStatusMsg(t('printers.stationSynced').replace('{x}', s.name));
+    } else if (r.reason === 'no-match' || r.reason === 'ambiguous') {
+      setStatusMsg(t('printers.stationSyncFail').replace('{x}', s.name).replace('{e}', t('printers.fleetHint')));
+    } else {
+      setStatusMsg(t('printers.stationSyncFail').replace('{x}', s.name).replace('{e}', String(r.reason ?? 'offline')));
+    }
+  };
+  /** Ganti template struk satu destinasi server (tugas B; null = Default). */
+  const setDestinationTemplate = async (destinationId: number, templateId: number | null) => {
+    const r = await updatePrintDestination(destinationId, { receiptTemplateId: templateId });
+    if (!r.ok) {
+      setStatusMsg(t('printers.tplFail').replace('{e}', 'offline'));
+      return;
+    }
+    setFleet((ff) => ff.map((x) => ({
+      ...x,
+      stations: x.stations.map((st) => (st.destinationId === destinationId ? { ...st, receiptTemplateId: templateId } : st)),
+    })));
+    const label = templateId === null
+      ? t('printers.tplDefault')
+      : (templates.find((x) => x.id === templateId)?.name ?? `#${templateId}`);
+    setStatusMsg(t('printers.tplSet').replace('{x}', label));
+  };
   const [preview, setPreview] = useState<{ station: string; text: string; hex: string } | null>(null);
   const [stName, setStName] = useState('');
   const [stRole, setStRole] = useState<StationRole>('Dapur');
@@ -182,6 +285,27 @@ function backupBindings(ss: Station[]): void {
   /** Label peran station ikut bahasa aktif (nilai kanonis tetap ID di state). */
   const roleLabel = (r: StationRole) =>
     r === 'Kasir' ? t('printers.role_kasir') : r === 'Dapur' ? t('printers.role_dapur') : r === 'Checker' ? t('printers.role_checker') : t('printers.role_label');
+
+  /** Label kind server (tugas A): nilai kanonis 'kasir'|'dapur'|'keduanya'. */
+  const kindLabel = (k: StationKind) =>
+    k === 'kasir' ? t('printers.kindKasir') : k === 'dapur' ? t('printers.kindDapur') : t('printers.kindBoth');
+
+  /** Waktu ISO → 'YYYY-MM-DD HH:MM' lokal; tak pernah melempar (tugas D). */
+  const shortTime = (iso?: string) => {
+    const v = String(iso ?? '').trim();
+    if (!v) return '-';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return v;
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  /** Fleet milik terminal klaim ini; kosong = tampil semua (belum klaim). */
+  const boundCode = String(activeTerm.terminalCode ?? '').trim().toUpperCase();
+  const boundFleet = boundCode
+    ? fleet.filter((x) => String(x.terminalCode ?? '').trim().toUpperCase() === boundCode)
+    : [];
+  const fleetShown = boundFleet.length > 0 ? boundFleet : fleet;
 
   // DB-first: printer terkonfigurasi (printerPort terisi) dari ms_station;
   // cache JSON hanya fallback bila DB kosong/belum siap.
@@ -215,6 +339,11 @@ function backupBindings(ss: Station[]): void {
             ...m,
             ...(c.terminalCode ? { terminalCode: c.terminalCode } : {}),
             ...(c.branchId ? { branchId: c.branchId } : {}),
+            // Kind + liveness milik cache JSON (tanpa kolom DB): tempel agar
+            // merge DB-first tak membuangnya.
+            ...(c.kind ? { kind: c.kind } : {}),
+            ...(c.lastCheckedAt ? { lastCheckedAt: c.lastCheckedAt } : {}),
+            ...(c.lastOkAt ? { lastOkAt: c.lastOkAt } : {}),
           };
         });
         for (const rest of bindOf.values()) mapped.push(rest);
@@ -452,9 +581,10 @@ function backupBindings(ss: Station[]): void {
 
   /** Tarik manual antrean cetak server (print-bridge FULL): terminalCode klaim
    * dibaca ulang lalu dipetakan ke id BE via daftar terminal cabang, kemudian
-   * satu siklus klaim-cetak-ack jalan ke station terikat (mundur ke utama,
-   * lalu ke station pertama yang bisa kirim). Tanpa klaim = tolak eksplisit.
-   * Tanpa state antrean lokal baru: hasil poller hanya statusMsg. */
+   * satu siklus klaim-cetak-ack jalan BROADCAST ke SEMUA station terikat
+   * non-dapur (tugas C; kind dapur dikecualikan untuk struk kasir). Tanpa
+   * klaim = tolak eksplisit. Tanpa state antrean lokal baru: hasil poller
+   * hanya statusMsg. */
   const pullServerJobs = async () => {
     if (serverPulling) return;
     let bound = activeTerm;
@@ -485,34 +615,59 @@ function backupBindings(ss: Station[]): void {
         setStatusMsg(t('printers.serverError').replace('{n}', 'no-terminal-id'));
         return;
       }
-      const boundHit = stations.find(
-        (s) => String(s.terminalCode ?? '').trim().toUpperCase() === term,
-      );
-      const defHit = stations.find((s) => s.isDefault);
-      const cands = [boundHit, defHit, ...stations].filter(
-        (s): s is Station => Boolean(s),
-      );
-      const picked = cands.find((s) => stationTarget(s) !== null);
-      if (!picked) {
+      // Target broadcast: station terikat terminal ini + kind BUKAN dapur.
+      const withTarget = stations
+        .filter((s) => String(s.terminalCode ?? '').trim().toUpperCase() === term)
+        .filter((s) => effectiveKind({ kind: s.kind, role: s.role }) !== 'dapur')
+        .map((s) => ({ s, target: stationTarget(s) }))
+        .filter((x): x is { s: Station; target: PrinterTarget } => x.target !== null);
+      if (withTarget.length === 0) {
         setStatusMsg(t('printers.noPrinter'));
         return;
       }
-      const target = stationTarget(picked);
-      if (!target) {
-        setStatusMsg(t('printers.noPrinter'));
-        return;
-      }
-      const out = await pollServerPrintJobs(beId, target, (tg, bytes) => printBytes(tg, bytes));
-      if (out.state === 'printed') {
-        setStatusMsg(t('printers.serverPrinted').replace('{x}', String(out.jobId)));
-      } else if (out.state === 'failed') {
-        setStatusMsg(
-          t('printers.serverFailed').replace('{x}', String(out.jobId)).replace('{e}', String(out.serverStatus)),
-        );
-      } else if (out.state === 'empty') {
+      const claimed = await claimTerminalPrintJob(beId);
+      if (claimed.state === 'empty') {
         setStatusMsg(t('printers.serverEmpty'));
+        return;
+      }
+      if (claimed.state === 'error') {
+        setStatusMsg(t('printers.serverError').replace('{n}', String(claimed.status)));
+        return;
+      }
+      const { job } = claimed;
+      let bytes: Uint8Array;
+      try {
+        bytes = fromBase64(job.payload);
+      } catch {
+        await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload is not valid base64');
+        setStatusMsg(
+          t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', 'INVALID_PAYLOAD'),
+        );
+        return;
+      }
+      let sent = 0;
+      let lastErr = '';
+      for (const x of withTarget) {
+        let r;
+        try {
+          r = await printBytes(x.target, bytes);
+        } catch {
+          r = { ok: false as const, reason: 'send-failed' };
+        }
+        if (r.ok) {
+          sent += 1;
+        } else {
+          lastErr = String((r as { detail?: unknown }).detail ?? (r as { reason?: unknown }).reason ?? 'send-failed');
+        }
+      }
+      if (sent > 0) {
+        await ackTerminalPrintJob(beId, job.id, job.leaseToken, true);
+        setStatusMsg(t('printers.serverPrinted').replace('{x}', String(job.id)));
       } else {
-        setStatusMsg(t('printers.serverError').replace('{n}', String(out.status)));
+        const ack = await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'PRINT_FAILED', lastErr || 'Broadcast send failed');
+        setStatusMsg(
+          t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', String(ack.status ?? 'QUEUED')),
+        );
       }
     } finally {
       setServerPulling(false);
@@ -579,8 +734,18 @@ function backupBindings(ss: Station[]): void {
             ? t('printers.btDenied')
             : t('printers.testFail').replace('{x}', s.name).replace('{e}', String(res.detail ?? res.reason)),
     );
+    // Tugas D (liveness nyata): `connected` HANYA pasca kirim nyata sukses
+    // (test-print ini); gagal = false. Stempel waktu dicatat selalu agar UI
+    // bedakan "Terhubung (terakhir dicek …)" vs "Belum dicek".
+    const nowIso = new Date().toISOString();
     if (res.ok) {
-      setStations((ss) => ss.map((x) => (x.id === s.id ? { ...x, connected: true } : x)));
+      const changed = { ...s, connected: true, lastCheckedAt: nowIso, lastOkAt: nowIso };
+      setStations((ss) => ss.map((x) => (x.id === s.id ? changed : x)));
+      void persistStation(changed);
+    } else {
+      const changed = { ...s, connected: false, lastCheckedAt: nowIso };
+      setStations((ss) => ss.map((x) => (x.id === s.id ? changed : x)));
+      void persistStation(changed);
     }
   };
 
@@ -599,6 +764,8 @@ function backupBindings(ss: Station[]): void {
           </Text>
           {/* Print-bridge FULL: pemicu manual poller klaim-cetak-ack server. */}
           <AppButton size="md" title={serverPulling ? t('printers.serverPulling') : t('printers.serverPull')} onPress={() => { void pullServerJobs(); }} disabled={serverPulling} variant="secondary" fullWidth={false} style={styles.blockGap} />
+          {/* Tugas A/B: sinkron fleet cabang + daftar template dari BE. */}
+          <AppButton size="md" title={fleetLoading ? t('printers.fleetSyncing') : t('printers.fleetSync')} onPress={() => { void syncFleet(); }} disabled={fleetLoading} variant="secondary" fullWidth={false} style={styles.blockGap} />
         </View>
         <Text style={styles.groupLabel}>{t('printers.stations')}</Text>
         {/* WIRE REA-16: kunci prefs native printer (info status, best-effort) */}
@@ -620,6 +787,48 @@ function backupBindings(ss: Station[]): void {
             <Text style={styles.stMeta}>{t('printers.serverHint')}</Text>
           </View>
         ) : null}
+        {/* Tugas A/B: fleet server per terminal — kind + template per destinasi.
+            Baca cache offline-first; tulis via Sinkron / picker template. */}
+        {fleetShown.length > 0 ? (
+          <View style={styles.stCard}>
+            <Text style={styles.stName}>{t('printers.fleetTitle')}</Text>
+            {fleetShown.map((ft) => (
+              <View key={String(ft.terminalId)}>
+                <Text style={styles.stMeta}>
+                  {`Terminal: ${String(ft.terminalCode ?? '').trim().toUpperCase() || `#${ft.terminalId}`}`}
+                </Text>
+                {ft.stations.map((st) => (
+                  <View key={st.destinationId}>
+                    <Text style={styles.stMeta}>
+                      {`${st.destinationName} · ${st.kind}${st.selected === false ? ' · off' : ''}`}
+                    </Text>
+                    <Text style={styles.stMeta}>
+                      {`${t('printers.tplTitle')}: ${st.receiptTemplateId == null ? t('printers.tplDefault') : (templates.find((x) => x.id === st.receiptTemplateId)?.name ?? `#${st.receiptTemplateId}`)}`}
+                    </Text>
+                    <View style={styles.chipRow}>
+                      <Pressable
+                        key="default"
+                        onPress={() => { void setDestinationTemplate(st.destinationId, null); }}
+                        style={[styles.chip, st.receiptTemplateId == null && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, st.receiptTemplateId == null && styles.chipTextActive]}>{t('printers.tplDefault')}</Text>
+                      </Pressable>
+                      {templates.map((tpl) => (
+                        <Pressable
+                          key={tpl.id}
+                          onPress={() => { void setDestinationTemplate(st.destinationId, tpl.id); }}
+                          style={[styles.chip, st.receiptTemplateId === tpl.id && styles.chipActive]}
+                        >
+                          <Text style={[styles.chipText, st.receiptTemplateId === tpl.id && styles.chipTextActive]}>{tpl.name}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        ) : null}
       {stations.length === 0 ? (
         <View style={styles.empty}>
           <Image source={require('../../../assets/images/empty_printer.webp')} style={styles.emptyImg} resizeMode="contain" />
@@ -634,6 +843,16 @@ function backupBindings(ss: Station[]): void {
               <Text style={styles.stName}>{s.name}{s.isDefault ? ` - ${t('printers.main')}` : ''}</Text>
               <Text style={styles.stMeta}>
                 {s.conn}{s.address ? ` - ${s.address}` : ''} - {s.connected ? t('printers.connected') : t('printers.disconnected')}
+              </Text>
+              {/* Tugas D: liveness nyata — Bedakan "terakhir OK" vs "dicek
+                  (gagal)" vs "belum pernah diuji". `connected` hanya true
+                  pasca uji kirim nyata sukses (lihat testPrintStation). */}
+              <Text style={styles.stMeta}>
+                {s.lastOkAt
+                  ? t('printers.liveOk').replace('{t}', shortTime(s.lastOkAt))
+                  : s.lastCheckedAt
+                    ? t('printers.liveFail').replace('{t}', shortTime(s.lastCheckedAt))
+                    : t('printers.liveNever')}
               </Text>
               {/* APP-PRINTER: label binding terminal (tanpa kunci i18n baru). */}
               <Text style={styles.stMeta}>
@@ -652,6 +871,20 @@ function backupBindings(ss: Station[]): void {
               </Pressable>
             ))}
           </View>
+          {/* Tugas A: kind server per station — 'dapur' dikecualikan dari
+              broadcast struk kasir (lihat effectiveKind lib/print). */}
+          <Text style={styles.stMeta}>{t('printers.kindTitle')}</Text>
+          <View style={styles.chipRow}>
+            {(['kasir', 'dapur', 'keduanya'] as StationKind[]).map((k) => {
+              const cur = effectiveKind({ kind: s.kind, role: s.role });
+              return (
+                <Pressable key={k} onPress={() => patchStation(s.id, { kind: k })} style={[styles.chip, cur === k && styles.chipActive]}>
+                  <Text style={[styles.chipText, cur === k && styles.chipTextActive]}>{kindLabel(k)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.hint}>{t('printers.kindHint')}</Text>
           <View style={styles.chipRow}>
             {(['Bluetooth', 'LAN', 'Star'] as ConnType[]).map((c) => (
               <Pressable key={c} onPress={() => patchStation(s.id, { conn: c })} style={[styles.chip, s.conn === c && styles.chipActive]}>
@@ -685,6 +918,9 @@ function backupBindings(ss: Station[]): void {
           ) : (
             <AppButton size="md" title={t('printers_use_here')} onPress={() => bindStation(s.id)} style={styles.greenBlock} />
           )}
+          {/* Tugas A: tulis terminalId+kind station ini ke BE (cocok nama;
+              gagal jujur via statusMsg — lihat syncOneStation). */}
+          <AppButton size="md" title={t('printers.syncStation')} onPress={() => { void syncOneStation(s); }} variant="secondary" style={styles.blockGap} />
         </View>
       ))}
       <View style={styles.stCard}>

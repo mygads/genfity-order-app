@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import { Image
 
 type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
 // APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
-import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
+import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
@@ -40,39 +40,13 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); const [autoSync, setAutoSync] = useState(true);
-  const [syncOnWifi, setSyncOnWifi] = useState(false);
   const [lastPush, setLastPush] = useState(() => getLastSync() || t('sync_never'));
   const [lastPull, setLastPull] = useState(t('sync_never'));
   const [daysAgo, setDaysAgo] = useState(() => (getLastSyncMs() > 0 ? 0 : Infinity));
   const [busy, setBusy] = useState<'push' | 'pull' | null>(null);
   const [msg, setMsg] = useState('');
-  // WIRE REA-9/REA-12: versi POS + verifikasi terminal (best-effort -
-  // kosong = dummy/offline, push/pull tetap jalan tanpa server).
-  const [posVer, setPosVer] = useState('');
-  const [verifyMsg, setVerifyMsg] = useState('');
-  const [verifyBusy, setVerifyBusy] = useState(false);
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const v = await fetchPosVersion();
-        if (!live || v.fromDummy || !v.latestVersion) return;
-        setPosVer(`v${v.latestVersion} / min v${v.minVersion}`);
-      } catch { /* offline - tanpa info versi */ }
-    })();
-    return () => { live = false; };
-  }, []);
-  const doVerify = async () => {
-    if (verifyBusy) return;
-    setVerifyBusy(true);
-    setVerifyMsg('');
-    try {
-      const r = await notifyTerminalVerification('verified');
-      if (r.ok && !r.fromDummy) setVerifyMsg(t('term_verify_ok'));
-    } catch { /* offline - panel tetap jalan */ } finally {
-      setVerifyBusy(false);
-    }
-  };
+  // Audit 2026-10-26: terminal-check manual dihapus. Validitas terminal dicek
+  // otomatis server di setiap apiFetch/pull (401 non-PIN → refresh → logout).
   const [tick, setTick] = useState(0);
   // BACKLOG GABUNGAN (temuan offline-ms-edits-stuck-invisible): antrean ringan
   // saja tak cukup — tampilkan juga fisik (tr_esoprocessqueue) + baris kotor
@@ -98,13 +72,16 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [tick]);
 
   const level = Number.isFinite(daysAgo) ? syncWarnLevel(Date.now() - daysAgo * 86400000) : syncWarnLevel();
-  useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); setSyncOnWifi(o.syncOnWifi); }); return () => { alive = false; }; }, []); useEffect(() => {
-    void setJSON(SYNC_OPTS_KEY, { autoSync, syncOnWifi }); }, [autoSync, syncOnWifi]);
+  // Audit 2026-10-26: opsi wifi-only dihapus — sync pakai jaringan apa pun.
+  // wifiOnly selalu false; bentuk simpanan dipertahankan agar instalasi lama
+  // yang masih menyimpan syncOnWifi=true ikut kembali ke jaringan apa pun.
+  useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); }); return () => { alive = false; }; }, []); useEffect(() => {
+    void setJSON(SYNC_OPTS_KEY, { autoSync, syncOnWifi: false }); }, [autoSync]);
   // Toggle sync otomatis benar-benar menjadwalkan push berkala (5 mnt) via
   // applyAutoSyncPrefs; sebelumnya toggle hanya tersimpan tanpa efek.
   useEffect(() => {
-    try { applyAutoSyncPrefs({ auto: autoSync, wifiOnly: syncOnWifi }); } catch { /* abaikan */ }
-  }, [autoSync, syncOnWifi]);
+    try { applyAutoSyncPrefs({ auto: autoSync, wifiOnly: false }); } catch { /* abaikan */ }
+  }, [autoSync]);
   // Hitung umur sync nyata dari timestamp sukses terakhir agar banner E00043
   // (>3 hari) dan E00044 (>7 hari) mencerminkan kondisi sebenarnya.
   // pullMaster TIDAK menyentuh lastSyncMs (hanya pushAll) — umur dihitung
@@ -184,29 +161,13 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('about.terminal')}</Text>
-        {posVer ? (
-          <View style={styles.wmRow}>
-            <Text style={styles.wmLabel}>POS</Text>
-            <Text style={styles.wmVal}>{posVer}</Text>
-          </View>
-        ) : null}
-        <View style={styles.btnRow}>
-          <AppButton size="sm" title={t('vou_check')} onPress={doVerify} disabled={verifyBusy} fullWidth={false} style={styles.greenFlex} />
-        </View>
-        {verifyMsg ? <Text style={styles.msg}>{verifyMsg}</Text> : null}
-      </View>
-
+      {/* Audit 2026-10-26: kartu terminal-check manual dihapus — validitas
+        terminal dicek otomatis server di setiap pull (401 → logout). */}
       <View style={styles.card}>
         <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('sync.opts')}</Text>
         <View style={styles.rowBetween}>
           <Text style={styles.rowLabel}>{t('sync.auto')}</Text>
           <Switch value={autoSync} onValueChange={setAutoSync} trackColor={{ true: colors.green, false: colors.stroke }} />
-        </View>
-        <View style={styles.rowBetween}>
-          <Text style={styles.rowLabel}>{t('sync.wifi')}</Text>
-          <Switch value={syncOnWifi} onValueChange={setSyncOnWifi} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         <Text style={styles.cardSub}>{t('sync.pullOrder')}</Text>
       </View>
