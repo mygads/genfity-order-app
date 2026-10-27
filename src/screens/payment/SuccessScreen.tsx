@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, successCheck, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -580,7 +580,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 20,
   },
-  checkMark: { color: colors.white, fontSize: 44, fontFamily: fonts.bold },
+  checkMark: { color: colors.white, fontSize: successCheck.mark, fontFamily: fonts.bold },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.text, marginTop: 14 },
   orderNo: { fontFamily: fonts.medium, fontSize: 14, color: colors.faint, marginTop: 4 },
   dateLine: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },

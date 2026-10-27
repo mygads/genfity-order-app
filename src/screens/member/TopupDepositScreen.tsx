@@ -7,7 +7,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';
+import { TABLET_BP, colors, fonts, successCheck, numGrouping, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -433,7 +433,7 @@ const s = StyleSheet.create({
     width: 84, height: 84, borderRadius: 42, backgroundColor: colors.green,
     alignItems: 'center', justifyContent: 'center', marginTop: 32, alignSelf: 'center',
   },
-  checkMark: { color: colors.white, fontSize: 44, fontFamily: fonts.bold },
+  checkMark: { color: colors.white, fontSize: successCheck.mark, fontFamily: fonts.bold },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.text, marginTop: 14, textAlign: 'center' },
   sub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' },
 });

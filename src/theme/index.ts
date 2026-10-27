@@ -47,6 +47,10 @@ export const colors = {
   paleRed: '#FDECEC',
   paleAmber: '#FFF6E0',
 };
+/** Gaya 44/45: ukuran ikon sukses SERAGAM (satu sumber).
+ * Lingkaran 84 + centang 44 dipakai di 3 layar sukses
+ * (PettyCash/TopupDeposit/SuccessScreen). Ubah di sini bila desain berubah. */
+export const successCheck = { circle: 84, mark: 44 };
 export const fonts = {
   regular: 'HKGrotesk-Regular',
   medium: 'HKGrotesk-Medium',

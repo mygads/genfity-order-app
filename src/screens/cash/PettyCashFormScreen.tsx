@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending, uploadExpensePhotoFirst, retryPendingExpensePhotos } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
+import { useEffect, useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { TABLET_BP, colors, fonts, successCheck, rp, rpNum, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending, uploadExpensePhotoFirst, retryPendingExpensePhotos } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import {
   cashMoveBe,
   cashMovePayload,
   getCashSessionId,
@@ -313,7 +313,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
     width: 84, height: 84, borderRadius: 42, backgroundColor: colors.green,
     alignItems: 'center', justifyContent: 'center', marginTop: 32, alignSelf: 'center',
   },
-  checkMark: { color: colors.white, fontSize: 44, fontFamily: fonts.bold },
+  checkMark: { color: colors.white, fontSize: successCheck.mark, fontFamily: fonts.bold },
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.text, marginTop: 14, textAlign: 'center' },
   sub: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 4, textAlign: 'center' },
   donePhoto: { width: '100%', height: 200, borderRadius: 10, backgroundColor: colors.line, marginTop: 14 },});
