@@ -72,7 +72,7 @@ export type GpayMethodSummary = {
 };
 
 /** Ambil allowlist metode Genfity Pay dari BE, pilih kode QRIS pertama yang live.
- *  Fallback 'qris' (kanonis prod SQ) bila BE tak terjangkau — BE yang menolak
+ *  Fallback 'qris' (kanonis SP/ShopeePay QRIS) bila BE tak terjangkau — BE yang menolak
  *  bila kanal tak tersedia, kasir tetap dapat pesan error yang jelas. */
 export async function pickGpayQrisMethod(): Promise<string> {
   const fallback = 'qris';
