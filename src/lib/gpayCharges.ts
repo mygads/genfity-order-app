@@ -62,6 +62,36 @@ export async function createGpayCharge(input: {
   }
 }
 
+export type GpayMethodSummary = {
+  PublicCode?: string;
+  publicCode?: string;
+  Code?: string;
+  code?: string;
+  Type?: string;
+  type?: string;
+};
+
+/** Ambil allowlist metode Genfity Pay dari BE, pilih kode QRIS pertama yang live.
+ *  Fallback 'qris' (kanonis prod SQ) bila BE tak terjangkau — BE yang menolak
+ *  bila kanal tak tersedia, kasir tetap dapat pesan error yang jelas. */
+export async function pickGpayQrisMethod(): Promise<string> {
+  const fallback = 'qris';
+  if (getApiMode() !== 'real') return fallback;
+  try {
+    const res = await apiFetch<Envelope<{ data?: GpayMethodSummary[] } | GpayMethodSummary[]>>(ApiPath.gpayMethods, { method: 'GET' });
+    if (!res.ok) return fallback;
+    const env = res.data as Envelope<{ data?: GpayMethodSummary[] } | GpayMethodSummary[]>;
+    const raw = env?.data as { data?: GpayMethodSummary[] } | GpayMethodSummary[] | undefined;
+    const list: GpayMethodSummary[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+    const qris = list.filter((m) => String(m.Type ?? m.type ?? '').toLowerCase() === 'qris');
+    const first = qris[0];
+    const code = String(first?.PublicCode ?? first?.publicCode ?? first?.Code ?? first?.code ?? '').trim();
+    return code || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function pollGpayCharge(id: string): Promise<GpayCharge | null> {
   if (getApiMode() !== 'real') return null;
   try {

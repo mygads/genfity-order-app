@@ -70,6 +70,7 @@ export const ApiPath = {
   // untuk polling status paid/expired.
   gpayChargeCreate: 'api/merchant/gpay/charges',
   gpayChargeGet: 'api/merchant/gpay/charges',
+  gpayMethods: 'api/merchant/gpay/payment-methods',
   pullUser: 'main/get-user',
   // [asumsi-clean-room] TIDAK ADA di APK (REA-18): hak akses per user untuk
   // RBAC lokal (dipetakan ke ms_posuseraccess via master.ts 'useraccess').

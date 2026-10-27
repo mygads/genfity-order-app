@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';import { toQR } from 'toqr';import { asciiToBytes, createGpayCharge, pollGpayCharge, type GpayCharge } from '../../lib/gpayCharges';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';import { toQR } from 'toqr';import { asciiToBytes, createGpayCharge, pickGpayQrisMethod, pollGpayCharge, type GpayCharge } from '../../lib/gpayCharges';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
@@ -115,7 +115,8 @@ function RealQr({ payload }: { payload: string }) {
     if (getApiMode() !== 'real' || !hasTotal || !qrChainId.trim() || chargeTriedRef.current) return;
     chargeTriedRef.current = true;
     void (async () => {
-      const c = await createGpayCharge({ amount: total, payment_method: 'qris', sale_reference: qrChainId.trim() });
+      const method = await pickGpayQrisMethod();
+      const c = await createGpayCharge({ amount: total, payment_method: method, sale_reference: qrChainId.trim() });
       if (c) {
         setCharge(c);
         if (c.expires_at) {
