@@ -22,10 +22,13 @@ type Props = { navigation?: Nav };
 const ENVS: ServerEnv[] = ['prod', 'dev', 'staging', 'custom'];
 const ENV_LABEL: Record<ServerEnv, string> = { prod: 'Prod', dev: 'Dev', staging: 'Staging', custom: 'Custom' };
 const AUTOCUT_KEY = 'genfity.settings.autocut';
-// PUTUSAN OWNER 2026-10-26: "Pengaturan Cetakan Menu" (routing menu→station)
-// disembunyikan dulu — dianggap belum aktif. Ubah ke true untuk menampilkan
-// kembali tanpa menghapus layar MenuPrinting.
-const MENU_PRINTING_VISIBLE = false;
+// 2026-10-26 owner sempat menyembunyikan "Pengaturan Cetakan Menu".
+// 2026-10-27 diaktifkan kembali: MenuPrintingScreen adalah satu-satunya
+// editor routing grup-menu→station (persistRoutes menulis stationId ke
+// ms_menu/ms_branchmenu + definisi ms_station) yang dibaca KitchenScreen;
+// PrintersScreen hanya mengatur koneksi, bukan routing; Help FAQ
+// (help_faq5_a) merujuk ke "Cetakan Menu". Route tanpa entry = yatim.
+const MENU_PRINTING_VISIBLE = true;
 // PUTUSAN OWNER 2026-10-26: baris "Scan QR" di Pengaturan disembunyikan dulu
 // (layar QrScan tetap ada — dipakai Member + Login). Ubah ke true untuk
 // menampilkan kembali tanpa menghapus layar.

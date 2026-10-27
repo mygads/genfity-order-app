@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Receipt</title>
+  <style>
+    :root {
+      --paper: 280px;
+      --fs-base: 12px;
+      --fs-sm:   10px;
+      --fs-xs:   9px;
+      --fs-lg:   15px;
+      --fs-xl:   16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: var(--paper); background: #fff; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: var(--fs-base);
+      color: #000;
+      padding: 10px 8px 16px;
+      word-break: break-word;
+    }
+    .center { text-align: center; }
+    .store-name { font-size: var(--fs-lg); font-weight: bold; }
+    .document-title { font-size: var(--fs-lg); font-weight: bold; margin-bottom: 6px; letter-spacing: .04em; }
+    .store-sub  { font-size: var(--fs-xs); margin-top: 2px; }
+    .logo { display: block; max-width: 56px; max-height: 56px; margin: 0 auto 4px; object-fit: contain; }
+    .divider-dash { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+    .divider-dot  { border: none; border-top: 1px dotted #999; margin: 4px 0; }
+    .divider-solid { border: none; border-top: 1px solid #000; margin: 4px 0; }
+    .order-num { font-size: var(--fs-xl); font-weight: bold; margin: 3px 0; }
+    .meta-line { font-size: var(--fs-xs); margin: 1px 0; }
+    .items { margin: 4px 0; }
+    .item-row  { display: flex; justify-content: space-between; font-size: var(--fs-base); margin: 3px 0; }
+    .item-name { flex: 1; margin-right: 4px; font-weight: 600; }
+    .item-price{ flex-shrink: 0; }
+    .item-unit { font-size: var(--fs-xs); color: #555; padding-left: 8px; margin-bottom: 1px; }
+    .addon-row { display: flex; justify-content: space-between; font-size: var(--fs-xs); padding-left: 8px; color: #333; margin: 1px 0; }
+    .item-note { font-size: var(--fs-xs); font-style: italic; color: #666; padding-left: 8px; margin-bottom: 2px; }
+    .pay-row   { display: flex; justify-content: space-between; font-size: var(--fs-sm); margin: 2px 0; }
+    .pay-total { display: flex; justify-content: space-between; font-size: var(--fs-base); font-weight: bold; margin: 3px 0; }
+    .order-note { font-size: var(--fs-xs); white-space: pre-line; margin: 3px 0; }
+    .footer-text { font-size: var(--fs-xs); text-align: center; margin: 2px 0; }
+    .thank-you  { font-size: var(--fs-sm); font-weight: bold; text-align: center; margin: 4px 0; }
+    .powered    { font-size: var(--fs-xs); text-align: center; color: #999; margin-top: 6px; }
+	.powered a  { color: inherit; text-decoration: underline; }
+    .qr-wrap    { text-align: center; margin: 6px 0; }
+    .qr-wrap img { width: 64px; height: 64px; }
+    .section    { margin-top: 4px; }
+  </style>
+</head>
+<body>
+  
+  
+  <div class="center">
+    
+    <div class="store-name">E2E Dev Merchant</div>
+    
+    
+    
+  </div>
+
+  <hr class="divider-dash" />
+
+  
+  <div class="center">
+    <div class="order-num">Order #GWCY</div>
+    
+      <div class="meta-line">
+        
+          
+            Dine In
+          
+        
+        
+      </div>
+    
+    <div class="meta-line">2026-10-27 08:28</div>
+    
+    
+    
+  </div>
+
+  <hr class="divider-dot" />
+
+  
+  <div class="items">
+    
+      <div class="item-row">
+        <div class="item-name">1 &times; Ayam Geprek E2E</div>
+        <div class="item-price">Rp18000</div>
+      </div>
+      
+      
+      
+    
+  </div>
+
+  <hr class="divider-dot" />
+
+  
+
+  
+  <div class="section">
+    <div class="pay-row"><span>Subtotal</span><span>Rp18000</span></div>
+    <div class="pay-row"><span>Tax</span><span>–</span></div>
+    <div class="pay-row"><span>Service Charge</span><span>–</span></div>
+    
+    
+    
+  </div>
+
+  
+  <hr class="divider-solid" />
+  <div class="pay-total">
+    <span>TOTAL</span>
+    <span>Rp18000</span>
+  </div>
+  
+
+  
+  <div class="section">
+    <div class="pay-row"><span>Payment</span><span>CASH_ON_COUNTER</span></div>
+    <div class="pay-row"><span>Amount Paid</span><span>Rp20000</span></div>
+    <div class="pay-row"><span>Change</span><span>Rp2000</span></div>
+  </div>
+
+  
+  
+  <hr class="divider-dash" />
+
+  <div class="footer-text">Cashier: E2E Owner</div>
+
+  
+
+  
+
+  
+    <div class="qr-wrap">
+      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgAQMAAACxAfVuAAAABlBMVEX///8AAABVwtN&#43;AAACzUlEQVR42uTWMYrjPBQH8L8RRM1itSkEusJMp21GV1nIBWSmDXbMtMG&#43;wMJeRdPE3ZxBoCKtzNdoQPh9eLI7zW7A2nZV/ooQ&#43;T3938M/fQQt5ioPNBIx&#43;aU2lIqwxk7vvaLISaJbHqDvYnfhyIfBap5Vbh&#43;pGM2VUT9oLmHtXyD2&#43;GY7gsIRxYgdyB8ocngvTp/X3IiCFn2Vh6GZdJDPw&#43;f3/B0B6OSPTeST8kf7WaaNWLfGJXkgouTVy/CgUxFW/fvEg7fQPLOziNoVIZopKYm6ck7K53FBGVYnbcB&#43;9HOCov9movu4PAH0MtPEgWPndCGevqZ9VgMMWKD&#43;1ekyjE860UsfNaSK9jG5Iqyb93SF6geOHCJM0kUo5ou55m4eABbGkW699EeMXxOpH7FFgjqLN6OLsBaL8esdMHkc6/rWNptRjO&#43;OA9XAEeSxftAoQ7rAq2xbENg4v2ldhBW9TvtAsYbx4dTMt3L8CcVMicLLSDQFOgtypeh0wmGOnFiIbTXpIqybi1HBV/MEL7vlcUqF6Mwe3Zo28GKoqAyrmdJVrlnnGKz4eFslOEB7r2KtibyI1X0U/YXzrAarp6DOv0q8GStKxqvvNYyTGS2MLsNhZ5I/CkoTcjcuPBWhGLTh&#43;dgMGoHOnbt13XZcf0V&#43;60bnAqN&#43;MXcRrTaeTlZMxKSY326ZvhnXEPA4xI5I4rl3hVhbmD2jwcJAHpv51jabEd0CYkQRPKvYmskVYd3CJLDFruHxHIXDPaxOT&#43;uAbubEvRf9688xsRmXKnnJoiDHKEN8hOp2FHFnuAprCFD&#43;ImhKRfgxteXhZDkHxbZyrgjXnYFYts2EnG37&#43;LlI/IY1dh8ltlxL3w23Z1iA3YVfWeiJkvRivGVdEZp97k4w5IHur1D5bgBn/ti8/vpLWxE7eEhr&#43;TrOmjdzF9eddh&#43;&#43;18KtkwtAKsJ/4vwfAAD//yK/cU/UMKPoAAAAAElFTkSuQmCC" alt="Track order" />
+      <div class="footer-text">Scan to track your order</div>
+    </div>
+  
+
+  <hr style="border:none;border-top:1px solid #eee;margin:8px 0;" />
+  <div class="powered">Powered by <a href="https://127.0.0.1" target="_blank" rel="noopener noreferrer">127.0.0.1</a></div>
+</body>
+</html>

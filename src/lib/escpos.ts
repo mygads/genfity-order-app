@@ -8,6 +8,9 @@ export interface EscItem {
   name: string;
   qty: number;
   price: number;
+  /** Harga satuan (@ Rp) ala website showUnitPrice; absen = tak dirender
+   * (byte-identik legacy). */
+  unitPrice?: number;
   /** Catatan item (★ di website; `*` ASCII di thermal). APP-11: hanya diisi
    * bila template aktif + showItemNotes; legacy tak mengoper = tak tampil. */
   note?: string;
@@ -268,6 +271,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   const money = (n: number): string => escMoney(n, r.currency);
   for (const i of r.items) {
     row2(out, `${i.qty}x ${i.name}`, money(i.qty * i.price), cols);
+    if (typeof i.unitPrice === 'number') text(out, `  @ ${money(i.unitPrice)}`);
     if (i.note) text(out, `  * ${i.note}`);
     for (const a of i.addons ?? []) {
       // Harga addon: kanan bila >0 (cermin kertas `+ nama Rp`), nama saja

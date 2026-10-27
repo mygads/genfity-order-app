@@ -54,11 +54,14 @@ const DEV_BRANCHES: BranchItem[] = [
     if (navigation?.goBack) navigation.goBack();
   };
 
-  /** Pilih cabang → TerminalPicker (B1); tak ada gate legacy checkBranch. */
+  /** Pilih cabang → TerminalPicker (B1); tak ada gate legacy checkBranch.
+   * B6 fail-closed DIPERTAHANKAN: daftar fallback dev + needBe = belum ada
+   * data cabang nyata dari BE → tolak maju via alert need_be (bukan
+   * diam, bukan lanjut). Tombol juga disabled (lihat chooseDisabled) +
+   * bergaya pucat agar tak dikira bisa ditekan; kartu dev di-tap pun hanya
+   * memunculkan alert yang sama (lihat onPress kartu). */
   const goSelect = () => {
     if (loading || !branchId) return;
-    // B6 fail-closed: daftar fallback dev + needBe = belum ada data cabang
-    // nyata dari BE,tolak maju.
     if (needBe && branches.length === 0) {
       appAlert(t('need_be'));
       return;
@@ -187,6 +190,11 @@ const DEV_BRANCHES: BranchItem[] = [
     (b.name + ' ' + b.id).toLowerCase().includes(query.trim().toLowerCase()),
   );
   const showingDev = branches.length === 0;
+  /** B6 fail-closed jujur: BE tak terjangkau + tanpa cabang nyata → tombol
+   * Pilih MATI (disabled + pucat), radio dev B001 dkk tak bisa lanjut
+   * (tap = alert need_be), banner failCard + tautan Sign in to POS tampil. */
+  const failClosed = needBe && branches.length === 0;
+  const chooseDisabled = loading || !branchId || failClosed;
 
   return (
     <ScreenRoot style={styles.root}>
@@ -217,10 +225,25 @@ const DEV_BRANCHES: BranchItem[] = [
             </TouchableOpacity>
           </View>
         ) : null}
-        {needBe ? (
+        {failClosed ? (
+          <View style={styles.failCard}>
+            <Text style={styles.failTitle}>{`\u26A0 ${t('need_be')}`}</Text>
+            <Text style={styles.failBody}>
+              {lang === 'id'
+                ? 'Server tak terjangkau sehingga daftar cabang asli belum termuat. Daftar di bawah hanya contoh lokal (dev) — mengetuknya tidak akan lanjut; tombol Pilih sengaja dinonaktifkan.'
+                : 'Server is unreachable so the real branch list has not loaded. The list below is only a local (dev) sample — tapping it will not continue; the Select button is intentionally disabled.'}
+            </Text>
+            <Text style={styles.failBody}>
+              {lang === 'id'
+                ? 'Hubungkan perangkat ke server, atau masuk lewat tautan Sign in to POS di bawah.'
+                : 'Connect the device to the server, or sign in via the Sign in to POS link below.'}
+            </Text>
+          </View>
+        ) : null}
+        {!failClosed && needBe ? (
           <Text style={styles.offline}>{t('need_be')}</Text>
         ) : null}
-        {fromDummy || showingDev ? (
+        {!failClosed && (fromDummy || showingDev) ? (
           <Text style={styles.offline}>
             {t('mode_local')}
             {lang === 'id'
@@ -245,8 +268,13 @@ const DEV_BRANCHES: BranchItem[] = [
         {list.map((b) => (
           <TouchableOpacity
             key={b.id}
-            style={[styles.card, branchId === b.id && styles.cardOn]}
-            onPress={() => { setBranchId(b.id); }}>
+            style={[styles.card, branchId === b.id && styles.cardOn, failClosed && styles.cardDim]}
+            onPress={() => {
+              // B6: radio dummy (B001 dkk) saat fail-closed BUKAN pilihan
+              // nyata — jangan tandai terpilih, beri tahu jujur via alert.
+              if (failClosed) { appAlert(t('need_be')); return; }
+              setBranchId(b.id);
+            }}>
             <View style={[styles.avatar, branchId === b.id && styles.avatarOn]}>
               <Text style={[styles.avatarT, branchId === b.id && styles.avatarTOn]}>C</Text>
             </View>
@@ -269,10 +297,12 @@ const DEV_BRANCHES: BranchItem[] = [
           size="lg"
           title={binding ? t('rebind_button') : t('sel_choose')}
           onPress={goSelect}
-          disabled={loading || !branchId || (needBe && branches.length === 0)}
-          style={styles.primary}
+          disabled={chooseDisabled}
+          style={[styles.primary, chooseDisabled && styles.primaryIdle]}
         />
-        {!binding ? (
+        {/* Jalur Sign in to POS: selalu ada saat unbound; saat fail-closed
+         * tampil juga walau bound (Login menangani state bound + unbind). */}
+        {!binding || failClosed ? (
           <TouchableOpacity
             onPress={() => navigation?.navigate('Login')}
             hitSlop={12}
@@ -358,7 +388,18 @@ const DEV_BRANCHES: BranchItem[] = [
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.orange },
   empty: { fontFamily: fonts.regular, fontSize: 13, color: GREY, textAlign: 'center', marginTop: 24 },
   /** Penanda status jujur B2: need_be (butuh BE) / mode_local (fallback dev). */
-  offline: { fontFamily: fonts.regular, fontSize: 12, color: GREY, marginTop: 6 }, footer: { paddingHorizontal: 24, paddingBottom: 28, paddingTop: 8, backgroundColor: '#FFFFFF' },
+  offline: { fontFamily: fonts.regular, fontSize: 12, color: GREY, marginTop: 6 },
+  /** Banner fail-closed B6: kartu tegas (bukan teks abu kecil) agar jelas
+   * tombol mati + radio dev tak bisa lanjut + arah Sign in to POS. */
+  failCard: {
+    backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.red,
+    borderRadius: 12, padding: 12, marginTop: 12,
+  },
+  failTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.red, lineHeight: 20 },
+  failBody: { fontFamily: fonts.regular, fontSize: 12, color: TITLE_DARK, marginTop: 6, lineHeight: 18 },
+  /** Kartu dev saat fail-closed: redup agar tak dikira pilihan aktif. */
+  cardDim: { opacity: 0.55 },
+  footer: { paddingHorizontal: 24, paddingBottom: 28, paddingTop: 8, backgroundColor: '#FFFFFF' },
   boundCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: '#F4F8FF', borderWidth: 1, borderColor: colors.navy,

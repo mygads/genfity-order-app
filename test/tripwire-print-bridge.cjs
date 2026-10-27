@@ -100,6 +100,40 @@ function run() {
     /printers\.serverNeedClaim/.test(i18n),
     'PB-UI: tujuh kunci printers.server ada di i18n');
 
+  // 7. KONTRAK FINAL AUTO (payload kosong dirender dari order server —
+  //    jangan cetak buta, jangan ack palsu; pola server-wins F-008).
+  ok(/export function isAutoPrintJob/.test(pb),
+    'PB-AUTO: isAutoPrintJob ada (deteksi job AUTO)');
+  ok(/String\(job\.source[^)]*\)[\s\S]{0,80}?toUpperCase\(\)[\s\S]{0,40}?===?\s*'AUTO'/.test(pb),
+    'PB-AUTO: source=AUTO (case-insensitive) = AUTO');
+  ok(/!String\(job\.payload[\s\S]{0,60}?trim\(\)/.test(pb) && /metadata\?\.orderId/.test(pb),
+    'PB-AUTO: payload kosong + metadata.orderId ikut AUTO (byte kosong tak keluar kertas)');
+  ok(/export async function printAutoServerJob/.test(pb),
+    'PB-AUTO: printAutoServerJob ada (render dari order server)');
+  ok(/fetchMerchantOrderDetail/.test(pb),
+    'PB-AUTO: sumber utama = detail penuh order server (fetchMerchantOrderDetail, server-wins)');
+  ok(/AUTO_NO_ORDER/.test(pb),
+    'PB-AUTO: AUTO tanpa orderId → FAILED AUTO_NO_ORDER (jujur, bukan PRINTED palsu)');
+  ok(/state:\s*'unavailable'/.test(pb) && /ORDER_UNAVAILABLE/.test(pb),
+    'PB-AUTO: order tak tersedia (offline/not-found) → unavailable → ack FAILED ORDER_UNAVAILABLE');
+  ok(/isAutoPrintJob\(job\)/.test(pollBody),
+    'PB-AUTO: poll cabang AUTO sebelum kirim byte (klaim → render/ack, bukan cetak buta)');
+  ok(pollBody.indexOf('isAutoPrintJob(job)') < pollBody.indexOf('await printFn(target, bytes)'),
+    'PB-AUTO: cabang AUTO mendahului printFn (byte kosong tak pernah ke printer)');
+  ok(/bytes\.length\s*===\s*0[\s\S]{0,300}?INVALID_PAYLOAD/.test(pollBody),
+    'PB-AUTO: byte kosong non-AUTO → ack FAILED INVALID_PAYLOAD tanpa printFn (anti cetak-buta)');
+  ok(/printDetailReceipt|printDetailKitchenTicket/.test(pb),
+    'PB-AUTO: render customer vs kitchen dari detail server (templateType-aware)');
+  ok(/templateType/.test(pb) && /kitchen/.test(pb),
+    'PB-AUTO: templateType kitchen/customer dihomati (tiket dapur tak ke kasir)');
+  // UI manual path: kontrak yang sama (bukan hanya poller).
+  ok(/isAutoPrintJob\(job\)/.test(screen) && /printAutoServerJob\(job\)/.test(screen),
+    'PB-AUTO-UI: PrintersScreen render AUTO via printAutoServerJob (bukan byte kosong)');
+  ok(/ORDER_UNAVAILABLE/.test(screen),
+    'PB-AUTO-UI: PrintersScreen ack FAILED ORDER_UNAVAILABLE saat order tak tersedia');
+  ok(/bytes\.length\s*===\s*0[\s\S]{0,300}?INVALID_PAYLOAD/.test(screen),
+    'PB-AUTO-UI: PrintersScreen tak siarkan byte kosong (INVALID_PAYLOAD, bukan PRINTED palsu)');
+
   return { failures, checks };
 }
 

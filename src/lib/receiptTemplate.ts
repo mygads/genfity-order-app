@@ -36,8 +36,10 @@ export type ReceiptTemplateToggles = {
   showCustomerPhone: boolean;
   // Items
   showItemNotes: boolean;
+  showOrderNotes: boolean;
   showAddons: boolean;
   showAddonPrices: boolean;
+  showUnitPrice: boolean;
   // Payment
   showSubtotal: boolean;
   showTax: boolean;
@@ -80,8 +82,10 @@ export const RECEIPT_TEMPLATE_DEFAULTS: ReceiptTemplateToggles = {
   showCustomerName: true,
   showCustomerPhone: true,
   showItemNotes: false,
+  showOrderNotes: true,
   showAddons: true,
   showAddonPrices: true,
+  showUnitPrice: false,
   showSubtotal: true,
   showTax: true,
   showServiceCharge: true,

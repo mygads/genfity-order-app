@@ -3,11 +3,12 @@ import { colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
- * Kuning pucat status nonaktif CTA primer - paritas `PEACH`
- * LoginScreen (di sana literal `#F6C28B`). Belum jadi token
- * `colors.*`, jadi diduplikat di sini dgn catatan ini.
+ * Nonaktif CTA primer — PAR-01 parity (2026-10-27): #FFB399 paritas FE
+ * --color-primary-disabled (dulu PEACH #F6C28B utk orange lama #F5820D).
+ * LoginScreen masih literal #F6C28B; migrasi ke token ini butuh acc owner
+ * (lihat decision-packet), tak disentuh di sini.
  */
-const PEACH_IDLE = '#F6C28B';
+const PEACH_IDLE = '#FFB399';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger';
 
@@ -28,8 +29,8 @@ interface ButtonProps {
 }
 
 /**
- * Tombol bersama - bentuk disalin dari CTA LoginScreen:
- * stadium (radius = tinggi / 2), h56, teks bold 16 putih.
+ * Tombol bersama — PAR-01 parity (2026-10-27): radius via radius.cta = 12
+ * (paritas FE rounded-lg; dulu stadium tinggi/2 = 28), h56, teks bold 16 putih.
  *
  * - `primary`: oranye solid ala Login (`colors.orange`).
  * - `secondary`: outline biru 1.5 ala tombol "how" Login.

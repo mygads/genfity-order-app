@@ -5,7 +5,7 @@ import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import ScreenHeader from '../../components/ScreenHeader';
 import { ApiPath } from '../../config/server';
-import { apiFetch, unwrap, validateVoucherCode } from '../../lib/apiSource';
+import { apiFetch, mapAppModeToGoOrderType, mapSaleItemsToPreviewItems, unwrap, validatePosVoucherPreview, validateVoucherCode } from '../../lib/apiSource';
 import type { CartItem } from './CashierScreen';
 import { initDb, query } from '../../lib/db';
 import { dbNowLocal } from '../../lib/datefmt';
@@ -310,6 +310,30 @@ export default function PromotionListScreen({ navigation, route }: Props) {
         ...(callerSalesNum !== undefined ? { salesNum: callerSalesNum } : {}),
         voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
     };
+    // G-005: preview live mesin-POS dulu bila konteks cart tersedia (engine
+    // SAMA dengan settle: nominal server menang; server menolak definitif =
+    // TOLAK tanpa fallback lintas-engine; offline = jatuh ke legacy di bawah).
+    try {
+      const previewItems = mapSaleItemsToPreviewItems(callerItems);
+      if (previewItems && subtotal !== undefined && subtotal > 0) {
+        const pv = await validatePosVoucherPreview(
+          p.code, subtotal, previewItems, mapAppModeToGoOrderType(callerMode));
+        if (pv.ok) {
+          go(pv.amount);
+          return;
+        }
+        if (!pv.offline) {
+          if (pv.minSpend > 0 && subtotal < pv.minSpend) {
+            setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(pv.minSpend)).replace('{code}', p.code));
+            return;
+          }
+          setWarn(pv.message || t('vou_unknown').replace('{k}', p.code));
+          return;
+        }
+      }
+    } catch {
+      /* offline - lanjut jalur legacy di bawah */
+    }
     // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
     // server menang bila backend asli menjawab; offline pakai nilai lokal.
     try {

@@ -691,6 +691,14 @@ export async function pollServerPrintJobs(
     const ack = await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload is not valid base64');
     return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
   }
+  // KONTRAK FINAL AUTO (lubang cetak-buta): fromBase64('') = byte kosong TANPA
+  // throw — tanpa penjaga ini payload kosong lolos ke printFn lalu bisa di-ack
+  // PRINTED palsu. Byte kosong TAK PERNAH dicetak; ack FAILED INVALID_PAYLOAD
+  // agar BE habiskan attempt lalu FAILED final (racun tak muter selamanya).
+  if (bytes.length === 0) {
+    const ack = await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong — tak dicetak buta (bukan job AUTO sah)');
+    return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
+  }
   let sent: PrintResult;
   try {
     sent = await printFn(target, bytes);

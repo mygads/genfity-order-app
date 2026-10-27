@@ -1293,7 +1293,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
-        onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier', subtotal })}>
+        onPress={() => navigation?.navigate('PromotionList', { returnTo: 'Cashier', subtotal, items: activeCart, mode })}>
         <Image source={require('../../../assets/icons/promo_blue.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>
           {voucher ? voucher.code : t('promo')}

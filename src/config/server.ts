@@ -52,6 +52,24 @@ export const ApiPath = {
   pullMenuOnline: 'v1/pull/get-menu-online',
   // [FAKTA] APK: v1/pull/expense-chart-of-accounts (REA-18).
   pullExpenseCoa: 'v1/pull/expense-chart-of-accounts',
+  // PULLMASTER-6DOMAIN (2026-10-27): jalur-Go pengganti path ESB-legacy
+  // (main/get-*, v1/pull/*, esb_api/*) yang 404 di backend Go :8086.
+  // Dibuktikan via router.go genfity-order-services (MerchantAuth, prefix
+  // api/ = bearer sesi otomatis via needsSessionBearer). Pemetaan:
+  // menu -> masterGo.pullGoCatalog; table/promotion/member/voucher/expensecoa ->
+  // lib/masterBe.ts (F-020: expensecoa live via pullGoCoa).
+  pullGoTables: 'api/merchant/table-management',
+  pullGoPromoTemplates: 'api/merchant/orders/pos/voucher-templates',
+  pullGoVoucherTemplates: 'api/merchant/order-vouchers/templates',
+  pullGoMembers: 'api/merchant/loyalty/members',
+  pullGoCustomers: 'api/merchant/customers/search',
+  // F-020 (2026-10-27): CoA BE live pasca-F-016 (MerchantChartOfAccountsList).
+  pullGoCoa: 'api/merchant/chart-of-accounts',
+  // GPAY-POS-DYNAMIC (2026-10-27): kasir membuat charge QRIS/VA dinamis ke
+  // Genfity Pay via BE (settlement ke tenant merchant sendiri). GET by id
+  // untuk polling status paid/expired.
+  gpayChargeCreate: 'api/merchant/gpay/charges',
+  gpayChargeGet: 'api/merchant/gpay/charges',
   pullUser: 'main/get-user',
   // [asumsi-clean-room] TIDAK ADA di APK (REA-18): hak akses per user untuk
   // RBAC lokal (dipetakan ke ms_posuseraccess via master.ts 'useraccess').

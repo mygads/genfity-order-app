@@ -683,6 +683,15 @@ function backupBindings(ss: Station[]): void {
         );
         return;
       }
+      // KONTRAK FINAL AUTO: byte kosong TAK PERNAH disiarkan ke station
+      // (fromBase64('') tak melempar) — ack FAILED INVALID_PAYLOAD, bukan PRINTED palsu.
+      if (bytes.length === 0) {
+        await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong — tak dicetak buta (bukan job AUTO sah)');
+        setStatusMsg(
+          t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', 'INVALID_PAYLOAD'),
+        );
+        return;
+      }
       let sent = 0;
       let lastErr = '';
       for (const x of withTarget) {

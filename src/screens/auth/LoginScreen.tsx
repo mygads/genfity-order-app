@@ -653,16 +653,21 @@ async function verifyOwnerOverridePin(pin: string, stageToken?: string): Promise
     // ini dilindungi tripwire (tripwire-pin-escalation-parkir.cjs) — jangan
     // "dibersihkan" sebagai dead-code.
   }
+  // S4-APP-313 (bound-hang): verifyAttendancePin = query expo-sqlite TANPA
+  // timeout internal — SQLite wedged = promise tak pernah settle = override
+  // ini gantung = submitStaffPin gantung di "Verifying..." selamanya.
+  // Batas 15 dtk: wedged → override gagal (fail-closed, lanjut jalur normal),
+  // BUKAN hang. Override gagal tak mengubah verdict normal (aditif).
   let v: { ok: boolean | null; userId?: string };
   try {
-    v = await verifyAttendancePin(clean);
+    v = await withTimeout(verifyAttendancePin(clean), 15000);
   } catch {
     return { ok: false };
   }
   if (v.ok !== true || !v.userId) return { ok: false };
   let gate: { ok: boolean } = { ok: false };
   try {
-    gate = await requireEscalationAccess(v.userId, 'settings.edit');
+    gate = await withTimeout(requireEscalationAccess(v.userId, 'settings.edit'), 8000);
   } catch {
     gate = { ok: false };
   }
@@ -798,7 +803,11 @@ async function completeOnline(
   } catch (e) {
     console.warn('[login] saveGrant gagal:', e);
   }
-  await ensureLocalPinHash(userId, pin);
+  // S4-APP-313 (bound-hang): hash lokal = SecureStore/AsyncStorage TANPA
+  // timeout internal — storage wedged = completeOnline gantung = pinBusy
+  // (modal "Verifying...") tak pernah clear. Batas 8 dtk: wedged → lewati
+  // (hash hanya akselerator offline; server tetap sumber benar).
+  await withTimeout(ensureLocalPinHash(userId, pin), 8000).catch(() => {});
   try { startRealtime(); } catch { /* abaikan */ }
   // SYNC-02 (C12): timer auto-sync ikut login online (bukan hanya buka SyncScreen).
   try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
@@ -855,7 +864,9 @@ async function completeOffline(
   // C2 Sesi-C QA3: segarkan cache merchant-type (cermin completeOnline).
   try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
-  await ensureLocalPinHash(userId, pin);
+  // S4-APP-313 (bound-hang): sama seperti completeOnline — storage wedged
+  // tak boleh menahan pinBusy selamanya; hash hanya akselerator offline.
+  await withTimeout(ensureLocalPinHash(userId, pin), 8000).catch(() => {});
   try { startRealtime(); } catch { /* abaikan */ }
   // SYNC-02 (C12): timer auto-sync ikut login offline-grant (bukan hanya buka SyncScreen).
   try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
@@ -1638,7 +1649,8 @@ export default function LoginScreen({ navigation }: Props) {
             const approvedBy = `owner:${ov.approverUserId}`;
             if (candidate.kind === 'offline') {
               const oCtx = await resolveTermCtx();
-              const oDev = oCtx?.deviceId || (await getContractDeviceId());
+              // S4-APP-313: storage wedged = gantung tanpa timeout → batas 5 dtk, '' = jalur error jujur.
+              const oDev = oCtx?.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
               const oTerm = (oCtx?.terminalId ?? '').trim();
               if (!oCtx || !oTerm || !oDev) {
                 setPinError(needBeText());
@@ -1668,7 +1680,8 @@ export default function LoginScreen({ navigation }: Props) {
               setPinError(needBeText());
               return;
             }
-            const oDev = oCtx.deviceId || (await getContractDeviceId());
+            // S4-APP-313: batas 5 dtk anti-wedged (lihat di atas).
+            const oDev = oCtx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
             const oUserId = str(candidate.payload.userId ?? candidate.payload.user_id);
             if (!oUserId) {
               setPinError(pinWrongText());
@@ -1689,7 +1702,8 @@ export default function LoginScreen({ navigation }: Props) {
           // completeOffline me-resolve binding sendiri; triple di sini
           // di-resolve sama agar verifikasi dan sesi konsisten.
           const offCtx = await resolveTermCtx();
-          const offDevice = offCtx?.deviceId || (await getContractDeviceId());
+          // S4-APP-313: batas 5 dtk anti-wedged (lihat di atas).
+          const offDevice = offCtx?.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
           const offTerm = (offCtx?.terminalId ?? '').trim();
           if (!offCtx || !offTerm || !offDevice) {
             setPinError(needBeText());
@@ -1789,9 +1803,11 @@ export default function LoginScreen({ navigation }: Props) {
           // server; temuan review Trek 1). Enroll progresif tetap via
           // USER_PIN_NOT_SET yang dikonfirmasi server (pv.reached, di atas).
           if (!pv.reached) {
+            // S4-APP-313 (bound-hang): SecureStore wedged = gantung tanpa
+            // timeout → batas 8 dtk; wedged = tak ada record = need_be jujur.
             let hasPinRecord = false;
             try {
-              hasPinRecord = !!(await loadPinRecord(userId));
+              hasPinRecord = !!(await withTimeout(loadPinRecord(userId), 8000));
             } catch {
               hasPinRecord = false;
             }
@@ -1800,7 +1816,22 @@ export default function LoginScreen({ navigation }: Props) {
               return;
             }
           }
-          if (!(await passesLocalWorkforcePin(userId, pin))) {
+          // S4-APP-313 (bound-hang): gerbang lokal = SecureStore TANPA
+          // timeout internal — wedged = "Verifying..." selamanya. Batas
+          // 15 dtk: wedged → need_be jujur (bukan pin-salah, bukan hang).
+          // pinBusy SELALU clear via finally di bawah.
+          let localOk = false;
+          let localWedged = false;
+          try {
+            localOk = await withTimeout(passesLocalWorkforcePin(userId, pin), 15000);
+          } catch {
+            localWedged = true;
+          }
+          if (localWedged) {
+            setPinError(needBeText());
+            return;
+          }
+          if (!localOk) {
             setPinError(pinWrongText());
             return;
           }
@@ -1851,7 +1882,19 @@ export default function LoginScreen({ navigation }: Props) {
           }
           if (!rpv.reached || (rpv.status === 400 && rpv.errorCode === 'USER_PIN_NOT_SET')) {
             // Fallback gerbang lokal: NOT_SET (enroll progresif) atau offline.
-            if (!(await passesLocalWorkforcePin(userId, pin))) {
+            // S4-APP-313: batas 15 dtk anti-wedged (pola sama jalur online).
+            let refetchOk = false;
+            let refetchWedged = false;
+            try {
+              refetchOk = await withTimeout(passesLocalWorkforcePin(userId, pin), 15000);
+            } catch {
+              refetchWedged = true;
+            }
+            if (refetchWedged) {
+              setPinError(needBeText());
+              return;
+            }
+            if (!refetchOk) {
               setPinError(pinWrongText());
               return;
             }
@@ -1881,7 +1924,9 @@ export default function LoginScreen({ navigation }: Props) {
         }
         // Sempat offline di tengah langkah 2: fallback grant jujur (triple-
         // spesifik, grant-map F1).
-        const userId = await lookupLocalUserId(candidate.username);
+        // S4-APP-313: query sqlite TANPA timeout internal — batas 15 dtk,
+        // wedged = '' → need_be jujur (bukan hang).
+        const userId = await withTimeout(lookupLocalUserId(candidate.username), 15000).catch(() => '');
         const problem = userId ? describeGrantProblem(userId, ctx.terminalId, deviceId) : 'no-grant';
         if (!problem && userId && verifyGrantPin(pin, { userId, terminalId: ctx.terminalId, deviceId })) {
           try {

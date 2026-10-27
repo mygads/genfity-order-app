@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';import { toQR } from 'toqr';import { asciiToBytes, createGpayCharge, pollGpayCharge, type GpayCharge } from '../../lib/gpayCharges';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
@@ -8,7 +8,30 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
 };};const fmtTime = (s: number) => {
   const m = Math.floor(s / 60);
   const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;};/** * Matriks QR dekoratif deterministik dari nominal - pola finder 3 sudut ala QR. * Bukan payload QRIS asli (payload asli butuh merchant ID dari backend). */function FauxQr({ seed }: { seed: number }) { const N = 21; const cells: boolean[] = []; for (let r = 0; r < N; r++) { for (let c = 0; c < N; c++) { const inFinder = (r < 7 && c < 7) || (r < 7 && c >= N - 7) || (r >= N - 7 && c < 7); if (inFinder) { const lr = r >= N - 7 ? r - (N - 7) : r; const lc = c >= N - 7 ? c - (N - 7) : c; cells.push(lr === 0 || lr === 6 || lc === 0 || lc === 6 || (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4)); } else { cells.push((r * 31 + c * 17 + seed * 13) % 7 < 3); } } } return (<View style={styles.qrMatrix}>{cells.map((on, i) => (<View key={i} style={[styles.qrCell, on && styles.qrCellOn]} /> ))}</View> );}export default function QrisScreen({ navigation, route }: Props) {
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;};/** * Matriks QR dekoratif deterministik dari nominal - pola finder 3 sudut ala QR. * Bukan payload QRIS asli (payload asli butuh merchant ID dari backend). */function FauxQr({ seed }: { seed: number }) { const N = 21; const cells: boolean[] = []; for (let r = 0; r < N; r++) { for (let c = 0; c < N; c++) { const inFinder = (r < 7 && c < 7) || (r < 7 && c >= N - 7) || (r >= N - 7 && c < 7); if (inFinder) { const lr = r >= N - 7 ? r - (N - 7) : r; const lc = c >= N - 7 ? c - (N - 7) : c; cells.push(lr === 0 || lr === 6 || lc === 0 || lc === 6 || (lr >= 2 && lr <= 4 && lc >= 2 && lc <= 4)); } else { cells.push((r * 31 + c * 17 + seed * 13) % 7 < 3); } } } return (<View style={styles.qrMatrix}>{cells.map((on, i) => (<View key={i} style={[styles.qrCell, on && styles.qrCellOn]} /> ))}</View> );}/** QR dinamis ASLI dari Genfity Pay: qr_string provider di-encode via toQR
+ * (n x n modules, bukan dekoratif). Gagal encode = null (pemanggil fallback
+ * ke tampilan payload teks). */
+function RealQr({ payload }: { payload: string }) {
+  const grid = useMemo(() => {
+    try {
+      const mods = toQR(asciiToBytes(payload));
+      const n = Math.round(Math.sqrt(mods.length));
+      if (n < 21 || n * n !== mods.length) return null;
+      return { mods, n };
+    } catch {
+      return null;
+    }
+  }, [payload]);
+  if (!grid) return null;
+  const cell = 189 / grid.n;
+  return (
+    <View style={[styles.qrMatrix, { width: 189, height: 189 }]}>
+      {Array.from(grid.mods).map((on, i) => (
+        <View key={i} style={[styles.qrCell, { width: cell, height: cell }, on ? styles.qrCellOn : undefined]} />
+      ))}
+    </View>
+  );
+}export default function QrisScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const totalParam = route?.params?.total; const hasTotal = typeof totalParam === 'number' && Number.isFinite(totalParam) && totalParam > 0; const total = hasTotal ? Math.round(totalParam) : 0;
@@ -16,6 +39,9 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
   const [status, setStatus] = useState<'waiting' | 'checking' | 'paid' | 'expired'>('waiting');
   const [confirmExit, setConfirmExit] = useState(false);
   const [pollCount, setPollCount] = useState(0);
+  // GPAY-POS-DYNAMIC: charge provider (qr_string asli). null = offline/mock.
+  const [charge, setCharge] = useState<GpayCharge | null>(null);
+  const chargeTriedRef = useRef(false);
   /** Mode sumber data: 'local' (tanpa server) = mode uji berlabel. */
   const apiMode = getApiMode();
 
@@ -82,6 +108,24 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     }, 1000);
     return () => clearTimeout(t);
   }, [seconds, status]);
+
+  // GPAY-POS-DYNAMIC: buat charge dinamis sekali (real mode + rantai siap).
+  // sale_reference = qrChainId (stabil per sale → retry tak ganda di provider).
+  useEffect(() => {
+    if (getApiMode() !== 'real' || !hasTotal || !qrChainId.trim() || chargeTriedRef.current) return;
+    chargeTriedRef.current = true;
+    void (async () => {
+      const c = await createGpayCharge({ amount: total, payment_method: 'qris', sale_reference: qrChainId.trim() });
+      if (c) {
+        setCharge(c);
+        if (c.expires_at) {
+          const left = Math.max(0, Math.floor((new Date(c.expires_at).getTime() - Date.now()) / 1000));
+          if (left > 0) setSeconds(Math.min(left, 24 * 3600));
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrChainId, hasTotal]);
 
   // Cek status  tiap 10 dtk saat menunggu (backend asli / simulasi dummy).
   useEffect(() => {
@@ -254,18 +298,37 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: 'qris', amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(voucherCode ? { voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), ...(String(refCode ?? '').trim() ? { notes: String(refCode).trim() } : {}), clientId: saleClientId });
+    mirrorSettleToServer({ salesNum: orderNo, methodLabel: 'qris', amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(voucherCode ? { voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), ...(String(refCode ?? '').trim() || charge?.id ? { notes: [String(refCode ?? '').trim(), charge?.id ? `gpay:${String(charge.id)}` : ''].filter(Boolean).join(' ') } : {}), clientId: saleClientId });
     navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(packagingParam > 0 ? { packaging: packagingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(tipParam > 0 ? { tip: tipParam } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
    *   lunas pada cek ke-3 ≈ ±30 dtk). * Dipakai tombol manual + polling otomatis. */ const doCheck = async () => { if (status !== 'waiting') return;
     setStatus('checking'); pollRef.current += 1; setPollCount(pollRef.current); const mode = getApiMode(); let paid = false; try {
       if (mode === 'real') {
-        const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
-        if (!r.fromDummy) {
-          const { data } = unwrap<Record<string, unknown>>(r.data); paid = String(data.status ?? '').toUpperCase() === 'PAID';
+        const cid = charge?.id;
+        if (cid) {
+          // Jalur utama: status charge dinamis dari Genfity Pay.
+          const c = await pollGpayCharge(cid);
+          if (c) {
+            setCharge(c);
+            paid = String(c.status ?? '').toUpperCase() === 'PAID';
+            if (String(c.status ?? '').toUpperCase() === 'EXPIRED' || String(c.current_attempt?.status ?? '').toUpperCase() === 'EXPIRED') {
+              if (!expiredRef.current) {
+                expiredRef.current = true;
+                setStatus('expired');
+              }
+              return;
+            }
+          } else {
+            paid = false;
+          }
         } else {
-          paid = false;
+          const r = await apiFetch(ApiPath.pushOrderView, { body: { refCode, total } });
+          if (!r.fromDummy) {
+            const { data } = unwrap<Record<string, unknown>>(r.data); paid = String(data.status ?? '').toUpperCase() === 'PAID';
+          } else {
+            paid = false;
+          }
         }
       } else {
         // Local (mode uji berlabel) + Dummy eksplisit: simulasi lunas.
@@ -343,11 +406,18 @@ type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNu
                   basi); fallback loading jujur selagi resolusi berjalan. */}
               {!qrChainId.trim() ? (
                 <Text style={styles.qrSub}>{t('qris_checking')}</Text>
+              ) : charge?.current_attempt?.qr_string ? (
+                <>
+                  {/* GPAY-POS-DYNAMIC: QR ASLI provider (bukan FauxQr). */}
+                  <RealQr payload={String(charge.current_attempt.qr_string)} />
+                  <Text style={styles.qrPayload} selectable>{String(charge.current_attempt.qr_string)}</Text>
+                  <Text style={styles.qrSub}>{t('qris_scan')}</Text>
+                </>
               ) : (
                 <>
                   <FauxQr seed={total} />
                   {/* M15: payload QR nyata (client_id rantai + salesNum + total) —
-                      bukan nominal-dekoratif; teks sampai renderer QR tersedia. */}
+                      bukan nominal-dekoratif; teks sampai charge dinamis tersedia. */}
                   <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
                   <Text style={styles.qrSub}>{t('qris_scan')}</Text>
                 </>

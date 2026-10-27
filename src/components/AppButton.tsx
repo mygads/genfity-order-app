@@ -13,8 +13,8 @@ import { TABLET_BP } from '../theme';
  * Ukuran tombol bersama — samakan di semua layar agar konsisten:
  * - `sm`: di dalam card/baris padat (h36, radius 10, font 13).
  * - `md`: aksi di dalam card/container (h46, radius 12, font 14).
- * - `lg`: CTA bar bawah/full-width (h56, radius 14, font 16, default
- *   agar CTA lama tak berubah).
+ * - `lg`: CTA bar bawah/full-width (h56, radius 12 PAR-01 parity FE, font 16,
+ *   default; dulu radius 14).
  */
 export type AppButtonSize = 'sm' | 'md' | 'lg';
 
@@ -23,10 +23,11 @@ export type AppButtonProps = ComponentProps<typeof Button> & {
   size?: AppButtonSize;
 };
 
+// PAR-01 parity (2026-10-27): lg radius 12 paritas FE rounded-lg (dulu 14).
 const SIZE_BOX: Record<AppButtonSize, ViewStyle> = {
   sm: { height: 36, borderRadius: 10, paddingHorizontal: 12 },
   md: { height: 46, borderRadius: 12, paddingHorizontal: 14 },
-  lg: { height: 56, borderRadius: 14 },
+  lg: { height: 56, borderRadius: 12 },
 };
 
 const SIZE_TEXT: Record<AppButtonSize, TextStyle> = {
@@ -40,7 +41,7 @@ const SIZE_TEXT: Record<AppButtonSize, TextStyle> = {
 const SIZE_BOX_TABLET: Record<AppButtonSize, ViewStyle> = {
   sm: { height: 44, borderRadius: 10, paddingHorizontal: 12 },
   md: { height: 50, borderRadius: 12, paddingHorizontal: 14 },
-  lg: { height: 60, borderRadius: 14 },
+  lg: { height: 60, borderRadius: 12 },
 };
 
 const SIZE_TEXT_TABLET: Record<AppButtonSize, TextStyle> = {

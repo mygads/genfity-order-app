@@ -9,6 +9,7 @@ import { getApiMode } from './apiSource';
 import { initDb, queryFirst, run } from './db';
 import { getWatermark, setWatermark } from './sync';
 import { GoCatalogUnavailable, pullGoCatalog } from './masterGo';
+import { BE_PULL_KEYS, pullBeDomain, type BePullKey } from './masterBe';
 
 type Row = Record<string, string | number | null>;
 
@@ -435,7 +436,24 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
       // Bukan backend Go — lanjut jalur ESB seperti semula.
     }
   }
+  const beKeys = BE_PULL_KEYS as readonly string[];
   for (const d of targets) {
+    // PULLMASTER-6DOMAIN (2026-10-27): backend terbukti Go (goOk) -> domain
+    // table/promotion/member/voucher/expensecoa DITARIK via adapter BE nyata
+    // (lib/masterBe.ts), BUKAN path ESB-legacy (main/get-*, v1/pull/*) yang
+    // 404 di BE Go. missing-endpoint (fallback bila BE lama tanpa rute,
+    // mis. expensecoa pra-F-016) dicatat ke `skipped` + warn (tripwire),
+    // bukan gagal. Tanpa goOk (BE
+    // bukan Go) alur legacy di bawah tak berubah.
+    if (goOk && beKeys.includes(d.key)) {
+      const r = await pullBeDomain(d.key as BePullKey);
+      if (r.status === 'missing-endpoint') {
+        skipped.push(d.key);
+        continue;
+      }
+      per[d.key] = r.count;
+      continue;
+    }
     const wm = await getWatermark(d.key);
     const res = await apiGet(d.path, { ...(wm.pull ? { since: wm.pull } : {}), limit: 200 });
     if (!res.ok) {
