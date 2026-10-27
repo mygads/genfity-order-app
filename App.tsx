@@ -8,7 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors, fonts, rp } from './src/theme';
 import type { RootStackParamList } from './src/navigation/types';
-import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, releaseBindingForReclaim, setKickNotice, subscribeReclaim, subscribeSession, takePostLoginRoute } from './src/session';
+import { getSession, hydrateTerminalState, getBinding, logout, peekPostLoginRoute, releaseBindingForReclaim, revokeKickedSession, setKickNotice, subscribeReclaim, subscribeSession, takePostLoginRoute } from './src/session';
 import { tr, useLang } from './src/lib/i18n';
 import { initDb, queryFirst, run } from './src/lib/db';
 import { seedIfEmpty } from './src/lib/seed';
@@ -156,8 +156,9 @@ function startTakeoverWatch(): () => void {
     return subscribeTerminalEvents(terminalId, (e) => {
       try {
         if (!/takeover/.test(String(e?.type ?? ''))) return;
-        const { forMe } = isTakeoverForMe(e?.data);
+        const { forMe, kickedUserId } = isTakeoverForMe(e?.data);
         if (!forMe) return;
+        try { revokeKickedSession(kickedUserId); } catch {}
         if (releaseBindingForReclaim()) {
           try {
             setKickNotice(tr('kicked_msg'));

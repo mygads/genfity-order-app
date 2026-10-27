@@ -1110,6 +1110,8 @@ const STR: Record<string, Entry> = {
   'settings.dataHelp': { id: 'Data dan Bantuan', en: 'Data and Help' },
   'settings.sync': { id: 'Sinkronisasi Data', en: 'Data Sync' },
   'settings.syncSub': { id: 'Push/pull manual - antrean offline', en: 'Manual push/pull - offline queue' },
+  'settings.backup': { id: 'Backup Data (PARKED - needs-dep)', en: 'Data Backup (PARKED - needs-dep)' },
+  'settings.backupSub': { id: 'Codec siap, tanpa clipboard/share - PARKED', en: 'Codec ready, no clipboard/share - PARKED' },
   'settings.log': { id: 'Log Aplikasi', en: 'App Log' },
   'settings.logSub': { id: 'Riwayat kejadian + detail', en: 'Event history + details' },
   'settings.language': { id: 'Bahasa', en: 'Language' },

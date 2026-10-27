@@ -260,6 +260,8 @@ export default function SettingsScreen({ navigation }: Props) {
       ) : null}
 
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
+      {/* SESI-FINAL-APP K5 PARKED needs-dep: backup codec murni, tanpa expo-clipboard/share/file — baris disabled jujur */}
+      <MenuRow title={t('settings.backup')} sub={t('settings.backupSub')} />
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
       {/* Cabang Australia (AUD): bahasa dikunci Inggris, baris pemilih disembunyikan. */}

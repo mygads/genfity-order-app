@@ -221,8 +221,7 @@ export async function fanoutReceiptAuto(input: {
     const { fetchBranchTerminals } = require('./terminalApi') as typeof import('./terminalApi');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getServerOrderIdForSale } = require('./posWire') as typeof import('./posWire');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { enqueuePrint } = require('./printqueue') as typeof import('./printqueue');
+    // PB server-wins: tanpa fallback antrean lokal (SQLite tak kenal id job server).
     const g = getTerminal();
     const termCode = String(g?.terminalCode ?? '').trim().toUpperCase();
     const branchId = String(g?.branchId ?? '').trim();
@@ -248,15 +247,7 @@ export async function fanoutReceiptAuto(input: {
       payloadBase64,
       metadata: { salesNum: orderNo, origin: 'payment-auto' },
     });
-    if (!r.ok && !input.alreadyQueued) {
-      // Fallback offline: byte selamat di antrean lokal persisten.
-      try {
-        const { fromBase64: b64dec } = require('./escpos') as typeof import('./escpos');
-        await enqueuePrint(b64dec(payloadBase64), null, { kind: 'receipt', label: `auto-fanout:${orderNo}` });
-      } catch {
-        /* antre lokal gagal pun tak melempar — outcome jujur di bawah */
-      }
-    }
+    // PB server-wins: gagal = outcome jujur, tanpa antrean lokal (fail-closed, tak melempar).
     return r;
   } catch {
     return fail('offline');
