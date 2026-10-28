@@ -113,7 +113,8 @@ export type SupervisorCode =
   | 'locked'
   | 'denied'
   | 'offline'
-  | 'unconfigured';
+  | 'unconfigured'
+  | 'endpoint-dead';
 
 export interface AuthResult {
   ok: boolean;
@@ -290,6 +291,12 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
       // R35: jaringan gagal lalu jatuh ke dummy = offline — fail-closed jujur
       // TANPA membakar attempt (klasifikasi sebelum penghitungan).
       return { ok: false, code: 'offline', message: tOf('sup_offline') };
+    }
+    if (r.status === 404 && !r.fromDummy) {
+      // Endpoint legacy DINYATAKAN MATI di Real mode (BE 404 by-design):
+      // bukan tebakan salah — JANGAN bakar attempt. Pemanggil shift
+      // (E29 territory) boleh fallback ke pin-verify terminal.
+      return { ok: false, code: 'endpoint-dead', message: tOf('sup_endpoint_dead') };
     }
     const { success, data } = unwrap<{ approved?: unknown }>(r.data);
     if (!r.ok || !success || data.approved !== true) {

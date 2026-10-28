@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { pinVerifyTerminalPin } from '../../lib/terminalApi';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashCloseBe,
   clockOutBe,
   clockOutPayload,
@@ -70,8 +70,31 @@ import React, { useEffect, useState } from 'react';import {
     let closedBy: string | null = null;
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
     const auth = await authorizeSupervisor(pin);
-    if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') { setError(auth.message); return; }
-    if (!auth.ok) {
+    // E29-FALLBACK: cermin ShiftScreen — endpoint legacy mati 404 di Real mode.
+    let e29verified = false;
+    if (!auth.ok && auth.code === 'endpoint-dead') {
+      const termInfo = getTerminal() as unknown as { terminalIdBe?: string };
+      const termId = (termInfo.terminalIdBe || '');
+      if (termId.trim()) {
+        try {
+          const e29 = await pinVerifyTerminalPin(termId.trim(), pin);
+          if (e29.ok && e29.data.verified === true) {
+            e29verified = true;
+            closedBy = getSession()?.userId || getSession()?.username || null;
+          } else if (e29.ok || e29.status !== 0) {
+            setError(t('shf_pin_wrong'));
+            return;
+          }
+        } catch {
+          /* jaringan gagal = PIN lokal di bawah */
+        }
+      }
+      if (e29verified && !closedBy) {
+        setError(t('shf_pin_wrong'));
+        return;
+      }
+    } else if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') { setError(auth.message); return; }
+    if (!auth.ok && !e29verified) {
       const v = await verifyAttendancePin(pin);
       if (v.ok !== true || !v.userId) {
         setError(v.ok === false ? t('shf_pin_wrong') : t('endshift_pin_unknown'));

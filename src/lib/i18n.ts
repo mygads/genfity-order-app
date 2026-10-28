@@ -1264,6 +1264,7 @@ const STR: Record<string, Entry> = {
   sup_default_deny: { id: 'PIN bawaan ditolak - ganti PIN dulu via Install / Lupa PIN.', en: 'Default PIN denied - change your PIN via Install / Forgot PIN first.' },
   sup_offline: { id: 'Offline, aksi sensitif ditolak demi keamanan.', en: 'Offline, sensitive action denied for safety.' },
   sup_unconfigured: { id: 'Server belum diatur, otorisasi ditolak.', en: 'Server not configured, authorization denied.' },
+  sup_endpoint_dead: { id: 'Jalur otorisasi lama mati di server, pakai verifikasi PIN terminal.', en: 'Legacy auth path is dead on server, use terminal PIN verification.' },
   sup_ok: { id: 'Disetujui supervisor.', en: 'Approved by supervisor.' },
   // ---- supervisor V1 (S7/PP-016: kontrak BE baru, identitas eksplisit) ----
   sup_v1_badfield: { id: 'Lengkapi ID supervisor, aksi, dan alasan (alasan wajib diisi).', en: 'Complete the supervisor ID, action, and reason (reason is required).' },

@@ -167,7 +167,7 @@ export default function SettingsScreen({ navigation }: Props) {
     <View style={styles.root}>
       <ScreenHeader
         title={t('settings.title')}
-        sub={t('settings.sub')}
+        sub={(getBinding()?.merchantName || getBinding()?.branchName || '').trim() || t('settings.sub')}
         left={
           <TouchableOpacity onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}>
             <Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" />

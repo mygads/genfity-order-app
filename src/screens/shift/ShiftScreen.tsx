@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
-} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';
+} from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { pinVerifyTerminalPin } from '../../lib/terminalApi';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';
 import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang —
  *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
 const MAX_KAS_AWAL_IDR = 10000000;
@@ -149,11 +149,35 @@ const terbilang = (n: number): string => {
       // 'offline'/'unconfigured' bila server tak terjangkau - hanya saat itu
       // kami izinkan PIN lokal agar kasir tetap jalan offline.
       const auth = await authorizeSupervisor(pin);
-      if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') {
+      // E29-FALLBACK: endpoint legacy mati 404 di Real mode (bukan salah PIN).
+      // Verifikasi PIN staff via pin-verify terminal; lolos = lanjut sebagai
+      // pemilik PIN sesi. Gagal jaringan = jatuh ke PIN lokal di bawah.
+      let e29verified = false;
+      if (!auth.ok && auth.code === 'endpoint-dead') {
+        const termId = ((getTerminal() as { terminalIdBe?: string }).terminalIdBe || '').trim();
+        if (termId) {
+          try {
+            const e29 = await pinVerifyTerminalPin(termId, pin);
+            if (e29.ok && e29.data.verified === true) {
+              e29verified = true;
+              openerUserId = getSession()?.userId || getSession()?.username || '';
+            } else if (e29.ok || e29.status !== 0) {
+              setError(t('shf_pin_wrong'));
+              return;
+            }
+          } catch {
+            /* jaringan gagal = PIN lokal di bawah */
+          }
+        }
+        if (e29verified && !openerUserId) {
+          setError(t('shf_pin_wrong'));
+          return;
+        }
+      } else if (!auth.ok && auth.code !== 'offline' && auth.code !== 'unconfigured') {
         setError(auth.message);
         return;
       }
-      if (!auth.ok) {
+      if (!auth.ok && !e29verified) {
         // Offline jujur: server tak terjangkau, cocokkan PIN lokal (lib/pin.ts).
         const local = await verifyAttendancePin(pin);
         if (local.ok !== true || !local.userId) {

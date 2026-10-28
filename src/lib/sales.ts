@@ -413,6 +413,10 @@ export async function saveSale(s: SaleInput): Promise<string> {
     );
   }
   const now = new Date().toISOString();
+  // SALESDATE-LOCAL (2026-10-28): salesDate dipakai dashboard/7-day dengan
+  // substr(...,1,10) vs hari LOKAL — ISO UTC menggeser omzet ke hari kemarin
+  // untuk transaksi dini hari WIB. createdAt/updatedAt tetap ISO.
+  const salesDateLocal = dbNowLocal();
   const t = getTerminal();
   const sess = getSession();
   const cashier = sess?.name ?? '';
@@ -545,7 +549,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       status, queueNumber, cashierName, createdAt, updatedAt, syncDate)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
-      salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, now,
+      salesNum, clientId, branchId, t.terminalCode || null, cashierId || null, shiftId, salesDateLocal,
       s.mode ? normalizeSalesMode(s.mode) : 'DINE_IN',
       r(subtotal), r(s.discountTotal ?? 0),
       r(s.vatTotal ?? 0), r(s.serviceTotal ?? 0), r(s.tipTotal ?? 0),

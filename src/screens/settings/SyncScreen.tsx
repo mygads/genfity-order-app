@@ -91,7 +91,20 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   const refreshDaysAgo = () => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); else setDaysAgo(Infinity); };
   useEffect(() => { refreshDaysAgo(); }, []); // S19: segarkan umur tiap layar
   // difokuskan; tak ada emit session-restore di sesi (grep) — focus saja.
-  useFocusEffect(useCallback(() => { refreshDaysAgo(); setTick((x) => x + 1); }, [])); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
+  useFocusEffect(useCallback(() => { refreshDaysAgo(); setTick((x) => x + 1);
+    // W-FULL §14: tampilkan stempel pull-otomatis terakhir (boot/reconnect)
+    // agar "Last pull: Never" hanya muncul bila pull belum pernah sukses.
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const m = require('../../lib/master') as typeof import('../../lib/master');
+        const iso = await m.getLastPullOk();
+        if (iso) {
+          const d = new Date(iso);
+          if (!Number.isNaN(d.getTime())) setLastPull(`${fmtDateInTz(d, lang)} ${fmtTimeInTz(d)}`);
+        }
+      } catch { /* abaikan — label tetap */ }
+    })(); }, [])); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
       sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind, dep: t('sync_kind_deposit'), shift: t('sync_kind_shift'), voucher: t('sync_kind_voucher'), member: t('sync_kind_member') }), createdAt: fmtTime(o.createdAt), note: String(o.note ?? ''), status: o.status, })),
   [tick, lang], );
 

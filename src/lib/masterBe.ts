@@ -40,7 +40,7 @@ export const BE_PULL_KEYS: readonly BePullKey[] = [
   'expensecoa',
 ];
 
-export type BeDomainStatus = 'live' | 'missing-endpoint';
+export type BeDomainStatus = 'live' | 'missing-endpoint' | 'forbidden';
 
 export interface BeDomainResult {
   key: BePullKey;
@@ -58,6 +58,17 @@ export class BeEndpointMissing extends Error {
   constructor(key: BePullKey) {
     super(`Pull-BE ${key}: endpoint belum ada (404)`);
     this.name = 'BeEndpointMissing';
+    this.key = key;
+  }
+}
+
+/** Tripwire: 403 dari BE (kasir tak punya izin baca domain) — dicatat ke
+ * `skipped` seperti missing-endpoint, bukan gagal total. */
+export class BeForbidden extends Error {
+  readonly key: BePullKey;
+  constructor(key: BePullKey) {
+    super(`Pull-BE ${key}: tanpa izin baca (403)`);
+    this.name = 'BeForbidden';
     this.key = key;
   }
 }
@@ -91,6 +102,7 @@ async function beGet(path: string, key: BePullKey): Promise<Row[] | { nested: un
   if (res.status === 401) {
     throw new Error(`Sesi kedaluwarsa (401) — login ulang sebelum sync ${key}.`);
   }
+  if (res.status === 403) throw new BeForbidden(key);
   if (!res.ok) throw new Error(`Pull-BE ${key}: HTTP ${res.status}`);
   const body = (await res.json()) as unknown;
   if (body && typeof body === 'object' && !Array.isArray(body)) {
@@ -594,6 +606,11 @@ export async function pullBeDomain(key: BePullKey): Promise<BeDomainResult> {
       const at = new Date().toISOString();
       console.warn(`[pull-be] ${key}: endpoint BE belum ada (404) — dilewati.`);
       return { key, status: 'missing-endpoint', count: 0, at, note: 'HTTP 404 dari BE.' };
+    }
+    if (e instanceof BeForbidden) {
+      const at = new Date().toISOString();
+      console.warn(`[pull-be] ${key}: tanpa izin baca (403) — dilewati, catat ke skipped.`);
+      return { key, status: 'forbidden', count: 0, at, note: 'HTTP 403 dari BE (izin peran tak cukup).' };
     }
     throw e;
   }

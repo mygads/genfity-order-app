@@ -8,6 +8,7 @@ import { ApiPath, apiGet, getBaseUrl, getBranchId, getServerEnv } from '../confi
 import { getApiMode } from './apiSource';
 import { initDb, queryFirst, run } from './db';
 import { getWatermark, setWatermark } from './sync';
+import { getItem, setItem } from './storage';
 import { GoCatalogUnavailable, pullGoCatalog } from './masterGo';
 import { BE_PULL_KEYS, pullBeDomain, type BePullKey } from './masterBe';
 
@@ -447,8 +448,8 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
     // bukan Go) alur legacy di bawah tak berubah.
     if (goOk && beKeys.includes(d.key)) {
       const r = await pullBeDomain(d.key as BePullKey);
-      if (r.status === 'missing-endpoint') {
-        skipped.push(d.key);
+      if (r.status === 'missing-endpoint' || r.status === 'forbidden') {
+        skipped.push(`${d.key}(${r.status}${r.note ? `: ${r.note}` : ''})`);
         continue;
       }
       per[d.key] = r.count;
@@ -505,5 +506,22 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
     await setWatermark(d.key, { pull: now });
   }
   const total = Object.values(per).reduce((a, b) => a + b, 0);
-  return { total, per, skipped, at: new Date().toISOString() };
+  const at = new Date().toISOString();
+  // W-FULL §14: stempel pull-otomatis (boot/reconnect/manual) agar layar Sync
+  // tak lagi "Last pull: Never" walau pull sukses — pull manual doPull tetap
+  // menimpa labelnya sendiri seperti semula.
+  void setItem(LS_LAST_PULL_OK, at).catch(() => {});
+  return { total, per, skipped, at };
+}
+
+/** Kunci stempel pull-master terakhir yang sukses (otomatis maupun manual). */
+const LS_LAST_PULL_OK = 'genfity.sync.lastPullOk';
+
+/** Baca stempel pull-master terakhir yang sukses (ISO); null bila belum pernah. */
+export async function getLastPullOk(): Promise<string | null> {
+  try {
+    return await getItem(LS_LAST_PULL_OK);
+  } catch {
+    return null;
+  }
 }

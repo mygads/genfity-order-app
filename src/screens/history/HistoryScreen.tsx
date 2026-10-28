@@ -21,12 +21,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
 
-  const { t } = useLang(); const { online, wsConnected } = useConnectivity();
+  const { t } = useLang(); const { online, wsConnected, sseLive, beReachable } = useConnectivity();
   // Pill koneksi 3-state (mirror DashboardScreen): hijau+Online bila jaringan &
   // WS up, amber+Offline bila jaringan mati, abu+Offline (mode lokal) bila tak diketahui
   // (null)/WS putus. 'Offline' netral EN/ID (tanpa kunci i18n baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('hist_online') : 'Offline';
-  const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
+  const liveOk = wsConnected || sseLive || beReachable === true;
+  const connLabel = online === false ? 'Offline' : online && liveOk ? t('hist_online') : 'Offline';
+  const connDot = online === false ? styles.onlineDotAmber : online && liveOk ? undefined : styles.onlineDotGrey;
   const [drawerOpen, setDrawerOpen] = useState(false); const [query, setQuery] = useState('');
   const [fDate, setFDate] = useState<string | null>(null);
   const [fStatus, setFStatus] = useState<TxnStatus | null>(null);

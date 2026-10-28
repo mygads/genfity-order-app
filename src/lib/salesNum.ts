@@ -95,15 +95,26 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
       try {
         const heads = await query<{ salesNum: string | null }>('SELECT salesNum FROM tr_saleshead');
         const prefix = `TRX-${branch}-${term}-${ymd}-`;
+        // W-FULL §14: NNNN dipakai ulang (0001 ganda) bila cabang berganti
+        // prefix (scan prefix eksak = 0) — padahal counter tr_sales_seq
+        // per (terminal, ymd) tanpa cabang. Perbaikan: adopsi MAX dari
+        // format baru APAPUN cabangnya untuk terminal+ymd yang sama, lalu
+        // format lama, agar NNNN tak pernah mundur dalam satu hari.
+        const reAnyBranch = new RegExp(`^TRX-.+-${term}-${ymd}-(\\d+)(?:-[0-9A-F]{4})?$`);
         for (const h of heads) {
           const sn = String(h?.salesNum ?? '');
           if (sn.startsWith(prefix)) {
             const tail = sn.slice(prefix.length).split('-')[0];
             if (/^\d+$/.test(tail)) mx = Math.max(mx, parseInt(tail, 10) || 0);
-          } else {
-            const m = sn.match(/^TRX-(\d{8})-(\d+)(?:-[A-Z])?$/);
-            if (m && m[1] === ymd) mx = Math.max(mx, parseInt(m[2], 10) || 0);
+            continue;
           }
+          const mb = sn.match(reAnyBranch);
+          if (mb) {
+            mx = Math.max(mx, parseInt(mb[1], 10) || 0);
+            continue;
+          }
+          const m = sn.match(/^TRX-(\d{8})-(\d+)(?:-[A-Z])?$/);
+          if (m && m[1] === ymd) mx = Math.max(mx, parseInt(m[2], 10) || 0);
         }
       } catch {
         /* tabel kosong - mulai dari 1 */

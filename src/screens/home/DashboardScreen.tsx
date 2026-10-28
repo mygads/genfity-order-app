@@ -61,13 +61,14 @@ function tableStyle(s: string) {
 export default function DashboardScreen({ navigation }: Props) {
   const s = getSession();
   const { lang, t } = useLang();
-  const { online, wsConnected } = useConnectivity();
+  const { online, wsConnected, sseLive, beReachable } = useConnectivity();
   // Badge koneksi REAL: hijau+Online bila jaringan & WS up, amber+Offline bila
   // jaringan mati, abu+Offline (mode lokal) bila jaringan up tapi WS putus
   // atau status awal null (belum dicek).
   // 'Offline' netral EN/ID (i18n.ts beku - tanpa kunci baru).
-  const connLabel = online === false ? 'Offline' : online && wsConnected ? t('badge_online') : 'Offline';
-  const connDot = online === false ? styles.onlineDotAmber : online && wsConnected ? undefined : styles.onlineDotGrey;
+  const liveOk = wsConnected || sseLive || beReachable === true;
+  const connLabel = online === false ? 'Offline' : online && liveOk ? t('badge_online') : 'Offline';
+  const connDot = online === false ? styles.onlineDotAmber : online && liveOk ? undefined : styles.onlineDotGrey;
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const [notice, setNotice] = useState('');

@@ -39,11 +39,44 @@ interface Channel {
 }
 
 const handlers = new Set<WsHandler>();
+/** URL WS BE Go untuk Real Mode (custom): path kanonis + tanpa token query
+ * (BE hanya baca cookie/HttpOnly atau header Authorization — browser WS tak
+ * bisa set header, jadi handshake anonim = 101 lalu pesan error JSON; itu
+ * BUKTI routing benar, bukan 404 legacy. Auth penuh butuh cookie sesi /
+ * enhanchement BE ?token= — dicatat jujur, badge hijau mengandalkan HTTP
+ * /health + SSE, bukan WS semata — W-FULL §14). */
+function beWsUrl(path: string): string {
+  try {
+    const base = getBaseUrl().replace(/\/+$/, '').replace(/^http/, 'ws');
+    if (!base) return '';
+    return `${base}${path}`;
+  } catch {
+    return '';
+  }
+}
+
+function isRealMode(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const api = require('./apiSource') as typeof import('./apiSource');
+    return api.getApiMode() === 'real';
+  } catch {
+    return false;
+  }
+}
+
 const channels: Channel[] = [
-  { name: 'device', url: () => getWsUrl(), ws: null, retry: 0, timer: null, beat: null },
+  {
+    name: 'device',
+    url: () => (isRealMode() ? beWsUrl('/ws/merchant/orders') || getWsUrl() : getWsUrl()),
+    ws: null, retry: 0, timer: null, beat: null,
+  },
   {
     name: 'self-order',
-    url: () => getBaseUrl().replace(/^http/, 'ws') + '/wss-self-order',
+    url: () =>
+      isRealMode()
+        ? beWsUrl('/ws/merchant/customer-display') || getBaseUrl().replace(/^http/, 'ws') + '/wss-self-order'
+        : getBaseUrl().replace(/^http/, 'ws') + '/wss-self-order',
     ws: null, retry: 0, timer: null, beat: null,
   },
 ];
@@ -263,6 +296,9 @@ function backoff(retry: number): number {
 /** R48: jumlah percobaan ulang sebelum channel idle (hemat baterai). */
 const MAX_RETRY = 12;
 
+/** W-FULL §14b: stempel reconnect-pull terakhir (debounce 90 dtk, anti self-DoS). */
+let lastReconnectPullMs = 0;
+
 /** R48: true bila app foreground — tak ada gunanya dial saat background. */
 function appForeground(): boolean {
   try {
@@ -325,12 +361,23 @@ function openSocket(ch: Channel, url: string): void {
     const reconnected = ch.retry > 0;
     ch.retry = 0;
     emitRealtimeIdle();
-    if (reconnected) {
+    // W-FULL §14b: debounce reconnect-pull (min 90 dtk). Tanpa ini, WS yang
+    // flapping (mis. 101-lalu-tutup karena auth cookie tak terkirim dari
+    // browser) memicu pullMaster penuh tiap open → self-DoS rate-limit BE
+    // (300/mnt/IP) → push 429. Genuine drop tetap ke-pull maksimal 1x/90 dtk.
+    if (reconnected && Date.now() - lastReconnectPullMs < 90000) {
       try {
         noteReconnect();
       } catch {
         /* stempel best-effort */
       }
+    } else if (reconnected) {
+      try {
+        noteReconnect();
+      } catch {
+        /* stempel best-effort */
+      }
+      lastReconnectPullMs = Date.now();
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const m = require('./master') as typeof import('./master');
