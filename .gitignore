@@ -72,3 +72,9 @@ db-now.db
 
 .expo-web*.log
 .expo-web*.err
+
+# local stack env (internal/external split)
+.env.prod
+.env.dev
+.env.production
+.env.development
