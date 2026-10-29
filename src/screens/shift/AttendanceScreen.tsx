@@ -75,7 +75,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     setError('');
     if (k === 'C') setPin('');
     else if (k === '⌫') setPin(pin.slice(0, -1));
-    // E2E-HP (2026-10-26): pad menerima 4-6 digit (paritas changePin
+    // E2E-HP (2026-10-26) + hardening 2026-10-29: pad 6 digit (paritas changePin
     // maxLength 6 + verifyGrantPin sesi 6-digit). Cap 4 membuat PIN 6-digit
     // (mis. seed 246810) tak pernah bisa dimasukkan -> Wrong PIN selamanya.
     // Minimum tetap 4 (dijaga clockIn/clockOut via att_pin_short).
@@ -105,7 +105,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     // GAP-4: guard ganda ala changePin — ketuk ganda saat verifikasi async
     // berjalan ditolak (tombol juga disabled via busy).
     if (busy) return;
-    if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try {
+    if (pin.length < 6) { setError(t('att_pin_short')); return; } setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
     if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
@@ -116,7 +116,7 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   const clockOut = async () => {
     // GAP-4: guard ganda ala changePin (cermin clockIn di atas).
     if (busy) return;
-    if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
+    if (pin.length < 6) { setError(t('att_pin_need_out')); return; }
     setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
     const vOut = await verifyAttendancePin(pin);
@@ -130,8 +130,8 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
     const o = clean(oldPin);
     const n = clean(newPin);
     const c = clean(confirmPin);
-    if (o.length < 4) { setPinMsg(t('att_old_short')); return; }
-    if (n.length < 4) { setPinMsg(t('att_new_short')); return; }
+    if (o.length < 6) { setPinMsg(t('att_old_short')); return; }
+    if (n.length < 6) { setPinMsg(t('att_new_short')); return; }
     if (n !== c) { setPinMsg(t('att_confirm_mismatch')); return; }
     if (o === n) { setPinMsg(t('att_same_pin')); return; }
     // SIDE-B: busy dikunci selama submit (tombol Save disabled) + panggilan

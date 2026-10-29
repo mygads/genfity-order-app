@@ -1445,11 +1445,11 @@ const STR: Record<string, Entry> = {
   tmr_sub: { id: 'Batas waktu duduk + peringatan sebelum habis', en: 'Seating time limit + warning before expiry' },
 
   // ---- absensi form (AttendanceScreen: PIN clock-in/out + ganti PIN) ----
-  att_pin_short: { id: 'Masukkan PIN (min. 4 digit).', en: 'Enter the PIN (min. 4 digits).' },
+  att_pin_short: { id: 'Masukkan PIN (min. 6 digit).', en: 'Enter the PIN (min. 6 digits).' },
   att_pin_wrong: { id: 'PIN salah - coba lagi atau hubungi supervisor.', en: 'Wrong PIN - try again or contact a supervisor.' },
   att_pin_need_out: { id: 'Masukkan PIN untuk clock-out.', en: 'Enter the PIN to clock out.' },
-  att_old_short: { id: 'PIN lama minimal 4 digit.', en: 'Old PIN must be at least 4 digits.' },
-  att_new_short: { id: 'PIN baru minimal 4 digit.', en: 'New PIN must be at least 4 digits.' },
+  att_old_short: { id: 'PIN lama minimal 6 digit.', en: 'Old PIN must be at least 6 digits.' },
+  att_new_short: { id: 'PIN baru minimal 6 digit.', en: 'New PIN must be at least 6 digits.' },
   att_confirm_mismatch: { id: 'Konfirmasi PIN baru tidak sama.', en: 'New PIN confirmation does not match.' },
   att_same_pin: { id: 'PIN baru harus berbeda dari PIN lama.', en: 'New PIN must differ from the old PIN.' },
   att_old_wrong: { id: 'PIN lama salah.', en: 'Old PIN is wrong.' },
