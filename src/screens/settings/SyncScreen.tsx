@@ -146,7 +146,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           <Image source={require('../../../assets/images/no_connection.webp')} style={styles.alertImg} resizeMode="contain" />
           <View style={styles.alertLeft}>
             <Text style={[styles.alertTitle, isTablet && { fontSize: 16 }]}>
-              {level === 'block7' ? t('sync.blocked') : t('sync.warn')}
+              {`${level === 'block7' ? t('sync.blocked') : t('sync.warn')} · ${pendingCount()} antre`}
             </Text>
             <Text style={styles.alertCode}> {level === 'block7' ? t('sync_code_block') : t('sync_code_warn')} </Text><Text style={styles.alertSub}>
               {level === 'block7'

@@ -204,6 +204,7 @@ export const ApiPath = {
   // Opsi A penutup M9-3 (BE TerminalBranchMenuUpdate): dorong stok absolut
   // satu item dari kasir. '{id}' diganti caller (terminalIdBe numerik BE).
   pushBranchMenu: 'api/v1/terminals/{id}/branch-menu', // POST {type:'menu'|'addon',id,stockQty,lowStockThreshold?}
+  kitchenBump: 'api/v1/terminals/{id}/kitchen-bump', // POST {ticketId,status} P2 KDS lintas device
   // E29-E31: sesi terminal fase-1a (login staged 3 faktor + logout tetap bound).
   terminalPinVerify: 'api/v1/terminals/{id}/pin-verify', // E29 POST verifikasi PIN user {pin} → {verified} (USER_PIN_NOT_SET/INVALID/LOCKED)
   terminalRelease: 'api/v1/terminals/{id}/release', // E30 POST occupant lepas binding sendiri {deviceId} → {released}

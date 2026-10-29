@@ -33,7 +33,7 @@
  */
 import { getJSON, setJSON } from './storage';
 import { fetchTerminalPosConfig } from './terminalApi';
-import { parsePaymentMethods, PAYMENT_METHODS_DEFAULT, type PaymentMethods } from './paymentMethods';
+import { parsePaymentMethods, parsePaymentMethodsStrict, PAYMENT_METHODS_DEFAULT, type PaymentMethods } from './paymentMethods';
 
 const STOCK_OPTS_KEY = 'genfity.stock.opts';
 const TIMER_CFG_KEY = 'genfity.tabletimer.config';
@@ -239,7 +239,13 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     // R4-4: snapshot metode bayar — server-wins tiap sync sukses (tulis TANPA
     // SYARAT, bukan seed-once: nilai server selalu menimpa cache). BE lama
     // tanpa kunci → parse = semua-true = tampil semua (NOL-regresi).
-    await setJSON(PAYMENT_METHODS_KEY, parsePaymentMethods(r.data));
+    // P1-FIX: simpan RAW r.data (bukan hasil parse). parsePaymentMethods
+    // selalu mengisi 5 flag boolean sehingga sinyal "absen" hilang bila yang
+    // disimpan hasil parse — hasExplicitPaymentSnapshot lalu selalu true dan
+    // banner fail-closed + parsePaymentMethodsStrict tak pernah aktif.
+    // Kedua pembaca (getPaymentMethods legacy + strict) mem-parse sendiri,
+    // jadi menyimpan raw aman untuk keduanya.
+    await setJSON(PAYMENT_METHODS_KEY, r.data ?? {});
   } catch { /* abaikan */ }
   return true;
 }
@@ -519,6 +525,17 @@ export async function getRequirePaymentProof(): Promise<boolean> {
     return String(cur.required).trim().toLowerCase() === 'true';
   } catch {
     return false;
+  }
+}
+
+/** R4-4 strict: snapshot + flag eksplisit (untuk banner butuh-sync layar baru).
+ * Legacy getPaymentMethods tetap all-true agar BE lama tidak terkunci. */
+export async function getPaymentMethodsStrict(): Promise<{ methods: PaymentMethods; hasExplicitSnapshot: boolean }> {
+  try {
+    const cur = await getJSON<unknown>(PAYMENT_METHODS_KEY, null);
+    return parsePaymentMethodsStrict(cur);
+  } catch {
+    return { methods: { ...PAYMENT_METHODS_DEFAULT, qrisEnabled: false, gpayEnabled: false, payAtCashierEnabled: false, manualTransferEnabled: false, codEnabled: false }, hasExplicitSnapshot: false };
   }
 }
 

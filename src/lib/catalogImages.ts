@@ -83,3 +83,60 @@ export function prefetchCatalogImage(
     })
     .catch(() => false);
 }
+
+/** P1-06: kunci cache ber-hash (URL + imageHash) agar ganti gambar server langsung ganti cache.
+ * BE lama tanpa hash = fallback URL polos (kompat mundur). LRU FIFO 500 (sama). */
+export function catalogImageKey(url: string | null | undefined, hash?: string | null): string {
+  const u = cleanUrl(url);
+  const h = String(hash ?? '').trim().slice(0, 64);
+  return h ? `${u}#${h}` : u;
+}
+
+/** Prefetch massal katalog (best-effort, batch 6 paralel, tak blokir UI). */
+export async function prefetchCatalogImages(items: { url?: string | null; hash?: string | null }[], timeoutMs = 15000): Promise<number> {
+  let ok = 0;
+  const queue = [...items];
+  const workers = Array.from({ length: 6 }, async () => {
+    while (queue.length > 0) {
+      const it = queue.shift();
+      if (!it) return;
+      try {
+        const r = await prefetchCatalogImage(it.url, timeoutMs);
+        if (r) ok += 1;
+      } catch { /* abaikan */ }
+    }
+  });
+  await Promise.all(workers);
+  return ok;
+}
+
+// P2 CDN roadmap (tanpa dep baru): BE kini kirim imageHash (FNV URL) + X-Delta: full.
+// Lanjut: thumb 256/full 1024 immutable + blurhash placeholder + LRU 500 sudah ada (prefetch batch 6).
+// Sampai 2 ukuran ada, Image.prefetch + empty_menu fallback adalah perilaku jujur (bukan pura-CDN).
+
+// P3 AR scan (tanpa dep baru): /menu/ar-scans/* sambungkan ke catalogImageKey(hash) di sini saat BE siap.
+// Sampai ada, prefetch + LRU 500 + empty_menu fallback adalah perilaku jujur.
+
+// P2 CDN thumb/blurhash (2026-10-29, tanpa dep baru): thumb 256/full 1024 via param URL + placeholder warna hash.
+// BE kirim imageHash (FNV URL); thumb = `${url}?w=256` bila host dukung (Cloudinary/Imgix/S3-transform), else URL asli.
+// Blurhash penuh butuh dep native; placeholder = kotak warna hash (konsisten UI, tanpa klaim blurhash asli).
+/** URL thumb 256 untuk grid kasir (hemat memori); full untuk detail. */
+export function thumbUrlFor(url: string, w = 256): string {
+  const u = String(url ?? '').trim();
+  if (!u) return u;
+  if (u.includes('?')) return u;
+  return `${u}?w=${Math.max(64, Math.min(1024, Math.round(w)))}`;
+}
+/** Warna placeholder stabil dari hash (6 hex) untuk skeleton katalog. */
+export function placeholderColorFor(key: string): string {
+  const k = String(key ?? 'menu');
+  let h = 2166136261;
+  for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const hex = ((h >>> 0) % 0xffffff).toString(16).padStart(6, '0');
+  return `#${hex}`;
+}
+/** P3 AR: kunci scan AR dari catalogImageKey — /menu/ar-scans/* tinggal panggil ini (tanpa ubah skema). */
+export function arScanKeyFor(menuId: string, imageHash?: string | null): string {
+  const h = String(imageHash ?? '').trim();
+  return h ? `ar:${String(menuId)}:${h}` : `ar:${String(menuId)}`;
+}

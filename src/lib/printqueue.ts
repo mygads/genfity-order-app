@@ -30,6 +30,19 @@ import { fromBase64, toBase64 } from './escpos';
 import { printBytes, type PrinterTarget } from '../native/printer';
 import { uuidv7 } from './uuidv7';
 
+/** P1-08: dedupe jobId::leaseToken agar fanout + lokal tidak ganda. */
+const seenJobs = new Set<string>();
+export function isDuplicatePrintJob(jobId: string | number, leaseToken?: string | null): boolean {
+  const k = `${String(jobId)}::${String(leaseToken ?? '')}`;
+  if (seenJobs.has(k)) return true;
+  seenJobs.add(k);
+  if (seenJobs.size > 500) {
+    const oldest = seenJobs.values().next().value as string | undefined;
+    if (oldest) seenJobs.delete(oldest);
+  }
+  return false;
+}
+
 export type PrintQueueStatus = 'antre' | 'cetak' | 'gagal';
 
 /** Batas coba ulang sebelum baris ditandai 'gagal' (tetap dicoba di drain berikut). */

@@ -63,24 +63,24 @@ function run() {
   // 2a. Daftar tawar per tipe.
   ok(/RESTAURANT:\s*\['DINE IN',\s*'TAKE AWAY',\s*'GOFOOD',\s*'GRABFOOD',\s*'SHOPEEFOOD'\]/.test(modes),
     'C2: RESTAURANT = 5 label lama (tanpa perubahan perilaku)');
-  ok(/PRODUCT:\s*\['IN STORE ORDER',\s*'TAKE AWAY'\]/.test(modes),
-    'C2: PRODUCT = IN STORE ORDER + TAKE AWAY (kanal POS-create BE)');
-  ok(/SERVICE:\s*\['IN STORE SERVICE'\]/.test(modes),
-    'C2: SERVICE = IN STORE SERVICE saja (satu-satunya kanal POS SERVICE)');
+  ok(/PRODUCT:\s*\['IN STORE ORDER',\s*'IN STORE PICKUP',\s*'TAKE AWAY'\]/.test(modes),
+    'C2: PRODUCT = IN STORE ORDER + IN STORE PICKUP (BOPIS) + TAKE AWAY (kanal POS-create BE)');
+  ok(/SERVICE:\s*\['IN STORE SERVICE',\s*'HOME SERVICE'\]/.test(modes),
+    'C2: SERVICE = IN STORE SERVICE + HOME SERVICE (kanal POS SERVICE Fase 3)');
   // 2b. Layar tak hardcode MODES.
   ok(!/const MODES = \[/.test(cashier),
     'C2: CashierScreen NOL const MODES hardcoded (wajib posModesFor)');
   ok(!/const MODES = \[/.test(dinein),
     'C2: DineInScreen NOL const MODES hardcoded (wajib posModesFor)');
-  ok(/posModesFor\(getBinding\(\)\?\.merchantType\)/.test(cashier),
-    'C2: CashierScreen MODES dari posModesFor(binding merchantType)');
+  ok(/posModesFor\(getBinding\(\)\?\.merchantType\)/.test(cashier) || /posModesForVertical\(/.test(cashier),
+    'C2: CashierScreen MODES dari posModesFor(binding merchantType) atau posModesForVertical (Adaptive Vertical Shell: preset vertikal > tipe)');
   ok(/posModesFor\(getBinding\(\)\?\.merchantType\)/.test(dinein),
     'C2: DineInScreen MODES dari posModesFor(binding merchantType)');
   // 2c. Cabang collapse goPosOrderType.
-  ok(/k === 'IN_STORE_PICKUP'\) return 'IN_STORE_ORDER'/.test(sync),
-    'C2: IN_STORE_PICKUP → IN_STORE_ORDER (kanal POS terdekat)');
-  ok(/if \(mt === 'SERVICE'\) \{\s*\n\s*if \(k === 'IN_STORE_SERVICE'\) return 'IN_STORE_SERVICE';\s*\n\s*return UNSUPPORTED_ORDER_TYPE;/.test(sync),
-    'C2: SERVICE = HANYA IN_STORE_SERVICE; HOME_SERVICE→UNSUPPORTED (owner-need BE)');
+  ok(/if \(k === 'IN_STORE_PICKUP'\) return 'IN_STORE_PICKUP'/.test(sync),
+    'C2 Fase 3: IN_STORE_PICKUP → IN_STORE_PICKUP distinct (BOPIS, bukan alias)');
+  ok(/if \(k === 'HOME_SERVICE'\) return 'HOME_SERVICE'/.test(sync),
+    'C2 Fase 3: HOME_SERVICE via POS didukung (teknisi datang, alamat di deliveryAddress)');
   ok(/if \(k === 'TAKE_AWAY' \|\| k === 'TAKEAWAY'\) return 'TAKEAWAY';\s*\n\s*return UNSUPPORTED_ORDER_TYPE;/.test(sync),
     'C2: PRODUCT DELIVERY/agregator/DINE_IN→UNSUPPORTED (delivery ≠ takeaway)');
   ok(/GOFOOD\|GRABFOOD\|SHOPEEFOOD\|ONLINE/.test(sync) && /return 'TAKEAWAY'/.test(sync),

@@ -1,6 +1,7 @@
 /**
- * P1-1b: prompt PIN manajer transport-only (cermin FE DeletePinModal +
- * withPosPin). PIN 4–8 digit (kontrak BE merchant_workforce), dipegang di
+ * P1-1b: prompt PIN manajer transport-only (cermin FE ManagerPinModal +
+ * withPosPin). PIN 4–8 digit (kontrak BE manager PIN, Opsi A: slot delete_pin
+ * sunset — server hanya baca `pin`), dipegang di
  * state lokal saja: diserahkan ke onSubmit untuk SATU panggilan live, lalu
  * dibersihkan saat tutup — TAK PERNAH dipersist, di-log, atau diantrekan.
  */
@@ -47,7 +48,7 @@ export default function ManagerPinPrompt({ visible, busy, onSubmit, onCancel }: 
             keyboardType="numeric"
             maxLength={8}
             secureTextEntry
-            placeholder={t('xp_pin_ph')}
+            placeholder={t('mgr_pin_ph')}
             value={pin}
             onChangeText={(v) => setPin(v.replace(/[^0-9]/g, '').slice(0, 8))}
           />

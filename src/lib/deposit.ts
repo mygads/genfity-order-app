@@ -63,3 +63,14 @@ export async function postDepositOnce({
     return { posted: false };
   }
 }
+
+// P3 loyalty snapshot (2026-10-29): poin pra-settle vs pasca-settle agar replay tak ganda.
+// Pemanggil snapshot poin SEBELUM settle; pasca-settle cocokkan delta; mismatch = antre review (tanpa blokir kasir).
+/** Snapshot poin member pra-settle (best-effort, tak pernah melempar). */
+export function memberPointsSnapshot(member: { id: string; points?: number } | null): { memberId: string; pointsBefore: number; at: string } | null {
+  try {
+    if (!member || !member.id) return null;
+    const pts = Math.max(0, Math.round(Number(member.points) || 0));
+    return { memberId: String(member.id), pointsBefore: pts, at: new Date().toISOString() };
+  } catch { return null; }
+}

@@ -24,6 +24,13 @@ export interface EscReceipt {
   addr?: string;
   trx?: string;
   cashier?: string;
+  /** 1:1 BE: baris tipe order + meja ("Dine In - Table 5") setelah trx.
+   * Template-mode diisi pemanggil; legacy tak mengoper = tak dirender. */
+  typeLine?: string;
+  /** 1:1 BE: nama/telepon pelanggan sebagai baris tengah sendiri setelah
+   * deliveryAddr (BE: setelah blok antar). Legacy tak mengoper. */
+  customerName?: string;
+  customerPhone?: string;
   datetime?: string;
   /** Kode currency cabang ('IDR'/'AUD') — S4: struk ikut format cabang
    * (default = perilaku IDR lama bila absen). */
@@ -66,11 +73,20 @@ export interface EscReceipt {
    *  label / station tanpa autocut). Diisi pemanggil dari station.autocut ??
    *  setelan global autocut. */
   cut?: boolean;
-  /** APP-11: baris kontak header (telpon/email) dari template website
-   * (showPhone/showEmail). Absen = tak dirender (byte-identik legacy). */
+  /** Kontak header (telpon/email) dari template website (showPhone/showEmail).
+   * Dirender di HEADER center ala BE (bukan footer). Absen = disembunyikan
+   * (BE juga sembunyikan bila merchant tak punya nomor/email). */
   contact?: string;
-  /** APP-11: baris terima-kasih. undefined = 'Terima kasih' (legacy);
-   * string kosong = sembunyikan (template showThankYouMessage=false). */
+  /** Catatan pesanan level order (showOrderNotes). Absen/kosong = tak dirender. */
+  orderNote?: string;
+  /** Nama kasir versi footer ala BE (showCashierName). `cashier` tetap header
+   * (info meja/pelanggan); field ini footer. Absen = tak dirender. */
+  cashierFooter?: string;
+  /** Telpon footer ala website (showFooterPhone). Absen = tak dirender. */
+  footerPhone?: string;
+  /** APP-11: baris terima-kasih. undefined = 'Terima kasih' (legacy
+   * BE-lama tanpa template); string kosong = sembunyikan (template
+   * showThankYouMessage=false / default kanonik BE). */
   thanks?: string;
   /** APP-11: baris branding "Powered by Genfity" (template
    * showGenfityBranding). Absen = tak dirender (byte-identik legacy). */
@@ -86,6 +102,26 @@ export interface EscReceipt {
   /** Kembalian (Rp). */
   change?: number;
   footer?: string;
+  /** Bahasa label 1:1 BE receiptLabels. Absen = legacy Indonesia byte-identik.
+   * Pemanggil template SELALU mengoper (dari receiptLanguage). */
+  lang?: 'id' | 'en';
+  /** Alamat antar + instruksi (DELIVERY) 1:1 BE. Absen = tak dirender. */
+  deliveryAddr?: string;
+  /** Vertical Shell Fase 3: info jadwal/teknisi/DP jasa (1-2 baris pra-format,
+   * label sudah Indonesia). Absen = tak dirender (byte-identik legacy). */
+  serviceInfo?: string;
+  /** Label diskon sumber voucher 1:1 BE DiscountLabel ("Diskon (CODE)").
+   * Template-mode: pemanggil mengisi ini (bukan voucherCode) bila diskon>0. */
+  discountLabel?: string;
+  /** Baris info pra-format caller (label i18n sudah termasuk di string):
+   * approval EDC, member, split. Absen = tak dirender. */
+  approval?: string;
+  member?: string;
+  splitText?: string;
+  /** Blok void (superset POS lokal): judul + rincian + alasan. */
+  voidTitle?: string;
+  voidLines?: { name: string; qty: number; price: number }[];
+  voidReason?: string;
 }
 
 const ESC = 0x1b;
@@ -117,6 +153,8 @@ function ascii(s: string): number[] {
     '‹': '<',
     '✓': 'v',
     '✕': 'x',
+    '★': '*',
+    '☆': '*',
   };
   return [...s.normalize('NFKD').replace(/[̀-ͯ]/g, '')].map((c) => {
     const code = c.codePointAt(0) ?? 63;
@@ -244,10 +282,55 @@ export function buildQrBytes(data: string): Uint8Array {
   return Uint8Array.from(out);
 }
 
-/** Susun byte ESC/POS lengkap (termasuk inisialisasi + potong kertas). */
+/** Pecah teks panjang per kolom thermal (wrap sederhana + paragraf \n).
+ * 1:1 BE SplitText: nama panjang dibungkus (bukan dipotong) untuk footer,
+ * kontak, dan catatan. Baris item tetap row2 potong (kolom angka). */
+function wrapCols(s: string, cols: number): string[] {
+  const out: string[] = [];
+  for (const para of String(s ?? '').split('\n')) {
+    const words = para.split(' ').filter((w) => w.length > 0);
+    if (words.length === 0) {
+      if (para.length === 0) continue;
+      // Paragraf tanpa spasi: potong per cols.
+      for (let i = 0; i < para.length; i += cols) out.push(para.slice(i, i + cols));
+      continue;
+    }
+    let line = '';
+    for (const w of words) {
+      if (w.length > cols) {
+        if (line) { out.push(line); line = ''; }
+        for (let i = 0; i < w.length; i += cols) out.push(w.slice(i, i + cols));
+        continue;
+      }
+      const cand = line ? `${line} ${w}` : w;
+      if (cand.length > cols) { out.push(line); line = w; }
+      else line = cand;
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+/** Susun byte ESC/POS lengkap (termasuk inisialisasi + potong kertas).
+ *
+ * 1:1 BE (PDF/HTML/bridge buildBridgeReceiptLines):
+ * - Urutan: Subtotal → Tax → Service → (Tip/PlatformFee superset) →
+ *   Kemasan → Ongkir → Potongan-Ongkir → Diskon(+label) → Rounding → TOTAL →
+ *   Payment/AmountPaid/Change → info (approval/member/split/void) →
+ *   divider footer → kasir/thanks/custom/QR(+label)/brand.
+ * - `lang` terisi (template-mode): label bilingual receiptLabels,
+ *   qty "N x Nama", "@ Rp each/per item", split Payment/AmountPaid,
+ *   prefix "Kasir:/Cashier:", label QR Track/Scan, divider header ganda,
+ *   wrap nama panjang ala SplitText.
+ * - `lang` absen (legacy): byte-identik perilaku lama (label Indonesia,
+ *   "Nx", merge Bayar, tanpa label QR).
+ */
 export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   const cols = r.cols === 48 ? ESC_COLS_WIDE : ESC_COLS;
   const out: number[] = [];
+  const tpl = r.lang === 'id' || r.lang === 'en';
+  const L = (id: string, en: string, legacy: string): string =>
+    r.lang === 'en' ? en : r.lang === 'id' ? id : legacy;
   push(out, ESC, 0x40); // init
   if (r.logo) {
     // Logo header monokrom di paling atas (builder sudah rata tengah).
@@ -260,63 +343,187 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.shop) text(out, r.shop);
   push(out, GS, 0x21, 0x00); // ukuran normal
   if (r.addr) text(out, r.addr);
+  // 1:1 BE: kontak header (telpon/email) center setelah alamat, sebelum trx.
+  if (r.contact) {
+    for (const line of wrapCols(r.contact, cols)) text(out, line);
+  }
+  // 1:1 BE: divider header antara blok merchant dan blok order. Legacy satu
+  // divider sebelum item (kondisi di bawah dipertahankan).
+  if (
+    tpl &&
+    (r.shop || r.addr || r.contact) &&
+    (r.trx || r.typeLine || r.cashier || r.datetime || r.deliveryAddr || r.customerName || r.customerPhone || r.unpaid)
+  ) {
+    text(out, '-'.repeat(cols));
+  }
   if (r.trx) text(out, r.trx);
+  // 1:1 BE: tipe+meja setelah nomor order; pelanggan setelah blok antar.
+  // Legacy hanya memakai cashier (zona digabung) — urutan legacy tak berubah.
+  if (r.typeLine) text(out, r.typeLine);
   if (r.cashier) text(out, r.cashier);
   if (r.datetime) text(out, r.datetime);
-  if (r.unpaid) text(out, '** BELUM BAYAR **');
+  // 1:1 BE: blok alamat antar DELIVERY setelah datetime, sebelum divider item.
+  if (r.deliveryAddr) {
+    for (const line of wrapCols(r.deliveryAddr, cols)) text(out, line);
+  }
+  for (const line of wrapCols(r.customerName ?? '', cols)) text(out, line);
+  for (const line of wrapCols(r.customerPhone ?? '', cols)) text(out, line);
+  if (r.serviceInfo) {
+    for (const line of wrapCols(r.serviceInfo, cols)) text(out, line);
+  }
+  if (r.unpaid) text(out, r.lang === 'en' ? '** UNPAID **' : '** BELUM BAYAR **');
   push(out, ESC, 0x61, 0); // rata kiri
   text(out, '-'.repeat(cols));
   // S4: semua nominal struk lewat escMoney(currency cabang) — escRp mentah
   // IDR-only dilarang di badan struk (residu PW-4).
   const money = (n: number): string => escMoney(n, r.currency);
+  // Baris item: template-mode wrap nama panjang ala BE SplitText (harga di
+  // kanan baris terakhir); legacy potong ala row2 byte-identik.
+  const itemRow = (left: string, right: string) => {
+    if (!tpl) {
+      row2(out, left, right, cols);
+      return;
+    }
+    if (!right) {
+      for (const line of wrapCols(left, cols)) text(out, line);
+      return;
+    }
+    const lines = wrapCols(left, cols);
+    if (lines.length === 0) {
+      row2(out, left, right, cols);
+      return;
+    }
+    for (let idx = 0; idx < lines.length - 1; idx++) text(out, lines[idx] as string);
+    const last = (lines[lines.length - 1] ?? '') as string;
+    if (last.length + 1 + right.length <= cols) {
+      row2(out, last, right, cols);
+    } else {
+      if (last) text(out, last);
+      text(out, `${' '.repeat(Math.max(0, cols - right.length))}${right}`);
+    }
+  };
+  // 1:1 BE: "2 x Mie" (spasi). Legacy "2x" byte-identik.
+  const qtyName = (qty: number, name: string): string =>
+    tpl ? `${qty} x ${name}` : `${qty}x ${name}`;
+  const eachSuffix = r.lang === 'en' ? 'each' : r.lang === 'id' ? 'per item' : '';
   for (const i of r.items) {
-    row2(out, `${i.qty}x ${i.name}`, money(i.qty * i.price), cols);
-    if (typeof i.unitPrice === 'number') text(out, `  @ ${money(i.unitPrice)}`);
+    itemRow(qtyName(i.qty, i.name), money(i.qty * i.price));
+    // 1:1 BE: "@ Rp 25.000 each/per item" (Unit = harga satuan terformat).
+    if (typeof i.unitPrice === 'number') {
+      text(out, `  @ ${money(i.unitPrice)}${eachSuffix ? ` ${eachSuffix}` : ''}`);
+    }
     if (i.note) text(out, `  * ${i.note}`);
     for (const a of i.addons ?? []) {
       // Harga addon: kanan bila >0 (cermin kertas `+ nama Rp`), nama saja
       // bila 0 (showAddonPrices mati di pemanggil).
-      if (a.price > 0) row2(out, `  + ${a.name}`, money(a.price * i.qty), cols);
-      else text(out, `  + ${a.name}`);
+      if (a.price > 0) itemRow(`  + ${a.name}`, money(a.price * i.qty));
+      else if (tpl) {
+        for (const line of wrapCols(`  + ${a.name}`, cols)) text(out, line);
+      } else text(out, `  + ${a.name}`);
     }
   }
   text(out, '-'.repeat(cols));
-  // Urutan ala POSLite = rumus kanonik totals.ts: subtotal(net) → service
-  // eksklusif → tip (terusan) → PPN info-only → feeESB → voucher → ongkir → rounding → total.
+  // Urutan kanonik 1:1 BE (PDF/HTML/bridge buildBridgeReceiptLines):
+  // Subtotal → Tax → Service → Packaging → Delivery → Discount → TOTAL →
+  // Payment/Paid/Change. Superset POS/FE (tip/feeESB/voucher/ongkirCut/
+  // rounding/unpaid) disisip tanpa mengubah urutan relatif baris BE:
+  // Subtotal → Tax → Service → Tip → PlatformFee → Kemasan → (Voucher info
+  // legacy) → Ongkir → Potongan-Ongkir → Diskon(+label) → Rounding → TOTAL.
+  // Catatan order setelah divider item ala BE (sebelum payment).
+  if (r.orderNote) {
+    for (const line of wrapCols(`${L('Catatan pesanan: ', 'Order note: ', 'Catatan: ')}${r.orderNote}`, cols)) text(out, line);
+    text(out, '-'.repeat(cols));
+  }
   // APP-11: hideSubtotal/hideTotal = toggle website; legacy tak mengoper.
+  // 1:1 BE: Diskon selalu setelah Delivery (bukan kedua) agar struk kasir
+  // berurut sama dengan PDF/bridge; Tax tepat setelah Subtotal.
   if (!r.hideSubtotal) row2(out, 'Subtotal', money(r.subtotal), cols);
-  if (r.discount) row2(out, 'Diskon', `-${money(r.discount)}`, cols);
-  if (r.service) row2(out, r.serviceLabel ?? 'Service 5%', money(r.service), cols);
+  if (r.tax) row2(out, L('Pajak', 'Tax', 'PPN (Inkl.)'), money(r.tax), cols);
+  if (r.service) row2(out, r.serviceLabel ?? L('Biaya Layanan', 'Service Charge', 'Service 5%'), money(r.service), cols);
   if (r.tip) row2(out, 'Tip', `+${money(r.tip)}`, cols);
-  if (r.tax) row2(out, 'PPN (Inkl.)', money(r.tax), cols);
-  if (r.feeESB) row2(out, 'Fee Layanan', money(r.feeESB), cols);
-  if (r.packaging) row2(out, 'Kemasan', money(r.packaging), cols);
-  if (r.voucherCode || r.voucherAmount) {
+  if (r.feeESB) row2(out, L('Fee Layanan', 'Platform Fee', 'Fee Layanan'), money(r.feeESB), cols);
+  if (r.packaging) row2(out, L('Biaya Kemasan', 'Packaging Fee', 'Kemasan'), money(r.packaging), cols);
+  // 1:1 BE: voucher adalah DiscountLabel ("Diskon (CODE)"), bukan baris
+  // ganda. Template-mode + diskon>0: kode ikut label diskon (pemanggil
+  // mengisi discountLabel, tak mengoper voucherCode). Baris Voucher terpisah
+  // hanya legacy / nominal tanpa diskon.
+  if ((r.voucherCode || r.voucherAmount) && !r.discountLabel) {
     row2(out, `Voucher ${r.voucherCode ?? ''}`.trimEnd(), r.voucherAmount ? `-${money(r.voucherAmount)}` : '-', cols);
   }
-  if (r.ongkir) row2(out, 'Ongkir', money(r.ongkir), cols);
-  if (r.ongkirCut) row2(out, 'Potongan Ongkir', `-${money(r.ongkirCut)}`, cols);
-  if (r.rounding) row2(out, 'Pembulatan', money(r.rounding), cols);
+  if (r.ongkir) row2(out, L('Biaya Pengantaran', 'Delivery Fee', 'Ongkir'), money(r.ongkir), cols);
+  if (r.ongkirCut) row2(out, L('Potongan Ongkir', 'Delivery Discount', 'Potongan Ongkir'), `-${money(r.ongkirCut)}`, cols);
+  if (r.discount) {
+    const base = L('Diskon', 'Discount', 'Diskon');
+    row2(out, r.discountLabel ? `${base} (${r.discountLabel})` : base, `-${money(r.discount)}`, cols);
+  }
+  if (r.rounding) row2(out, L('Pembulatan', 'Rounding', 'Pembulatan'), money(r.rounding), cols);
+  // 1:1 BE bridge (buildBridgeReceiptLines): divider sebelum TOTAL bila TOTAL
+  // tampil. Hanya mode template; legacy byte-identik tanpa divider.
+  if (tpl && !r.hideTotal) text(out, '-'.repeat(cols));
   if (!r.hideTotal) {
     push(out, ESC, 0x45, 1); // tebal
     row2(out, 'TOTAL', money(r.total), cols);
     push(out, ESC, 0x45, 0);
   }
-  if (r.method) row2(out, 'Bayar', r.paid ? `${r.method} ${money(r.paid)}` : r.method, cols);
-  if (r.change) row2(out, 'Kembali', money(r.change), cols);
-  if (r.qr) {
-    // QR di bawah rincian bayar, sebelum footer (ala POSLite).
-    for (const b of buildQrBytes(r.qr)) out.push(b);
+  // 1:1 BE: Payment dan AmountPaid baris terpisah. Legacy gabung byte-identik.
+  if (tpl) {
+    if (r.method) row2(out, L('Pembayaran', 'Payment', 'Bayar'), r.method, cols);
+    if (r.paid) row2(out, L('Jumlah Dibayar', 'Amount Paid', 'Bayar'), money(r.paid), cols);
+  } else if (r.method) {
+    row2(out, 'Bayar', r.paid ? `${r.method} ${money(r.paid)}` : r.method, cols);
   }
+  if (r.change) row2(out, L('Kembalian', 'Change', 'Kembali'), money(r.change), cols);
+  // Superset POS lokal (jejak audit rantai bayar): approval/member/split/
+  // void. Pra-format caller; kiri rata. Absen = tak dirender.
+  if (r.approval) {
+    for (const line of wrapCols(r.approval, cols)) text(out, line);
+  }
+  if (r.member) {
+    for (const line of wrapCols(r.member, cols)) text(out, line);
+  }
+  if (r.splitText) {
+    for (const line of wrapCols(r.splitText, cols)) text(out, line);
+  }
+  if (r.voidTitle || (r.voidLines && r.voidLines.length > 0) || r.voidReason) {
+    if (r.voidTitle) text(out, r.voidTitle);
+    for (const l of r.voidLines ?? []) {
+      itemRow(qtyName(l.qty, l.name), `-${money(l.qty * l.price)}`);
+    }
+    if (r.voidReason) {
+      for (const line of wrapCols(r.voidReason, cols)) text(out, line);
+    }
+  }
+  // 1:1 BE: divider footer sebelum blok footer (kasir/thanks/custom/QR/brand).
+  const hasFooter = Boolean(r.cashierFooter || r.thanks !== '' || r.footer || r.footerPhone || r.qr || r.branding);
+  if (hasFooter) text(out, '-'.repeat(cols));
   push(out, ESC, 0x61, 1);
-  // APP-11: kontak header + thanks/branding dari template; default
-  // thanks = 'Terima kasih' menjaga byte-identik legacy bila pemanggil
-  // tak mengoper thanks (test-print station, arsip lama).
-  if (r.contact) text(out, r.contact);
+  // APP-11: thanks/branding dari template; default 'Terima kasih' menjaga
+  // byte-identik legacy bila pemanggil tak mengoper thanks (arsip lama).
+  // Mode template SELALU mengoper thanks eksplisit ('' bila toggle mati).
+  // 1:1 BE: footer kasir berlabel ("Kasir: nama").
+  if (r.cashierFooter) {
+    const labeled = tpl ? `${L('Kasir', 'Cashier', '')}${L(': ', ': ', '')}${r.cashierFooter}` : r.cashierFooter;
+    for (const line of wrapCols(labeled, cols)) text(out, line);
+  }
   const thanks = r.thanks === undefined ? 'Terima kasih' : r.thanks;
-  if (thanks) text(out, thanks);
-  if (r.footer) text(out, r.footer);
-  if (r.branding) text(out, r.branding);
+  if (thanks) {
+    for (const line of wrapCols(thanks, cols)) text(out, line);
+  }
+  if (r.footer) {
+    for (const line of wrapCols(r.footer, cols)) text(out, line);
+  }
+  if (r.footerPhone) {
+    for (const line of wrapCols(r.footerPhone, cols)) text(out, line);
+  }
+  if (r.qr) {
+    // 1:1 BE: label Track order + QR tracking + Scan to track, sebelum brand.
+    if (tpl) text(out, L('Lacak pesanan', 'Track order', ''));
+    for (const b of buildQrBytes(r.qr)) out.push(b);
+    if (tpl) text(out, L('Scan untuk lacak pesanan', 'Scan to track your order', ''));
+  }
+  if (r.branding) {
+    for (const line of wrapCols(r.branding, cols)) text(out, line);
+  }
   push(out, LF, LF, LF, LF);
   if (r.cut !== false) push(out, GS, 0x56, 0x00); // potong kertas
   return Uint8Array.from(out);
@@ -334,9 +541,22 @@ export interface EscKitchenTicket {
   time?: string;
   cashier?: string;
   items: { name: string; qty: number; note?: string }[];
+  /** 1:1 template dapur (KITCHEN_TICKET). Absen = tampil (legacy). */
+  showTable?: boolean;
+  showMode?: boolean;
+  showTime?: boolean;
+  showCashierName?: boolean;
+  showItemNotes?: boolean;
+  /** Catatan order (showOrderNotes). Absen/kosong = tak dirender. */
+  orderNote?: string;
+  /** Bahasa label 1:1 BE. Absen = legacy Indonesia byte-identik. */
+  lang?: 'id' | 'en';
 }
 
-/** Tiket dapur/checker: tanpa harga (opsional total estimasi), tanpa potong? tetap potong. */
+/** Tiket dapur/checker: tanpa harga (slip kerja), tetap potong. 1:1
+ * template KITCHEN_TICKET: showTable/showMode/showTime/showCashierName/
+ * showItemNotes/showOrderNotes digerbang pemanggil (print.ts) dari
+ * KitchenTemplateJSON; legacy tak mengoper = semua tampil. */
 export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
   const cols = t.cols === 48 ? ESC_COLS_WIDE : ESC_COLS;
   const out: number[] = [];
@@ -348,17 +568,26 @@ export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
   push(out, ESC, 0x45, 1);
   text(out, t.no);
   push(out, ESC, 0x45, 0);
-  if (t.table) text(out, `Meja: ${t.table}`);
-  if (t.mode) text(out, t.mode);
-  if (t.time) text(out, t.time);
-  if (t.cashier) text(out, t.cashier);
+  if (t.table && t.showTable !== false) text(out, `Meja: ${t.table}`);
+  if (t.mode && t.showMode !== false) text(out, t.mode);
+  if (t.time && t.showTime !== false) text(out, t.time);
+  if (t.cashier && t.showCashierName !== false) text(out, t.cashier);
   push(out, ESC, 0x61, 0);
   text(out, '-'.repeat(cols));
+  const tpl = t.lang === 'id' || t.lang === 'en';
   for (const i of t.items) {
     push(out, ESC, 0x45, 1);
-    text(out, `${i.qty}x ${i.name}`);
+    // 1:1 BE "N x Nama" (template-mode); legacy "Nx" byte-identik.
+    for (const line of wrapCols(tpl ? `${i.qty} x ${i.name}` : `${i.qty}x ${i.name}`, cols)) text(out, line);
     push(out, ESC, 0x45, 0);
-    if (i.note) text(out, `  * ${i.note}`);
+    if (i.note && t.showItemNotes !== false) {
+      for (const line of wrapCols(`  * ${i.note}`, cols)) text(out, line);
+    }
+  }
+  if (t.orderNote) {
+    text(out, '-'.repeat(cols));
+    const prefix = t.lang === 'en' ? 'Order note: ' : t.lang === 'id' ? 'Catatan pesanan: ' : 'Catatan: ';
+    for (const line of wrapCols(`${prefix}${t.orderNote}`, cols)) text(out, line);
   }
   text(out, '-'.repeat(cols));
   push(out, LF, LF, LF, LF);

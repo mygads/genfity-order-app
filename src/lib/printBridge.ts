@@ -254,7 +254,39 @@ export async function fanoutReceiptAuto(input: {
   }
 }
 
-/** Klaim satu job FIFO untuk terminal ini. */
+/**
+ * Dedupe cetak-otomatis pasca-bayar (jendela 120 detik, memori sesi).
+ * Skenario: Bayar -> Success -> Receipt(autoPrint) vs buka-ulang Receipt
+ * (autoPrint) / ketuk Cetak ganda = SATU sale, SATU cetakan.
+ * - Kunci = clientId rantai bayar (stabil per sale), fallback salesNum.
+ * - Hanya untuk jalur OTOMATIS; cetak manual (tombol) selalu lolos.
+ * - Tanpa kunci (legacy) = lolos agar perilaku lama tak berubah.
+ * - In-memory + batas 500 entri (prune kedaluwarsa); lintas-restart
+ *   ditutup penanda printedCount DB di ReceiptScreen (R26).
+ */
+const terminalAutoPrintClaims = new Map<string, number>();
+export const TERMINAL_AUTO_PRINT_DEDUPE_MS = 120000;
+export function claimTerminalAutoPrint(key: unknown, windowMs: number = TERMINAL_AUTO_PRINT_DEDUPE_MS): boolean {
+  const k = String(key ?? '').trim().slice(0, 120);
+  if (!k) return true;
+  const now = Date.now();
+  const last = terminalAutoPrintClaims.get(k) ?? 0;
+  if (now - last < windowMs) return false;
+  terminalAutoPrintClaims.set(k, now);
+  if (terminalAutoPrintClaims.size > 500) {
+    for (const [kk, ts] of terminalAutoPrintClaims) {
+      if (now - ts >= windowMs) terminalAutoPrintClaims.delete(kk);
+      if (terminalAutoPrintClaims.size <= 400) break;
+    }
+  }
+  return true;
+}
+/** Hanya untuk uji — produksi tak memanggil. */
+export function __resetTerminalAutoPrintClaimsForTests(): void {
+  terminalAutoPrintClaims.clear();
+}
+
+//** Klaim satu job FIFO untuk terminal ini. */
 export function isAutoPrintJob(job: ServerPrintJob): boolean {
   if (!job) return false;
   // KONTRAK FINAL: source='AUTO' (payload_base64='' + metadata.orderId).
@@ -308,12 +340,26 @@ async function printDetailKitchenTicket(
   detail: ServerOrderDetail,
   orderId: string,
 ): Promise<AutoPrintOutcome> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const tplLib = require('./receiptTemplate') as typeof import('./receiptTemplate');
+  let kTpl = tplLib.KITCHEN_TEMPLATE_DEFAULTS;
+  try {
+    const raw = await tplLib.getKitchenTemplateToggles();
+    kTpl = tplLib.getEffectiveTogglesForMode(raw, String(detail.orderType ?? ''));
+  } catch { /* default dapur aman */ }
   const ticket: EscKitchenTicket = {
     station: 'dapur',
     no: String(detail.orderNumber || detail.id || orderId),
     ...(detail.tableNumber ? { table: detail.tableNumber } : {}),
     ...(detail.orderType ? { mode: detail.orderType } : {}),
     ...((detail.paidAt || detail.createdAt) ? { time: detail.paidAt || detail.createdAt } : {}),
+    ...(detail.cashierName ? { cashier: String(detail.cashierName) } : {}),
+    ...(kTpl.showTableNumber === false ? { showTable: false } : {}),
+    ...(kTpl.showOrderType === false ? { showMode: false } : {}),
+    ...(kTpl.showDateTime === false ? { showTime: false } : {}),
+    ...(kTpl.showCashierName === false ? { showCashierName: false } : {}),
+    ...(kTpl.showItemNotes === false ? { showItemNotes: false } : {}),
+    ...(kTpl.showOrderNotes && (detail as unknown as { orderNote?: string }).orderNote ? { orderNote: String((detail as unknown as { orderNote?: string }).orderNote) } : {}),
     items: detail.items.map((it) => {
       const addonPart = it.addons.length > 0 ? `+ ${it.addons.map((a) => a.name).join(', + ')}` : '';
       const noteParts = [String(it.note ?? '').trim(), addonPart].filter((s) => s);
@@ -355,7 +401,8 @@ async function printDetailReceipt(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const totalsLib = require('./totals') as typeof import('./totals');
   const tplOn = await tplLib.hasReceiptTemplate();
-  const tpl = await tplLib.getReceiptTemplateToggles();
+  const tplRaw = await tplLib.getReceiptTemplateToggles();
+  const tpl = tplLib.getEffectiveTogglesForMode(tplRaw, String(detail.orderType ?? ''));
   const tp = tplOn ? tpl : null;
   const lang = getLang();
   const tplLang = (tpl.receiptLanguage ?? lang) as 'id' | 'en';
@@ -366,37 +413,65 @@ async function printDetailReceipt(
     /* label service legacy */
   }
   const svcLabel = totalsLib.serviceLabel((k: string) => tOf(k, lang), svcCfg);
+  // Identitas merchant cache (server-wins) untuk header 1:1 BE.
+  let mInfo = { name: '', address: '', phone: '', email: '', logoUrl: '', merchantCode: '', merchantType: '' };
+  try {
+    mInfo = await tplLib.getCachedMerchantInfo();
+  } catch {
+    /* fallback terminal */
+  }
+  const mContact = tplOn
+    ? [tpl.showPhone ? (mInfo.phone ?? '').trim() : '', tpl.showEmail ? (mInfo.email ?? '').trim() : '']
+      .map((s) => s.trim()).filter((s) => s).join(' · ')
+    : '';
   let shopName = 'Genfity';
   try {
-    shopName = String(getTerminal()?.branchName ?? '').trim() || 'Genfity';
+    shopName = (mInfo.name ?? '').trim() || String(getTerminal()?.branchName ?? '').trim() || 'Genfity';
   } catch {
     /* default */
   }
   const no = String(detail.orderNumber || detail.id || orderId);
   const orderType = String(detail.orderType ?? '');
-  const cashierLineTpl = [
-    tp && tp.showCashierName ? detail.cashierName : '',
-    tp && !tp.showTableNumber ? '' : detail.tableNumber,
-    tp && !(tp.showCustomerName || tp.showCustomerPhone) ? '' : detail.customerName,
-  ].map((s) => String(s ?? '').trim()).filter((s) => s).join(' · ');
+  const cashierFooterTpl = tp && tp.showCashierName ? String(detail.cashierName ?? '').trim() : '';
   const cashierLineLegacy = [detail.cashierName, detail.tableNumber, detail.customerName]
     .map((s) => String(s ?? '').trim()).filter((s) => s).join(' · ');
   const method = String(detail.paymentMethod ?? '');
   const isCash = /cash|tunai/i.test(method);
+  // Logo thermal mono (pull-time cache; print-time baca — offline tetap jalan).
+  let tplLogo: EscReceipt['logo'];
+  try {
+    tplLogo = await tplLib.getEffectiveReceiptLogo(tp?.showLogo);
+  } catch {
+    tplLogo = undefined;
+  }
   const receipt: EscReceipt = {
+    ...(tplLogo ? { logo: tplLogo } : {}),
     shop: (!tp || tp.showMerchantName) ? shopName.toUpperCase() : '',
+    ...((!tp || tp.showAddress) && (mInfo.address ?? '').trim() ? { addr: (mInfo.address ?? '').trim() } : {}),
+    ...(mContact ? { contact: mContact } : {}),
+    ...(tplOn ? { lang: tplLang } : {}),
     trx: tplOn
-      ? [tpl.showOrderNumber ? `No: ${no}` : '', tpl.showOrderType ? orderType : '']
-        .map((s) => s.trim()).filter((s) => s).join(' - ')
+      ? [tpl.showOrderNumber ? tplLib.receiptOrderNumberLabel(no, tplLang, (mInfo as unknown as { merchantCode?: string }).merchantCode || undefined) : '']
+        .map((s) => s.trim()).filter((s) => s).join('')
       : `No: ${no}${orderType ? ` - ${orderType}` : ''}`,
-    ...((tplOn ? cashierLineTpl : cashierLineLegacy) ? { cashier: tplOn ? cashierLineTpl : cashierLineLegacy } : {}),
+    ...(tplOn
+      ? (tplLib.buildReceiptOrderTypeLine(orderType, detail.tableNumber, tpl, tplLang, (mInfo as unknown as { merchantType?: string }).merchantType || undefined)
+        ? { typeLine: tplLib.buildReceiptOrderTypeLine(orderType, detail.tableNumber, tpl, tplLang, (mInfo as unknown as { merchantType?: string }).merchantType || undefined) }
+        : {})
+      : ((cashierLineLegacy) ? { cashier: cashierLineLegacy } : {})),
     ...(((!tp || tp.showDateTime) && (detail.paidAt || detail.createdAt))
       ? { datetime: String(detail.paidAt || detail.createdAt) } : {}),
+    ...((!tp || tp.showOrderType) && detail.deliveryAddr ? { deliveryAddr: detail.deliveryAddr } : {}),
+    ...((detail as unknown as { serviceInfo?: string }).serviceInfo ? { serviceInfo: (detail as unknown as { serviceInfo?: string }).serviceInfo } : {}),
+    ...(tplOn && (tp?.showCustomerName ? String(detail.customerName ?? '').trim() : '') ? { customerName: String(detail.customerName ?? '').trim() } : {}),
+    ...(tplOn && (tp?.showCustomerPhone ? String(detail.customerPhone ?? '').trim() : '') ? { customerPhone: String(detail.customerPhone ?? '').trim() } : {}),
+    ...((tplOn && tp?.showOrderNotes && detail.orderNote) ? { orderNote: detail.orderNote } : {}),
     currency: getCachedCurrency().code,
     items: detail.items.map((it) => ({
       name: String(it.name || '-'),
       qty: Math.max(1, Math.round(it.qty) || 1),
       price: Math.max(0, Math.round(it.price) || 0),
+      ...((!tp || tp.showUnitPrice) ? { unitPrice: Math.max(0, Math.round(it.price) || 0) } : {}),
       ...(tp?.showItemNotes && it.note ? { note: String(it.note) } : {}),
       ...(tp?.showAddons
         ? { addons: it.addons.map((a) => ({ name: a.name, price: tp?.showAddonPrices ? Math.max(0, Math.round(a.price) || 0) : 0 })) }
@@ -407,14 +482,14 @@ async function printDetailReceipt(
     ...((detail.discount > 0 && (!tp || tp.showDiscount))
       ? { discount: Math.max(0, Math.round(detail.discount)) } : {}),
     ...((detail.service > 0 && (!tp || tp.showServiceCharge))
-      ? { service: Math.max(0, Math.round(detail.service)), ...(svcLabel ? { serviceLabel: svcLabel } : {}) }
+      ? { service: Math.max(0, Math.round(detail.service)), serviceLabel: tplOn ? (tplLang === 'id' ? 'Biaya Layanan' : 'Service Charge') : svcLabel }
       : {}),
     ...((detail.tip > 0) ? { tip: Math.max(0, Math.round(detail.tip)) } : {}),
     ...((detail.tax > 0 && (!tp || tp.showTax))
       ? { tax: Math.max(0, Math.round(detail.tax)) } : {}),
     ...((detail.packaging > 0 && (!tp || tp.showPackagingFee))
       ? { packaging: Math.max(0, Math.round(detail.packaging)) } : {}),
-    ...(detail.voucherCode ? { voucherCode: detail.voucherCode } : {}),
+    ...(tplOn && detail.voucherCode && detail.discount > 0 ? { discountLabel: detail.voucherCode } : detail.voucherCode ? { voucherCode: detail.voucherCode } : {}),
     ...((detail.delivery > 0 && (!tp || tp.showDeliveryFee))
       ? { ongkir: Math.max(0, Math.round(detail.delivery)) } : {}),
     total: Math.max(0, Math.round(detail.total) || 0),
@@ -424,6 +499,7 @@ async function printDetailReceipt(
       ? { paid: Math.max(0, Math.round(detail.amountPaid)) } : {}),
     ...((isCash && detail.changeAmount > 0 && (!tp || tp.showChange))
       ? { change: Math.max(0, Math.round(detail.changeAmount)) } : {}),
+    ...(cashierFooterTpl ? { cashierFooter: cashierFooterTpl } : {}),
     ...(tplOn
       ? {
         thanks: tpl.showThankYouMessage
@@ -432,6 +508,7 @@ async function printDetailReceipt(
       }
       : { thanks: tOf('rc_thanks', lang) }),
     ...(tplOn && tpl.showCustomFooterText && tpl.customFooterText ? { footer: tpl.customFooterText } : {}),
+    ...(tplOn && tpl.showFooterPhone && (mInfo.phone ?? '').trim() ? { footerPhone: (mInfo.phone ?? '').trim() } : {}),
     ...(tplOn && tpl.showGenfityBranding
       ? { branding: tplLang === 'en' ? 'Powered by Genfity' : 'Diberdayakan oleh Genfity' }
       : {}),
@@ -524,7 +601,8 @@ export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrint
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getTerminal } = require('../config/server') as typeof import('../config/server');
     const tplOn = await tplLib.hasReceiptTemplate();
-    const tpl = await tplLib.getReceiptTemplateToggles();
+    const tplRaw = await tplLib.getReceiptTemplateToggles();
+    const tpl = tplLib.getEffectiveTogglesForMode(tplRaw, String(entry.orderType ?? ''));
     const tp = tplOn ? tpl : null;
     const lang = getLang();
     const tplLang = (tpl.receiptLanguage ?? lang) as 'id' | 'en';
@@ -549,6 +627,7 @@ export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrint
       ...(custParts.length > 0 ? { cashier: custParts.join(' · ') } : {}),
       ...(((!tp || tp.showDateTime) && (entry.paidAt || entry.createdAt))
         ? { datetime: String(entry.paidAt || entry.createdAt) } : {}),
+      ...(tplOn ? { lang: tplLang } : {}),
       currency: getCachedCurrency().code,
       items: (entry.items ?? []).map((it) => ({
         name: String(it.name ?? '-'),

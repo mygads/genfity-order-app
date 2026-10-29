@@ -466,11 +466,36 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   let lastReason = '';
   let lastDetail: string | undefined;
   let needDevClient = false;
+  // 1:1 BE copies: destinasi server membawa `copies` (PrintBridge) —
+  // cetakan lokal mengulang kirim per station sesuai salinan itu (maks 3
+  // agar tak boros bila salah konfigurasi). Tanpa baris destinasi = 1x.
+  let copiesByName: Record<string, number> = {};
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const cfg = require('./posConfigSync') as typeof import('./posConfigSync');
+    const dests = await cfg.getPrintDestinations();
+    for (const d of dests) {
+      const k = String(d.name ?? '').trim().toLowerCase();
+      if (k && Number.isFinite(d.copies) && d.copies > 1) copiesByName[k] = Math.min(3, Math.max(1, Math.round(d.copies)));
+    }
+  } catch { copiesByName = {}; }
   for (const g of groups.values()) {
     for (const t of g.stations) {
+      const copies = copiesByName[String(t.name ?? '').trim().toLowerCase()] ?? 1;
       let res;
       try {
         res = await printBytes(t.target, g.bytes);
+        // Salinan 2..N: kirim ulang byte yang sama (best-effort).
+        if ((res as { ok: boolean }).ok && copies > 1) {
+          for (let c = 1; c < copies; c++) {
+            try {
+              const rr = await printBytes(t.target, g.bytes);
+              if ((rr as { ok: boolean }).ok) {
+                sentBytes += (rr as { ok: true; bytes: number }).bytes;
+              } else break;
+            } catch { break; }
+          }
+        }
       } catch {
         res = { ok: false, reason: 'send-failed', detail: 'printFn threw' } as const;
       }
@@ -589,6 +614,27 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
     window.print();
     return { ok: true, bytes: 0, printer: 'OS print' };
   }
+  // 1:1 template dapur: bila pemanggil tak menggating eksplisit, hormati
+  // KitchenTemplateJSON (showTable/showMode/showTime/showCashierName/
+  // showItemNotes). Best-effort sinkron (tanpa template = default dapur aman).
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tplLib = require('./receiptTemplate') as typeof import('./receiptTemplate');
+    const hasK = await tplLib.hasKitchenTemplate();
+    if (hasK) {
+      const kRaw = await tplLib.getKitchenTemplateToggles();
+      const k = tplLib.getEffectiveTogglesForMode(kRaw, t.mode);
+      if (t.showTable === undefined && k.showTableNumber === false) t = { ...t, showTable: false };
+      if (t.showMode === undefined && k.showOrderType === false) t = { ...t, showMode: false };
+      if (t.showTime === undefined && k.showDateTime === false) t = { ...t, showTime: false };
+      if (t.showCashierName === undefined && k.showCashierName === false) t = { ...t, showCashierName: false };
+      if (t.showItemNotes === undefined && k.showItemNotes === false) t = { ...t, showItemNotes: false };
+      if (t.orderNote === undefined && k.showOrderNotes === false) t = { ...t, orderNote: undefined };
+      // 1:1 BE "N x Nama" + prefix bilingual via builder lang (slip dapur
+      // selalu template-aware: default aman KITCHEN_TEMPLATE_DEFAULTS).
+      if (t.lang === undefined) t = { ...t, lang: (k.receiptLanguage ?? 'en') };
+    }
+  } catch { /* default builder */ }
   const d = await kitchenStation(station);
   if (!d) {
     appAlert(

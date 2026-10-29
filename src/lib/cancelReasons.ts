@@ -130,10 +130,18 @@ export async function fetchServerCancelReasonNames(): Promise<string[] | null> {
  * Resolusi preset siap pakai layar kasir: server dulu, lalu cache,
  * lalu {names:[], fromServer:false} (= pemanggil pakai fallback i18n).
  */
-export async function resolveCancelReasonPresets(): Promise<CancelReasonPresetSource> {
+export async function resolveCancelReasonPresets(verticalId?: unknown): Promise<CancelReasonPresetSource> {
   const online = await fetchServerCancelReasonNames().catch(() => null);
   if (online !== null) return { names: online, fromServer: true };
   const cached = await readCachedCancelReasonNames().catch(() => null);
   if (cached !== null) return { names: cached, fromServer: true };
+  // Fase 3: fallback vertikal (server/cached kosong). Fashion: retur/tukar;
+  // resto: salah input/dapur; jasa: jadwal ulang. Pemanggil tetap bisa tambah manual.
+  try {
+    const v = String(verticalId ?? '').trim().toUpperCase();
+    if (v === 'FASHION') return { names: ['Retur 7 hari', 'Tukar size', 'Cacat produksi'], fromServer: false };
+    if (v === 'SERVICE') return { names: ['Jadwal ulang', 'Komplain hasil'], fromServer: false };
+    if (v === 'PULSA_DIGITAL') return { names: ['Salah nomor (refund)', 'Provider gangguan'], fromServer: false };
+  } catch { /* abaikan */ }
   return { names: [], fromServer: false };
 }

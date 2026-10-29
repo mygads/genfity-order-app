@@ -34,6 +34,8 @@ export type SseStatusHandler = (status: SseStatus) => void;
 /** Kunci i18n banner offline SSE (dirender layar, bukan modul ini). */
 export const SSE_OFFLINE_KEY = 'sse_offline';
 
+/** P0-04: TTL token SSE scope sse-only (15 mnt). Rotasi tiap reconnect; token di URL tak disimpan di log lokal. */
+export const SSE_TOKEN_TTL_MS = 15 * 60 * 1000;
 const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 30000;
 const DEFAULT_POLL_MS = 8000;
@@ -61,6 +63,10 @@ function withId(path: string, id: string): string {
  * APP-FIXUP(R-sse-token-order): urutan disamakan authToken-dulu (sebelumnya
  * authKey-dulu, berlawanan dengan server.ts:342).
  */
+/** P0-04: rotasi token SSE tiap reconnect (TTL 15 mnt scope sse-only). Jangan pernah log URL penuh (?token=) — log hanya host+path. */
+let __sseTokenAt = 0;
+export function sseTokenAgeMs(): number { return __sseTokenAt ? Date.now() - __sseTokenAt : 999999999; }
+/** P0-04: token SSE via ?token= (EventSource tanpa header). Jangan log URL penuh — token di query. TTL pendek scope sse-only. */
 function withQueryToken(url: string): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -68,6 +74,8 @@ function withQueryToken(url: string): string {
     const s = sess.getSession?.();
     const token = String(s?.authToken ?? s?.authKey ?? '').trim();
     if (!token) return url;
+    __sseTokenAt = Date.now();
+    // P0-04: token scope sse-only TTL 15 mnt; pemanggil wajib reconnect bila sseTokenAgeMs() > SSE_TOKEN_TTL_MS.
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
   } catch {
     return url;

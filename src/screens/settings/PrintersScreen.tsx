@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, pollServerPrintJobs, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { fetchReceiptTemplates, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, pollServerPrintJobs, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { buildReceiptOrderTypeLine, fetchReceiptTemplates, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -217,6 +217,21 @@ function backupBindings(ss: Station[]): void {
       }
       setFleet(fr.terminals);
       setTemplates(tpl);
+      // 1:1 template: segarkan cache TemplateJSON lokal dari daftar terbaru
+      // (default CUSTOMER_RECEIPT) agar paperSize merchant langsung berlaku.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const tplLib = require('../../lib/receiptTemplate') as typeof import('../../lib/receiptTemplate');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { initDb: idb, run: runDb } = require('../../lib/db') as typeof import('../../lib/db');
+        const def = tpl.find((x) => x && x.isDefault === true) ?? tpl.find((x) => x && String(x.templateType).toUpperCase() === 'CUSTOMER_RECEIPT') ?? tpl[0] ?? null;
+        if (def) {
+          await idb();
+          await tplLib.persistReceiptTemplate(def, runDb);
+          const kitchen = tpl.find((x) => x && String(x.templateType).toUpperCase() === 'KITCHEN_TICKET') ?? null;
+          if (kitchen) await tplLib.persistKitchenTemplate(kitchen, runDb);
+        }
+      } catch { /* cache lama tetap */ }
       const n = fr.terminals.reduce((a, x) => a + x.stations.length, 0);
       setStatusMsg(t('printers.fleetSynced').replace('{n}', String(n)));
     } finally {
@@ -731,16 +746,43 @@ function backupBindings(ss: Station[]): void {
       setStatusMsg(t('printers.noPrinter'));
       return;
     }
-    // R54: layout uji mengikuti peran + cut per station (bukan selalu struk).
-    // Label = slip antrean pendek (cetak label; bukan struk bayar).
+    // R54 rev 1:1: layout uji mengikuti peran + cut per station + toggle
+    // template merchant (bukan selalu struk penuh). Label = slip antrean.
     const shop = String(getTerminal().branchName ?? '').trim() || 'GENFITY';
     let bytes: Uint8Array;
+    // Template efektif (best-effort; tanpa template = default kanonik BE).
+    let tplOnUji = false;
+    let tplUji = null as unknown as import('../../lib/receiptTemplate').ReceiptTemplateToggles | null;
+    try {
+      tplOnUji = await hasReceiptTemplate();
+      const raw = await getReceiptTemplateToggles();
+      tplUji = getEffectiveTogglesForMode(raw, undefined);
+    } catch { tplOnUji = false; tplUji = null; }
+    const tplLangUji = (tplOnUji && tplUji ? (tplUji.receiptLanguage ?? 'en') : null) as 'id' | 'en' | null;
+    const colsUji = s.cpl;
     if (s.role === 'Dapur' || s.role === 'Checker') {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const kLib = require('../../lib/receiptTemplate') as typeof import('../../lib/receiptTemplate');
+      let kShowTable = true, kShowMode = true, kShowTime = true, kShowNotes = true;
+      try {
+        if (await kLib.hasKitchenTemplate()) {
+          const k = kLib.getEffectiveTogglesForMode(await kLib.getKitchenTemplateToggles(), undefined);
+          kShowTable = k.showTableNumber !== false;
+          kShowMode = k.showOrderType !== false;
+          kShowTime = k.showDateTime !== false;
+          kShowNotes = k.showItemNotes !== false;
+        }
+      } catch { /* default tampil */ }
       bytes = buildKitchenTicketBytes({
+        ...(tplLangUji ? { lang: tplLangUji } : {}),
         station: s.name,
         no: `${t('printers.receiptTest')} - ${s.name}`,
         cols: s.cpl,
         cut: s.autocut,
+        ...(kShowTable ? {} : { showTable: false as const }),
+        ...(kShowMode ? {} : { showMode: false as const }),
+        ...(kShowTime ? {} : { showTime: false as const }),
+        ...(kShowNotes ? {} : { showItemNotes: false as const }),
         items: [
           { name: 'Ayam Geprek Pelakor', qty: 1 },
           { name: 'Es Teh Manis', qty: 2 },
@@ -749,20 +791,56 @@ function backupBindings(ss: Station[]): void {
     } else if (s.role === 'Label') {
       bytes = buildQueueSlipBytes({ queueNo: 'A-001', branch: shop, cols: s.cpl, cut: s.autocut });
     } else {
+      // Sampel uji 1:1 struk kasir: mencerminkan SEMUA toggle template agar
+      // merchant melihat efek nyata (bukan struk minimal). Label UJI CETAK
+      // + nama station menandai ini sampel konektivitas, bukan struk asli.
+      const tp = tplOnUji && tplUji ? tplUji : null;
+      const sampleNo = `${t('printers.receiptTest')} - ${s.name}`;
+      let tplLogoUji: import('../../lib/escpos').EscReceipt['logo'];
+      try {
+        const rl = require('../../lib/receiptTemplate') as typeof import('../../lib/receiptTemplate');
+        tplLogoUji = await rl.getEffectiveReceiptLogo(tp ? tp.showLogo : false);
+      } catch { tplLogoUji = undefined; }
       bytes = buildReceiptBytes({
-        cols: s.cpl,
+        ...(tplLogoUji ? { logo: tplLogoUji } : {}),
+        ...(tplLangUji ? { lang: tplLangUji } : {}),
+        cols: colsUji,
         cut: s.autocut,
-        shop,
-        addr: `${t('printers.receiptTest')} - ${s.name}`,
-        trx: `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
+        shop: (!tp || tp.showMerchantName) ? shop : '',
+        addr: (!tp || tp.showAddress) ? `${t('printers.receiptTest')} - ${s.name}` : '',
+        ...(!tp ? {} : ([tp.showPhone ? '021-555-0100' : '', tp.showEmail ? 'halo@toko.id' : ''].filter((x) => x).join(' · ') ? { contact: [tp.showPhone ? '021-555-0100' : '', tp.showEmail ? 'halo@toko.id' : ''].filter((x) => x).join(' · ') } : {})),
+        trx: tp
+          ? [tp.showOrderNumber ? sampleNo : '', tp.showOrderType ? `${roleLabel(s.role)} - ${s.conn}` : ''].filter((x) => x).join(' - ')
+          : `${roleLabel(s.role)} - ${s.conn} - ${t('printers.receiptCols').replace('{n}', String(s.cpl))}`,
+        ...(tp && buildReceiptOrderTypeLine('DINE_IN', '5', tp, tplLangUji ?? 'en') ? { typeLine: buildReceiptOrderTypeLine('DINE_IN', '5', tp, tplLangUji ?? 'en') } : {}),
+        ...(tp && tp.showCustomerName ? { customerName: 'Budi' } : {}),
+        ...(tp && tp.showCustomerPhone ? { customerPhone: '0812-3456-7890' } : {}),
+        ...((!tp || tp.showDateTime) ? { datetime: new Date().toLocaleString() } : {}),
+        deliveryAddr: 'Jl. Merdeka No. 10, Jakarta',
         items: [
-          { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000 },
-          { name: 'Es Teh Manis', qty: 2, price: 8000 },
+          { name: 'Ayam Geprek Pelakor', qty: 1, price: 45000, ...((tp && tp.showUnitPrice) ? { unitPrice: 45000 } : {}), ...((!tp || tp.showItemNotes) ? { note: 'Sambal pisah' } : {}), ...((!tp || tp.showAddons) ? { addons: [{ name: 'Es Teh Manis', price: (tp && !tp.showAddonPrices) ? 0 : 8000 }] } : {}) },
+          { name: 'Nasi Putih Hangat Spesial Jumbo Extra Panjang Agar Wrap', qty: 2, price: 12000 },
         ],
-        subtotal: 61000,
-        service: 3050,
-        total: 64050,
-        method: t('pay_tab_cash'),
+        ...((!tp || (tp && tp.showOrderNotes)) ? { orderNote: 'Jangan pakai plastik' } : {}),
+        ...((!tp || tp.showSubtotal) ? {} : { hideSubtotal: true }),
+        subtotal: 69000,
+        ...((!tp || tp.showTax) ? { tax: 6900 } : {}),
+        ...((!tp || tp.showServiceCharge) ? { service: 3450, serviceLabel: tplLangUji === 'id' ? 'Biaya Layanan' : 'Service Charge' } : {}),
+        ...((!tp || tp.showPackagingFee) ? { packaging: 2000 } : {}),
+        ...((!tp || tp.showDeliveryFee) ? { ongkir: 10000, ongkirCut: 3000 } : {}),
+        ...((!tp || tp.showDiscount) ? { discount: 5000, discountLabel: 'HEMAT5' } : {}),
+        ...({ rounding: -50 } ),
+        total: 86300,
+        ...((tp && !tp.showTotal) ? { hideTotal: true } : {}),
+        ...((!tp || tp.showPaymentMethod) ? { method: t('pay_tab_cash') } : {}),
+        ...(((!tp || tp.showAmountPaid)) ? { paid: 100000 } : {}),
+        ...(((!tp || tp.showChange)) ? { change: 13700 } : {}),
+        ...((!tp || tp.showCashierName) && tp ? { cashierFooter: 'Andi' } : {}),
+        ...(tp ? { thanks: tp.showThankYouMessage ? (tp.customThankYouMessage || (tplLangUji === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!')) : '' } : {}),
+        ...(tp && tp.showCustomFooterText && tp.customFooterText ? { footer: tp.customFooterText } : {}),
+        ...(tp && tp.showFooterPhone ? { footerPhone: '021-555-0100' } : {}),
+        ...(tp && tp.showTrackingQRCode ? { qr: sampleNo } : {}),
+        ...(tp && tp.showGenfityBranding ? { branding: (tplLangUji === 'id' ? 'Diberdayakan oleh Genfity' : 'Powered by Genfity') } : {}),
       });
     }
     setPreview({ station: s.name, text: previewText(s, hasNativePrinter() ? null : t('printers.detectedHint'), { test: t('printers.receiptTest'), role: roleLabel(s.role), cols: t('printers.receiptCols').replace('{n}', String(s.cpl)), cut: s.autocut ? t('printers.receiptCut') : t('printers.receiptNoCut'), total: t('c_total') }), hex: toHex(bytes).slice(0, 240) + '...' });
@@ -852,6 +930,7 @@ function backupBindings(ss: Station[]): void {
                     <Text style={styles.stMeta}>
                       {`${t('printers.tplTitle')}: ${st.receiptTemplateId == null ? t('printers.tplDefault') : (templates.find((x) => x.id === st.receiptTemplateId)?.name ?? `#${st.receiptTemplateId}`)}`}
                     </Text>
+                    <Text style={styles.stMeta}>{t('printers.tplHint')}</Text>
                     <View style={styles.chipRow}>
                       <Pressable
                         key="default"

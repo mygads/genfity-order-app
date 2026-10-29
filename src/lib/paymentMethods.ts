@@ -157,6 +157,44 @@ export function parsePaymentMethods(raw: unknown): PaymentMethods {
  * NOL-regresi: snapshot absen/all-true = daftar utuh dikembalikan.
  */
 export function filterOnlineWallets<T extends { id: string }>(wallets: T[], m: PaymentMethods): T[] {
-  if (!m || m.qrisEnabled !== false) return wallets;
-  return wallets.filter((w) => w.id !== 'qris');
+  if (!m) return wallets;
+  let out = wallets;
+  // QRIS digerbang tegas bila false.
+  if (m.qrisEnabled === false) out = out.filter((w) => w.id !== 'qris');
+  // Genfity Pay (gopay/google-pay ambigu diselesaikan): id gpay/genfity_pay digerbang bila false.
+  if (m.gpayEnabled === false) out = out.filter((w) => w.id !== 'gpay' && w.id !== 'genfity_pay' && w.id !== 'gopay');
+  return out;
+}
+
+/** Strict fail-closed: snapshot absen = semua false + butuh sync (untuk layar baru). Legacy parse tetap all-true agar BE lama tidak terkunci. */
+export interface StrictPaymentMethodsResult {
+  methods: PaymentMethods;
+  hasExplicitSnapshot: boolean;
+}
+
+export function hasExplicitPaymentSnapshot(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const root = raw as Record<string, unknown>;
+  const containers: unknown[] = [root];
+  for (const k of ['pos', 'paymentSettings', 'payment_settings']) {
+    if (root[k] && typeof root[k] === 'object') containers.push(root[k]);
+  }
+  for (const c of containers) {
+    const o = c as Record<string, unknown>;
+    for (const k of ['paymentMethods', 'payment_methods']) {
+      if (o[k] && typeof o[k] === 'object') return true;
+    }
+    for (const k of ['qrisEnabled', 'qris_enabled', 'gpayEnabled', 'gpay_enabled', 'manualTransferEnabled', 'payAtCashierEnabled', 'codEnabled']) {
+      if (o[k] !== undefined) return true;
+    }
+  }
+  return false;
+}
+
+export function parsePaymentMethodsStrict(raw: unknown): StrictPaymentMethodsResult {
+  const has = hasExplicitPaymentSnapshot(raw);
+  if (!has) {
+    return { methods: { payAtCashierEnabled: false, manualTransferEnabled: false, qrisEnabled: false, codEnabled: false, gpayEnabled: false }, hasExplicitSnapshot: false };
+  }
+  return { methods: parsePaymentMethods(raw), hasExplicitSnapshot: true };
 }

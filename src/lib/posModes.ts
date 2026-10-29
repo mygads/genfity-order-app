@@ -1,11 +1,10 @@
 /**
  * Mode kasir per merchant-type (C2, SESI-C APP).
  *
- * Matriks POS-create BE — orders_pos_create.go:196 (gate umum) + :224-250
- * (gate per tipe):
+ * Matriks POS-create BE — orders_pos_create.go (gate umum + gate per tipe):
  *   RESTAURANT: DINE_IN | TAKEAWAY
- *   PRODUCT:    IN_STORE_ORDER | TAKEAWAY
- *   SERVICE:    IN_STORE_SERVICE
+ *   PRODUCT:    IN_STORE_ORDER | IN_STORE_PICKUP (BOPIS distinct Fase 3) | TAKEAWAY
+ *   SERVICE:    IN_STORE_SERVICE | HOME_SERVICE (Fase 3, alamat ≤500 char)
  * UI kasir menawarkan HANYA kanal yang diterima BE untuk tipe itu. Agregator
  * (GOFOOD/GRABFOOD/SHOPEEFOOD) adalah label kanal → TAKEAWAY di lapisan sync
  * (kurir-bawa-pulang; goPosOrderType), bukan enum BE.
@@ -19,6 +18,7 @@
  */
 import { apiFetch, unwrap } from './apiSource';
 import { initDb, queryFirst, run } from './db';
+import { defaultVerticalForMerchantType, normalizeVerticalId, VERTICALS, type VerticalId } from './verticals';
 
 /** Tipe merchant kanonis BE (CLAUDE.md §5 + orders_pos_create.go:224-250). */
 export type PosMerchantType = 'RESTAURANT' | 'PRODUCT' | 'SERVICE';
@@ -43,8 +43,8 @@ export function normalizeMerchantType(raw?: unknown): PosMerchantType {
  */
 export const POS_MODES_BY_TYPE: Record<PosMerchantType, string[]> = {
   RESTAURANT: ['DINE IN', 'TAKE AWAY', 'GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'],
-  PRODUCT: ['IN STORE ORDER', 'TAKE AWAY'],
-  SERVICE: ['IN STORE SERVICE'],
+  PRODUCT: ['IN STORE ORDER', 'IN STORE PICKUP', 'TAKE AWAY'],
+  SERVICE: ['IN STORE SERVICE', 'HOME SERVICE'],
 };
 
 /** Daftar tawar untuk tipe merchant (tak dikenal → RESTAURANT, lihat [ASUMSI]). */
@@ -160,6 +160,21 @@ function notifyDeliveryFlag(on: boolean): void {
  * ([ASUMSI] R1, didokumentasi di sini, bukan dikarang diam-diam).
  */
 let cachedDeliveryEnabled: boolean = true;
+
+/** Label kasir Indonesia untuk enum mode (display-only; payload BE tetap Inggris).
+ * DINE IN → Makan di Tempat; TAKE AWAY → Bungkus; IN STORE ORDER → Beli di Toko;
+ * IN STORE PICKUP → Ambil di Toko; IN STORE SERVICE → Layanan di Toko;
+ * HOME SERVICE → Layanan ke Rumah; agregator tampil apa adanya. */
+export function modeDisplayLabel(mode: unknown): string {
+  const k = String(mode ?? '').trim().toUpperCase();
+  if (k === 'DINE IN' || k === 'DINE-IN') return 'Makan di Tempat';
+  if (k === 'TAKE AWAY' || k === 'TAKEAWAY') return 'Bungkus';
+  if (k === 'IN STORE ORDER') return 'Beli di Toko';
+  if (k === 'IN STORE PICKUP') return 'Ambil di Toko';
+  if (k === 'IN STORE SERVICE') return 'Layanan di Toko';
+  if (k === 'HOME SERVICE' || k === 'HOME_SERVICE') return 'Layanan ke Rumah';
+  return String(mode ?? '');
+}
 
 /** Baca cache flag delivery sesi (default true = legacy lestari, lihat atas). */
 export function getCachedDeliveryEnabled(): boolean {
@@ -441,4 +456,156 @@ export function readMerchantTypeFromLoginBody(body: unknown): string {
     }
   }
   return '';
+}
+
+/* ── Adaptive Vertical Shell compat (Fase 1, additive — API lama tak berubah) ── */
+
+let cachedVerticalId: VerticalId = 'WARUNG_QSR';
+
+export function getCachedVerticalId(): VerticalId {
+  return cachedVerticalId;
+}
+
+export function setCachedVerticalId(raw: unknown, merchantType?: unknown): VerticalId {
+  const v = normalizeVerticalId(raw);
+  cachedVerticalId = v || defaultVerticalForMerchantType(merchantType ?? cachedMerchantType);
+  return cachedVerticalId;
+}
+
+/** Parser forward-compat verticalId dari body E01 (cermin readMerchantTypeFromLoginBody). */
+export function readVerticalIdFromLoginBody(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const KEYS = ['verticalId', 'vertical_id', 'verticalid'];
+  const b = body as Record<string, unknown>;
+  for (const k of KEYS) {
+    const v = b[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  const nested = [b['session'], b['merchant'], b['branch'], b['terminal']];
+  for (const n of nested) {
+    if (n && typeof n === 'object') {
+      for (const k of KEYS) {
+        const v = (n as Record<string, unknown>)[k];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+      }
+    }
+  }
+  return '';
+}
+
+/** Kupas verticalId dari payload profil (toleran dua envelope, cermin readMerchantTypeFromProfile). */
+function readVerticalIdFromProfile(data: Record<string, unknown>): string {
+  for (const key of ['verticalId', 'vertical_id']) {
+    const direct = data[key];
+    if (typeof direct === 'string' && direct.trim()) return direct;
+  }
+  for (const nest of ['merchant', 'branch', 'profile', 'data']) {
+    const inner = data[nest];
+    if (inner && typeof inner === 'object') {
+      const rec = inner as Record<string, unknown>;
+      for (const key of ['verticalId', 'vertical_id']) {
+        const c = rec[key];
+        if (typeof c === 'string' && c.trim()) return c;
+      }
+    }
+  }
+  return '';
+}
+
+/** Persist cache ke ms_setting(Merchant, Vertical). */
+async function persistVerticalId(code: VerticalId): Promise<void> {
+  await initDb();
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Vertical', ?, ?)` +
+      ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+    [code, ''],
+  );
+}
+
+/** Muat vertical lokal (toleran; tak dikenal -> default tipe). */
+async function loadVerticalIdLocal(merchantType: string): Promise<VerticalId> {
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Vertical' LIMIT 1`,
+    );
+    const raw = (row?.value1 ?? '').trim();
+    const v = normalizeVerticalId(raw);
+    if (v) return v;
+  } catch {
+    /* abaikan -> fallback */
+  }
+  return defaultVerticalForMerchantType(merchantType);
+}
+
+/** Sinkronisasi vertical: server dulu, baris lokal, fallback default tipe. Best-effort. */
+export async function syncVerticalIdFromProfile(merchantType: string): Promise<VerticalId> {
+  try {
+    const r = await apiFetch('api/merchant/profile', { method: 'GET' });
+    if (r.ok && !r.fromDummy) {
+      const { data } = unwrap<Record<string, unknown>>(r.data ?? {});
+      const raw = readVerticalIdFromProfile(data ?? {});
+      const v = normalizeVerticalId(raw);
+      if (v) {
+        try { await persistVerticalId(v); } catch { /* abaikan */ }
+        cachedVerticalId = v;
+        return cachedVerticalId;
+      }
+    }
+  } catch { /* offline -> lokal */ }
+  const local = await loadVerticalIdLocal(merchantType);
+  cachedVerticalId = local;
+  return cachedVerticalId;
+}
+
+/** Dorong verticalId pilihan kasir ke server (PUT api/merchant/profile).
+ * Best-effort tanpa throw: true = server terima (selaras lintas device/login),
+ * false = offline/dummy/ditolak (pemanggil WAJIB pertahankan pilihan lokal,
+ * jangan timpa balik via re-pull agar ganti-vertikal tak mental sendiri).
+ * BE memvalidasi nilai + kompatibilitas merchantType (merchant_profile.go). */
+export async function pushVerticalIdToServer(vertical: unknown): Promise<boolean> {
+  try {
+    const v = normalizeVerticalId(vertical);
+    if (!v) return false;
+    const r = await apiFetch('api/merchant/profile', { method: 'PUT', body: { verticalId: v } });
+    return r.ok === true && r.fromDummy !== true;
+  } catch {
+    return false;
+  }
+}
+
+/** Daftar mode untuk vertikal (turunan VERTICALS; fallback posModesFor tipe). */
+export function posModesForVertical(vertical?: unknown, merchantType?: unknown): string[] {
+  const v = normalizeVerticalId(vertical);
+  if (v && VERTICALS[v]) return [...VERTICALS[v].modes];
+  return posModesFor(merchantType);
+}
+
+/* ── Hybrid-toggle Fase 3 (additive): preset utama + tambahan ──
+ * 50% UMKM Indonesia hybrid (warung + pulsa/baju). 1 toko = 1 verticalId utama
+ * (BE gate aman); tambahan = panel UI saja (item masuk keranjang yang sama).
+ * Disimpan ms_setting Merchant/Hybrid JSON array. Kompatibel = merchantType sama.
+ */
+export async function getHybridVerticals(): Promise<string[]> {
+  try {
+    await initDb();
+    const row = await queryFirst<{ value1: string | null }>(
+      `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Hybrid' LIMIT 1`,
+    );
+    const raw = (row?.value1 ?? '').trim();
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((x): x is string => typeof x === 'string' && !!normalizeVerticalId(x)).slice(0, 3);
+  } catch { return []; }
+}
+
+export async function setHybridVerticals(ids: string[]): Promise<void> {
+  const clean = [...new Set(ids.map((x) => normalizeVerticalId(x)).filter(Boolean))].slice(0, 3);
+  await initDb();
+  await run(
+    `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Hybrid', ?, ?)` +
+      ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+    [JSON.stringify(clean), ''],
+  );
 }

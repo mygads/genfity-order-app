@@ -1,7 +1,7 @@
+import { getSession, logout, getBinding } from '../../session';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
-import { getSession, logout } from '../../session';
 import { getBranchId, getTerminal } from '../../config/server';
 import { initDb, query, queryFirst } from '../../lib/db';
 import { getJSON } from '../../lib/storage';
@@ -13,6 +13,10 @@ import { useLang } from '../../lib/i18n';
 import { ensureShiftOpen, getShiftStatus } from '../../lib/shiftGuard';
 import { terminalLogout } from '../../lib/terminalApi';
 import { useConnectivity } from '../../hooks/useConnectivity';
+import { getCachedVerticalId, setCachedVerticalId, syncMerchantTypeFromProfile, syncVerticalIdFromProfile } from '../../lib/posModes';
+import VerticalOnboarding from '../../components/vertical/VerticalOnboarding';
+import { VERTICALS, type VerticalId } from '../../lib/verticals';
+import { insightFor } from '../../lib/verticalReports';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -72,6 +76,40 @@ export default function DashboardScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const [notice, setNotice] = useState('');
+  // Vertical Shell: onboarding 1x — tampil bila ms_setting Merchant/Vertical
+  // kosong (install fresh / DB lama pre-vertikal). Bukan blocking login;
+  // merchant lama langsung pakai default tipe (WARUNG_QSR/GROCERY/SERVICE).
+  const [verticalAsk, setVerticalAsk] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { initDb } = await import('../../lib/db');
+        await initDb();
+        const { queryFirst } = await import('../../lib/db');
+        const row = await queryFirst<{ value1: string | null }>(
+          `SELECT value1 FROM ms_setting WHERE key1 = 'Merchant' AND key2 = 'Vertical' LIMIT 1`,
+        );
+        if (!alive) return;
+        if (!(row?.value1 ?? '').trim()) {
+          // Segarkan dari server dulu (BE Fase 0 kirim verticalId); tetap
+          // kosong -> minta pilih (first-run) agar tak resto-sentris diam-diam.
+          try {
+            const b = getBinding() as { merchantType?: string } | null;
+            const mt = await syncMerchantTypeFromProfile().catch(() => b?.merchantType ?? 'RESTAURANT');
+            const v = await syncVerticalIdFromProfile(mt).catch(() => null);
+            if (!alive) return;
+            if (!v) setVerticalAsk(true);
+          } catch {
+            if (alive) setVerticalAsk(true);
+          }
+        }
+      } catch {
+        /* DB belum siap -> jangan ganggu kasir */
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
   // Drawer /home juga dibuka dari Dashboard (home) - dulu hanya dari Cashier.
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Nilai awal nol; efek di bawah menimpa dengan hitungan nyata SQLite.
@@ -92,6 +130,8 @@ export default function DashboardScreen({ navigation }: Props) {
   // NAV-04/05: hitungan nyata; null/awal = DB kosong → tampil nol.
   const [esbNew, setEsbNew] = useState<number | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  // Fase 3: insight vertikal hari ini (lunas saja, offline-first).
+  const [insight, setInsight] = useState<{ title: string; lines: string[] } | null>(null);
   // Rekap sekilas: omzet 7 hari + komposisi pembayaran hari ini (live SQLite).
   const [week, setWeek] = useState<WeekPoint[]>([]);
   const [payMix, setPayMix] = useState<PaySlice[]>([]);
@@ -170,6 +210,33 @@ export default function DashboardScreen({ navigation }: Props) {
             })),
           );
         }
+        // Insight vertikal: heads + items hari ini.
+        try {
+          const hRows = await query<{ salesMode: string | null; grandTotal: number | null; salesDate: string | null; tableNo: string | null; customerName: string | null; ongkir: number | null }>(
+            `SELECT salesMode, grandTotal, salesDate, tableNo, customerName, ongkir FROM tr_saleshead WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND substr(salesDate, 1, 10) = ? ORDER BY salesDate DESC LIMIT 200`,
+            [bid, day],
+          );
+          const nums = hRows.length ? hRows.map((_, i) => `?`).join(',') : '';
+          let iRows: { name: string; qty: number; price: number; note: string | null }[] = [];
+          if (nums) {
+            const sns = await query<{ salesNum: string }>(
+              `SELECT salesNum FROM tr_saleshead WHERE status = 'paid' AND (branchId = ? OR branchId IS NULL OR branchId = '') AND substr(salesDate, 1, 10) = ? ORDER BY salesDate DESC LIMIT 200`,
+              [bid, day],
+            );
+            const list = sns.map((r) => r.salesNum);
+            if (list.length) {
+              iRows = await query(
+                `SELECT menuName AS name, qty, price, note FROM tr_salesmenu WHERE salesNum IN (${list.map(() => '?').join(',')}) LIMIT 1000`,
+                list,
+              );
+            }
+          }
+          if (alive) {
+            let vid = '';
+            try { vid = String(getCachedVerticalId() ?? ''); } catch { vid = ''; }
+            setInsight(insightFor(vid, hRows.map((r) => ({ salesNum: '', salesMode: r.salesMode ?? undefined, grandTotal: r.grandTotal ?? undefined, salesDate: r.salesDate ?? undefined, ongkir: (r as Record<string, unknown>).ongkir != null ? Math.max(0, Math.round(Number((r as Record<string, unknown>).ongkir) || 0)) : undefined })), iRows.map((r) => ({ name: String(r.name ?? ''), qty: Math.max(1, Math.round(Number(r.qty) || 0)), price: Math.round(Number(r.price) || 0), note: r.note ?? undefined }))));
+          }
+        } catch { /* insight gagal = kartu disembunyikan */ }
         const tRows = await query<{ id: string; tableNo: string | null; status: string | null }>(
           'SELECT id, tableNo, status FROM ms_table LIMIT 60',
         );
@@ -260,12 +327,24 @@ export default function DashboardScreen({ navigation }: Props) {
     return String(Math.round(n));
   };
 
+  // Vertical Shell: kartu Tables/Kitchen hanya untuk vertikal resto
+  // (COFFEE/WARUNG_QSR/RESTO_FULL); fashion/grocery/pulsa/service fokus ke
+  // Scan/Kalender/Input-nomor. Fail-open: vertikal tak dikenal = semua tampil.
+  const verticalDrawer = (() => {
+    try {
+      return VERTICALS[getCachedVerticalId()]?.drawer ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const showTables = !verticalDrawer || verticalDrawer.tables;
   const MENU: MenuItem[] = [
     { label: t('nav_order'), sub: `${t('nav_cashier')} · ${sales.trx} ${t('unit_trx')}`, route: 'Cashier' },
-    { label: t('nav_tables'), sub: `${t('nav_layout')} · ${busy} ${t('unit_filled')}`, route: 'Tables' },
+    ...(showTables ? [{ label: t('nav_tables'), sub: `${t('nav_layout')} · ${busy} ${t('unit_filled')}`, route: 'Tables' } as MenuItem] : []),
     // Booking disengaja hanya kartu dashboard (route Booking valid) -
     // drawer kanonis 10 item Lampiran A tetap tanpa Booking agar sinkron.
-    { label: t('nav_booking'), sub: t('nav_booking_sub'), route: 'Booking' },
+    // Vertical Shell: Booking hanya untuk RESTO_FULL + SERVICE.
+    ...((!verticalDrawer || getCachedVerticalId() === 'RESTO_FULL' || getCachedVerticalId() === 'SERVICE') ? [{ label: t('nav_booking'), sub: t('nav_booking_sub'), route: 'Booking' } as MenuItem] : []),
     { label: t('nav_shift'), sub: t('nav_shift_sub'), route: 'Shift' },
     { label: t('nav_history'), sub: t('nav_history_sub'), route: 'History' },
     { label: t('nav_recap'), sub: t('nav_recap_sub'), route: 'Recap' },
@@ -342,6 +421,33 @@ export default function DashboardScreen({ navigation }: Props) {
         outlet={s?.outlet || getTerminal().branchName || undefined}
         user={s ? `${s.name} | ${s.shift}` : undefined}
       />
+      <VerticalOnboarding
+        visible={verticalAsk}
+        onPick={(v: VerticalId) => {
+          try {
+            const b = getBinding() as { merchantType?: string } | null;
+            setCachedVerticalId(v, b?.merchantType);
+            void (async () => {
+              try {
+                const { initDb, run } = await import('../../lib/db');
+                await initDb();
+                await run(
+                  `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Vertical', ?, ?)` +
+                  ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+                  [v, ''],
+                );
+              } catch { /* abaikan */ }
+              // First-run: dorong ke server agar selaras lintas login/device
+              // (best-effort; offline = lokal saja, server menang saat online).
+              try {
+                const { pushVerticalIdToServer } = await import('../../lib/posModes');
+                await pushVerticalIdToServer(v);
+              } catch { /* abaikan */ }
+            })();
+          } catch { /* abaikan */ }
+          setVerticalAsk(false);
+        }}
+      />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
 
       {/* Tablet: kartu shift + omzet bersebelahan, CTA full-width di bawahnya. */}
@@ -367,6 +473,14 @@ export default function DashboardScreen({ navigation }: Props) {
         <Text style={[styles.salesSub, isTablet && styles.salesSubBig]}>{sales.trx} {t('unit_trx')} · {t('dash_avg')} {rp(avg)} · {deltaTxt}</Text>
       </View>
       </View>
+
+      {insight ? (
+        <View style={styles.insightCard}>
+          <Text style={styles.insightTitle}>Insight usaha</Text>
+          <Text style={styles.insightHead}>{insight.title}</Text>
+          {insight.lines.map((l) => (<Text key={l} style={styles.insightLine}>• {l}</Text>))}
+        </View>
+      ) : null}
 
       <TouchableOpacity style={styles.cta} onPress={() => {
         // Cek live dari DB + segarkan kartu shift (state mount bisa basi sepulang Tutup Shift).
@@ -549,6 +663,10 @@ const styles = StyleSheet.create({
   notice: { fontFamily: fonts.medium, fontSize: 12, color: colors.orangeDark, marginTop: 6 },
   /* Rekap sekilas: kartu chart senada salesCard; tablet bersebelahan. */
   chartRowTablet: { flexDirection: 'row', gap: 10 },
+  insightCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12, gap: 4 },
+  insightTitle: { fontFamily: fonts.semibold, fontSize: 13, color: colors.muted },
+  insightHead: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy },
+  insightLine: { fontFamily: fonts.regular, fontSize: 13, color: colors.text },
   chartCard: {
     backgroundColor: colors.card,
     borderRadius: 12,

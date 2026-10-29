@@ -134,6 +134,17 @@ function run() {
   ok(/bytes\.length\s*===\s*0[\s\S]{0,300}?INVALID_PAYLOAD/.test(screen),
     'PB-AUTO-UI: PrintersScreen tak siarkan byte kosong (INVALID_PAYLOAD, bukan PRINTED palsu)');
 
+  // 8. Dedupe cetak-otomatis pasca-bayar (satu sale = satu cetakan).
+  ok(/export function claimTerminalAutoPrint/.test(pb),
+    'PB-DEDUP: claimTerminalAutoPrint ada (kunci clientId/salesNum)');
+  ok(/TERMINAL_AUTO_PRINT_DEDUPE_MS/.test(pb) && /120000/.test(pb),
+    'PB-DEDUP: jendela 120 detik (PayNow vs Success/buka-ulang)');
+  ok(/claimTerminalAutoPrint\(autoKey\)/.test(readRaw('screens/bill/ReceiptScreen.tsx')) &&
+    /route\?\.params\?\.clientId/.test(readRaw('screens/bill/ReceiptScreen.tsx')),
+    'PB-DEDUP: Receipt auto-effect klaim kunci clientId/salesNum sebelum doPrint');
+  ok(/export function __resetTerminalAutoPrintClaimsForTests/.test(pb),
+    'PB-DEDUP: reset uji tersedia (produksi tak memanggil)');
+
   return { failures, checks };
 }
 

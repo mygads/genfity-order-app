@@ -17,6 +17,7 @@ import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { subscribeTerminalEvents } from './src/lib/sse';
 import { getApiMode } from './src/lib/apiSource';
 import { flushPendingRevokes, restoreAutoSyncPrefs } from './src/lib/sync';
+import { initMonitor, reportError } from './src/lib/monitor';
 import { startTerminalAutoPrintPoll, stopTerminalAutoPrintPoll } from './src/lib/printBridge';
 import { printBytes } from './src/native/printer';
 import { pullMaster } from './src/lib/master';
@@ -552,7 +553,8 @@ export default function App() {
         try { void flushPendingRevokes().catch(() => {}); } catch { /* abaikan */ }
         // SYNC-02 (C12): pulihkan timer auto-sync tersimpan — sebelumnya timer
         // hanya nyala bila SyncScreen dibuka (mati diam-diam pasca-restart).
-        try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
+        try { try { initMonitor(); } catch (e) { reportError(e); }
+    void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
         const b = st.binding;
         setBound(!!(b && b.terminalId));
         const tag = b?.tag ? parseDeviceRole(b.tag) : null;

@@ -214,6 +214,7 @@ const DEV_BRANCHES: BranchItem[] = [
           />
         </View>
         <Text style={[styles.desc, isTablet && styles.descBig]}>{t('sel_desc')}</Text>
+        <Text style={[styles.desc, isTablet && styles.descBig, { marginTop: 6, fontStyle: 'italic' }]}>{t('billing_branch_note')}</Text>
         {binding ? (
           <View style={styles.boundCard}>
             <Text style={styles.boundMain}>

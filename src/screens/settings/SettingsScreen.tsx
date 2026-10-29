@@ -15,6 +15,11 @@ import { requireAccess } from '../../lib/access';
 import { terminalLogout } from '../../lib/terminalApi';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getDeviceRole, subscribeDeviceRole, normalizeTag, VIEW_TAGS } from '../../lib/deviceRole';
+import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
+import VerticalOnboarding from '../../components/vertical/VerticalOnboarding';
+import { getCachedVerticalId, getHybridVerticals, normalizeMerchantType, setCachedVerticalId, setHybridVerticals, syncVerticalIdFromProfile } from '../../lib/posModes';
+import { VERTICALS, type VerticalId } from '../../lib/verticals';
+
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -56,6 +61,14 @@ export default function SettingsScreen({ navigation }: Props) {
   // Alasan: preset 'Prod' menunjuk ke server pihak ketiga (ESB), dan selektor
   // server di tangan kasir = risiko salah arah + desync klaim terminal.
   const [serverUnlocked, setServerUnlocked] = useState(false);
+  // Vertical Shell: jenis usaha aktif + dialog ganti (PIN supervisor) + onboarding picker.
+  const [verticalTick, setVerticalTick] = useState(0);
+  const [verticalPickOpen, setVerticalPickOpen] = useState(false);
+  const [verticalPinOpen, setVerticalPinOpen] = useState(false);
+  const [hybridPickOpen, setHybridPickOpen] = useState(false);
+  const [hybrid, setHybrid] = useState<string[]>([]);
+  useEffect(() => { void getHybridVerticals().then(setHybrid).catch(() => {}); }, [verticalTick]);
+  void verticalTick;
   const [versionTaps, setVersionTaps] = useState(0);
   // F4 readout klaim: ditulis HANYA oleh alur bind terverifikasi PIN via
   // BranchPicker (tanpa input manual di layar ini); dibaca ulang tiap fokus —
@@ -237,6 +250,16 @@ export default function SettingsScreen({ navigation }: Props) {
 
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.operational')}</Text>
       <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
+      <MenuRow
+        title={t('settings.vertical')}
+        sub={(() => { try { const v = VERTICALS[getCachedVerticalId()]; return v ? `${v.icon} ${v.label} — ${v.example}` : t('settings.verticalSub'); } catch { return t('settings.verticalSub'); } })()}
+        onPress={() => setVerticalPinOpen(true)}
+      />
+      <MenuRow
+        title="Jualan tambahan (hybrid)"
+        sub={hybrid.length ? hybrid.map((h) => { try { const v = VERTICALS[h as VerticalId]; return v ? `${v.icon} ${v.label}` : h; } catch { return h; } }).join(' + ') : 'Satu usaha utama + tambahan (mis. warung + pulsa)'}
+        onPress={() => setHybridPickOpen(true)}
+      />
       <MenuRow title={t('settings.tableTimer')} sub={t('settings.tableTimerSub')} onPress={() => go('TableTimer')} />
       <MenuRow
         title={t('settings.newOrderSound')}
@@ -286,6 +309,91 @@ export default function SettingsScreen({ navigation }: Props) {
       <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
       <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
 
+      <SupervisorApprovalDialog
+        visible={verticalPinOpen}
+        action="VERTICAL_SWITCH"
+        refId={(() => { try { return getBinding()?.terminalId ?? ''; } catch { return ''; } })()}
+        lockRefId={false}
+        reasonPreset="Ganti jenis usaha"
+        fallbackAccessKey="settings.edit"
+        title={t('settings.vertical')}
+        sub={t('settings.verticalSub')}
+        onApproved={() => { setVerticalPinOpen(false); setVerticalPickOpen(true); }}
+        onCancel={() => setVerticalPinOpen(false)}
+      />
+      <VerticalOnboarding
+        visible={verticalPickOpen}
+        initial={(() => { try { return getCachedVerticalId(); } catch { return undefined; } })()}
+        onPick={(v: VerticalId) => {
+          try {
+            const mt = (() => { try { return normalizeMerchantType(getBinding()?.merchantType); } catch { return 'RESTAURANT'; } })();
+            setCachedVerticalId(v, mt);
+            void (async () => {
+              try {
+                const { initDb: initDb2, run: run2 } = await import('../../lib/db');
+                await initDb2();
+                await run2(
+                  `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'Vertical', ?, ?)` +
+                  ` ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+                  [v, ''],
+                );
+              } catch { /* abaikan */ }
+              // Selaraskan ke server dulu (PUT verticalId); HANYA re-pull bila
+              // server terima — bila offline/ditolak, pilihan lokal WAJIB
+              // dipertahankan (jangan re-pull yang menimpa balik ke nilai lama).
+              try {
+                const { pushVerticalIdToServer } = await import('../../lib/posModes');
+                const pushed = await pushVerticalIdToServer(v);
+                if (pushed) {
+                  try { await syncVerticalIdFromProfile(mt); } catch { /* abaikan */ }
+                }
+              } catch { /* lokal saja */ }
+              setVerticalTick((x) => x + 1);
+            })();
+            appAlert(t('settings.vertical'), t('vertical.changed'));
+          } catch { /* abaikan */ }
+          setVerticalPickOpen(false);
+        }}
+      />
+      <VerticalOnboarding
+        visible={hybridPickOpen}
+        initial={(() => { try { return getCachedVerticalId(); } catch { return undefined; } })()}
+        onPick={(v: VerticalId) => {
+          // Toggle keanggotaan: pilih yang sudah ada = hapus; beda L1 merchantType
+          // = tolak jujur (1 terminal = 1 tipe BE; campur RESTAURANT+PRODUCT
+          // merusak gate orderType). Maks 3 tambahan.
+          void (async () => {
+            try {
+              const main = getCachedVerticalId();
+              const mainCfg = VERTICALS[main];
+              const cur = await getHybridVerticals();
+              let ids: string[];
+              let msg: string;
+              if (v === main) {
+                msg = 'Sudah menjadi usaha utama.';
+                ids = cur;
+              } else if (cur.includes(v)) {
+                ids = cur.filter((x) => x !== v);
+                msg = `${VERTICALS[v].label} dihapus dari tambahan.`;
+              } else if (VERTICALS[v].merchantType !== mainCfg.merchantType) {
+                appAlert('Tidak kompatibel', `${VERTICALS[v].label} beda tipe usaha (${VERTICALS[v].merchantType}) dengan utama (${mainCfg.merchantType}). Ganti jenis usaha utama dulu bila perlu.`);
+                return;
+              } else if (cur.length >= 3) {
+                appAlert('Penuh', 'Maksimal 3 jualan tambahan.');
+                return;
+              } else {
+                ids = [...cur, v].slice(0, 3);
+                msg = `${VERTICALS[v].label} ditambah sebagai jualan tambahan.`;
+              }
+              await setHybridVerticals(ids);
+              setHybrid(ids);
+              setVerticalTick((x) => x + 1);
+              appAlert('Jualan tambahan', msg);
+            } catch { /* abaikan */ }
+          })();
+          setHybridPickOpen(false);
+        }}
+      />
       <AppButton
         size="lg"
         title={t('settings.logout')}

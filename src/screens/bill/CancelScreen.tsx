@@ -407,8 +407,13 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   const [serverReasons, setServerReasons] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
-    resolveCancelReasonPresets().then(({ names, fromServer }) => {
-      if (!alive || !fromServer) return;
+    (async () => {
+      try {
+        const { getCachedVerticalId } = await import('../../lib/posModes');
+        return await resolveCancelReasonPresets(getCachedVerticalId());
+      } catch { return await resolveCancelReasonPresets(); }
+    })().then(({ names }) => {
+      if (!alive || names.length === 0) return;
       setServerReasons(names);
       // Ganti default awal dengan preset server pertama — TAPI hormati
       // pilihan kasir bila sudah diubah manual sebelum fetch tiba.
@@ -422,6 +427,20 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   const [authMsg, setAuthMsg] = useState(''); const [done, setDone] = useState(false);
 
   const step = (id: string, delta: number, max: number) => setVoidQty((q) => { const next = Math.min(max, Math.max(0, (q[id] ?? 0) + delta)); return { ...q, [id]: next }; }); const picked = items.filter((i) => (voidQty[i.id] ?? 0) > 0); const voidTotal = picked.reduce((s, i) => s + i.price * (voidQty[i.id] ?? 0), 0);
+  /** Fase 3 FASHION retur 7 hari: TRX-{BR}-{TERM}-{YYYYMMDD}-{NNNN} → umur struk. */
+  const orderAgeDays: number | null = (() => {
+    try {
+      const m = /TRX-[^-]+-[^-]+-(\d{8})-/.exec(String(orderId ?? ''));
+      if (!m) return null;
+      const y = Number(m[1].slice(0, 4)); const mo = Number(m[1].slice(4, 6)) - 1; const d = Number(m[1].slice(6, 8));
+      const t = new Date(y, mo, d).getTime();
+      if (!Number.isFinite(t)) return null;
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      return Math.max(0, Math.floor((now.getTime() - t) / 86400000));
+    } catch { return null; }
+  })();
+  const isFashionReturn = /retur/i.test(String(reason ?? ''));
+  const returnExpired = isFashionReturn && orderAgeDays != null && orderAgeDays > 7;
   /** Total live (jumlah item) bila pemanggil tak mengirim total; tanpa mock. */
   const liveTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
   const orderTotal = paramTotal > 0 ? paramTotal : liveTotal;
@@ -435,7 +454,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
 
   // PIN eskalasi 4-6 digit: seed uji 4 digit (1111/2222/1234) lolos ke
   // authorizeSupervisor (server tetap menuntut 6) + fallback lokal.
-  const canConfirm = picked.length > 0; /** S7: tombol ini hanya gate RBAC +
+  const canConfirm = picked.length > 0; /** Fase 3 retur 7 hari: kedaluwarsa tak hard-block — wajib lewat dialog supervisor (approveVoid). Warning merah di bawah tetap tampil. */ /** S7: tombol ini hanya gate RBAC +
    * buka dialog persetujuan supervisor V1 (kontrak BE baru, legacy NOL);
    * persistVoid jalan di approveVoid (dipanggil dialog saat disetujui). */
   const confirm = () => {
@@ -490,6 +509,11 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
       ))}
       {serverReasons !== null && serverReasons.length === 0 ? (
         <Text style={styles.hint}>{t('cx_server_empty')}</Text>
+      ) : null}
+      {returnExpired ? (
+        <Text style={[styles.hint, { color: colors.red }]}>Retur melebihi 7 hari (umur {orderAgeDays} hari) — butuh persetujuan supervisor.</Text>
+      ) : isFashionReturn && orderAgeDays != null ? (
+        <Text style={styles.hint}>Umur struk {orderAgeDays} hari (batas retur 7 hari).</Text>
       ) : null}
       <AppInput label={t('c_note_opt')} value={note} onChangeText={setNote} placeholder={t('cx_note_ph')} />
       {/* S7: PIN + identitas supervisor pindah ke SupervisorApprovalDialog. */}

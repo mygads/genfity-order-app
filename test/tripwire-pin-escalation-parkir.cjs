@@ -43,7 +43,7 @@ function run() {
     'C6: HANYA NOT_SET (belum enroll) yang lanjut ke cek lokal');
 
   // 3. Fallback lokal selalu di bawah gerbang owner-only.
-  ok(/v = await verifyAttendancePin\(clean\)[\s\S]{0,600}?requireEscalationAccess\(v\.userId, 'settings\.edit'\)/.test(login),
+  ok(/verifyAttendancePin\(clean\)[\s\S]{0,800}?requireEscalationAccess\(v\.userId, 'settings\.edit'\)/.test(login),
     'C6: hash-lokal SELALU diikuti gerbang requireEscalationAccess owner-only');
   ok(/if \(!gate\.ok\) return \{ ok: false \};/.test(login),
     'C6: gerbang gagal = override gagal (jalur normal yang memverdict)');

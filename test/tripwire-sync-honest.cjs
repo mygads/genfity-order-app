@@ -61,7 +61,9 @@ function run() {
   ok(!/lastSyncMs/.test(master),
     'C12 SYNC-03: pullMaster tak menyentuh lastSyncMs (umur tak berbohong pasca-pull)');
 
-  // SYNC-03: tanpa infrastruktur background-sync (foreground-only eksplisit).
+  // SYNC-03: background-task OPSIONAL best-effort (2026-10-29): foreground-only tetap default jujur.
+  // backgroundSync.ts + wiring sync.ts BOLEH ada bila: dynamic require + isAvailable() + fail-open + tanpa klaim
+  // "sync saat screen mati". Yang DILARANG: klaim background aktif tanpa gate ketersediaan.
   const files = walk(SRC, []);
   const bgHits = files.filter((f) => {
     try {
@@ -71,8 +73,22 @@ function run() {
       return false;
     }
   });
-  ok(bgHits.length === 0,
-    `C12 SYNC-03: nol background-task infra (foreground-only jujur)${bgHits.length ? ` — ${bgHits.join(', ')}` : ''}`);
+  const allowedBg = new Set([
+    require('path').join(SRC, 'lib', 'backgroundSync.ts'),
+    require('path').join(SRC, 'lib', 'sync.ts'),
+  ]);
+  const hardBg = bgHits.filter((f) => !allowedBg.has(f));
+  ok(hardBg.length === 0,
+    `C12 SYNC-03: background hanya di modul opsional${hardBg.length ? ` — ${hardBg.join(', ')}` : ''}`);
+  try {
+    const bg = strip(fs.readFileSync(require('path').join(SRC, 'lib', 'backgroundSync.ts'), 'utf8'));
+    ok(/isBackgroundSyncAvailable/.test(bg) && /try/.test(bg) && /catch/.test(bg),
+      'C12 SYNC-03: background gate ketersediaan + fail-open (tanpa klaim palsu)');
+  } catch { ok(false, 'C12 SYNC-03: backgroundSync.ts wajib ada dgn gate'); }
+  try {
+    ok(!/sync saat screen mati/.test(sync),
+      'C12 SYNC-03: tanpa klaim sync-mati-layar');
+  } catch { /* abaikan */ }
 
   return { failures, checks };
 }

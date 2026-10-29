@@ -20,7 +20,7 @@
 import { getBoundSupervisorTerminalId } from './supervisor';
 import { fetchTerminalPosConfig } from './terminalApi';
 
-export type PosPinAction = 'payment' | 'refund' | 'void' | 'cancel' | 'edit';
+export type PosPinAction = 'payment' | 'refund' | 'void' | 'cancel' | 'edit' | 'discount';
 
 const FLAG_OF: Record<PosPinAction, string> = {
   payment: 'requirePinForPayment',
@@ -28,7 +28,14 @@ const FLAG_OF: Record<PosPinAction, string> = {
   void: 'requirePinForVoid',
   cancel: 'requirePinForCancel',
   edit: 'requirePinForEdit',
+  discount: 'requirePinForDiscount',
 };
+
+/** Diskon >20% selalu butuh PIN manajer walau flag mati (anti-fraud kasir). */
+export function requiresDiscountPin(discountPercent: number): boolean {
+  if (discountPercent > 20) return true;
+  return false;
+}
 
 let cacheAt = 0;
 let cached: Record<string, unknown> | null = null;

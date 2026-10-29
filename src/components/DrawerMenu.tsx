@@ -8,6 +8,8 @@ import { useLang } from '../lib/i18n';
 import { allowedRoutesFor, getDeviceRole, normalizeTag, subscribeDeviceRole } from '../lib/deviceRole';
 import { initDb, queryFirst } from '../lib/db';
 import { logoutRevoke } from '../lib/terminalApi';
+import { getCachedVerticalId } from '../lib/posModes';
+import { VERTICALS } from '../lib/verticals';
 
 interface DrawerItem {
   label: string;
@@ -168,14 +170,33 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
       icon: require('../../assets/icons/nav_esb_order_dashboard.webp'),
     },
   ];
+  // Vertical Shell: Tables/Kitchen/Booking disembunyikan untuk non-resto
+  // (fashion/grocery/pulsa tak butuh denah meja & tiket masak; service pakai
+  // Booking tapi bukan Tables/Kitchen resto). Fail-open: vertikal tak dikenal
+  // = tampil semua (jangan kunci kasir).
+  const verticalDrawer = (() => {
+    try {
+      const v = VERTICALS[getCachedVerticalId()];
+      return v?.drawer ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const verticalFiltered = verticalDrawer
+    ? ITEMS.filter((m) => {
+        if (m.route === 'Tables' && !verticalDrawer.tables) return false;
+        if (m.route === 'Kitchen' && !verticalDrawer.kitchen) return false;
+        return true;
+      })
+    : ITEMS;
   const VISIBLE: DrawerItem[] =
     allow === null
-      ? ITEMS
+      ? verticalFiltered
       : allow.has('QueueView')
         ? QUEUE_ONLY
         : allow.has('CustomerDisplay')
           ? CUSTOMER_ONLY
-          : ITEMS.filter((m) => allow.has(m.route));
+          : verticalFiltered.filter((m) => allow.has(m.route));
   const go = (route: string) => {
     // Gerbang kasir + dapur (Q4: view bebas-shift, dapur WAJIB shift terbuka):
     // shift tutup (status live dibaca tiap drawer dibuka) → tutup drawer

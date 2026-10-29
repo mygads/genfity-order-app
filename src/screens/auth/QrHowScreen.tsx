@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { TABLET_BP, fonts, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import { appAlert } from '../../lib/appAlert';
 import ScreenRoot from '../../components/ScreenRoot';
@@ -13,11 +13,11 @@ type Nav = {
 
 type Props = { navigation?: Nav };
 
-const BLUE = '#1E88E5';
-const HEADER_BLUE = '#1B7FD4';
-const TITLE_DARK = '#2B2B2B';
-const GREY = '#757575';
-const DIVIDER = '#D8D8D8';
+const BLUE = colors.blue; // PAR-01: biru legacy dipetakan ke theme.blue #1B5BD7 (jangan tambah biru baru)
+const HEADER_BLUE = colors.blueDark;
+const TITLE_DARK = colors.text;
+const GREY = colors.muted;
+const DIVIDER = colors.line;
 
 /**
  * Layar "Cara mendapatkan QR" - panduan 4 langkah + banner + thumbnail video

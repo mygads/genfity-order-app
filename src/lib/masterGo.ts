@@ -12,8 +12,8 @@
 import { apiGet, getBranchId } from '../config/server';
 import { initDb, queryFirst, run } from './db';
 import { persistReceiptPrefs } from './posSyncReceipt';
-import { fetchDefaultReceiptTemplate, persistReceiptTemplate } from './receiptTemplate';
-import { setWatermark } from './sync';
+import { RECEIPT_TEMPLATE_DEFAULTS, fetchDefaultKitchenTemplate, fetchDefaultReceiptTemplate, fetchReceiptTemplates, persistKitchenTemplate, persistReceiptTemplate, syncMerchantLogoRaster } from './receiptTemplate';
+import { getWatermark, setWatermark } from './sync';
 
 export class GoCatalogUnavailable extends Error {
   constructor() {
@@ -40,6 +40,7 @@ interface GoAddonCategory {
 
 interface GoMenuItem {
   id: number;
+  // P1-06 fields ditambah di bawah via cast (kompat mundur).
   name: string;
   price: number;
   promoPrice?: number | null;
@@ -51,6 +52,15 @@ interface GoMenuItem {
   dailyStockTemplate?: number | null;
   hasAddons?: boolean;
   addonCategories?: GoAddonCategory[] | null;
+  /** Fase 3 katalog polimorfik (best-effort, BE lama tak mengirim = null). */
+  unitLabel?: string | null;
+  sku?: string | null;
+  provider?: string | null;
+  nominal?: number | null;
+  durationMin?: number | null;
+  sizeLabel?: string | null;
+  colorLabel?: string | null;
+  kind?: string | null;
 }
 
 interface GoCategory {
@@ -61,6 +71,16 @@ interface GoCategory {
 
 interface GoMerchant {
   currency: string;
+  /** Identitas merchant untuk header struk 1:1 BE (showMerchantName/Address/Phone/Email). Opsional — BE lama tak mengirim. */
+  name?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  /** 1:1 BE: kode/logo/tipe merchant untuk prefix nomor, pratinjau logo,
+   * dan cabang label retail. Opsional — BE lama tak mengirim. */
+  code?: string | null;
+  logoUrl?: string | null;
+  merchantType?: string | null;
   enableTax: boolean;
   taxPercentage: number;
   /** Knob service charge merchant (audit trisisi #1 — server-driven).
@@ -89,6 +109,10 @@ interface GoMenuResponse {
     merchant: GoMerchant;
     categories: GoCategory[];
     menuItems: GoMenuItem[];
+    // P2 delta envelope (BE aditif): daftar id terhapus + penanda full/delta.
+    deletedIds?: Array<number | string>;
+    delta?: string;
+    sinceEcho?: string;
   };
 }
 
@@ -110,7 +134,10 @@ export interface GoCatalogResult {
  */
 export async function pullGoCatalog(): Promise<GoCatalogResult> {
   await initDb();
-  const res = await apiGet('api/merchant/pos/menu', { limit: 500 });
+  // P2 delta: kirim since bila watermark ada (BE lama abaikan). Best-effort.
+  let since = '';
+  try { const wm = await getWatermark('branchmenu'); since = wm.pull || ''; } catch { /* abaikan */ }
+  const res = await apiGet('api/merchant/pos/menu', { limit: 500, ...(since ? { since } : {}) });
   if (res.status === 404) throw new GoCatalogUnavailable();
   if (res.status === 401) {
     throw new Error('Sesi kedaluwarsa (401) — login ulang sebelum sync katalog.');
@@ -122,6 +149,18 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
   if (!merchant || !Array.isArray(categories) || !Array.isArray(menuItems)) {
     throw new Error('Pull katalog Go: bentuk data tak dikenal');
   }
+  // P2 delta: hapus lokal id yang dihapus server (best-effort; BE kini kirim [] bila tak ada).
+  try {
+    const del = (body.data as { deletedIds?: Array<number|string> }).deletedIds;
+    if (Array.isArray(del) && del.length > 0) {
+      for (const raw of del) {
+        const id = String(raw ?? '').trim();
+        if (!id) continue;
+        try { await run('DELETE FROM ms_branchmenu WHERE menuId = ?', [id]); } catch { /* abaikan */ }
+        try { await run('DELETE FROM ms_menu WHERE id = ?', [id]); } catch { /* abaikan */ }
+      }
+    }
+  } catch { /* delta best-effort */ }
 
   const now = new Date().toISOString();
   const branchId = getBranchId();
@@ -154,16 +193,43 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     // FE guard item.dailyStockTemplate === null).
     const tpl = m.dailyStockTemplate !== undefined && m.dailyStockTemplate !== null
       ? Math.max(0, Math.round(Number(m.dailyStockTemplate))) : null;
+    // P1-06: imageHash/imageUpdatedAt/updatedAt opsional (kompat mundur, BE lama tak mengirim).
+    const imgHash = (m as unknown as Record<string, unknown>).imageHash !== undefined && (m as unknown as Record<string, unknown>).imageHash !== null ? String((m as unknown as Record<string, unknown>).imageHash) : null;
+    const imgUpd = (m as unknown as Record<string, unknown>).imageUpdatedAt !== undefined && (m as unknown as Record<string, unknown>).imageUpdatedAt !== null ? String((m as unknown as Record<string, unknown>).imageUpdatedAt) : null;
+    const mUpd = (m as unknown as Record<string, unknown>).updatedAt !== undefined && (m as unknown as Record<string, unknown>).updatedAt !== null ? String((m as unknown as Record<string, unknown>).updatedAt) : now;
     await run(
-      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, trackStock, stockTemplate, flagActive, syncDate)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      `INSERT INTO ms_menu (id, menuName, categoryId, price, imageUrl, imageHash, imageUpdatedAt, updatedAt, stationId, trackStock, stockTemplate, flagActive, syncDate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET menuName = excluded.menuName,
          categoryId = excluded.categoryId, price = excluded.price,
-         imageUrl = excluded.imageUrl, trackStock = excluded.trackStock,
+         imageUrl = excluded.imageUrl, imageHash = excluded.imageHash, imageUpdatedAt = excluded.imageUpdatedAt, updatedAt = excluded.updatedAt, trackStock = excluded.trackStock,
          stockTemplate = excluded.stockTemplate,
          flagActive = excluded.flagActive, syncDate = excluded.syncDate`,
-      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), tracked, tpl, active, now],
+      [id, str(m.name) ?? '', m.categoryId !== undefined && m.categoryId !== null ? String(m.categoryId) : null, price, str(m.imageUrl), imgHash, imgUpd, mUpd, tracked, tpl, active, now],
     );
+    // Fase 3: kolom polimorfik best-effort (DB lama tanpa kolom = abaikan, jangan gagalkan pull).
+    try {
+      const extra = m as unknown as Record<string, unknown>;
+      const hasExtra = ['unitLabel','sku','provider','nominal','durationMin','sizeLabel','colorLabel','kind'].some((k) => extra[k] !== undefined && extra[k] !== null && String(extra[k]).trim() !== '');
+      if (hasExtra) {
+        const g = (k: string): string | null => {
+          const v = extra[k];
+          return v === undefined || v === null ? null : String(v).trim() || null;
+        };
+        const n = (k: string): number | null => {
+          const v = extra[k];
+          if (v === undefined || v === null) return null;
+          const x = Math.round(Number(v));
+          return Number.isFinite(x) ? x : null;
+        };
+        await run(
+          'UPDATE ms_menu SET unitLabel = COALESCE(?, unitLabel), sku = COALESCE(?, sku), provider = COALESCE(?, provider), nominal = COALESCE(?, nominal), durationMin = COALESCE(?, durationMin), sizeLabel = COALESCE(?, sizeLabel), colorLabel = COALESCE(?, colorLabel), kind = COALESCE(?, kind) WHERE id = ?',
+          [g('unitLabel'), g('sku'), g('provider'), n('nominal'), n('durationMin'), g('sizeLabel'), g('colorLabel'), g('kind'), id],
+        );
+      }
+    } catch {
+      /* DB lama tanpa kolom polimorfik — pull tetap sukses */
+    }
     // Stok cabang: habis = trackStock + stockQty <= 0. stationId +
     // lowThreshold lokal dipertahankan (printer milik layar Printer; ambang
     // milik Stock Management — pull tak mengirim keduanya).
@@ -232,6 +298,36 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     }
   }
 
+  // 1:1 identitas merchant untuk header struk (showMerchantName/Address/Phone/Email).
+  // Server-wins bila BE mengirim (BE-final /pos/menu); ketidakhadiran = jangan sentuh cache lokal.
+  try {
+    const mName = typeof merchant.name === 'string' ? merchant.name.trim().slice(0, 80) : '';
+    const mAddr = typeof merchant.address === 'string' ? merchant.address.trim().slice(0, 200) : '';
+    const mPhone = typeof merchant.phone === 'string' ? merchant.phone.trim().slice(0, 40) : '';
+    const mEmail = typeof merchant.email === 'string' ? merchant.email.trim().slice(0, 100) : '';
+    const mLogo = typeof merchant.logoUrl === 'string' ? merchant.logoUrl.trim().slice(0, 500) : '';
+    const mCode = typeof merchant.code === 'string' ? merchant.code.trim().toUpperCase().slice(0, 12) : '';
+    const mType = typeof merchant.merchantType === 'string' ? merchant.merchantType.trim().slice(0, 20) : '';
+    if (mName || mAddr || mPhone || mEmail || mLogo || mCode || mType) {
+      const infoRaw = JSON.stringify({ name: mName, address: mAddr, phone: mPhone, email: mEmail, logoUrl: mLogo, merchantCode: mCode, merchantType: mType }).slice(0, 2000);
+      await run(
+        `INSERT INTO ms_setting (key1, key2, value1, value2) VALUES ('Merchant', 'InfoJSON', ?, '1')
+         ON CONFLICT(key1, key2) DO UPDATE SET value1 = excluded.value1, value2 = excluded.value2`,
+        [infoRaw],
+      );
+    }
+  } catch {
+    /* abaikan — header fallback ke nama cabang lokal */
+  }
+  // Raster logo thermal (pull-time, fire-and-forget): unduh logoUrl → mono →
+  // Merchant/LogoMonoJSON; print-time hanya baca (offline tetap jalan).
+  // Gagal decode/jaringan = cache lama utuh, pratinjau URL tetap 1:1.
+  try {
+    const mLogoSync = typeof merchant.logoUrl === 'string' ? merchant.logoUrl.trim().slice(0, 500) : '';
+    void syncMerchantLogoRaster(mLogoSync).catch(() => {});
+  } catch {
+    /* abaikan */
+  }
   // Mata uang + PPN milik server (cermin currency.ts + totals.ts getTaxRate).
   const currency = String(merchant.currency ?? '').toUpperCase();
   if (currency === 'IDR' || currency === 'AUD') {
@@ -304,14 +400,35 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
   );
   // A3: preferensi struk milik server (hanya tulis bila BE mengirim kuncinya).
   await persistReceiptPrefs(merchant, run);
-  // APP-11: template struk website (server-wins; 404/BE lama = tak tulis =
-  // cache lokal utuh). Best-effort: gagal pull template tak boleh
-  // menggagalkan katalog (kontrak katalog tetap hijau).
+  // APP-11 rev 1:1: template struk website (server-wins; 404/BE lama =
+  // tak tulis = cache lokal utuh). Best-effort: gagal pull template tak boleh
+  // menggagalkan katalog (kontrak katalog tetap hijau). Bila BE baru namun
+  // merchant belum membuat template (list 200 kosong), tulis default kanonik
+  // BE agar merchant tanpa kustomisasi tetap 1:1 dengan PDF (bukan legacy).
   try {
-    const tpl = await fetchDefaultReceiptTemplate();
-    await persistReceiptTemplate(tpl, run);
+    const [tpl, kitchenTpl, all] = await Promise.all([
+      fetchDefaultReceiptTemplate(),
+      fetchDefaultKitchenTemplate(),
+      fetchReceiptTemplates(),
+    ]);
+    if (tpl) {
+      await persistReceiptTemplate(tpl, run);
+    } else if (all.length === 0) {
+      // List kosong perlu dibedakan dari BE lama (404 juga []): cek via
+      // endpoint mentah? fetchReceiptTemplates menelan 404. Di sini [] =
+      // kemungkinan BE baru tanpa template ATAU BE lama/offline. Tulis
+      // default hanya bila katalog Go sukses (BE baru terbukti) — BE lama
+      // takkan sampai ke lane ini (GoCatalogUnavailable lebih dulu).
+      await persistReceiptTemplate(
+        { id: 0, name: 'default', templateType: 'CUSTOMER_RECEIPT', settings: { ...RECEIPT_TEMPLATE_DEFAULTS } },
+        run,
+      );
+    }
+    if (kitchenTpl) {
+      await persistKitchenTemplate(kitchenTpl, run);
+    }
   } catch {
-    /* abaikan — render fallback ke default perilaku-lama */
+    /* abaikan — render fallback ke default kanonik BE */
   }
 
   await setWatermark('menu', { pull: now });

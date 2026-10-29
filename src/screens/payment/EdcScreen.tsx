@@ -39,6 +39,12 @@ type Props = {
       ongkirCut?: number;
       tip?: number;
       customer?: string;
+      serviceDate?: string;
+      serviceTime?: string;
+      technician?: string;
+      dpPercent?: number;
+      deliveryAddress?: string;
+      deliveryFee?: number;
       memberId?: string;
       /** Ronde-3 Q1: customerId GO (int) bila member ditempel. */
       customerId?: number;
@@ -65,6 +71,12 @@ export default function EdcScreen({ navigation, route }: Props) {
     route?.params?.memberPoin == null || !Number.isFinite(Number(route.params.memberPoin))
       ? null
       : Math.max(0, Math.round(Number(route.params.memberPoin)));
+  const serviceDateParam = String(route?.params?.serviceDate ?? '').trim();
+  const serviceTimeParam = String(route?.params?.serviceTime ?? '').trim();
+  const technicianParam = String(route?.params?.technician ?? '').trim();
+  const dpPercentParam = Math.max(0, Math.round(Number(route?.params?.dpPercent) || 0));
+  const deliveryAddressParam = String((route?.params as { deliveryAddress?: unknown } | undefined)?.deliveryAddress ?? '').trim();
+  const deliveryFeeParam = Math.max(0, Math.round(Number((route?.params as { deliveryFee?: unknown } | undefined)?.deliveryFee) || 0));
   const [phase, setPhase] = useState<Phase>('waiting');
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
@@ -178,6 +190,12 @@ export default function EdcScreen({ navigation, route }: Props) {
     const packagingParam = Math.max(0, Math.round(Number(p.packaging) || 0));
     const roundingParam = Math.round(Number(p.rounding) || 0);
     const tipParam = Math.max(0, Math.round(Number(p.tip) || 0));
+    const serviceDateParam = String(p.serviceDate ?? '').trim();
+    const serviceTimeParam = String(p.serviceTime ?? '').trim();
+    const technicianParam = String(p.technician ?? '').trim();
+    const dpPercentParam = Math.max(0, Math.round(Number(p.dpPercent) || 0));
+    const deliveryAddressParam = String((p as { deliveryAddress?: unknown }).deliveryAddress ?? '').trim();
+    const deliveryFeeParam = Math.max(0, Math.round(Number((p as { deliveryFee?: unknown }).deliveryFee) || 0));
     const paidBefore = fwdSplits.reduce((s, x) => s + x.amount, 0);
     const fullTotal = paidBefore + total;
     // Split grup (BillPreview/SplitBill via Pay): kunjungan EDC ikut SATU
@@ -219,6 +237,12 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
             ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
           };
           // C7/L1 save-then-record (cermin PayScreen:553-554): tulis DB dulu,
           // antre HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
@@ -282,6 +306,12 @@ export default function EdcScreen({ navigation, route }: Props) {
         ...(p.table ? { table: p.table } : {}),
         ...(p.ongkir && p.ongkir > 0 ? { ongkir: p.ongkir } : {}),
         ...(p.customer ? { customer: p.customer } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
       });
       return;
     }
@@ -310,6 +340,12 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
       ...(tipParam > 0 ? { tipTotal: tipParam } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
     };
     // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
     // HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
@@ -362,6 +398,12 @@ export default function EdcScreen({ navigation, route }: Props) {
       ...(p.ongkirCut && p.ongkirCut > 0 ? { ongkirCut: p.ongkirCut } : {}),
       ...(tipParam > 0 ? { tip: tipParam } : {}),
       ...(p.customer ? { customer: p.customer } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
     });
   };
 
@@ -505,6 +547,12 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(p.table ? { table: p.table } : {}),
             ...(p.ongkir ? { ongkir: p.ongkir } : {}),
             ...(p.customer ? { customer: p.customer } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
             ...(p.memberId ? { memberId: p.memberId } : {}),
             ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
             ...(backSalesNum ? { salesNum: backSalesNum } : {}),

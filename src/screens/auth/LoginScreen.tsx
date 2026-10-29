@@ -22,6 +22,7 @@ import {
   forceLogoutOnTokenLoss,
   getBinding as getSessionBinding,
   getGrantPinVersion,
+  noteServerPinVersion as noteServerPinVerAsync,
   getMaxOfflineGrantDays,
   getSession,
   hydrateTerminalState,
@@ -53,9 +54,9 @@ import { queryFirst } from '../../lib/db';
 import { isSeedReady, whenSeedReady } from '../../lib/seed';
 import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
-import { readMerchantTypeFromLoginBody } from '../../lib/posModes';
+
 import { syncCurrencyFromProfile } from '../../lib/currency';
-import { syncMerchantTypeFromProfile } from '../../lib/posModes';
+import { readMerchantTypeFromLoginBody, readVerticalIdFromLoginBody, setCachedVerticalId, syncMerchantTypeFromProfile, syncVerticalIdFromProfile } from '../../lib/posModes';
 import { syncTimezoneFromProfile } from '../../lib/timezone';
 import { useLang, applyBranchLanguagePolicy } from '../../lib/i18n';
 import AppButton from '../../components/AppButton';
@@ -70,17 +71,17 @@ type Nav = {
 
 type Props = { navigation?: Nav };
 
-const BLUE = '#1E88E5';
-const BLUE_PALE = '#E7F3FF';
-const BLUE_ICON_BG = '#D2E7FF';
-const ORANGE = '#F5820D';
-const PEACH = '#F6C28B';
-const GREY = '#757575';
-const BORDER = '#E0E0E0';
-const INPUT_BORDER = '#BDBDBD';
-const ICON_GREY = '#9E9E9E';
-const RED = '#D33A3F';
-const TITLE_DARK = '#2B2B2B';
+const BLUE = colors.blue; // PAR-01: biru legacy dipetakan ke theme.blue #1B5BD7 (jangan tambah biru baru)
+const BLUE_PALE = colors.paleBlue;
+const BLUE_ICON_BG = colors.paleBlue; // UI-konsisten
+const ORANGE = colors.orange; // PAR-01: primer GENFITY #FF6B35
+const PEACH = colors.paleOrange; // UI-konsisten: peach -> paleOrange kanonis
+const GREY = colors.muted;
+const BORDER = colors.line; // UI-konsisten: border kanonis
+const INPUT_BORDER = colors.inputBorder; // UI-konsisten: paritas FE gray-300
+const ICON_GREY = colors.faint; // UI-konsisten
+const RED = colors.red; // UI-konsisten: merah kanonis theme
+const TITLE_DARK = colors.text;
 
 const ICONS = {
   userBlue: require('../../../assets/icons/login_username_blue.webp'),
@@ -789,7 +790,7 @@ async function completeOnline(
   // C2 Sesi-C QA3: sekalian segarkan cache merchant-type (RESTAURANT/PRODUCT/
   // SERVICE → daftar mode kasir + routing orderType; tak ada = default
   // restaurant, ASUMSI). Fire-and-forget best-effort cermin currency.
-  try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  try { void syncMerchantTypeFromProfile().then((mt) => { try { void syncVerticalIdFromProfile(mt).catch(() => {}); } catch { /* abaikan */ } }).catch(() => {}); } catch { /* abaikan */ }
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   try {
     const pol = payload.policy as Record<string, unknown> | undefined;
@@ -800,6 +801,8 @@ async function completeOnline(
   }
   try {
     saveSessionGrant(buildSessionGrant({ userId, terminalId: ctx.terminalId, deviceId, staffPin: pin, ...(pinVersion !== undefined ? { pinVersion } : {}) }));
+    // P0-01: catat versi server terakhir untuk deny stale offline.
+    try { void noteServerPinVerAsync({ userId, terminalId: ctx.terminalId, deviceId }, Number(pinVersion) || 0).catch(() => {}); } catch { /* abaikan */ }
   } catch (e) {
     console.warn('[login] saveGrant gagal:', e);
   }
@@ -821,10 +824,25 @@ async function completeOnline(
  * diperpanjang saat auth ONLINE sukses (completeOnline) — fungsi ini tak
  * pernah menyentuh grant. Tanpa grant valid fungsi ini tak pernah dipanggil.
  */
+/** P0-01: deny stale offline — grant.pinVersion vs server terakhir (keduanya non-zero & beda = tolak).
+ * Best-effort async; storage gagal = fail-open (kasir tetap jalan), tapi catat log. */
+async function checkGrantStaleDeny(userId: string, terminalId: string, deviceId: string): Promise<boolean> {
+  try {
+    const { getGrantPinVersion, getLastServerPinVersion } = await import('../../session');
+    const g = getGrantPinVersion({ userId, terminalId, deviceId });
+    const s = await getLastServerPinVersion({ userId, terminalId, deviceId });
+    if (g && g > 0 && s && s > 0 && g !== s) {
+      try { console.info(`[login] deny stale offline: grant v${g} != server v${s} — sync untuk refresh`); } catch { /* abaikan */ }
+      return true;
+    }
+  } catch { /* fail-open */ }
+  return false;
+}
 async function completeOffline(
   userId: string,
   username: string,
   pin: string,
+  // P0-01 offline hardening: grant.pinVersion==0 (belum pernah E29) + sudah pernah pull = minta online sekali.
   // GAP-14: attribution owner-override ('owner:<approverUserId>') — lihat
   // completeOnline; absen = login offline normal tanpa override.
   approvedBy?: string,
@@ -832,6 +850,10 @@ async function completeOffline(
   const ctx = await resolveTermCtx();
   if (!ctx) throw new Error('unbound');
   const deviceId = ctx.deviceId || (await withTimeout(getContractDeviceId(), 5000).catch(() => ''));
+  // P0-01 enforce: grant.pinVersion vs server terakhir — beda & keduanya non-zero = tolak offline.
+  try {
+    if (await checkGrantStaleDeny(userId, (ctx.terminalId || '').trim(), deviceId)) throw new Error('grant-stale-pin-changed');
+  } catch (e) { if (e instanceof Error && e.message === 'grant-stale-pin-changed') throw e; /* storage gagal = fail-open */ }
   const prev = getSession();
   const sameUser = !!prev && prev.userId === userId;
   const sess: DeviceSession = {
@@ -862,7 +884,7 @@ async function completeOffline(
   // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
   try { void syncCurrencyFromProfile().then(() => applyBranchLanguagePolicy()).catch(() => {}); } catch { /* abaikan */ }
   // C2 Sesi-C QA3: segarkan cache merchant-type (cermin completeOnline).
-  try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
+  try { void syncMerchantTypeFromProfile().then((mt) => { try { void syncVerticalIdFromProfile(mt).catch(() => {}); } catch { /* abaikan */ } }).catch(() => {}); } catch { /* abaikan */ }
   try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
   // S4-APP-313 (bound-hang): sama seperti completeOnline — storage wedged
   // tak boleh menahan pinBusy selamanya; hash hanya akselerator offline.
@@ -993,6 +1015,8 @@ export default function LoginScreen({ navigation }: Props) {
 
   /** grant_expired: blokir eksplisit, tanpa silent local login. */
   const grantExpiredText = (): string => t('grant_expired');
+  /** P0-01: PIN diubah manajer — tolak offline, minta sync. */
+  const grantStaleText = (): string => { const v = t('grant_stale_pin_changed' as never); if (typeof v === 'string' && v !== 'grant_stale_pin_changed') return v; return lang === 'id' ? 'PIN diubah manajer — sync untuk refresh. Login offline ditolak demi keamanan.' : 'PIN changed by manager — sync to refresh. Offline login denied for security.'; };
 
   /** Teks unbound: kunci kanonis terminal_unbound_hint (id+en di kamus). */
   const unboundText = (): string => t('terminal_unbound_hint');
@@ -1187,7 +1211,7 @@ export default function LoginScreen({ navigation }: Props) {
     // PW-4/S3: sekalian segarkan cache timezone cabang (AUD = Australia/Perth).
     try { void syncCurrencyFromProfile().then(() => applyBranchLanguagePolicy()).catch(() => {}); } catch { /* abaikan */ }
     // C2 Sesi-C QA3: segarkan cache merchant-type (cermin completeOnline).
-    try { void syncMerchantTypeFromProfile().catch(() => {}); } catch { /* abaikan */ }
+    try { void syncMerchantTypeFromProfile().then((mt) => { try { void syncVerticalIdFromProfile(mt).catch(() => {}); } catch { /* abaikan */ } }).catch(() => {}); } catch { /* abaikan */ }
     try { void syncTimezoneFromProfile().catch(() => {}); } catch { /* abaikan */ }
     // M8: QR/DEV login menerbitkan grant rangkap-tiga via penerbit kanonis yang
     // sama dengan completeOnline (buildSessionGrant + saveSessionGrant).
@@ -1521,9 +1545,18 @@ export default function LoginScreen({ navigation }: Props) {
               // C2: tipe merchant dari body E01 (forward-compat; BE 2026-10-20
               // belum mengirim → '' → adopt pertahankan prev/default).
               merchantType: readMerchantTypeFromLoginBody(second.body) || undefined,
+              verticalId: readVerticalIdFromLoginBody(second.body) || undefined,
               tag: str(pTerm.tag) || term.tag,
               deviceId: data.deviceId,
             });
+            // Vertical Shell: cache in-memory langsung dari E01 agar kasir
+            // benar di render pertama (sebelum profile sync tiba).
+            try {
+              const vBody = second.body as Record<string, unknown>;
+              const vRaw = (vBody?.['verticalId'] ?? vBody?.['vertical_id'] ?? readVerticalIdFromLoginBody(second.body) ?? '') as string;
+              const mRaw = readMerchantTypeFromLoginBody(second.body);
+              setCachedVerticalId(String(vRaw ?? ''), mRaw);
+            } catch { /* abaikan */ }
           } catch (e) {
             setServerError(e instanceof Error && e.message ? e.message : needBeText());
             return;
@@ -1667,7 +1700,7 @@ export default function LoginScreen({ navigation }: Props) {
               try {
                 await completeOffline(candidate.userId, candidate.username, pin, approvedBy);
               } catch (e) {
-                setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+                setPinError(e instanceof Error && e.message === 'grant-stale-pin-changed' ? grantStaleText() : e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
                 return;
               }
               setPinAttempts(0);
@@ -1735,7 +1768,7 @@ export default function LoginScreen({ navigation }: Props) {
           } catch (e) {
             // completeOffline hanya melempar 'unbound' (tanpa ikatan); gate
             // grant sudah lolos di pemanggil — selain itu = grant basi.
-            setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+            setPinError(e instanceof Error && e.message === 'grant-stale-pin-changed' ? grantStaleText() : e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
             return;
           }
           setPinAttempts(0);
@@ -1933,7 +1966,7 @@ export default function LoginScreen({ navigation }: Props) {
             await completeOffline(userId, candidate.username, pin);
           } catch (e) {
             // completeOffline hanya melempar 'unbound' (tanpa ikatan).
-            setPinError(e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
+            setPinError(e instanceof Error && e.message === 'grant-stale-pin-changed' ? grantStaleText() : e instanceof Error && e.message === 'unbound' ? needBeText() : grantExpiredText());
             return;
           }
           setPinAttempts(0);

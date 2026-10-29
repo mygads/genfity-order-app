@@ -15,6 +15,7 @@ import {
 import { hashPin, verifyPinHash } from './lib/pin';
 import type { PinRecord } from './lib/pin';
 import { normalizeMerchantType } from './lib/posModes';
+import { defaultVerticalForMerchantType, normalizeVerticalId } from './lib/verticals';
 
 export interface Session {
   name: string;
@@ -83,6 +84,10 @@ export interface Binding {
    * default), dipertahankan lintas re-bind terminal yang sama. BUKAN
    * otorisasi — gate izin tetap milik access.ts + server. */
   merchantType?: string;
+  /** Vertical UX preset (Adaptive Vertical Shell): COFFEE/WARUNG_QSR/RESTO_FULL/
+   * FASHION/GROCERY/PULSA_DIGITAL/SERVICE. Diderivasi dari body E01
+   * (verticalId) > profil server > default tipe. BUKAN otorisasi. */
+  verticalId?: string;
   /** Satu dari 5 tag kanonis, disimpan lowercase (kasir|dapur|view_pelanggan|view_queue|full_access). */
   tag: string;
   /** Untuk tag view_pelanggan: terminal kasir pasangan (aturan 1:1, BE E15). */
@@ -159,6 +164,8 @@ const DEMO: Session = {
 const LS_SESSION = 'genfity.session.current';
 const LS_BINDING = 'genfity.terminal.binding';
 const LS_GRANT = 'genfity.session.grant';
+/** P0-01: versi PIN server terakhir yang dipelajari online per-triple (untuk deny stale offline). */
+const LS_SERVER_PINVER = 'genfity.session.serverPinVer';
 const LS_GRANT_POLICY = 'genfity.session.grantPolicy';
 const LS_PENDING_REVOKE = 'genfity.session.pendingRevoke';
 
@@ -451,6 +458,8 @@ function isBindingLike(v: unknown): v is Binding {
     (b['merchantName'] === undefined || typeof b['merchantName'] === 'string') &&
     // C2: merchantType opsional (binding lama tanpa kunci ini tetap valid).
     (b['merchantType'] === undefined || typeof b['merchantType'] === 'string') &&
+    // Vertical Shell: verticalId opsional (binding lama tetap valid).
+    (b['verticalId'] === undefined || typeof b['verticalId'] === 'string') &&
     typeof b['tag'] === 'string' &&
     typeof b['boundAt'] === 'string'
   );
@@ -500,6 +509,8 @@ export function saveBinding(b: Binding): Binding {
     merchantName: (b.merchantName ?? b.branchName ?? '').trim(),
     // C2: materialisasi tipe (default RESTAURANT = [ASUMSI] koordinator).
     merchantType: normalizeMerchantType(b.merchantType),
+    // Vertical Shell: input > simpanan lama > default tipe (WARUNG_QSR aman legacy).
+    verticalId: normalizeVerticalId((b as { verticalId?: unknown }).verticalId) || defaultVerticalForMerchantType(normalizeMerchantType(b.merchantType)),
     // Kanon SPEC §11.1: tag simpanan SELALU satu dari 5 nilai —
     // resolveTerminalTag memaksa explicit default 'full_access' untuk
     // string asing/kosong (tanpa '' diam-diam yang merusak DrawerMenu dkk).
@@ -536,6 +547,7 @@ export interface AdoptTerminalBindingInput {
   merchantName?: string;
   /** C2: tipe merchant dari body E01 ('' = tak diketahui → default saat baca). */
   merchantType?: string;
+  verticalId?: string;
 }
 
 /**
@@ -585,6 +597,9 @@ export function adoptTerminalBinding(
     // C2: input E01 > binding lama > default RESTAURANT (di saveBinding).
     // BUKAN otorisasi — hanya daftar mode kasir.
     merchantType: normalizeMerchantType(input?.merchantType ?? prev?.merchantType),
+    verticalId:
+      normalizeVerticalId((input as { verticalId?: unknown })?.verticalId ?? (prev as { verticalId?: unknown })?.verticalId) ||
+      defaultVerticalForMerchantType(normalizeMerchantType(input?.merchantType ?? prev?.merchantType)),
     tag,
     // Pairing 1:1 (BE E15) dipertahankan hanya bila terminalnya sama.
     ...(prev && prev.terminalId === terminalId && prev.pairedKasirId
@@ -1003,7 +1018,26 @@ export function setGrantPinVersion(triple: GrantTriple, version: number): Grant 
   return n;
 }
 
+/** P0-01: catat versi PIN server terakhir (online) per-triple. Tak pernah melempar. */
+export async function noteServerPinVersion(triple: GrantTriple, v: number): Promise<void> {
+  try {
+    if (!v) return;
+    const { getJSON, setJSON } = await import('./lib/storage');
+    const m = await getJSON<Record<string, number>>(LS_SERVER_PINVER, {});
+    m[grantKeyOf(triple)] = Math.max(0, Math.round(Number(v) || 0));
+    await setJSON(LS_SERVER_PINVER, m);
+  } catch { /* abaikan */ }
+}
 /** Baca pinVersion tersimpan satu triple; null = tak ada grant (wajib online). */
+/** P0-01: baca versi server terakhir (async). 0/null = belum pernah online / tak enforce. */
+export async function getLastServerPinVersion(triple: GrantTriple): Promise<number | null> {
+  try {
+    const { getJSON } = await import('./lib/storage');
+    const m = await getJSON<Record<string, number>>(LS_SERVER_PINVER, {});
+    const v = Number(m[grantKeyOf(triple)] || 0);
+    return v > 0 ? v : null;
+  } catch { return null; }
+}
 export function getGrantPinVersion(triple: GrantTriple): number | null {
   restoreGrant();
   const g = grantMap[grantKeyOf(triple)];
@@ -1866,3 +1900,7 @@ export function getSessionWelcome(): {
       : merchantName || terminalName;
   return { merchantName, terminalName, text };
 }
+
+// P2 PIN rotation/lockout audit (2026-10-29): grant.pinVersion sembuh pasca-E29 sukses (rotation implisit);
+// lockout progresif lokal 5x salah -> kunci modal 60dtk (LoginScreen); lockout server + audit bind/claim/unbind/pair/stock/close/approve
+// tampil di FE operational-review bila BE ekspos. Sampai ada, diagnostik console.info [login] pinVersion adalah jejak jujur.

@@ -594,6 +594,8 @@ export interface SettleInput {
   voucherCode?: string;
   notes?: string;
   idempotencyKey?: string;
+  /** P0-03: UUID sesi kas lokal (offline) untuk rekonsiliasi BE. */
+  clientSessionUuid?: string;
   /**
    * Ronde-3 Q1/Q2: customerId GO (int) bila member ditempel. Alias ESB
    * (prefix M/MC) DILARANG — guard di bawah hanya meneruskan int valid;
@@ -656,6 +658,8 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<Settl
           ...(pinClean ? { pin: pinClean } : {}),
           ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
           ...(proofClean ? { proofUrl: proofClean } : {}),
+          // P0-03: UUID sesi kas lokal (offline) untuk rekonsiliasi BE.
+          ...(inp.clientSessionUuid ? { clientSessionUuid: String(inp.clientSessionUuid).slice(0, 64) } : {}),
         },
         idempotencyKey: key,
       }),
@@ -909,6 +913,33 @@ export function resetInvoiceEmailCache(): void {
   invoiceEmailCache = null;
 }
 
+// Share WA manual (2026-10-29, tanpa gateway): tombol share + template teks -> redirect wa.me via Linking.
+// TIDAK ada notif/kirim otomatis ke gateway WA eksternal. Copy jujur: "dibagikan", bukan "terkirim WA".
+/** Bersihkan nomor WA ke digit saja (62...); kosong = share tanpa target (user pilih kontak di WA). */
+export function cleanWaPhone(raw: unknown): string {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('0')) return `62${d.slice(1)}`;
+  return d;
+}
+/** Bangun URL wa.me untuk template teks struk (tanpa network, tanpa gateway). */
+export function waShareUrl(text: string, phone?: unknown): string {
+  const body = encodeURIComponent(String(text ?? ''));
+  const to = cleanWaPhone(phone);
+  return to ? `https://wa.me/${to}?text=${body}` : `https://wa.me/?text=${body}`;
+}
+/** Buka WA via Linking (best-effort; false bila tak bisa dibuka — panggil share sheet sebagai fallback). */
+export async function openWaShare(text: string, phone?: unknown): Promise<boolean> {
+  try {
+    const { Linking } = await import('react-native');
+    const url = waShareUrl(text, phone);
+    const ok = await Linking.canOpenURL(url).catch(() => false);
+    if (!ok) return false;
+    await Linking.openURL(url);
+    return true;
+  } catch { return false; }
+}
+
 export async function sendPosReceiptEmail(
   serverId: number,
   email: string,
@@ -970,6 +1001,10 @@ export interface ServerOrderDetail {
   orderType: string;
   tableNumber: string;
   customerName: string;
+  /** 1:1 BE: telpon pelanggan, alamat antar, catatan order (notes). */
+  customerPhone: string;
+  deliveryAddr: string;
+  orderNote: string;
   /** Nama kasir penyelesaian (payment.paidBy.name BE) — kosong bila absen. */
   cashierName: string;
   subtotal: number;
@@ -1068,6 +1103,17 @@ export async function fetchMerchantOrderDetail(
         }
       }
     }
+    // 1:1 BE: alamat antar = unit/gedung/no/lantai + jalan + instruksi.
+    const delParts = [
+      strOf(o.deliveryUnit ?? o.delivery_unit),
+      strOf(o.deliveryBuildingName ?? o.delivery_building_name),
+      strOf(o.deliveryBuildingNumber ?? o.delivery_building_number),
+      strOf(o.deliveryFloor ?? o.delivery_floor),
+    ].filter((s) => s);
+    const delStreet = strOf(o.deliveryAddress ?? o.delivery_address ?? o.deliveryStreetLine ?? o.delivery_street_line);
+    const delInstr = strOf(o.deliveryInstructions ?? o.delivery_instructions);
+    const delAddr = [...delParts, delStreet].filter((s) => s).join(', ')
+      + (delInstr ? ` (${delInstr})` : '');
     return {
       ok: true,
       data: {
@@ -1076,6 +1122,9 @@ export async function fetchMerchantOrderDetail(
         orderType: strOf(o.orderType ?? o.order_type),
         tableNumber: strOf(o.tableNumber ?? o.table_number),
         customerName: strOf(cust.name ?? o.customerName ?? o.customer_name) || '-',
+        customerPhone: strOf(cust.phone ?? o.customerPhone ?? o.customer_phone),
+        deliveryAddr: delAddr,
+        orderNote: strOf(o.notes ?? o.note),
         cashierName: strOf(paidBy.name),
         subtotal: numOf(o.subtotal),
         discount: numOf(o.discountAmount ?? o.discount_amount ?? o.discount),

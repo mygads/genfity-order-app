@@ -10,7 +10,8 @@ import { useLang, tCur } from '../../lib/i18n';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type ServiceConfig } from '../../lib/totals';
 import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
-import { enqueueSync } from '../../lib/sync';
+import { enqueueSync, payPolicyBlockReason } from '../../lib/sync';
+import { getCachedVerticalId } from '../../lib/posModes';
 import { nextSalesNum } from '../../lib/sales';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
@@ -41,6 +42,13 @@ type Props = {
       packaging?: number;
       subtotal?: number;
       salesNum?: string;
+      /** Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa dari Cashier. */
+      serviceDate?: string;
+      serviceTime?: string;
+      technician?: string;
+      dpPercent?: number;
+      deliveryAddress?: string;
+      deliveryFee?: number;
     };
   };
 };
@@ -59,6 +67,14 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [customerId, setCustomerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Nomor struk draft: dipakai ulang saat bayar + kunci hapus draft di Success. */
   const [salesNum, setSalesNum] = useState(route?.params?.salesNum ?? '');
+  /** Vertical Shell Fase 3 (SERVICE/HOME_SERVICE): jadwal + teknisi + DP + alamat
+   * diteruskan apa adanya ke Pay (kasir mengisi di Cashier; CartDetail hanya kurir). */
+  const [serviceDate] = useState(route?.params?.serviceDate ?? '');
+  const [serviceTime] = useState(route?.params?.serviceTime ?? '');
+  const [technician] = useState(route?.params?.technician ?? '');
+  const [dpPercent] = useState(route?.params?.dpPercent ?? 0);
+  const [deliveryAddress] = useState(route?.params?.deliveryAddress ?? '');
+  const [deliveryFee] = useState(Math.max(0, Math.round(Number(route?.params?.deliveryFee) || 0)));
   /** Tarif pajak setting-driven (ms_setting Tax/PPN, fallback 11). */
   const [taxRate, setTaxRate] = useState(TAX_DEFAULT);
   /** Service charge server-driven (audit trisisi #1) + langkah pembulatan
@@ -251,6 +267,14 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
+      // Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa diteruskan ke Pay
+      // (tanpa ini BE 400 serviceDate/serviceTime untuk SERVICE).
+      ...(serviceDate ? { serviceDate } : {}),
+      ...(serviceTime ? { serviceTime } : {}),
+      ...(technician ? { technician } : {}),
+      ...(dpPercent > 0 ? { dpPercent } : {}),
+      ...(deliveryAddress ? { deliveryAddress } : {}),
+      ...(deliveryFee > 0 ? { deliveryFee } : {}),
     });
   const goPromo = () =>
     // Bawa konteks cart penuh: kembali dari promo hanya membawa {voucher}
@@ -268,7 +292,14 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       ...(customerId != null ? { customerId } : {}),
       ...(salesNum.trim() ? { salesNum: salesNum.trim() } : {}),
     });
+  const [blockMsg, setBlockMsg] = useState('');
   const goSave = () => {
+    // Vertical Shell Fase 2: PREPAID tak boleh draft/parked.
+    try {
+      const reason = payPolicyBlockReason(getCachedVerticalId());
+      if (reason) { setBlockMsg(reason); return; }
+    } catch { /* lanjut legacy */ }
+
     setSavedTick(true);
     const title = `${modeLabel} · ${customer.trim() || t('guestFallback')}`;
     const now = new Date().toISOString();
@@ -299,6 +330,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         // ulang kanonis dari dasar yang sama (net di sini = cut susut permanen).
         ...(ongkir > 0 ? { ongkir } : {}),
         ...(ongkirCut > 0 ? { ongkirCut } : {}),
+        ...(serviceDate ? { serviceDate } : {}),
+        ...(serviceTime ? { serviceTime } : {}),
+        ...(technician ? { technician } : {}),
+        ...(dpPercent > 0 ? { dpPercent } : {}),
+        ...(deliveryAddress ? { deliveryAddress } : {}),
+        ...(deliveryFee > 0 ? { deliveryFee } : {}),
         total,
         ts: Date.now(),
       });
@@ -608,6 +645,12 @@ export default function CartDetailScreen({ navigation, route }: Props) {
               ...(packaging > 0 ? { packaging } : {}),
               ...(voucher ? { voucher: { code: voucher.code, amount: voucher.amount, ...(voucher.kind ? { kind: voucher.kind } : {}), ...voucherExtras(voucher) } } : {}),
               discount: discountTotal + voucherAmt,
+              ...(serviceDate ? { serviceDate } : {}),
+              ...(serviceTime ? { serviceTime } : {}),
+              ...(technician ? { technician } : {}),
+              ...(dpPercent > 0 ? { dpPercent } : {}),
+              ...(deliveryAddress ? { deliveryAddress } : {}),
+              ...(deliveryFee > 0 ? { deliveryFee } : {}),
               ...(service > 0 ? { service } : {}),
               ...(taxIncl > 0 ? { tax: taxIncl } : {}),
               ...(rounding !== 0 ? { rounding } : {}),
@@ -678,6 +721,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             {t('totalUpdatedA')}{rp(routeTotal)} → {rp(total)}{t('totalUpdatedB')}
           </Text>
         )}
+        {blockMsg ? <Text style={[styles.footerNote, { color: colors.red }]}>{blockMsg}</Text> : null}
         {savedTick && items.length > 0 && (
           <Text style={[styles.footerNote, isTablet && styles.footerNoteBig]}>{t('orderSavedNote')}</Text>
         )}

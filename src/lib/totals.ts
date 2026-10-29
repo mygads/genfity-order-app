@@ -560,3 +560,6 @@ export function totals(input: TotalsInput): TotalsResult {
     isPercentVoucher,
   };
 }
+
+// P3 delivery dispatch (tanpa ubah kontrak): /delivery/dispatch sambungkan ke ongkirCut/deliveryFeeSchedule di sini.
+// Sampai ada, DineIn/Delivery + ongkirCut lokal adalah sumber benar (BE validasi final saat push).

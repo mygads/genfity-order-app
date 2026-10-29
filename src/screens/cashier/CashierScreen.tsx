@@ -30,7 +30,18 @@ import { ApiPath, getTerminal } from '../../config/server';
 import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';
 import { TAX_DEFAULT, defaultOngkirForMode, getPackagingFee, getRoundStep, getServiceConfig, getTaxRate, isMarketplaceMode, SERVICE_LEGACY, serviceLabel, platformFeeLabel, totals, voucherExtras, type DeliveryFeeSchedule, type ServiceConfig } from '../../lib/totals';
 import { getCachedCurrency } from '../../lib/currency';
-import { getCachedDeliveryEnabled, isDeliveryChannelLabel, posModesFor, subscribeDeliveryFlag } from '../../lib/posModes';
+import { getCachedDeliveryEnabled, getCachedVerticalId, isDeliveryChannelLabel, posModesFor, posModesForVertical, subscribeDeliveryFlag, syncVerticalIdFromProfile } from '../../lib/posModes';
+import { MODIFIER_PRESETS, VERTICALS, isValidPhoneNumberID } from '../../lib/verticals';
+import ScanBar from '../../components/vertical/ScanBar';
+import VariantPicker from '../../components/vertical/VariantPicker';
+import PhoneTopupForm from '../../components/vertical/PhoneTopupForm';
+import ServiceScheduleForm from '../../components/vertical/ServiceScheduleForm';
+import { payPolicyBlockReason } from '../../lib/sync';
+import { getBillingStatus, type BillingStatus } from '../../lib/billingStatus';
+import ModeBar from '../../components/cashier/ModeBar';
+// CatalogGrid (components/cashier) = versi ramping reusable; CashierScreen memakai grid custom
+// superset (soldOut/void/edit/modifier + low + unit/SKU) — parity dijaga tripwire-vertical-shell.
+import { getHybridVerticals } from '../../lib/posModes';
 import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn, getDeliveryFeeSchedule } from '../../lib/posConfigSync';
 import { fetchTerminalPosConfig } from '../../lib/terminalApi';
 import { isOutsideOnlineHours, type OpeningHour } from '../../lib/openingHours';
@@ -60,6 +71,12 @@ type Props = {
       itemNote?: { id: string; note: string };
       loadItems?: CartItem[];
       salesNum?: string;
+      serviceDate?: string;
+      serviceTime?: string;
+      technician?: string;
+      dpPercent?: number;
+      deliveryAddress?: string;
+      deliveryFee?: number;
     };
   };
 };
@@ -78,8 +95,9 @@ export type CartItem = {
   voided?: boolean;
 };
 
-type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean; soldOut?: boolean };
+type Product = { id: string; name: string; price: number; category: string; tags: string[]; fav?: boolean; soldOut?: boolean; low?: boolean; unitLabel?: string; sizeLabel?: string; colorLabel?: string; sku?: string };
 
+/** P1-05: preset F&B legacy (RESTAURANT); vertikal lain pakai preset vertikal + ms_category live (lihat categories useMemo). */
 const CATEGORIES: { name: string; subs: string[] }[] = [
   { name: 'Favorit', subs: [] },
   { name: 'Minuman', subs: ['Dingin', 'Panas', 'Coffee', 'Shake'] },
@@ -89,8 +107,9 @@ const CATEGORIES: { name: string; subs: string[] }[] = [
   { name: 'Cake', subs: ['Slice', 'Whole'] },
 ];
 
-/** Last-resort absolut bila query DB melempar; array kosong DB tetap tampil empty-state. */
-const PRODUCTS: Product[] = [
+/** Last-resort DEV-only bila query DB melempar; prod kosong tampil empty-state + banner retry.
+ * P1-09: jangan menutupi DB error dengan katalog fiksi di production. */
+const PRODUCTS_DEV_FALLBACK: Product[] = [
   { id: 'p1', name: 'Ayam Geprek Pelakor', price: 45000, category: 'Makanan', tags: ['Makanan Cepat'], fav: true },
   { id: 'p2', name: 'Ayam Goreng Dada', price: 15000, category: 'Makanan', tags: ['Makanan Cepat'] },
   { id: 'p3', name: 'Ayam Goreng Paha', price: 5000, category: 'Makanan', tags: ['Makanan Cepat'] },
@@ -107,6 +126,8 @@ const PRODUCTS: Product[] = [
   { id: 'p14', name: 'Spaghetti Bolognese', price: 35000, category: 'Pasta', tags: ['Spaghetti'] },
   { id: 'p15', name: 'Puding Coklat', price: 12000, category: 'Dessert', tags: ['Puding'] },
 ];
+/** P1-09: prod tanpa fallback fiksi; dev boleh pakai dummy agar preview jalan. */
+const PRODUCTS: Product[] = __DEV__ ? PRODUCTS_DEV_FALLBACK : [];
 
 /** M9: cabang aktif = terminal yang diklaim; '' = unbound (fail-closed — tanpa
  * fallback diam-diam 'B001'; query di bawah + banner unbound menanganinya). */
@@ -129,10 +150,12 @@ const CATEGORY_OF: Record<string, string> = {
 
 function mapCategory(raw: string | null): string {
   const v = (raw ?? '').trim();
-  if (!v) return 'Makanan';
+  // Vertical Shell P0: fallback JUJUR 'Lainnya' (bukan 'Makanan') — toko
+  // baju/pulsa/jasa tak boleh melihat kategori F&B saat katalog kosong.
+  if (!v) return 'Lainnya';
   if (CATEGORY_OF[v]) return CATEGORY_OF[v];
   if (CATEGORIES.some((c) => c.name === v)) return v;
-  return 'Makanan';
+  return 'Lainnya';
 }
 
 /** Item void tidak dihitung ke total. */
@@ -196,7 +219,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const liveOk = wsConnected || sseLive || beReachable === true;
   const connLabel = online === false ? 'Offline' : online && liveOk ? t('badge_online') : 'Offline';
   const connDot = online === false ? styles.onlineDotAmber : online && liveOk ? undefined : styles.onlineDotGrey;
-  const [activeCategory, setActiveCategory] = useState('Makanan');
+  const [activeCategory, setActiveCategory] = useState('Favorit'); // Vertical Shell P0: netral (dulu 'Makanan' = resto-sentris)
   const [activeSub, setActiveSub] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
@@ -223,7 +246,10 @@ export default function CashierScreen({ navigation, route }: Props) {
     })();
   }, []);
   const MODES = (() => {
-    const all = posModesFor(getBinding()?.merchantType);
+    // Vertical Shell: mode dari preset vertikal (PRODUCT/SERVICE non-resto
+    // otomatis dapat IN STORE ORDER / IN STORE SERVICE, bukan DINE IN).
+    const binding = getBinding() as { merchantType?: string; verticalId?: string } | null;
+    const all = posModesForVertical(binding?.verticalId, binding?.merchantType);
     return deliveryOn ? all : all.filter((m) => !isDeliveryChannelLabel(m));
   })();
   const [mode, setMode] = useState(() => {
@@ -282,7 +308,29 @@ export default function CashierScreen({ navigation, route }: Props) {
    * untuk gate di dalam effect params; state untuk gate render tombol. */
   const [customItemsEnabled, setCustomItemsEnabled] = useState(true);
   const [payImmediately, setPayImmediately] = useState(false);
+  /** Vertical Shell Fase 2: varian fashion (Size/Warna) — ditempel ke nama item agar SKU unik per varian. */
+  const [selSize, setSelSize] = useState<string | null>(null);
+  const [selColor, setSelColor] = useState<string | null>(null);
+  /** Vertical Shell Fase 2: jadwal jasa (wajib YYYY-MM-DD + HH:MM) + teknisi + DP%. Dibawa ke Pay via goCart/goPayDirect. */
+  const [svcDate, setSvcDate] = useState('');
+  const [svcTime, setSvcTime] = useState('');
+  const [svcTech, setSvcTech] = useState('');
+  const [svcDp, setSvcDp] = useState(50);
+  /** Fase 3: alamat antar/jemput (HOME_SERVICE wajib, PICKUP opsional catatan). */
+  const [svcAddress, setSvcAddress] = useState('');
+  /** Fase 3 hybrid: panel tambahan (warung+pulsa) — view lokal, tak ubah vertical utama/BE gate. */
+  const [hybridList, setHybridList] = useState<string[]>([]);
+  const [hybridView, setHybridView] = useState<string | ''>('');
+  useEffect(() => { void getHybridVerticals().then((h) => setHybridList(h)).catch(() => {}); }, []);
   const posFlagsRef = useRef({ custom: true, edit: true, payNow: false, reqTable: false });
+  // Vertical Shell: segarkan cache vertikal saat kasir dibuka (install/re-bind
+  // via picker tanpa merchantType tetap koreksi via profil; gagal = cache lama).
+  useEffect(() => {
+    try {
+      const b = getBinding() as { merchantType?: string } | null;
+      void syncVerticalIdFromProfile(b?.merchantType ?? 'RESTAURANT').catch(() => {});
+    } catch { /* abaikan */ }
+  }, []);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -398,6 +446,7 @@ export default function CashierScreen({ navigation, route }: Props) {
    *  dibaca langsung dari GET pos-config (fetch fokus + TTL 5 mnt, cermin
    *  posPinGate) — posConfigSync TAK disentuh. Absen/kosong = tak render.
    *  NOL gate: settle/create/CTA tak membaca state ini. */
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [onlineHours, setOnlineHours] = useState<OpeningHour[]>([]);
   const hoursFetchedAt = useRef(0);
   useFocusEffect(
@@ -419,6 +468,58 @@ export default function CashierScreen({ navigation, route }: Props) {
       return () => { alive = false; };
     }, []),
   );
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      try {
+        void getBillingStatus()
+          .then((r) => { if (alive && r) setBillingStatus(r); })
+          .catch(() => { /* best-effort: banner diam bila fetch gagal */ });
+      } catch { /* abaikan: banner info-only tak boleh crash kasir */ }
+      return () => { alive = false; };
+    }, []),
+  );
+  /** BILLING: info-only, NOL gate (CTA Bayar tak membaca state ini).
+   *  PAST_DUE/READ_ONLY: kasir tetap jalan + CTA topup ke owner.
+   *  SUSPENDED: antre offline tetap tersimpan, hubungi owner. */
+  const renderBillingBanner = () => {
+    if (!billingStatus) return null;
+    const n = (key: string, fallback: string, count: number | null) => {
+      try {
+        const s = t(key);
+        return typeof s === 'string' ? s.replace('{n}', String(count ?? '?')) : fallback;
+      } catch { return fallback; }
+    };
+    if (billingStatus.isProTrial && (billingStatus.trialDaysRemaining ?? 0) > 0) {
+      return (
+        <View style={styles.modeNote}>
+          <Text style={styles.modeNoteT}>{n('billing_trial', 'PRO trial aktif.', billingStatus.trialDaysRemaining)}</Text>
+        </View>
+      );
+    }
+    if (billingStatus.stage === 'PAST_DUE') {
+      return (
+        <View style={styles.modeNote}>
+          <Text style={styles.modeNoteT}>{n('billing_pastdue', 'Tagihan tertunda. Hubungi owner.', billingStatus.graceDaysRemaining)}</Text>
+        </View>
+      );
+    }
+    if (billingStatus.stage === 'READ_ONLY') {
+      return (
+        <View style={styles.modeNote}>
+          <Text style={styles.modeNoteT}>{t('billing_readonly')}</Text>
+        </View>
+      );
+    }
+    if (billingStatus.stage === 'SUSPENDED') {
+      return (
+        <View style={styles.modeNote}>
+          <Text style={styles.modeNoteT}>{t('billing_suspended')}</Text>
+        </View>
+      );
+    }
+    return null;
+  };
   const renderHoursBanner = () =>
     onlineHours.length > 0 && isOutsideOnlineHours(new Date(), onlineHours) ? (
       <View style={styles.modeNote}>
@@ -480,6 +581,7 @@ export default function CashierScreen({ navigation, route }: Props) {
    * PRODUCTS const hanya last-resort bila query DB sendiri melempar. */
   const [dbProducts, setDbProducts] = useState<Product[] | null>(null);
   const [dbFailed, setDbFailed] = useState(false);
+  const [dbError, setDbError] = useState('');
   // Audit-5d80 stock wiring: hormati opt allowSellEmpty layar Stok
   // (LS_OPTS 'genfity.stock.opts'). Muat ulang tiap fokus agar perubahan
   // di layar Stok langsung berlaku tanpa restart kasir.
@@ -499,10 +601,10 @@ export default function CashierScreen({ navigation, route }: Props) {
         await initDb();
         // M9: '' = unbound (tanpa fallback B001) — peta sold-out kosong, jujur.
         const branchId = (getTerminal().branchId ?? '').trim();
-        let rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
+        let rows: { id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }[] = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }>(
           'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
         );
-        let sold = await queryDb<{ menuId: string; flagSoldOut: number | null }>(
+        let sold: { menuId: string; flagSoldOut: number | null; qty?: number | null; lowThreshold?: number | null }[] = await queryDb<{ menuId: string; flagSoldOut: number | null; qty?: number | null; lowThreshold?: number | null }>(
           'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
           [branchId],
         );
@@ -560,17 +662,25 @@ export default function CashierScreen({ navigation, route }: Props) {
           } catch {
             /* seed gagal - fallback PRODUCTS di bawah tetap jalan */
           }
-          rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
+          rows = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel: string | null; sizeLabel: string | null; colorLabel: string | null; sku: string | null }>(
+            'SELECT id, menuName, categoryId, price, unitLabel, sizeLabel, colorLabel, sku FROM ms_menu WHERE flagActive = 1',
+          ).catch(async () => queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null }>(
             'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
-          );
-          sold = await queryDb<{ menuId: string; flagSoldOut: number | null }>(
-            'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
+          ) as unknown as { id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel: string | null; sizeLabel: string | null; colorLabel: string | null; sku: string | null }[]);
+          sold = await queryDb<{ menuId: string; flagSoldOut: number | null; qty: number | null; lowThreshold: number | null }>(
+            'SELECT menuId, flagSoldOut, qty, lowThreshold FROM ms_branchmenu WHERE branchId = ?',
             [branchId],
           );
         }
         if (!alive) return;
         if (rows.length === 0) { if (alive) setDbProducts([]); return; }
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
+        // Fase 3 grocery/fashion: stok menipis = qty<=ambang (default 5), masih bisa jual.
+        const lowMap = new Map(sold.map((r) => {
+          const q = Math.round(Number(r.qty) || 0);
+          const lim = Math.max(0, Math.round(Number(r.lowThreshold) || 5));
+          return [r.menuId, q > 0 && q <= lim] as [string, boolean];
+        }));
         // Kamus id -> nama kategori (pola StockManagementScreen) agar chip/label
         // memakai nama ramah; jatuh ke id mentah bila kamus kosong.
         let catName = new Map<string, string>();
@@ -583,18 +693,27 @@ export default function CashierScreen({ navigation, route }: Props) {
           /* kamus kosong - pakai id apa adanya */
         }
         setDbProducts(
-          rows.map((r) => ({
-            id: r.id,
-            name: r.menuName ?? r.id,
-            price: Math.max(0, Math.round(Number(r.price) || 0)),
-            category: mapCategory(r.categoryId ? (catName.get(r.categoryId) ?? r.categoryId) : null),
-            tags: [],
-            soldOut: soldMap.get(r.id) ?? false,
-          })),
+          rows.map((r) => {
+            const anyR = r as Record<string, unknown>;
+            return {
+              id: r.id,
+              name: r.menuName ?? r.id,
+              price: Math.max(0, Math.round(Number(r.price) || 0)),
+              category: mapCategory(r.categoryId ? (catName.get(r.categoryId) ?? r.categoryId) : null),
+              tags: [],
+              soldOut: soldMap.get(r.id) ?? false,
+              low: lowMap.get(r.id) ?? false,
+              // Fase 3 katalog polimorfik: unit pcs/kg + size/warna + SKU (best-effort).
+              unitLabel: String(anyR.unitLabel ?? '').trim() || undefined,
+              sizeLabel: String(anyR.sizeLabel ?? '').trim() || undefined,
+              colorLabel: String(anyR.colorLabel ?? '').trim() || undefined,
+              sku: String(anyR.sku ?? '').trim() || undefined,
+            };
+          }),
         );
       } catch {
-        /* Query DB melempar - PRODUCTS const sebagai last resort absolut. */
-        if (alive) setDbFailed(true);
+        /* P1-09: Query DB melempar -> banner retry, bukan katalog fiksi di prod. */
+        if (alive) { setDbFailed(true); setDbError('DB katalog gagal dibaca — tarik sync / retry.'); }
       }
     })();
     return () => {
@@ -603,10 +722,12 @@ export default function CashierScreen({ navigation, route }: Props) {
   }, []);
 
   /** Katalog aktif: live SQLite; [] saat DB kosong (empty-state grid); PRODUCTS hanya bila query melempar. */
-  const catalog = dbProducts ?? (dbFailed ? PRODUCTS : []);
+  const catalog = dbProducts ?? (dbFailed ? (__DEV__ ? PRODUCTS : []) : []);
 
-  /** Chip kategori diderivasi dari baris live (distinct category); CATEGORIES
-   * const hanya sebagai FALLBACK bila rows kosong. Subs live kosong (tags []). */
+  /** Chip kategori diderivasi dari baris live (distinct category); fallback
+   * VERTIKAL (bukan F&B hardcode): DB kosong -> preset kategori vertikal aktif
+   * agar toko baju/pulsa/jasa tak melihat Makanan/Minuman/Dessert. CATEGORIES
+   * F&B hanya untuk RESTAURANT legacy. Subs live kosong (tags []). */
   const categories = useMemo(() => {
     if (dbProducts && dbProducts.length > 0) {
       const seen: string[] = [];
@@ -620,6 +741,13 @@ export default function CashierScreen({ navigation, route }: Props) {
         ...seen.map((name) => ({ name, subs: [] as string[] })),
       ];
     }
+    // Vertical Shell: preset kategori vertikal aktif (Favorit selalu chip pertama).
+    try {
+      const v = VERTICALS[getCachedVerticalId()];
+      if (v && Array.isArray(v.categories) && v.categories.length > 0) {
+        return v.categories.map((name) => ({ name, subs: [] as string[] }));
+      }
+    } catch { /* abaikan -> CATEGORIES legacy */ }
     return CATEGORIES;
   }, [dbProducts]);
 
@@ -627,7 +755,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!dbProducts || dbProducts.length === 0) return;
     if (!categories.some((c) => c.name === activeCategory)) {
-      setActiveCategory(categories[0]?.name ?? 'Makanan');
+      setActiveCategory(categories[0]?.name ?? 'Favorit');
       setActiveSub(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -750,6 +878,19 @@ export default function CashierScreen({ navigation, route }: Props) {
     }
     if (p.memberId !== undefined) setMemberId(p.memberId ?? '');
     if (typeof p.salesNum === 'string' && p.salesNum.trim()) setSalesNum(p.salesNum.trim());
+    if (typeof p.serviceDate === 'string' && p.serviceDate.trim()) setSvcDate(p.serviceDate.trim());
+    if (typeof p.serviceTime === 'string' && p.serviceTime.trim()) setSvcTime(p.serviceTime.trim());
+    if (typeof p.technician === 'string' && p.technician.trim()) setSvcTech(p.technician.trim());
+    if (p.dpPercent != null && Number.isFinite(Number(p.dpPercent))) setSvcDp(Math.max(0, Math.round(Number(p.dpPercent))));
+    if (typeof p.deliveryAddress === 'string' && p.deliveryAddress.trim()) setSvcAddress(p.deliveryAddress.trim());
+    if (p.deliveryFee != null && Number.isFinite(Number(p.deliveryFee))) setOngkir(Math.max(0, Math.round(Number(p.deliveryFee))));
+    // Muat draft: field jasa yang tak dibawa = reset (anti-bocor dari order sebelumnya). Non-draft (promo/itemNote) = jangan sentuh.
+    if (p.loadItems && p.loadItems.length > 0) {
+      if (!(typeof p.serviceDate === 'string' && p.serviceDate.trim())) setSvcDate('');
+      if (!(typeof p.serviceTime === 'string' && p.serviceTime.trim())) setSvcTime('');
+      if (!(typeof p.technician === 'string' && p.technician.trim())) { setSvcTech(''); setSvcDp(50); }
+      if (!(typeof p.deliveryAddress === 'string' && p.deliveryAddress.trim())) setSvcAddress('');
+    }
     /** Booking oper nama + jumlah tamu - gabung ke kolom info (bisa diedit kasir). */
     if (p.customer !== undefined || p.tamu !== undefined) {
       const nm = (p.customer ?? '').trim();
@@ -787,7 +928,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       const { id, note } = p.itemNote;
       setCart((prev) => prev.map((c) => (c.id === id ? { ...c, note: note || undefined } : c)));
     }
-    if (p.customItem && posFlagsRef.current.custom) {
+    if (p.customItem && posFlagsRef.current.custom && (() => { try { const vv = VERTICALS[getCachedVerticalId()]; return vv?.flags?.customItems !== false; } catch { return true; } })()) {
       const key = JSON.stringify(p.customItem);
       if (appliedCustom.current !== key) {
         appliedCustom.current = key;
@@ -981,13 +1122,175 @@ export default function CashierScreen({ navigation, route }: Props) {
     return map;
   }, [activeCart, catalog]);
 
-  /** A-P1-7: gerbang meja wajib (mode DINE IN + flag requireTable ON): blokir
-   * dengan pesan inline yang jujur, bukan diam. */
+  /** Vertical Shell Fase 2: tambah pulsa/digital sebagai item keranjang (PREPAID).
+   * Nama kanonis `Pulsa {nominal} → {phone}` agar struk + sync membawa nomor tujuan.
+   * Tanpa tempo: pemanggil wajib lunas via Pay (dijaga payPolicyBlockReason). */
+  const addPulsaToCart = (phone: string, nominal: number) => {
+    const digits = phone.replace(/[^0-9]/g, '');
+    if (!isValidPhoneNumberID(digits)) {
+      setBlockMsg('Nomor HP 10–14 digit diawali 08 (contoh 0812…).');
+      return;
+    }
+    setBlockMsg('');
+    const id = `PULSA-${nominal}-${digits}`;
+    const name = `Pulsa ${nominal} → ${digits}`;
+    setCart((prev) => {
+      const found = prev.find((c) => c.id === id);
+      if (found) return prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1, voided: false } : c));
+      return [...prev, { id, name, basePrice: Math.round(nominal), qty: 1, modifiers: [], discount: 0, note: `Tujuan ${digits}` }];
+    });
+  };
+
+  /** Vertical Shell Fase 2: nama item fashion ditempel varian agar tidak salah kirim (S/M/L + warna). */
+  const variantSuffix = [selSize, selColor].filter(Boolean).join(' / ');
+  const addToCartWithVariant = (prod: Product) => {
+    if (!variantSuffix) {
+      addToCart(prod);
+      return;
+    }
+    const id = `${prod.id}##${variantSuffix}`;
+    const name = `${prod.name} (${variantSuffix})`;
+    if (prod.soldOut && !sellEmpty) return;
+    setCart((prev) => {
+      const found = prev.find((c) => c.id === id);
+      if (found) return prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1, voided: false } : c));
+      return [...prev, { id, name, basePrice: prod.price, qty: 1, modifiers: [], discount: 0 }];
+    });
+  };
+
+  /** Vertical Shell Fase 2: panel adaptif per vertikal (additive — resto tak berubah).
+   * FASHION/GROCERY: ScanBar (barcode/SKU/nama) + VariantPicker (fashion).
+   * PULSA: 3-langkah kaku nomor→nominal→lunas. SERVICE: jadwal+teknisi+DP (format BE). */
+  const renderVerticalPanel = () => {
+    let vid = '';
+    try { vid = String(hybridView || getCachedVerticalId() || ''); } catch { vid = ''; }
+    const hybridChips = hybridList.length > 0 ? (
+      <View style={styles.hybridRow}>
+        {(() => {
+          let main = '';
+          try { main = String(getCachedVerticalId() ?? ''); } catch { main = ''; }
+          const all = [main, ...hybridList.filter((h) => h !== main)];
+          return all.map((id) => {
+            const cfg = (VERTICALS as unknown as Record<string, { icon?: string; label?: string }>)[id];
+            if (!cfg) return null;
+            const on = vid === id;
+            return (
+              <TouchableOpacity
+                key={id}
+                style={[styles.hybridChip, on && styles.hybridChipOn]}
+                onPress={() => setHybridView(on ? '' : id)}
+                accessibilityRole="button">
+                <Text style={[styles.hybridChipT, on && styles.hybridChipTOn]}>{cfg.icon} {cfg.label}</Text>
+              </TouchableOpacity>
+            );
+          });
+        })()}
+      </View>
+    ) : null;
+    const wrap = (inner: React.ReactNode) => (
+      <View>
+        {hybridChips}
+        {inner}
+      </View>
+    );
+
+    const v = (VERTICALS as unknown as Record<string, { flags?: Record<string, boolean>; payPolicy?: string }>)[vid];
+    if (!v) return null;
+    const flags = v.flags ?? {};
+    // PULSA_DIGITAL: ganti grid F&B dengan form konter (tanpa Tables/Kitchen).
+    if (vid === 'PULSA_DIGITAL') {
+      const offlineWarn = online === false;
+      return wrap(
+        <View style={styles.verticalPanel}>
+          {offlineWarn ? (
+            <Text style={styles.verticalNote}>{t('cashier.pulsaOfflineWarn')}</Text>
+          ) : null}
+          <PhoneTopupForm onSubmit={(phone, nominal) => addPulsaToCart(phone, nominal)} />
+        </View>
+      );
+    }
+    // SERVICE: jadwal wajib sebelum bayar (mencegah 400 serviceDate/serviceTime).
+    if (vid === 'SERVICE') {
+      return wrap(
+        <View style={styles.verticalPanel}>
+          <ServiceScheduleForm
+            technicians={['Kasir', 'Kapster 1', 'Kapster 2', 'Teknisi']}
+            onSubmit={(s) => {
+              setSvcDate(s.date); setSvcTime(s.time); setSvcTech(s.technician); setSvcDp(s.dp);
+              setBlockMsg(`Jadwal ${s.date} ${s.time} · ${s.technician} · DP ${s.dp}% — lanjut Bayar.`);
+            }}
+          />
+          {svcDate ? (
+            <Text style={styles.verticalNote}>Terjadwal: {svcDate} {svcTime} · {svcTech} · DP {svcDp}%</Text>
+          ) : null}
+          {(mode === 'HOME SERVICE' || mode === 'HOME_SERVICE') ? (
+            <TextInput
+              style={styles.addressBox}
+              placeholder="Alamat pelanggan (wajib home service)…"
+              placeholderTextColor={colors.faint}
+              value={svcAddress}
+              onChangeText={setSvcAddress}
+              accessibilityLabel="Alamat pelanggan"
+            />
+          ) : null}
+        </View>
+      );
+    }
+    // FASHION/GROCERY: scan dominan + varian (fashion).
+    if (flags.needScan) {
+      return wrap(
+        <View style={styles.verticalPanel}>
+          <ScanBar
+            value={query}
+            onChange={setQuery}
+            onScan={() => navigation?.navigate('QrScan')}
+            placeholder={vid === 'FASHION' ? 'Scan barcode / cari SKU / nama baju…' : 'Scan barcode / cari SKU / nama…'}
+          />
+          {vid === 'FASHION' ? (
+            <View style={{ gap: 8, marginTop: 8 }}>
+              <VariantPicker label="Size" options={['S', 'M', 'L', 'XL', 'XXL']} selected={selSize} onSelect={(s) => setSelSize(s === selSize ? null : s)} />
+              <VariantPicker label="Warna" options={['Hitam', 'Putih', 'Navy', 'Abu', 'Cream']} selected={selColor} onSelect={(s) => setSelColor(s === selColor ? null : s)} />
+              {variantSuffix ? <Text style={styles.verticalNote}>Varian: {variantSuffix} — ditempel ke nama saat tambah.</Text> : null}
+            </View>
+          ) : null}
+        </View>
+      );
+    }
+    return hybridChips;
+  };
+
+    /** A-P1-7: gerbang meja wajib (mode DINE IN + flag requireTable ON): blokir
+   * dengan pesan inline yang jujur, bukan diam.
+   * Vertical Shell: hanya RESTO_FULL yang wajib meja; WARUNG_QSR/COFFEE
+   * (QSR cepat, tanpa floor plan) tak diblokir walau flag server ON. */
   const checkTable = (): boolean => {
-    if (posFlagsRef.current.reqTable && mode === 'DINE IN' && !table.trim()) {
+    let needTable = posFlagsRef.current.reqTable;
+    try {
+      const vv = VERTICALS[getCachedVerticalId()];
+      if (vv && vv.flags && vv.flags.needTable === false) needTable = false;
+    } catch { /* abaikan -> flag server */ }
+    if (needTable && mode === 'DINE IN' && !table.trim()) {
       setBlockMsg(t('dineinTableRequired'));
       return false;
     }
+    // Vertical Shell Fase 2: SERVICE wajib jadwal + teknisi (format BE) sebelum ke Pay/Cart.
+    try {
+      if (String(getCachedVerticalId()) === 'SERVICE' && (mode === 'IN STORE SERVICE')) {
+        const dOk = /^\d{4}-\d{2}-\d{2}$/.test(svcDate.trim());
+        const tmOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(svcTime.trim());
+        if (!dOk || !tmOk || !svcTech) {
+          setBlockMsg('Jasa wajib isi jadwal (YYYY-MM-DD + HH:MM) + teknisi dulu.');
+          return false;
+        }
+      }
+    } catch { /* abaikan -> flag server */ }
+    // Fase 3: HOME_SERVICE wajib alamat (teknisi tahu ke mana datang).
+    try {
+      if (String(getCachedVerticalId()) === 'SERVICE' && mode === 'HOME SERVICE' && !svcAddress.trim()) {
+        setBlockMsg('Home service wajib isi alamat pelanggan.');
+        return false;
+      }
+    } catch { /* abaikan */ }
     setBlockMsg('');
     return true;
   };
@@ -998,6 +1301,10 @@ export default function CashierScreen({ navigation, route }: Props) {
       total,
       mode,
       table,
+      ...(svcDate ? { serviceDate: svcDate } : {}),
+      ...(svcTime ? { serviceTime: svcTime } : {}),
+      ...(svcTech ? { technician: svcTech, dpPercent: svcDp } : {}),
+      ...(svcAddress.trim() ? { deliveryAddress: svcAddress.trim(), deliveryFee: ongkir } : {}),
       ongkir,
       ...(packaging > 0 ? { packaging } : {}),
       customer: customer.trim(),
@@ -1016,6 +1323,10 @@ export default function CashierScreen({ navigation, route }: Props) {
       total,
       mode,
       ...(table ? { table } : {}),
+      ...(svcDate ? { serviceDate: svcDate } : {}),
+      ...(svcTime ? { serviceTime: svcTime } : {}),
+      ...(svcTech ? { technician: svcTech, dpPercent: svcDp } : {}),
+      ...(svcAddress.trim() ? { deliveryAddress: svcAddress.trim(), deliveryFee: ongkir } : {}),
       ongkir,
       ...(packaging > 0 ? { packaging } : {}),
       customer: customer.trim(),
@@ -1135,8 +1446,18 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Text style={styles.modeNoteT}>{t('modeMarketplaceNoteA')}{mode}{t('modeMarketplaceNoteB')}</Text>
       </View>
     ) : null;
-  /** Simpan membawa payload + salesNum agar muncul di Muat Order (dulu navigate tanpa params). */
+  /** Simpan membawa payload + salesNum agar muncul di Muat Order (dulu navigate tanpa params).
+   * Vertical Shell Fase 2: PREPAID (pulsa) tak boleh parked/simpan-hutang — SN/token tak bisa ditarik.
+   * Blokir jujur di UI (bukan parked diam), cermin payPolicyBlockReason sync. */
   const goSaved = () => {
+    try {
+      const reason = payPolicyBlockReason(getCachedVerticalId());
+      if (reason) {
+        setBlockMsg(reason);
+        return;
+      }
+    } catch { /* abaikan -> lanjut legacy */ }
+
     void (async () => {
       let num = salesNum.trim();
       if (!num) {
@@ -1172,6 +1493,15 @@ export default function CashierScreen({ navigation, route }: Props) {
     year: 'numeric',
   });
 
+  /** Fase 3: toggle modifier preset 1-tap (kopi/warung/jasa). */
+  const toggleModifier = (id: string, name: string, price: number) => {
+    setCart((prev) => prev.map((c) => {
+      if (c.id !== id) return c;
+      const has = (c.modifiers ?? []).some((m) => m.name === name);
+      return { ...c, modifiers: has ? c.modifiers.filter((m) => m.name !== name) : [...c.modifiers, { name, price }] };
+    }));
+  };
+
   /** Panel editor catatan + diskon + void per item. */
   const renderItemEditor = (c: CartItem) => {
     if (editingId !== c.id) return null;
@@ -1195,6 +1525,28 @@ export default function CashierScreen({ navigation, route }: Props) {
           keyboardType="numeric"
         />
         {discMsg ? <Text style={styles.editorErr}>{discMsg}</Text> : null}
+        {(() => {
+          try {
+            const presets = MODIFIER_PRESETS[String(getCachedVerticalId()) ?? ''] ?? [];
+            if (!presets.length) return null;
+            return (
+              <View style={styles.modRow}>
+                {presets.map((m) => {
+                  const on = (c.modifiers ?? []).some((x) => x.name === m.name);
+                  return (
+                    <TouchableOpacity
+                      key={m.name}
+                      style={[styles.modChip, on && styles.modChipOn]}
+                      onPress={() => toggleModifier(c.id, m.name, m.price)}
+                      accessibilityRole="button">
+                      <Text style={[styles.modChipT, on && styles.modChipTOn]}>{m.name}{m.price > 0 ? ` +${m.price}` : ''}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            );
+          } catch { return null; }
+        })()}
         <View style={styles.editorRow}>
           <AppButton
             size="sm"
@@ -1277,8 +1629,8 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('saved')}</Text>
       </TouchableOpacity>
-      {/* A-P1-7: tombol Custom disembunyikan bila flag posCustomItems OFF. */}
-      {customItemsEnabled && (
+      {/* A-P1-7: tombol Custom disembunyikan bila flag posCustomItems OFF. Vertical Shell: FASHION/GROCERY/PULSA/SERVICE (customItems=false) tak boleh item bebas — SKU/nominal/jadwal kanonis. */}
+      {customItemsEnabled && (() => { try { const vv = VERTICALS[getCachedVerticalId()]; return vv?.flags?.customItems !== false; } catch { return true; } })() && (
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
         onPress={() => navigation?.navigate('CustomMenu')}>
@@ -1385,7 +1737,9 @@ export default function CashierScreen({ navigation, route }: Props) {
     ) : null;
 
   const renderMenu = () => (
-    <FlatList
+    <>
+    {dbFailed ? (<Text style={{ color: colors.red, padding: 8, textAlign: 'center' }}>{dbError}</Text>) : null}
+          <FlatList
       key={isWide ? `grid-${numCols}` : 'list'}
       data={isWide ? gridData : filtered}
       keyExtractor={(p, idx) => (p ? p.id : `__spacer-${idx}`)}
@@ -1398,11 +1752,16 @@ export default function CashierScreen({ navigation, route }: Props) {
         if (isWide) {
           return (
             <View style={[styles.card, item.soldOut && styles.cardSoldOut]}>
-              <TouchableOpacity onPress={() => addToCart(item)} activeOpacity={0.7} disabled={item.soldOut && !sellEmpty}>
+              <TouchableOpacity onPress={() => { try { if (String(getCachedVerticalId()) === 'FASHION' && variantSuffix) addToCartWithVariant(item); else addToCart(item); } catch { addToCart(item); } }} activeOpacity={0.7} disabled={item.soldOut && !sellEmpty}>
                 <MenuThumb size={isWide ? 80 : 64} />
                 <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                 <View style={styles.cardFoot}>
-                  <Text style={styles.cardPrice}>{rp(item.price)}</Text>
+                  <Text style={styles.cardPrice}>{rp(item.price)}{item.unitLabel ? ` / ${item.unitLabel}` : ''}</Text>
+                  {!item.soldOut && item.low ? (
+                    <View style={styles.lowBadge}>
+                      <Text style={styles.lowText}>Stok menipis</Text>
+                    </View>
+                  ) : null}
                   {item.soldOut ? (
                     <View style={styles.soldBadge}>
                       <Text style={styles.soldText}>{t('menu.soldOut')}</Text>
@@ -1442,7 +1801,8 @@ export default function CashierScreen({ navigation, route }: Props) {
                 <MenuThumb size={48} />
                 <View style={styles.rowInfo}>
                   <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
-                  <Text style={styles.rowPrice}>{rp(item.price)}</Text>
+                  <Text style={styles.rowPrice}>{rp(item.price)}{item.unitLabel ? ` / ${item.unitLabel}` : ''}{item.sku ? ` · ${item.sku}` : ''}</Text>
+                  {!item.soldOut && item.low ? (<Text style={styles.rowLow}>Stok menipis</Text>) : null}
                   {inCart?.note ? <Text style={styles.rowNote} numberOfLines={1}>📝 {inCart.note}</Text> : null}
                   {inCart && inCart.discount > 0 ? (
                     <Text style={styles.rowDisc}>{t('discount')} -{rp(inCart.discount)}</Text>
@@ -1465,7 +1825,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   </TouchableOpacity>
                 </View>
               ) : (
-                <TouchableOpacity style={styles.addBtnLg} onPress={() => addToCart(item)}>
+                <TouchableOpacity style={styles.addBtnLg} onPress={() => { try { if (String(getCachedVerticalId()) === 'FASHION' && variantSuffix) addToCartWithVariant(item); else addToCart(item); } catch { addToCart(item); } }}>
                   <Text style={styles.addBtnLgText}>+ {t('addMenu')}</Text>
                 </TouchableOpacity>
               )}
@@ -1496,10 +1856,44 @@ export default function CashierScreen({ navigation, route }: Props) {
             resizeMode="contain"
           />
           <Text style={styles.empty}>{t('common.noMatch')}</Text>
+          {(() => {
+            // Vertical Shell: empty-state menjual (Tambah/Scan) + preset
+            // kategori vertikal agar toko baju/pulsa/jasa tak lihat F&B.
+            try {
+              const v = VERTICALS[getCachedVerticalId()];
+              if (!v || (dbProducts && dbProducts.length > 0)) return null;
+              const needScan = !!v.flags?.needScan;
+              const allowCustom = v.flags?.customItems !== false;
+              return (
+                <View style={{ alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <Text style={[styles.empty, { marginTop: 0 }]}>{v.categories.slice(0, 3).join(' · ')}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {allowCustom ? (
+                    <TouchableOpacity
+                      style={{ minHeight: 44, paddingHorizontal: 18, borderRadius: 10, borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.paleOrange, alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => navigation?.navigate('CustomMenu')}>
+                      <Text style={{ fontSize: 14, color: colors.primaryDark, fontFamily: fonts.semibold }}>{t('cashier.emptyAdd')}</Text>
+                    </TouchableOpacity>
+                    ) : null}
+                    {needScan ? (
+                      <TouchableOpacity
+                        style={{ minHeight: 44, paddingHorizontal: 18, borderRadius: 10, borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.paleOrange, alignItems: 'center', justifyContent: 'center' }}
+                        onPress={() => navigation?.navigate('QrScan')}>
+                        <Text style={{ fontSize: 14, color: colors.primaryDark, fontFamily: fonts.semibold }}>{t('cashier.emptyScan')}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            } catch {
+              return null;
+            }
+          })()}
         </View>
       }
       ItemSeparatorComponent={!isWide ? () =><View style={styles.rowSep} /> : undefined}
     />
+    </>
   );
 
   const renderCartPanel = () => (
@@ -1749,6 +2143,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         {renderSyncBlock()}
         {renderUnboundNotice()}
         {renderHoursBanner()}
+        {renderBillingBanner()}
         <DrawerMenu
           visible={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1778,6 +2173,8 @@ export default function CashierScreen({ navigation, route }: Props) {
               </View>
             )}
             {renderModeNote()}
+            {renderVerticalPanel()}
+            {MODES.length <= 3 ? <ModeBar modes={MODES} active={mode} onPick={(m) => setMode(m)} /> : null}
             {showSearch && (
               <View style={styles.searchWrap}>
                 <SearchGlyph size={15} color={colors.faint} />
@@ -1810,6 +2207,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       {renderSyncBlock()}
       {renderUnboundNotice()}
       {renderHoursBanner()}
+      {renderBillingBanner()}
       <DrawerMenu
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -1835,6 +2233,8 @@ export default function CashierScreen({ navigation, route }: Props) {
         </View>
       )}
       {renderModeNote()}
+      {renderVerticalPanel()}
+      {MODES.length <= 3 ? <ModeBar modes={MODES} active={mode} onPick={(m) => setMode(m)} /> : null}
       {renderCats()}
       {renderBreadcrumb()}
       {renderSubs()}
@@ -2154,6 +2554,7 @@ const styles = StyleSheet.create({
   rowName: { fontFamily: fonts.medium, fontSize: 14, color: colors.text },
   rowPrice: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, marginTop: 2 },
   rowNote: { fontFamily: fonts.regular, fontSize: 12, color: colors.blue, marginTop: 2 },
+  rowLow: { fontFamily: fonts.semibold, fontSize: 11, color: colors.amberDark, backgroundColor: colors.paleAmber, alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2, overflow: 'hidden' },
   rowDisc: { fontFamily: fonts.medium, fontSize: 12, color: colors.red, marginTop: 2 },
   rowEditBtn: { backgroundColor: colors.white, paddingHorizontal: 16, paddingVertical: 6 },
   rowEditT: { fontFamily: fonts.medium, fontSize: 12, color: colors.blue },
@@ -2171,6 +2572,8 @@ const styles = StyleSheet.create({
   stepQtySm: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, minWidth: 24, textAlign: 'center' },
   addBtnLg: { borderWidth: 1, borderColor: colors.orange, borderRadius: 20, paddingHorizontal: 14, minHeight: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   addBtnLgText: { color: colors.orange, fontFamily: fonts.bold, fontSize: 13 },
+  lowBadge: { backgroundColor: colors.paleAmber, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  lowText: { fontFamily: fonts.semibold, fontSize: 11, color: colors.amberDark },
   soldBadge: {
     backgroundColor: colors.red,
     borderRadius: 8,
@@ -2259,6 +2662,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   editorVoidT: { fontFamily: fonts.bold, fontSize: 13, color: colors.red },
+  modRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  modChip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1.5, borderColor: colors.inputBorder, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  modChipOn: { borderColor: colors.primary, backgroundColor: colors.paleOrange },
+  modChipT: { fontSize: 13, color: colors.text, fontFamily: fonts.semibold },
+  modChipTOn: { color: colors.primaryDark },
   editorSave: {
     flex: 2,
     backgroundColor: colors.navy,
@@ -2326,6 +2734,27 @@ const styles = StyleSheet.create({
   grandVal: { fontFamily: fonts.bold, fontSize: 15, color: colors.navy, textAlign: 'right', maxWidth: 180, flexShrink: 1 },
   cartActions: { padding: 12, gap: 8 },
   cartActionsRow: { flexDirection: 'row', gap: 8 },
+  verticalPanel: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  verticalNote: { fontFamily: fonts.medium, fontSize: 13, color: colors.primaryDark },
+  hybridRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  hybridChip: { minHeight: 44, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1.5, borderColor: colors.line, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  hybridChipOn: { borderColor: colors.primary, backgroundColor: colors.paleOrange },
+  hybridChipT: { fontSize: 13, color: colors.text, fontFamily: fonts.semibold },
+  hybridChipTOn: { color: colors.primaryDark },
+  addressBox: {
+    minHeight: 48, borderRadius: 12, borderWidth: 1.5, borderColor: colors.inputBorder,
+    backgroundColor: colors.white, paddingHorizontal: 12, fontSize: 14, color: colors.text,
+  },
   btnSave: {
     flex: 1,
     flexDirection: 'row',

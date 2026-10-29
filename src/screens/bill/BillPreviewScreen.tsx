@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { useLang } from '../../lib/i18n';
 import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
+import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, RECEIPT_TEMPLATE_DEFAULTS, type CachedMerchantInfo, type ReceiptTemplateToggles } from '../../lib/receiptTemplate';
 import { getGroupPaid, nextSalesNum } from '../../lib/sales';
 import { getBranchId, getTerminal } from '../../config/server';
 import type { SaleItemIn } from '../../lib/payments';
@@ -28,8 +29,9 @@ type Props = {
       service?: number; serviceTotal?: number;
       tax?: number; vatTotal?: number;
       /** Fee platform agregator + pembulatan + kemasan bawaan pemanggil (info-only, diteruskan). */
-      feeESB?: number; rounding?: number; packaging?: number;
-      mode?: string; table?: string; ongkir?: number; ongkirCut?: number;
+      feeESB?: number; rounding?: number; packaging?: number; tip?: number;
+      mode?: string; table?: string; ongkir?: number; ongkirCut?: number; orderNote?: string; deliveryAddr?: string;
+      serviceDate?: string; serviceTime?: string; technician?: string; dpPercent?: number; deliveryAddress?: string; deliveryFee?: number;
       customer?: string; memberId?: string; customerId?: number;
       /** Nomor order bila sudah ada (alir balik History); pratinjau baru = tanpa nomor. */
       no?: string;
@@ -54,6 +56,23 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   /** Label service mengikuti knob server (audit trisisi #1); nilai serviceVal
    * tetap dari pemanggil (angka resmi rantai). */
   const [svcCfg, setSvcCfg] = useState<ServiceConfig>(SERVICE_LEGACY);
+  // 1:1 template website: pratinjau tagihan menghormati toggle yang sama
+  // dengan ReceiptScreen/thermal (tanpa template = default kanonik BE).
+  const [tpl, setTpl] = useState<ReceiptTemplateToggles>({ ...RECEIPT_TEMPLATE_DEFAULTS });
+  const [tplOn, setTplOn] = useState(false);
+  const [mInfo, setMInfo] = useState<CachedMerchantInfo>({ name: '', address: '', phone: '', email: '', logoUrl: '', merchantCode: '', merchantType: '' });
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const on = await hasReceiptTemplate();
+        const tg = await getReceiptTemplateToggles();
+        const mi = await getCachedMerchantInfo();
+        if (alive) { setTplOn(on); setTpl(tg); setMInfo(mi); }
+      } catch { /* default kanonik */ }
+    })();
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     let alive = true;
     void getServiceConfig().then((c) => {
@@ -81,6 +100,15 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const feeESBVal = p.feeESB ?? 0;
   const packagingVal = Math.max(0, Math.round(Number(p.packaging) || 0));
   const roundingVal = p.rounding ?? 0;
+  const tipVal = Math.max(0, Math.round(Number((p as unknown as { tip?: unknown }).tip) || 0));
+  const orderNoteVal = String((p as unknown as { orderNote?: unknown }).orderNote ?? '').trim();
+  const deliveryAddrVal = String((p as unknown as { deliveryAddr?: unknown }).deliveryAddr ?? '').trim();
+  const serviceDateVal = String((p as unknown as { serviceDate?: unknown }).serviceDate ?? '').trim();
+  const serviceTimeVal = String((p as unknown as { serviceTime?: unknown }).serviceTime ?? '').trim();
+  const technicianVal = String((p as unknown as { technician?: unknown }).technician ?? '').trim();
+  const dpPercentVal = Math.max(0, Math.round(Number((p as unknown as { dpPercent?: unknown }).dpPercent) || 0));
+  const deliveryAddressVal = String((p as unknown as { deliveryAddress?: unknown }).deliveryAddress ?? '').trim();
+  const svcLineVal = [serviceDateVal && serviceTimeVal ? `${serviceDateVal} ${serviceTimeVal}` : null, technicianVal ? `Teknisi ${technicianVal}` : null, dpPercentVal > 0 ? `DP ${dpPercentVal}%` : null, deliveryAddressVal ? `Antar: ${deliveryAddressVal.slice(0, 80)}` : null].filter(Boolean).join(' · ');
   const subtotalVal = p.subtotal ?? orderItems.reduce((s, it) => s + lineAmount(it), 0);
   const total = p.total ?? (subtotalVal - discountVal + serviceVal + ongkirVal);
   // Kepala struk mengikuti order berjalan (meja/pelanggan/member/kasir/no
@@ -101,8 +129,10 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const liveShop = liveBranchName
     ? (liveBranchId ? `${liveBranchName} - ${liveBranchId}` : liveBranchName)
     : (liveBranchId || '-');
-  const shopName = p.shopName ?? liveShop;
-  const shopAddr = p.shopAddr ?? '-';
+  const shopName = p.shopName ?? (mInfo.name || liveShop);
+  const shopAddr = p.shopAddr ?? (mInfo.address || '-');
+  const shopPhone = (mInfo.phone ?? '').trim();
+  const shopEmail = (mInfo.email ?? '').trim();
   const metaCashier = p.cashier ?? '-';
   const metaNo = p.no ?? 'Pratinjau / Preview';
   const metaTime = new Date().toLocaleTimeString(lang === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');
@@ -212,6 +242,14 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
     ...(p.customer ? { customer: p.customer } : {}),
     ...(p.memberId ? { memberId: p.memberId } : {}),
+    ...(tipVal > 0 ? { tip: tipVal } : {}),
+    ...(orderNoteVal ? { orderNote: orderNoteVal } : {}),
+    ...(deliveryAddrVal ? { deliveryAddr: deliveryAddrVal } : {}),
+    ...(serviceDateVal ? { serviceDate: serviceDateVal } : {}),
+    ...(serviceTimeVal ? { serviceTime: serviceTimeVal } : {}),
+    ...(technicianVal ? { technician: technicianVal } : {}),
+    ...(dpPercentVal > 0 ? { dpPercent: dpPercentVal } : {}),
+    ...(deliveryAddressVal ? { deliveryAddress: deliveryAddressVal } : {}),
     ...(parseCustomerId(p.customerId) != null ? { customerId: parseCustomerId(p.customerId) as number } : {}),
   };
   // Share proporsional service/pajak/feeESB/kemasan/pembulatan untuk split parsial
@@ -227,6 +265,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       ...(taxVal > 0 ? { tax: Math.max(0, Math.round(taxVal * r)) } : {}),
       ...(feeESBVal > 0 ? { feeESB: Math.max(0, Math.round(feeESBVal * r)) } : {}),
       ...(packagingVal > 0 ? { packaging: Math.max(0, Math.round(packagingVal * r)) } : {}),
+      ...(tipVal > 0 ? { tip: Math.max(0, Math.round(tipVal * r)) } : {}),
       ...(roundingVal !== 0 ? { rounding: Math.round(roundingVal * r) } : {}),
     };
   };
@@ -237,6 +276,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
     ...(taxVal > 0 ? { tax: taxVal } : {}),
     ...(feeESBVal > 0 ? { feeESB: feeESBVal } : {}),
     ...(packagingVal > 0 ? { packaging: packagingVal } : {}),
+    ...(tipVal > 0 ? { tip: tipVal } : {}),
     ...(roundingVal !== 0 ? { rounding: roundingVal } : {}),
   };
 
@@ -249,40 +289,86 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
         <Text style={styles.meta}>{metaNo} · {metaTable} · {metaGuest}</Text>
       {/* Tablet: struk dibatasi sempit + tengahkan agar proporsional. */}
-      <View style={[styles.bill, isTablet && wideCenterSm]}>
-        <Text style={styles.shop}>{shopName}</Text>
-        <Text style={styles.addr}>{shopAddr}</Text>
-        <Text style={styles.trx}>{metaNo} · {metaTable} · {metaCashier} · {metaTime}</Text>
+      {(() => {
+        const eff = tplOn ? getEffectiveTogglesForMode(tpl, p.mode) : null;
+        const show = (k: keyof ReceiptTemplateToggles): boolean => (eff ? eff[k] as boolean : true);
+        const narrow = tplOn && eff && eff.paperSize === '58mm';
+        return (<View style={[styles.bill, isTablet && wideCenterSm, narrow && styles.billNarrow]}>
+        <Text style={styles.unpaid}>** {t('rc_unpaid')} **</Text>
+        {(tplOn && eff && eff.showLogo && (mInfo.logoUrl ?? '').trim()) ? (<Image source={{ uri: (mInfo.logoUrl ?? '').trim() }} style={styles.logo} resizeMode="contain" />) : null}
+        {show('showMerchantName') ? (<Text style={styles.shop}>{shopName}</Text>) : null}
+        {show('showAddress') ? (<Text style={styles.addr}>{shopAddr}</Text>) : null}
+        {(() => {
+          const c = [eff && eff.showPhone ? shopPhone : '', eff && eff.showEmail ? shopEmail : ''].filter((s) => s).join(' · ');
+          return c ? (<Text style={styles.addr}>{c}</Text>) : null;
+        })()}
+        {(show('showOrderNumber') || show('showOrderType')) ? (<Text style={styles.trx}>{[eff && !eff.showOrderNumber ? '' : metaNo, eff && !eff.showOrderType ? '' : (tplOn && eff ? buildReceiptOrderTypeLine(p.mode ?? '', p.table, eff, (eff.receiptLanguage ?? lang), mInfo.merchantType || undefined) : (p.mode ?? ''))].filter((s) => s && s !== '-').join(' · ')}</Text>) : null}
+        {(() => {
+          const parts = [eff && !eff.showTableNumber ? '' : metaTable, (eff && !(eff.showCustomerName || eff.showCustomerPhone)) ? '' : metaGuest].filter((x) => x && x !== '-');
+          return parts.length > 0 ? (<Text style={styles.trx}>{parts.join(' · ')}</Text>) : null;
+        })()}
+        {show('showDateTime') ? (<Text style={styles.trx}>{metaTime}</Text>) : null}
+        {deliveryAddrVal ? (<Text style={styles.trx}>{deliveryAddrVal}</Text>) : null}
+        {svcLineVal ? (<Text style={styles.trx}>{svcLineVal}</Text>) : null}
+        {tplOn && eff && eff.paperSize ? (<Text style={styles.paperTag}>{eff.paperSize === '58mm' ? '58mm' : '80mm'} · {eff.receiptLanguage === 'id' ? 'ID' : 'EN'}</Text>) : null}
         {orderItems.map((i, idx) => (
           <View key={`${itemKey(i)}-${idx}`} style={styles.row}>
             <Text style={styles.item}>{i.qty}× {i.name}</Text>
             <Text style={styles.price}>{rp(lineAmount(i))}</Text>
           </View>
         ))}
-        <View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.price}>{rp(subtotalVal)}</Text></View>
-        {discountVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{t('discount')}{voucherCode ? ` (${voucherCode})` : ''}</Text><Text style={styles.disc}>-{rp(discountVal)}</Text></View>
-        )}
-        {taxVal > 0 && (
+        {orderItems.map((i, idx) => (
+          <View key={`sub-${itemKey(i)}-${idx}`}>
+            {(tplOn && eff && eff.showUnitPrice) ? (<Text style={styles.note}>@ {rp(unitPrice(i))}</Text>) : null}
+            {(() => {
+              const n = (i as unknown as { note?: string }).note;
+              return (tplOn && eff && eff.showItemNotes && n) ? (<Text style={styles.note}>* {n}</Text>) : null;
+            })()}
+            {((!eff || eff.showAddons) ? (i.modifiers ?? []) : []).map((m) => (
+              <Text key={m.name} style={styles.note}>+ {m.name}{(!eff || eff.showAddonPrices) ? ` ${rp(m.price * i.qty)}` : ''}</Text>
+            ))}
+          </View>
+        ))}
+        {(tplOn && eff && eff.showOrderNotes && orderNoteVal) ? (<Text style={styles.note}>{orderNoteVal}</Text>) : null}
+        {show('showSubtotal') ? (<View style={styles.row}><Text style={styles.item}>{t('c_subtotal')}</Text><Text style={styles.price}>{rp(subtotalVal)}</Text></View>) : null}
+        {taxVal > 0 && show('showTax') && (
           <View style={styles.row}><Text style={styles.item}>{t('taxIncl')}</Text><Text style={styles.price}>{rp(taxVal)}</Text></View>
         )}
-        {serviceVal > 0 && (
-          <View style={styles.row}><Text style={styles.item}>{serviceLabel(t, svcCfg)}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+        {serviceVal > 0 && show('showServiceCharge') && (
+          <View style={styles.row}><Text style={styles.item}>{tplOn && eff ? ((eff.receiptLanguage ?? lang) === 'id' ? 'Biaya Layanan' : 'Service Charge') : serviceLabel(t, svcCfg)}</Text><Text style={styles.price}>{rp(serviceVal)}</Text></View>
+        )}
+        {tipVal > 0 && (
+          <View style={styles.row}><Text style={styles.item}>{t('pay_tip_row')}</Text><Text style={styles.price}>+{rp(tipVal)}</Text></View>
         )}
         {feeESBVal > 0 && (
           <View style={styles.row}><Text style={styles.item}>{platformFeeLabel(t)}</Text><Text style={styles.price}>{rp(feeESBVal)}</Text></View>
         )}
-        {packagingVal > 0 && (
+        {packagingVal > 0 && show('showPackagingFee') && (
           <View style={styles.row}><Text style={styles.item}>{t('packaging')}</Text><Text style={styles.price}>{rp(packagingVal)}</Text></View>
+        )}
+        {ongkirVal > 0 && show('showDeliveryFee') && (
+          <View style={styles.row}><Text style={styles.item}>{t('ongkir')}</Text><Text style={styles.price}>{rp(ongkirVal)}</Text></View>
+        )}
+        {ongkirCutVal > 0 && show('showDeliveryFee') && (
+          <View style={styles.row}><Text style={styles.item}>{t('rc_ongkir_cut')}</Text><Text style={styles.price}>-{rp(ongkirCutVal)}</Text></View>
+        )}
+        {discountVal > 0 && show('showDiscount') && (
+          <View style={styles.row}><Text style={styles.item}>{t('discount')}{voucherCode ? ` (${voucherCode})` : ''}</Text><Text style={styles.disc}>-{rp(discountVal)}</Text></View>
         )}
         {roundingVal !== 0 && (
           <View style={styles.row}><Text style={styles.item}>{t('rounding')}</Text><Text style={styles.price}>{rp(roundingVal)}</Text></View>
         )}
-        <View style={styles.totalRow}><Text style={styles.totalL}>{t('bill_total')}</Text><Text style={styles.totalV}>{rp(total)}</Text></View>
+        {show('showTotal') ? (<View style={styles.totalRow}><Text style={styles.totalL}>{t('bill_total')}</Text><Text style={styles.totalV}>{rp(total)}</Text></View>) : null}
+        {tplOn && eff && eff.showCashierName && metaCashier && metaCashier !== '-' ? (<Text style={styles.member}>{(eff.receiptLanguage ?? lang) === 'id' ? 'Kasir' : 'Cashier'}: {metaCashier}</Text>) : null}
+        {tplOn && eff && eff.showThankYouMessage ? (<Text style={styles.thanks}>{eff.customThankYouMessage || ((eff.receiptLanguage ?? lang) === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!')}</Text>) : null}
+        {tplOn && eff && eff.showCustomFooterText && eff.customFooterText ? (<Text style={styles.addr}>{eff.customFooterText}</Text>) : null}
+        {tplOn && eff && eff.showFooterPhone && shopPhone ? (<Text style={styles.addr}>{shopPhone}</Text>) : null}
+        {tplOn && eff && eff.showGenfityBranding ? (<Text style={styles.addr}>{(eff.receiptLanguage ?? lang) === 'id' ? 'Diberdayakan oleh Genfity' : 'Powered by Genfity'}</Text>) : null}
         {(p.memberId || p.customer) ? (
           <Text style={styles.member}>{p.memberId ? t('bill_member_line').replace('{m}', p.memberId).replace('{c}', p.customer ? ` · ${p.customer}` : '') : metaGuest}</Text>
         ) : null}
-      </View>
+      </View>);
+      })()}
 
       <View style={styles.actions}>
         <AppButton
@@ -441,6 +527,12 @@ const styles = StyleSheet.create({
   body: { padding: 16, paddingBottom: 40 },
   meta: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   bill: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginTop: 10, borderWidth: 1, borderColor: colors.line },
+  billNarrow: { maxWidth: 300, alignSelf: 'center', width: '100%' },
+  unpaid: { fontFamily: fonts.bold, fontSize: 13, color: colors.red, textAlign: 'center', marginBottom: 6 },
+  paperTag: { fontFamily: fonts.medium, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 4 },
+  thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 10 },
+  note: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  logo: { width: 56, height: 56, alignSelf: 'center', marginBottom: 4 },
   shop: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, textAlign: 'center' },
   addr: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 2 },
   trx: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, textAlign: 'center', marginVertical: 10 },

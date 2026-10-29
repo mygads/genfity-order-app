@@ -35,6 +35,24 @@ const m = time.match(/(\d{1,2}):(\d{2})/); if (!m) return null; const d = new Da
   Selesai: null,};/** Status tiket dapur: tulis baris tr_kitchenticket + antrean outbox FISIK
  * (tr_esoprocessqueue via enqueueOutbox). Tak pernah melempar; daftar tiket
  * dibaca dari tr_kitchenticket (tiket lahir dari saveSale nyata, bukan mock). */
+/** P2 KDS bump lintas device (2026-10-29): siarkan status Baru->Diproses->Selesai via WS bila online.
+ * Best-effort tanpa ubah kontrak: payload {type:'kitchen', id, status} ke channel dapur; offline = lokal saja.
+ * Penerima lain dedupe via id::status (R18) sehingga exactly-once tetap terjaga. */
+
+async function broadcastKitchenBump(id: string, status: string): Promise<void> {
+  try {
+    const { getApiMode, apiFetch } = await import('../../lib/apiSource');
+    if (getApiMode() !== 'real') return;
+    const { getTerminal, ApiPath } = await import('../../config/server');
+    const t = getTerminal() as unknown as { terminalIdBe?: unknown; terminalId?: unknown };
+    const tid = String(t.terminalIdBe ?? t.terminalId ?? '').trim();
+    if (!tid) return;
+    const tpl = String((ApiPath as unknown as Record<string, unknown>).kitchenBump ?? '/api/v1/terminals/{id}/kitchen-bump');
+    const path = tpl.replace('{id}', encodeURIComponent(tid));
+    await apiFetch(path, { method: 'POST', body: { ticketId: id, status } }).catch(() => null);
+  } catch { /* offline = lokal saja */ }
+}
+
 async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): Promise<void> {
   const now = new Date().toISOString();
   const salesNum = String((tk as { salesNum?: unknown }).salesNum ?? '');
@@ -276,6 +294,8 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     setMoved((m) => ({ ...m, [tk.id]: next }));
     setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: next } : sel));
     void persistKitchenStatus(tk, next);
+    // P2 KDS bump lintas device: siarkan best-effort (offline = lokal saja, dedupe id::status di penerima).
+    void broadcastKitchenBump(tk.id, next).catch(() => {});
     // W2: cermin status ke BE bila tiket tertaut order server. Tanpa id server
     // = BLOCKED (lokal-only, tanpa kirim buta). Optimistik dipertahankan agar
     // dapur tetap jalan; drain menyusul saat offline; konflik transisi =
@@ -308,7 +328,18 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   const filterLabel = (f: (typeof filters)[number]) => f === 'Semua' ? t('c_all') : f === 'Baru' ? t('kit_new') : f === 'Diproses' ? t('kit_proc') : t('kit_done'); return (
     <View style={styles.root}>
       <ScreenHeader title={t('kit_title')} sub={`${list.length} tiket - ${counts.Baru} ${t('kit_new')} - ${counts.Diproses} ${t('kit_proc')}`} left={<Pressable onPress={() => setDrawerOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('action_open_menu')}><Image source={require('../../../assets/icons/burger.webp')} style={styles.burger} resizeMode="contain" /></Pressable>
-      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} /><View style={styles.tabs}>
+      } /><DrawerMenu visible={drawerOpen} onClose={() => setDrawerOpen(false)} navigate={(r) => navigation?.navigate(r)} />{(() => { try {
+        // Vertical Shell: dapur/KDS hanya relevan untuk resto/coffee/warung (needKitchen).
+        // Retail/jasa/pulsa yang membuka via deep-link dapat banner jujur, tetap fail-open.
+        const { getCachedVerticalId } = require('../../lib/posModes') as { getCachedVerticalId: () => string };
+        const { VERTICALS } = require('../../lib/verticals') as Record<string, unknown>;
+        const vid = String(getCachedVerticalId() ?? '');
+        const vv = (VERTICALS as Record<string, { label?: string; flags?: { needKitchen?: boolean } }>)[vid];
+        if (vv && vv.flags && vv.flags.needKitchen === false) {
+          return (<Text style={styles.verticalWarn}>{t('kitchen.verticalNote').replace('{v}', vv.label ?? vid)}</Text>);
+        }
+        return null;
+      } catch { return null; } })()}<View style={styles.tabs}>
         {filters.map((f) => (
           <Pressable key={f} onPress={() => setFilter(f)} style={[styles.tab, filter === f && styles.tabActive, isTablet && styles.tabTablet]}>
             <Text style={[styles.tabText, filter === f && styles.tabTextActive, isTablet && styles.tabTextBig]}>{filterLabel(f)}</Text>
@@ -497,6 +528,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   tabTextBig: { fontSize: 14 },
   stationRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 8, gap: 6 },
   liveNotice: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, paddingHorizontal: 16, marginTop: 6 },
+  verticalWarn: { fontFamily: fonts.medium, fontSize: 12, color: colors.amberDark, backgroundColor: colors.paleAmber, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginHorizontal: 16, marginTop: 8, overflow: 'hidden' },
   miniTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line },
   miniTabActive: { backgroundColor: colors.orange, borderColor: colors.orange },
   miniText: { fontFamily: fonts.bold, fontSize: 11, color: colors.muted },

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import ScreenRoot from '../../components/ScreenRoot';
+import { pullMaster } from '../../lib/master';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };
 type Props = { navigation?: Nav; route?: { params?: { branch?: string } } };
@@ -15,21 +16,52 @@ export default function InstallProgressScreen({ navigation, route }: Props) {
   const { t } = useLang();
   const branch = route?.params?.branch ?? 'Genfity Cabang Poris';
   const [done, setDone] = useState(0);
+  const [detail, setDetail] = useState('');
+  const [failed, setFailed] = useState('');
+  const started = useRef(false);
 
   useEffect(() => {
-    if (done >= STEP_KEYS.length) {
-      const t = setTimeout(() => navigation?.navigate('CreatePin', { branch }), 600);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setDone((d) => d + 1), 900);
-    return () => clearTimeout(t);
-  }, [done, navigation, branch]);
+    if (started.current) return;
+    started.current = true;
+    let alive = true;
+    (async () => {
+      // P1-01: progress nyata per-domain, bukan timer palsu.
+      // Urutan: menu/branchmenu (Go) -> table/station/payment -> user/voucher/member.
+      const steps: string[][] = [
+        ['menu', 'branchmenu'],
+        ['table', 'station', 'paymentmethod'],
+        ['user', 'voucher', 'member', 'promotion'],
+      ];
+      let stepIdx = 0;
+      try {
+        for (const only of steps) {
+          if (!alive) return;
+          setDetail(only.join(', '));
+          try {
+            await pullMaster(only);
+          } catch (e) {
+            // Jujur: domain gagal dicatat, lanjut domain berikut (fail-closed per-domain).
+            if (alive) setFailed(String((e as Error)?.message ?? e).slice(0, 200));
+          }
+          stepIdx += 1;
+          if (alive) setDone(stepIdx);
+        }
+      } finally {
+        if (alive && stepIdx >= STEP_KEYS.length) {
+          const timer = setTimeout(() => navigation?.navigate('CreatePin', { branch }), 600);
+          void timer;
+        }
+      }
+    })().catch((e) => { if (alive) setFailed(String((e as Error)?.message ?? e).slice(0, 200)); });
+    return () => { alive = false; };
+  }, [navigation, branch]);
 
   return (
     <ScreenRoot style={styles.root}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.body, isTablet && wideCenterSm]}>
       <Text style={styles.title}>{t('g_inst_title')}</Text>
-      <Text style={styles.desc}>{branch} · {t('g_inst_dont_close')}</Text>
+      <Text style={styles.desc}>{branch} · {t('g_inst_dont_close')}{detail ? ` · ${detail}` : ''}</Text>
+      {failed ? <Text style={styles.err}>{failed}</Text> : null}
       <View style={styles.card}>
         {STEP_KEYS.map((k, i) => (
           <View key={k} style={styles.step}>
@@ -67,4 +99,5 @@ const styles = StyleSheet.create({
   bar: { height: 8, borderRadius: 4, backgroundColor: colors.line, marginTop: 20, overflow: 'hidden' },
   fill: { height: 8, backgroundColor: colors.orange },
   pct: { fontFamily: fonts.bold, fontSize: 14, color: colors.orangeDark, textAlign: 'center', marginTop: 8 },
+  err: { fontFamily: fonts.regular, fontSize: 12, color: colors.red, textAlign: 'center', marginTop: 8 },
 });

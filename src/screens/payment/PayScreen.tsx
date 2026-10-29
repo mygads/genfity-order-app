@@ -31,11 +31,13 @@ import {
   GO_OP_SETTLE,
 } from '../../lib/posWire';
 import { initDb, query as queryDb } from '../../lib/db';
-import { getCachedTipEnabled, subscribeTipFlag } from '../../lib/posModes';
+import { getCachedTipEnabled, getCachedVerticalId, subscribeTipFlag } from '../../lib/posModes';
+import { payPolicyBlockReason } from '../../lib/sync';
+import { VERTICAL_POLICY, VERTICALS } from '../../lib/verticals';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';
 import { requiresPosPin } from '../../lib/posPinGate';
 import { getCachedCurrency } from '../../lib/currency';
-import { getPosPromoGate, isPayTabEnabled, getRequirePaymentProof, getPaymentMethods } from '../../lib/posConfigSync';
+import { getPosPromoGate, isPayTabEnabled, getRequirePaymentProof, getPaymentMethods, getPaymentMethodsStrict } from '../../lib/posConfigSync';
 import { filterOnlineWallets, PAYMENT_METHODS_DEFAULT } from '../../lib/paymentMethods';
 import { uploadExpensePhotoFirst } from '../../lib/terminalExpense';
 import { preparePhoto } from '../../lib/photo';
@@ -153,6 +155,13 @@ type Props = {
       splitGroup?: boolean;
       /** Total PENUH order grup (tagihan kunjungan ini tetap di `total`). */
       orderTotal?: number;
+      /** Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa (Cashier/CartDetail). */
+      serviceDate?: string;
+      serviceTime?: string;
+      technician?: string;
+      dpPercent?: number;
+      deliveryAddress?: string;
+      deliveryFee?: number;
     };
   };
 };
@@ -214,6 +223,13 @@ export default function PayScreen({ navigation, route }: Props) {
   const orderMode = route?.params?.mode;
   const tableNo = route?.params?.table;
   const ongkir = route?.params?.ongkir ?? 0;
+  /** Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa — diteruskan ke sale + struk. */
+  const serviceDateParam = (route?.params?.serviceDate ?? '').trim();
+  const serviceTimeParam = (route?.params?.serviceTime ?? '').trim();
+  const technicianParam = (route?.params?.technician ?? '').trim();
+  const dpPercentParam = Math.max(0, Math.round(Number(route?.params?.dpPercent) || 0));
+  const deliveryAddressParam = (route?.params?.deliveryAddress ?? '').trim();
+  const deliveryFeeParam = Math.max(0, Math.round(Number(route?.params?.deliveryFee) || 0));
   const customerName = route?.params?.customer;
   const memberIdParam = route?.params?.memberId;
   /** Ronde-3 Q1: ref GO dari params (ditempel MemberScreen pasca-resolve). */
@@ -270,18 +286,33 @@ export default function PayScreen({ navigation, route }: Props) {
    * flag lain AMBIGU (peta lengkap di lib/paymentMethods) → tampil + parked.
    * Muat sekali saat layar dibuka; cache gagal = perilaku lama. */
   const [qrisEnabled, setQrisEnabled] = useState(true);
+  const [gpayEnabled, setGpayEnabled] = useState(true);
+  const [hasPaymentSnapshot, setHasPaymentSnapshot] = useState(true);
   useEffect(() => {
     let alive = true;
     void getPaymentMethods()
-      .then((m) => { if (alive) setQrisEnabled(m.qrisEnabled !== false); })
-      .catch(() => { /* absen = tampil */ });
+      .then((m) => {
+        if (!alive) return;
+        setQrisEnabled(m.qrisEnabled !== false);
+        setGpayEnabled(m.gpayEnabled !== false);
+      })
+      .catch(() => { /* absen = tampil (kasir tak boleh terkunci) */ });
+    void getPaymentMethodsStrict()
+      .then((r) => {
+        if (!alive) return;
+        setHasPaymentSnapshot(r.hasExplicitSnapshot);
+      })
+      .catch(() => { /* banner tampil bila gagal baca */ });
     return () => { alive = false; };
   }, []);
-  /** R4-4: bila QRIS terpilih lalu server menonaktifkan susulan, kembalikan
+  /** R4-4: bila QRIS/GPay terpilih lalu server menonaktifkan susulan, kembalikan
    * pilihan ke null (bukan ke dompet lain) agar kasir memilih sadar. */
   useEffect(() => {
     if (!qrisEnabled) setWallet((w) => (w === 'qris' ? null : w));
   }, [qrisEnabled]);
+  useEffect(() => {
+    if (!gpayEnabled) setWallet((w) => (w === 'gpay' || w === 'genfity_pay' || w === 'gopay' ? null : w));
+  }, [gpayEnabled]);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -302,8 +333,8 @@ export default function PayScreen({ navigation, route }: Props) {
   /** R4-4: kartu dompet online yang tampil (QRIS disembunyikan bila owner
    * menonaktifkan via server; dompet lain tak digerbang — lihat peta flag). */
   const visibleWallets = useMemo(
-    () => filterOnlineWallets(WALLETS, { ...PAYMENT_METHODS_DEFAULT, qrisEnabled }),
-    [qrisEnabled],
+    () => filterOnlineWallets(WALLETS, { ...PAYMENT_METHODS_DEFAULT, qrisEnabled, gpayEnabled }),
+    [qrisEnabled, gpayEnabled],
   );
   /** S-F2: gate promo server (posDiscountsEnabled=false = kunci UI pasang
    * voucher baru; voucher bawaan order tetap ditampilkan apa adanya). */
@@ -933,7 +964,13 @@ export default function PayScreen({ navigation, route }: Props) {
             ...(orderMode ? { mode: orderMode } : {}),
             ...(ongkir > 0 ? { ongkir } : {}),
             ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
-            ...(customerName ? { customer: customerName } : {}),
+...(customerName ? { customer: customerName } : {}),
+            ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+            ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+            ...(technicianParam ? { technician: technicianParam } : {}),
+            ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+            ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+            ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
           };
           // L1: antre HANYA setelah tulis DB sukses (gagal = tanpa antre yatim).
           await saveSale(gInput);
@@ -990,6 +1027,11 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(orderMode ? { mode: orderMode } : {}),
         ...(tableNo ? { table: tableNo } : {}),
         ...(customerName ? { customer: customerName } : {}),
+        ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+        ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+        ...(technicianParam ? { technician: technicianParam } : {}),
+        ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+        ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
       });
       return;
     }
@@ -1022,7 +1064,13 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(orderMode ? { mode: orderMode } : {}),
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
-      ...(customerName ? { customer: customerName } : {}),
+...(customerName ? { customer: customerName } : {}),
+      ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+      ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+      ...(technicianParam ? { technician: technicianParam } : {}),
+      ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+      ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+      ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
     };
     try {
       await saveSale(input);
@@ -1063,6 +1111,11 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(orderMode ? { mode: orderMode } : {}),
       ...(tableNo ? { table: tableNo } : {}),
       ...(customerName ? { customer: customerName } : {}),
+      ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+      ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+      ...(technicianParam ? { technician: technicianParam } : {}),
+      ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+      ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
     });
     } finally {
       goRef.current = false;
@@ -1070,7 +1123,8 @@ export default function PayScreen({ navigation, route }: Props) {
   };
 
   // ---- Tunai actions ----
-  // P1-1b: gerbang PIN manajer (paritas FE DeletePinModal): PIN dikumpulkan
+  // P1-1b: gerbang PIN manajer (paritas FE ManagerPinModal; Opsi A: hanya
+  // `pin` yang dibaca server, slot delete_pin sunset): PIN dikumpulkan
   // via ManagerPinPrompt lalu diteruskan ke goSuccess → mirror live; bila
   // live gagal, PIN ikut antrean GO_OP_SETTLE agar drain memfinalisasi
   // (transport-only; salah/berubah = fail-once PIN_REQUIRED jujur).
@@ -1081,7 +1135,16 @@ export default function PayScreen({ navigation, route }: Props) {
   // ulangi setelah order tertaut / online kembali. TANPA persist tambahan:
   // tagihan meja yang sudah ada tetap 'open'; keranjang baru tetap di
   // keranjang (tanpa struk-hantu, tanpa burn voucher, tanpa debit deposit).
+  /** Vertical Shell Fase 2: PREPAID (pulsa) tak boleh hold/simpan-hutang.
+   * SN/token tak bisa ditarik — tahan = rugi pasti. Blokir jujur + arahkan lunas. */
   const holdAsUnpaidOffline = () => {
+    try {
+      const reason = payPolicyBlockReason(getCachedVerticalId());
+      if (reason) {
+        appAlert(t('pay.prepaidOnly'), reason);
+        return;
+      }
+    } catch { /* abaikan -> alert legacy */ }
     appAlert(t('pay_hold_unpaid_title'), t('pay_hold_unpaid'));
   };
   const goSuccessGated = (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string }) => {
@@ -1219,6 +1282,12 @@ export default function PayScreen({ navigation, route }: Props) {
         ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
         ...(tipAmount > 0 ? { tip: tipAmount } : {}),
         ...(customerName ? { customer: customerName } : {}),
+        ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+        ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+        ...(technicianParam ? { technician: technicianParam } : {}),
+        ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+        ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+        ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
         ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
         ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
         ...(memberPoinParam != null ? { memberPoin: memberPoinParam } : {}),
@@ -1398,6 +1467,12 @@ export default function PayScreen({ navigation, route }: Props) {
 
   const renderBanner = () => (
     <View style={isTablet ? styles.bannerRowTablet : styles.bannerRow}>
+      {!hasPaymentSnapshot ? (
+        <View style={{ backgroundColor: '#fef3c7', borderColor: '#f59e0b', borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 8 }}>
+          <Text style={{ color: '#92400e', fontWeight: '700' }}>Butuh sync metode bayar</Text>
+          <Text style={{ color: '#92400e', marginTop: 2 }}>Snapshot pembayaran belum ada (mode fail-closed untuk layar baru). Tarik sync agar QRIS/GPay tampil sesuai setting owner. Kasir tetap bisa tunai.</Text>
+        </View>
+      ) : null}
       {isTablet && (
         boxVoucher ? (
           <TouchableOpacity
@@ -1439,6 +1514,49 @@ export default function PayScreen({ navigation, route }: Props) {
           <Text style={[styles.bannerValue, styles.bannerRemaining]}>{rp(remaining)}</Text>
         </View>
       </View>
+      {(() => {
+        // Vertical Shell: PREPAID (pulsa) wajib lunas — tanpa tempo; DP (jasa) beri hint.
+        try {
+          const v = VERTICALS[getCachedVerticalId()];
+          if (v?.payPolicy === 'PREPAID') return <Text style={styles.ctaHint}>{t('pay.prepaidOnly')}</Text>;
+          if (v?.payPolicy === 'DP') return <Text style={styles.ctaHint}>{t('pay.dpHint')}</Text>;
+        } catch { /* abaikan */ }
+        return null;
+      })()}
+      {(serviceDateParam || technicianParam || deliveryAddressParam) ? (
+        <Text style={styles.ctaHint}>
+          {[serviceDateParam && serviceTimeParam ? `${serviceDateParam} ${serviceTimeParam}` : null, technicianParam ? `Teknisi ${technicianParam}` : null, dpPercentParam > 0 ? `DP ${dpPercentParam}%` : null, deliveryAddressParam ? `Antar: ${deliveryAddressParam.slice(0, 80)}` : null].filter(Boolean).join(' · ')}
+        </Text>
+      ) : null}
+      {(() => {
+        // Fase 3 kasbon: warung/grocery boleh simpan-hutang dengan nama + limit.
+        // PREPAID (pulsa) dan fashion/jasa tak boleh kasbon — tombol tak tampil.
+        try {
+          const vid = String(getCachedVerticalId() ?? '');
+          const pol = (VERTICAL_POLICY as Record<string, { kasbonAllowed: boolean; kasbonLimit: number }>)[vid];
+          if (!pol?.kasbonAllowed) return null;
+          if (remaining <= 0) return null;
+          const nm = String(customerName ?? '').trim();
+          const over = remaining > pol.kasbonLimit;
+          return (
+            <View style={styles.kasbonBox}>
+              <Text style={styles.kasbonT}>
+                {nm ? (over ? `Kasbon melebihi limit (${remaining} > ${pol.kasbonLimit}). Kurangi atau tambah bayar.` : `Simpan kasbon ${nm} — sisa ${remaining}`) : 'Isi nama pelanggan di kasir untuk kasbon.'}
+              </Text>
+              <AppButton
+                title={nm && !over ? `Simpan kasbon (${remaining})` : 'Kasbon (belum bisa)'}
+                size="md"
+                variant="secondary"
+                disabled={!nm || over}
+                onPress={() => {
+                  if (!nm || over) return;
+                  void goSuccess('cash', paid, 0);
+                }}
+              />
+            </View>
+          );
+        } catch { return null; }
+      })()}
       {groupPaidInfo && (
         <View style={styles.voucherBar}>
           <Text style={styles.voucherBarText}>{`◈  ${t('pay_group_collected').replace('{p}', rp(groupPaidInfo.paid)).replace('{g}', rp(groupPaidInfo.grand))}`}</Text>
@@ -1734,6 +1852,12 @@ export default function PayScreen({ navigation, route }: Props) {
           ...(totalOngkirCut > 0 ? { ongkirCut: totalOngkirCut } : {}),
           ...(tipAmount > 0 ? { tip: tipAmount } : {}),
           ...(customerName ? { customer: customerName } : {}),
+          ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}),
+          ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}),
+          ...(technicianParam ? { technician: technicianParam } : {}),
+          ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}),
+          ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
+          ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
           ...(fwdMemberId ? { memberId: fwdMemberId } : {}),
           ...(fwdCustomerId != null ? { customerId: fwdCustomerId } : {}),
           ...(memberPoinParam != null ? { memberPoin: memberPoinParam } : {}),
@@ -2220,6 +2344,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   changeText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.greenDark },
+  kasbonBox: { backgroundColor: colors.paleAmber, borderWidth: 1, borderColor: colors.amber, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8, gap: 8 },
+  kasbonT: { fontFamily: fonts.medium, fontSize: 13, color: colors.amberDark },
   ctaHint: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 8, textAlign: 'center' },
   edcInfo: { backgroundColor: colors.paleBlue, borderWidth: 1, borderColor: colors.blue, borderRadius: 8, padding: 12, marginTop: 12 },
   edcInfoTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.navy },

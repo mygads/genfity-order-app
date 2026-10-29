@@ -197,7 +197,13 @@ function run() {
       checks++;
     }
     const st = execSync('git status --short', { cwd: ROOT, encoding: 'utf8' });
-    ok(!/genfity-logo|icon\/|splash|Login|Intro|About|Idle/i.test(st),
+    // W1-05 scoped (Vertical Shell): hanya jalur ASET yang dijaga
+    // (assets/ + nama berkas logo/icon/splash). Nama layar (Login/Idle/About)
+    // BUKAN aset — edit layar tak boleh memicu false-positive logo.
+    const assetTouched = st.split('\n').some((line) =>
+      /(^|[\/])assets[\/]|genfity-logo|splash|\/icon[^\/]*\.(png|webp|jpg|jpeg|svg)$|\/logo[^\/]*\.(png|webp|jpg|jpeg|svg)$/i.test(line),
+    );
+    ok(!assetTouched,
       'W1-05: aset logo (icon/splash/genfity-logo*) tak tersentuh');
   } catch (e) {
     // Tanpa git = lewati penjaga (bukan gagal): lingkungan baca-saja.

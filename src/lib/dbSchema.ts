@@ -122,7 +122,10 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS ms_menu (
     id TEXT PRIMARY KEY, menuName TEXT, categoryId TEXT, price REAL DEFAULT 0,
     imageUrl TEXT, stationId TEXT, trackStock INTEGER DEFAULT 1,
-    stockTemplate INTEGER, flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
+    stockTemplate INTEGER, flagActive INTEGER DEFAULT 1, syncDate TEXT,
+    kind TEXT DEFAULT 'MENU', sku TEXT DEFAULT '', provider TEXT DEFAULT '',
+    nominal INTEGER DEFAULT 0, durationMin INTEGER DEFAULT 0,
+    sizeLabel TEXT DEFAULT '', colorLabel TEXT DEFAULT '', unitLabel TEXT DEFAULT 'pcs')`,
   `CREATE TABLE IF NOT EXISTS ms_category (
     id TEXT PRIMARY KEY, categoryName TEXT, sortOrder INTEGER DEFAULT 0,
     flagActive INTEGER DEFAULT 1, syncDate TEXT)`,
@@ -298,6 +301,17 @@ export const MIGRATION_STATEMENTS: string[] = [
   // NULL = tanpa template → tombol reset tak tampil (cermin FE guard).
   'ALTER TABLE ms_menu ADD COLUMN stockTemplate INTEGER',
   'ALTER TABLE ms_addon ADD COLUMN stockTemplate INTEGER',
+  // Adaptive Vertical Shell Fase 3: katalog polimorfik (1 tabel, N tampilan).
+  // kind MENU/SKU/PULSA/SERVICE; sku/provider/nominal/duration/size/color/unit.
+  // Best-effort untuk instalasi lama (gagal = sudah ada).
+  "ALTER TABLE ms_menu ADD COLUMN kind TEXT DEFAULT 'MENU'",
+  "ALTER TABLE ms_menu ADD COLUMN sku TEXT DEFAULT ''",
+  "ALTER TABLE ms_menu ADD COLUMN provider TEXT DEFAULT ''",
+  'ALTER TABLE ms_menu ADD COLUMN nominal INTEGER DEFAULT 0',
+  'ALTER TABLE ms_menu ADD COLUMN durationMin INTEGER DEFAULT 0',
+  "ALTER TABLE ms_menu ADD COLUMN sizeLabel TEXT DEFAULT ''",
+  "ALTER TABLE ms_menu ADD COLUMN colorLabel TEXT DEFAULT ''",
+  "ALTER TABLE ms_menu ADD COLUMN unitLabel TEXT DEFAULT 'pcs'",
   // A5: tabel arsip void-penuh lokal untuk instalasi lama (IF NOT EXISTS =
   // idempoten; gagal = sudah ada).
   `CREATE TABLE IF NOT EXISTS tr_voidtrail (
@@ -305,4 +319,13 @@ export const MIGRATION_STATEMENTS: string[] = [
     grandTotal REAL DEFAULT 0, discount REAL DEFAULT 0, service REAL DEFAULT 0,
     feeESB REAL DEFAULT 0, packaging REAL DEFAULT 0, tip REAL DEFAULT 0, ongkir REAL DEFAULT 0,
     reasonId TEXT, reasonNote TEXT, userId TEXT, voidDate TEXT, syncDate TEXT)`,
+  // P0/P1 hardening 2026-10-29 (audit final): kolom aditif kompat mundur (gagal = sudah ada).
+  'ALTER TABLE ms_menu ADD COLUMN imageHash TEXT',
+  'ALTER TABLE ms_menu ADD COLUMN imageUpdatedAt TEXT',
+  'ALTER TABLE ms_menu ADD COLUMN updatedAt TEXT',
+  'ALTER TABLE ms_branchmenu ADD COLUMN updatedAt TEXT',
+  'ALTER TABLE tr_saleshead ADD COLUMN clientSessionUuid TEXT',
+  `CREATE INDEX IF NOT EXISTS idx_sync_dirty_head ON tr_saleshead(syncDate)`,
+  `CREATE INDEX IF NOT EXISTS idx_sync_dirty_menu ON tr_salesmenu(syncDate)`,
+  `CREATE INDEX IF NOT EXISTS idx_branchmenu_updated ON ms_branchmenu(updatedAt)`,
 ];

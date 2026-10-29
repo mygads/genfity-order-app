@@ -265,6 +265,30 @@ const LS_PENDING_CLOSES = 'genfity.be.pendingCashCloses';
 
 let cashSessionMem: string | null = null;
 
+/** P0-03: UUID sesi kas lokal saat buka shift offline (tak ada id server).
+ * Dibawa di settle drain sebagai clientSessionUuid; BE cocokkan saat cash-open online.
+ * Tak pernah melempar. */
+export async function getPendingSessionUuid(): Promise<string | null> {
+  try {
+    const { getItem } = await import('./storage');
+    const v = await getItem(LS_PENDING_SESSION_UUID);
+    const s = String(v ?? '').trim();
+    return s ? s : null;
+  } catch { return null; }
+}
+export async function setPendingSessionUuid(uuid: string): Promise<void> {
+  try {
+    const { setItem } = await import('./storage');
+    const s = String(uuid ?? '').trim().slice(0, 64);
+    if (s) await setItem(LS_PENDING_SESSION_UUID, s);
+  } catch { /* abaikan */ }
+}
+export async function clearPendingSessionUuid(): Promise<void> {
+  try {
+    const { setItem } = await import('./storage');
+    await setItem(LS_PENDING_SESSION_UUID, '');
+  } catch { /* abaikan */ }
+}
 export async function getCashSessionId(): Promise<string | null> {
   if (cashSessionMem) return cashSessionMem;
   try {
@@ -305,6 +329,7 @@ export async function clearCashSessionId(): Promise<void> {
 // pendingManagerReview, dibaca ShiftScreen sebagai kartu approve, dibersihkan
 // saat approve sukses (atau replay REVIEW_NOT_PENDING).
 // ---------------------------------------------------------------------------
+const LS_PENDING_SESSION_UUID = 'genfity.be.pendingSessionUuid';
 const LS_PENDING_REVIEW = 'genfity.be.pendingReviewSid';
 
 let pendingReviewMem: string | null = null;
@@ -351,7 +376,9 @@ export interface CashOpenResult {
 export async function cashOpenBe(openingCash: number, note?: string): Promise<WfResult<CashOpenResult>> {
   const cash = Math.max(0, Math.round(numOf(openingCash)));
   // registerId 0 = server pakai/buat 'Main register' (kontrak BE).
+  // P0-03: sertakan clientSessionUuid (UUID lokal saat buka offline) agar BE cocokkan saat online.
   const body: Record<string, unknown> = { registerId: 0, openingCash: cash };
+  try { const pend = await getPendingSessionUuid(); if (pend) body.clientSessionUuid = pend; } catch { /* abaikan */ }
   const n = String(note ?? '').trim();
   if (n) body.note = n.slice(0, 500);
   const call = await postWithStampRetry(ApiPath.merchantCashOpen, body);
@@ -364,6 +391,7 @@ export async function cashOpenBe(openingCash: number, note?: string): Promise<Wf
       return { ok: false, reason: 'error', code: 'BAD_RESPONSE', message: 'Server tanpa id sesi', status: res.status };
     }
     await setCashSessionId(id);
+    try { await clearPendingSessionUuid(); } catch { /* abaikan */ }
     return { ok: true, data: { sessionId: id } };
   }
   const be = beErrorOf(res.data);

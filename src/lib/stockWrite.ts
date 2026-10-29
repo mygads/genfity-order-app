@@ -156,6 +156,16 @@ export async function persistBranchQty(
       soldOut = 0;
     }
   }
+  // P0-02 optimistic-lock: tangkap baseQty SEBELUM tulis (untuk 409 STOCK_CONFLICT).
+  // Tanpa base = BE perlakukan legacy (tanpa cek) — jangan pernah kirim baseQty == qty baru.
+  let baseQty: number | null = null;
+  try {
+    const prev = await queryFirst<{ qty: number | null }>(
+      `SELECT qty FROM ${branch} WHERE branchId = ? AND ${idCol} = ?`,
+      [branchId, id],
+    );
+    if (prev && prev.qty !== null && prev.qty !== undefined) baseQty = Math.max(0, Math.round(Number(prev.qty) || 0));
+  } catch { /* tanpa base = legacy */ }
   await run(
     `INSERT INTO ${branch} (branchId, ${idCol}, qty, flagSoldOut, flagActive, syncDate)
      VALUES (?, ?, ?, ?, 1, NULL)
@@ -164,9 +174,11 @@ export async function persistBranchQty(
     [branchId, id, clean, soldOut],
   );
   try {
-    await enqueueOutbox(branch, `${branchId}:${id}`, 'update');
+    const { enqueueOutboxWithPayload } = await import('./sync');
+    if (baseQty !== null) await enqueueOutboxWithPayload(branch, `${branchId}:${id}`, 'update', { baseQty });
+    else await enqueueOutbox(branch, `${branchId}:${id}`, 'update');
   } catch {
-    /* abaikan: qty lokal tetap tersimpan, antrean dicoba lagi berikutnya */
+    try { await enqueueOutbox(branch, `${branchId}:${id}`, 'update'); } catch { /* abaikan: qty lokal tetap tersimpan */ }
   }
 }
 

@@ -13,7 +13,8 @@ import { apiFetch } from './apiSource';
 import { all, initDb, markClean, markDirty, queryFirst, run } from './db';
 import { getLang, tr } from './i18n';
 import { fmtDateInTz, fmtTimeInTz } from './datefmt';
-import { getCachedMerchantType, normalizeMerchantType } from './posModes';
+import { getCachedMerchantType, getCachedVerticalId, normalizeMerchantType } from './posModes';
+import { VERTICALS } from './verticals';
 import { notifyPushSyncSuccess } from './push';
 import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
@@ -343,25 +344,31 @@ export const UNSUPPORTED_ORDER_TYPE = 'UNSUPPORTED';
  *   DAFTAR UI (kasir sembunyikan kanal delivery bila OFF), BUKAN di sini —
  *   sync buta-flag agar pesanan lama tetap mengalir walau flag mati belakangan.
  *   Varian IN_STORE dan HOME_SERVICE →UNSUPPORTED (logika TIPE, bukan flag).
- * - PRODUCT: IN_STORE_ORDER/IN_STORE_PICKUP→IN_STORE_ORDER (alias eksplisit:
- *   pickup = order in-store); TAKEAWAY/TAKE_AWAY→TAKEAWAY; DELIVERY/agregator/
+ * - PRODUCT: IN_STORE_ORDER→IN_STORE_ORDER; IN_STORE_PICKUP→IN_STORE_PICKUP
+ *   distinct (BOPIS Fase 3 — ambil-di-toko pisah di laporan; BE 00213+POS-create
+ *   kini terima); TAKEAWAY/TAKE_AWAY→TAKEAWAY; DELIVERY/agregator/
  *   DINE_IN→UNSUPPORTED — SENGAJA tak dilipat ke TAKEAWAY (delivery ≠ takeaway;
  *   BE menolak = BLOCKED jujur).
- * - SERVICE: IN_STORE_SERVICE→IN_STORE_SERVICE; lainnya (termasuk
- *   HOME_SERVICE)→UNSUPPORTED — BE service kini hanya IN_STORE_SERVICE
- *   (owner-need: dukungan HOME_SERVICE/DELIVERY di BE).
+ * - SERVICE: IN_STORE_SERVICE→IN_STORE_SERVICE; HOME_SERVICE→HOME_SERVICE
+ *   (Fase 3 — teknisi datang, alamat di deliveryAddress; BE POS-create kini
+ *   terima + validasi alamat ≤500 char).
  * Mode asing RESTAURANT → DINE_IN (default lama, lestari).
  */
 function goPosOrderType(raw?: unknown, merchantType?: unknown): string {
   const mt = normalizeMerchantType(merchantType ?? getCachedMerchantType());
   const k = String(raw ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
   if (mt === 'PRODUCT') {
-    if (k === 'IN_STORE_ORDER' || k === 'IN_STORE_PICKUP') return 'IN_STORE_ORDER';
+    // Fase 3 BOPIS: IN_STORE_PICKUP disimpan distinct (laporan pisah ambil-di-toko
+    // vs makan-di-tempat; BE orders_pos_create kini terima keduanya).
+    if (k === 'IN_STORE_ORDER') return 'IN_STORE_ORDER';
+    if (k === 'IN_STORE_PICKUP') return 'IN_STORE_PICKUP';
     if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
     return UNSUPPORTED_ORDER_TYPE;
   }
   if (mt === 'SERVICE') {
     if (k === 'IN_STORE_SERVICE') return 'IN_STORE_SERVICE';
+    // Fase 3: HOME_SERVICE via POS (teknisi datang; alamat di deliveryAddress).
+    if (k === 'HOME_SERVICE') return 'HOME_SERVICE';
     return UNSUPPORTED_ORDER_TYPE;
   }
   // RESTAURANT + tak-dikenal (default restaurant, ASUMSI): perilaku pra-C2.
@@ -386,6 +393,29 @@ export function orderTypeBlockReason(raw?: unknown, merchantType?: unknown): str
   if (goPosOrderType(raw, mt) !== UNSUPPORTED_ORDER_TYPE) return null;
   const mode = String(raw ?? '').trim() || '?';
   return tr('sync.orderTypeUnsupported').replace('{mode}', mode).replace('{type}', mt);
+}
+
+/**
+ * Vertical Shell Fase 2: pagar payPolicy per vertikal (defense-in-depth;
+ * UI sudah menyembunyikan tombolnya, sync menolak bila lolos).
+ * - PREPAID (PULSA_DIGITAL): aksi hold/simpan-hutang/parked SELALU ditolak
+ *   (SN/token tak bisa ditarik — tahan = rugi pasti). Guard berbasis aksi,
+ *   bukan nominal: pemanggil (Simpan/Hold/Parked) sudah berarti ada utang.
+ *   amountDue opsional hanya untuk pesan; bila diisi dan <=0 pun tetap tolak
+ *   agar tak ada jalan pintas parked-diam untuk pulsa.
+ * - DP (SERVICE): tak diblokir di sini (hint saja di PayScreen).
+ * null = boleh lanjut.
+ */
+export function payPolicyBlockReason(vertical?: unknown, amountDue?: unknown): string | null {
+  let vid = '';
+  try { vid = String(vertical ?? getCachedVerticalId() ?? ''); } catch { vid = String(vertical ?? ''); }
+  const cfg = (VERTICALS as Record<string, { payPolicy?: string }>)[vid];
+  const policy = cfg?.payPolicy ?? '';
+  if (policy === 'PREPAID') {
+    void amountDue;
+    return tr('pay.prepaidOnly');
+  }
+  return null;
 }
 
 /**
@@ -476,6 +506,8 @@ function toGoPosRequest(
     tableId?: unknown; customer?: unknown; orderId?: unknown; order_id?: unknown;
     shareId?: unknown; share_id?: unknown; salesNum?: unknown;
     client_id?: unknown; clientId?: unknown;
+    deliveryAddress?: unknown; address?: unknown; deliveryFee?: unknown; ongkir?: unknown;
+    serviceDate?: unknown; serviceTime?: unknown; notes?: unknown;
   };
   const op = String(p.op ?? '');
   if (op === 'group-payment') {
@@ -524,6 +556,12 @@ function toGoPosRequest(
   const salesNum = String(p.salesNum ?? '').trim();
   const tableNumber = String(p.tableId ?? '').trim();
   const customer = String(p.customer ?? '').trim();
+  // Fase 3: alamat + ongkir + jadwal + teknisi (BOPIS/HOME_SERVICE).
+  const deliveryAddress = String(p.deliveryAddress ?? p.address ?? '').trim();
+  const deliveryFeeRaw = Number(p.deliveryFee ?? p.ongkir ?? 0);
+  const serviceDate = String(p.serviceDate ?? '').trim();
+  const serviceTime = String(p.serviceTime ?? '').trim();
+  const techNote = String(p.notes ?? '').trim();
   return {
     path: GO_POS_CREATE_PATH,
     body: {
@@ -535,6 +573,14 @@ function toGoPosRequest(
       ...(salesNum ? { displayNo: salesNum } : {}),
       ...(tableNumber ? { tableNumber } : {}),
       ...(customer ? { customer: { name: customer.slice(0, 200) } } : {}),
+      ...(deliveryAddress ? { deliveryAddress: deliveryAddress.slice(0, 500) } : {}),
+      ...(Number.isFinite(deliveryFeeRaw) && deliveryFeeRaw > 0 ? { deliveryFee: Math.round(deliveryFeeRaw) } : {}),
+      ...(serviceDate ? { serviceDate } : {}),
+      ...(serviceTime ? { serviceTime } : {}),
+      // Fase 3 SERVICE: teknisi/DP (komposisi payments.buildSalePayload) ikut sebagai
+      // notes untuk IN_STORE_SERVICE + HOME_SERVICE (BE tak punya kolom teknisi;
+      // notes = satu-satunya kanal order-level yang BE simpan). Resto/product tak tersentuh.
+      ...(techNote && (orderType === 'HOME_SERVICE' || orderType === 'IN_STORE_SERVICE') ? { notes: techNote.slice(0, 500) } : {}),
     },
   };
 }
@@ -1263,11 +1309,21 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
   };
   try {
     const path = ApiPath.pushBranchMenu.replace('{id}', encodeURIComponent(tid));
+    // P0-02: optimistic-lock BENAR — baseQty dari payload saat edit (bukan qty baru).
+    // Tanpa base (edit lama/antre legacy) = tanpa baseQty agar BE perlakukan legacy tanpa false-409.
+    let baseQty: number | null = null;
+    try {
+      const pm = row.payload ? JSON.parse(row.payload) as Record<string, unknown> : null;
+      const b = pm ? Number((pm as Record<string, unknown>).baseQty) : NaN;
+      if (Number.isFinite(b)) baseQty = Math.max(0, Math.round(b));
+    } catch { /* tanpa base = legacy */ }
     const r = await apiFetch(path, {
       method: 'POST',
-      body: lt === null
-        ? { type: bodyType, id: Math.round(numId), stockQty: qty }
-        : { type: bodyType, id: Math.round(numId), stockQty: qty, lowStockThreshold: lt },
+      body: {
+        type: bodyType, id: Math.round(numId), stockQty: qty,
+        ...(lt === null ? {} : { lowStockThreshold: lt }),
+        ...(baseQty !== null ? { baseQty } : {}),
+      },
     });
     // local/dummy/offline-buta = retry, bukan sukses palsu.
     if (!r || r.fromDummy) return markFailed();
@@ -1291,6 +1347,11 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
     }
     // Opname DRAFT berjalan di server = retry jujur (tanpa marker racun).
     if (r.status === 409 && /STOCK_COUNT_IN_PROGRESS/i.test(codeOf(r.data))) return markFailed();
+    // P0-02: konflik optimistik = pull ulang lalu retry jujur (tanpa racun).
+    if (r.status === 409 && /STOCK_CONFLICT/i.test(codeOf(r.data))) {
+      try { const { pullMaster } = await import('./master'); await pullMaster(['menu', 'branchmenu']); } catch { /* abaikan */ }
+      return markFailed();
+    }
     // 4xx deterministik (menu tak dikenal/validasi) = racun: tandai _dead4xx
     // agar siklus berikut 'skipped' ala APP-8 (kartu tetap 'gagal').
     if (r.status >= 400 && r.status < 500) {
@@ -1915,12 +1976,16 @@ function isDeterministicFailNote(note: unknown): boolean {
   // order 9 gagal 401 saat token basi ("posWire: 401 — Authorization token
   // required") lalu di-skip SELAMANYA pasca-relogin — antrean mati diam-diam.
   // Kecualikan kode-transien dari fail-once; 4xx lain tetap final.
+  // BILLING (2026-10-29): 402 INSUFFICIENT_DEPOSIT = TRANSIEN — saldo habis
+  // sembuh setelah owner topup; jangan fail-once/skip agar antre offline
+  // otomatis flush pasca-topup (kasir tetap jalan saat PAST_DUE/READ_ONLY).
+  if (/INSUFFICIENT_DEPOSIT/i.test(s)) return false;
   if (/^(posWire|beWorkforce):/.test(s)) {
-    if (/\b(401|403|429)\b/.test(s)) return false;
+    if (/\b(401|402|403|429)\b/.test(s)) return false;
     return true;
   }
   if (/^HTTP 4\d\d\b/.test(s)) {
-    if (/^HTTP (401|403|429)\b/.test(s)) return false;
+    if (/^HTTP (401|402|403|429)\b/.test(s)) return false;
     return true;
   }
   return false;
@@ -2127,6 +2192,13 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
         beBody = null;
       }
       const be = beErrorOf(beBody);
+      // BILLING (2026-10-29): 402 deposit habis = retry (tunggu topup owner),
+      // bukan fail-once — antre offline harus flush otomatis pasca-topup.
+      if (goRes.status === 402 || be.code === 'INSUFFICIENT_DEPOSIT') {
+        item.status = 'gagal';
+        item.note = `posWire: ${be.code || 402}${be.message ? ` — ${be.message}` : ''} (retry)`.slice(0, 160);
+        return 'failed';
+      }
       item.status = 'gagal';
       // P1-1: PIN supervisor live-only — antrean REFUND/CANCEL/VOID/STATUS
       // TAK pernah membawa PIN (goMerchantOp membangun body per-field tanpa
@@ -2776,6 +2848,29 @@ export async function enqueueOutboxPhysical(
   }
 }
 
+export async function enqueueOutboxWithPayload(
+  table: string,
+  rowId: string,
+  op: OutboxOp,
+  extraPayload: Record<string, unknown>,
+): Promise<void> {
+  // P0-02: simpan baseQty/baseUpdatedAt di payload fisik agar drain kirim optimistic-lock benar.
+  try {
+    const { uuidv7 } = await import('./uuidv7');
+    const { run, queryFirst } = await import('./db');
+    void queryFirst;
+    await run(
+      `INSERT INTO tr_esoprocessqueue (id, orderID, serverID, tableName, op, payload, status, createdAt)
+       VALUES (?, ?, '', ?, ?, ?, 'antre', ?)`,
+      [uuidv7(), rowId, table, op, JSON.stringify({ table, rowId, op, ...extraPayload }), new Date().toISOString()],
+    );
+    try { await markDirty(table, rowId); } catch { /* abaikan */ }
+    if (!table.startsWith('ms_')) { try { enqueueSync('other', { table, rowId, op }); } catch { /* abaikan */ } }
+    return;
+  } catch { /* fallback ke jalur biasa */ }
+  await enqueueOutbox(table, rowId, op);
+}
+
 export async function enqueueOutbox(
   table: string,
   rowId: string,
@@ -2887,6 +2982,9 @@ export function syncWarnLevel(lastMs?: number): 'ok' | 'warn3' | 'block7' {
 // galat (bukan Custom env / offline = lewati). wifiOnly = cek tipe jaringan
 // via expo-network bila tersedia.
 //
+// P2 roadmap (tanpa dep baru): WorkManager (Android)/BGTask (iOS) untuk antrean >0 saat background.
+  // Jalur Expo: expo-task-manager + expo-background-fetch (opsional, belum dipasang agar bundle tetap kecil).
+  // Sampai dipasang, foreground-only + EFF-09 skip (antrean 0) + banner block7/warn3 adalah perilaku jujur.
 // SYNC-03 (C12, batas jujur — BUKAN background sync): timer ini HANYA hidup
 // saat app foreground (JS timer suspend saat layar mati; repo ini SENGAJA
 // tanpa TaskManager/BackgroundFetch — tak ada klaim "sync saat screen mati").
@@ -2972,6 +3070,7 @@ export const SYNC_OPTS_KEY = 'genfity.sync.opts';
  * (applyAutoSyncPrefs membersihkan timer lama). Best-effort, tak melempar.
  */
 export async function restoreAutoSyncPrefs(): Promise<void> {
+  try { const { registerBackgroundSync } = await import('./backgroundSync'); void registerBackgroundSync().catch(() => {}); } catch { /* modul bg tak terpasang = foreground-only */ }
   try {
     const o = await getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(
       SYNC_OPTS_KEY,
@@ -2984,3 +3083,19 @@ export async function restoreAutoSyncPrefs(): Promise<void> {
     /* preferensi tak terbaca — timer tetap mati, SyncScreen yang menyalakan */
   }
 }
+
+/** P2: ringkasan lag sync untuk dashboard FE operational-review (tanpa network). */
+export async function getSyncLagSummary(): Promise<{ pending: number; dirty: number; lastMs: number; level: string }> {
+  try {
+    hydrate();
+    const pending = outbox.filter((o) => o.status === 'antre' || o.status === 'gagal').length;
+    let dirty = 0;
+    try { dirty = await countDirtyRows(); } catch { /* abaikan */ }
+    const lastMs = lastSyncMs || Date.parse(lastSync) || 0;
+    return { pending, dirty, lastMs, level: syncWarnLevel() };
+  } catch { return { pending: 0, dirty: 0, lastMs: 0, level: 'block7' }; }
+}
+
+// P2 Sentry roadmap (tanpa dep baru): bungkus drain/pushAll/pullMaster dengan captureException bila DSN terisi.
+// Sampai DSN dipasang, tr_applog + LogScreen + readiness + syncWarnLevel adalah observability jujur (tanpa klaim crash-reporting).
+// Jangan kirim PII (PIN/token) ke crash-report — scrub authToken/authKey/clientId sebelum kirim.

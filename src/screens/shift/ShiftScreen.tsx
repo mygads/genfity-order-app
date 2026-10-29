@@ -11,6 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   cashOpenBe,
   cashOpenPayload,
   clockInBe,
+  setPendingSessionUuid,
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
@@ -123,6 +124,8 @@ const terbilang = (n: number): string => {
       return;
     }
     openingRef.current = true;
+      // P0-03: siapkan UUID sesi lokal agar settle offline tidak yatim (pakai import statis di atas).
+      try { const { uuidv7 } = await import('../../lib/uuidv7'); await setPendingSessionUuid(uuidv7()); } catch { /* abaikan */ }
     setError('');
     // APP-SHIFT 2026-10-17: jalur PIN staff dinyatakan CLEAR - server dulu,
     // fallback PIN lokal mana pun yang dikenal (tanpa gerbang owner, tanpa

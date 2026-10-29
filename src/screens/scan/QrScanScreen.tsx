@@ -150,8 +150,9 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       // Belum tervalidasi: tampilkan kode asli hasil pindaian, bukan contoh fiksi.
       return code.trim() || '-';
     }
-    // esb/claim tanpa hasil validasi lokal: kode asli, bukan contoh fiksi.
-    if (tab === 'esb') return code.trim() || '-';
+    // esb/claim tanpa hasil validasi lokal: kode asli, bukan contoh fiksi. P1-07: status perlu-online eksplisit.
+    if (tab === 'esb') return `${code.trim() || '-'} · perlu online — cek server`;
+    if (tab === 'claim') return `${code.trim() || '-'} · perlu online — cek server`;
     return code.trim() || '-';
   };
 

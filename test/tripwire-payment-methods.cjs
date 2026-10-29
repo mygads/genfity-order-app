@@ -123,15 +123,22 @@ function run() {
     'Q4-6: snake payment_settings efektif menang atas mentah camel');
 
   // ---- PM-03: semua-false → gerbang jelas saja; wajib tetap tampil ----
-  const wallets = [{ id: 'ovo' }, { id: 'gopay' }, { id: 'qris' }, { id: 'dana' }];
+  // P1-FINAL: gpayEnabled=false ikut menyembunyikan kartu gpay/genfity_pay/
+  // gopay (ambigu GoPay-vs-Genfity-Pay diselesaikan: id Genfity Pay digerbang).
+  const wallets = [{ id: 'ovo' }, { id: 'gopay' }, { id: 'qris' }, { id: 'dana' }, { id: 'genfity_pay' }];
   const cut = rt.filterOnlineWallets(wallets, ALL_FALSE);
-  ok(cut.length === wallets.length - 1 && cut.every((w) => w.id !== 'qris'),
-    'PM-03: semua-false → QRIS tersembunyi, dompet lain tampil');
+  ok(eq(cut, [{ id: 'ovo' }, { id: 'dana' }]),
+    'PM-03: semua-false → QRIS + gpay/gopay/genfity_pay tersembunyi, ovo/dana tampil');
   ok(eq(rt.filterOnlineWallets(wallets, ALL_TRUE), wallets),
     'PM-03: semua-true → daftar utuh (NOL-regresi)');
+  ok(eq(rt.filterOnlineWallets(wallets, { ...ALL_TRUE, gpayEnabled: false }),
+    [{ id: 'ovo' }, { id: 'qris' }, { id: 'dana' }]),
+    'PM-03: gpay false saja → hanya kartu gpay-family hilang, QRIS tampil');
   const pay = read('screens/payment/PayScreen.tsx');
-  ok(!/payAtCashierEnabled|manualTransferEnabled|codEnabled|gpayEnabled/.test(pay),
+  ok(!/payAtCashierEnabled|manualTransferEnabled|codEnabled/.test(pay),
     'PM-03: tab tunai/member/lainnya TAK digerbang flag ambigu (wajib tampil)');
+  ok(/gpayEnabled/.test(pay) && /qrisEnabled/.test(pay),
+    'PM-03: hanya 2 gerbang JELAS (qris + gpay) dipakai PayScreen');
 
   // ---- PM-04: server-wins menimpa cache ----
   // Parser stateless + tulis-tanpa-syarat: payload server selalu menang.
@@ -144,12 +151,26 @@ function run() {
   const syncRaw = readRaw('lib/posConfigSync.ts');
   ok(/PAYMENT_METHODS_KEY = 'genfity\.pos\.paymentMethods'/.test(syncRaw),
     'PM-04: cache key genfity.pos.paymentMethods');
-  ok(/setJSON\(PAYMENT_METHODS_KEY, parsePaymentMethods\(r\.data\)\)/.test(sync),
-    'PM-04: sync tulis TANPA SYARAT (server-wins, bukan seed-once)');
+  ok(/setJSON\(PAYMENT_METHODS_KEY, r\.data \?\? \{\}\)/.test(syncRaw),
+    'PM-04: sync tulis RAW TANPA SYARAT (server-wins; parse ditunda ke pembaca agar sinyal absen utuh)');
   ok(/export async function getPaymentMethods/.test(sync),
     'PM-04: getPaymentMethods diekspor modul posConfig');
   ok(/from ['"]\.\/paymentMethods['"]/.test(syncRaw),
     'PM-04: posConfig memakai parser murni paymentMethods (pola parsePayTabs)');
+
+  // ---- PM-07: raw-store → strict fail-closed untuk layar baru (P1-FINAL) ----
+  // Menyimpan hasil parse menghancurkan sinyal "absen" (parse selalu isi 5
+  // boolean) → hasExplicitPaymentSnapshot selalu true → banner tak tampil.
+  ok(rt.hasExplicitPaymentSnapshot({}) === false,
+    'PM-07: raw kosong (BE lama) = tanpa snapshot eksplisit');
+  ok(rt.hasExplicitPaymentSnapshot({ paymentMethods: { qrisEnabled: false } }) === true,
+    'PM-07: raw berisi kunci = snapshot eksplisit');
+  ok(eq(rt.parsePaymentMethodsStrict({}).methods, ALL_FALSE),
+    'PM-07: strict + raw kosong = semua-false (fail-closed layar baru)');
+  ok(rt.parsePaymentMethodsStrict({}).hasExplicitSnapshot === false,
+    'PM-07: strict + raw kosong menandai butuh-sync');
+  ok(eq(rt.parsePaymentMethodsStrict({ paymentMethods: ALL_TRUE }).methods, ALL_TRUE),
+    'PM-07: strict + raw eksplisit = nilai server dipakai');
 
   // ---- PM-05: wiring ujung-ke-ujung ----
   const term = read('lib/terminalApi.ts');

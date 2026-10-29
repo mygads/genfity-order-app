@@ -101,6 +101,15 @@ export interface SaleInput {
   ongkirCut?: number;
   /** Nama pelanggan (delivery / pencatatan kasir). */
   customer?: string;
+  /** Adaptive Vertical Shell Fase 3 (SERVICE/HOME_SERVICE via POS):
+   * jadwal wajib BE (YYYY-MM-DD + HH:MM) + teknisi + DP% + alamat.
+   * Best-effort optional — payload lama tanpa field ini tetap jalan. */
+  serviceDate?: string;
+  serviceTime?: string;
+  technician?: string;
+  dpPercent?: number;
+  deliveryAddress?: string;
+  deliveryFee?: number;
   /** Nomor antrean display (QS-014 gaya): bila kosong saveSale menurunkan
    * dari suffix NNNN salesNum agar CustomerDisplay/QueueView tak selalu
    * fallback ke salesNum penuh. */
@@ -220,6 +229,15 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.ongkir !== undefined && s.ongkir > 0 ? { ongkir: r(s.ongkir) } : {}),
     ...(s.ongkirCut !== undefined && s.ongkirCut > 0 ? { ongkirCut: r(s.ongkirCut) } : {}),
     ...(s.customer ? { customer: s.customer } : {}),
+    ...(s.serviceDate ? { serviceDate: s.serviceDate } : {}),
+    ...(s.serviceTime ? { serviceTime: s.serviceTime } : {}),
+    ...(s.deliveryAddress ? { deliveryAddress: s.deliveryAddress } : {}),
+    ...(s.deliveryFee !== undefined && r(s.deliveryFee) > 0 ? { deliveryFee: r(s.deliveryFee) } : {}),
+    // Teknisi + DP dilipat ke notes order (BE tak punya kolom teknisi;
+    // sync meneruskan notes untuk order SERVICE/HOME_SERVICE).
+    ...((s.technician || (s.dpPercent !== undefined && r(s.dpPercent) > 0))
+      ? { notes: [`Teknisi ${String(s.technician ?? '-').slice(0, 60)}`, s.dpPercent !== undefined && r(s.dpPercent) > 0 ? `DP ${r(s.dpPercent)}%` : ''].filter(Boolean).join(' · ').slice(0, 500) }
+      : {}),
     ts: new Date().toISOString(),
   };
 }
