@@ -1065,6 +1065,10 @@ export interface TerminalPosConfig {
   roundingStep: number | null;
   /** S-F6: gerbang workforce (absen = keduanya OFF). */
   workforce: TerminalWorkforceGates;
+  /** PRO-GATE (2026-10-31): tier paket merchant (null = BE lama/tak diketahui). */
+  planTier: string | null;
+  /** PRO-GATE: true = Pro/Enterprise; false = Starter; null = tak diketahui. */
+  isProPlan: boolean | null;
   /** S-F12/F13: destinasi cetak aktif server ([] = BE lama / belum dikonfigurasi). */
   printDestinations: TerminalPrintDestination[];
 }
@@ -1182,6 +1186,9 @@ export async function fetchTerminalPosConfig(
         requirePinForPos: wf.requirePinForPos === true,
         requireCashRegisterForPos: wf.requireCashRegisterForPos === true,
       },
+      // PRO-GATE: tier paket (server-wins; absen = null = tak diketahui).
+      planTier: typeof data.planTier === 'string' && data.planTier.trim() !== '' ? data.planTier.trim().toUpperCase() : null,
+      isProPlan: data.isProPlan === true ? true : data.isProPlan === false ? false : null,
       printDestinations: dests
         .map(cleanPrintDestination)
         .filter((d): d is TerminalPrintDestination => d !== null),

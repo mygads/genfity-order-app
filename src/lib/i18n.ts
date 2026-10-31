@@ -801,6 +801,8 @@ const STR: Record<string, Entry> = {
   att_in: { id: 'Masuk', en: 'Clock In' },
   att_out: { id: 'Keluar', en: 'Clock Out' },
   att_queued: { id: 'Tercatat (antre sync)', en: 'Recorded (sync queued)' },
+  att_pro_only_title: { id: 'Fitur Pro', en: 'Pro Feature' },
+  att_pro_only_desc: { id: 'Absensi & shift khusus paket Pro. Upgrade untuk membuka akses.', en: 'Attendance & shifts are a Pro plan feature. Upgrade to unlock access.' },
   rcp_by_user: { id: 'Penjualan per Kasir', en: 'Sales by Cashier' },
   rcp_pay: { id: 'Ringkasan per Metode Bayar', en: 'Summary by Payment Method' },
   rcp_menu: { id: 'Penjualan per Menu', en: 'Sales by Menu' },

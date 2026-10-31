@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
+import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
+import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
  * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
   d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync.
@@ -27,6 +28,20 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
   const [pinMsg, setPinMsg] = useState('');
   /** Popup ganti PIN (dibuka via tombol, bukan seksi inline). */
   const [pinModal, setPinModal] = useState(false);
+  /** PRO-GATE: null = belum tahu (fail-open); true = Starter = kunci. */
+  const [starterLock, setStarterLock] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const v = await isStarterPlanCached();
+        if (alive) setStarterLock(v);
+      } catch {
+        if (alive) setStarterLock(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
@@ -149,7 +164,22 @@ import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollVie
 
   const clockedIn = inTime !== null && outTime === null;
 
-  const outlet = s?.outlet ?? t('outlet_fallback'); const who = s?.name ?? s?.username ?? '-'; return (
+  const outlet = s?.outlet ?? t('outlet_fallback'); const who = s?.name ?? s?.username ?? '-';
+  // PRO-GATE: absensi & shift khusus Pro. Tak diketahui = fail-open.
+  if (starterLock === true) {
+    return (
+      <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
+        <View style={styles.card}>
+          <Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_pro_only_title')}</Text>
+          <Text style={[styles.meta, isTablet && styles.metaTablet]}>{t('att_pro_only_desc')}</Text>
+        </View>
+        <View style={styles.actions}>
+          <AppButton size="md" title={t('att_exit')} variant="secondary" fullWidth={false} style={{ flex: 1, marginTop: 0 }} onPress={() => navigation?.navigate('Dashboard')} />
+        </View>
+      </ScrollView></View>
+    );
+  }
+  return (
     <View style={styles.root}><ScreenHeader title={t('title_attendance')} sub={`${outlet} · ${t('att_inout')}`} onBack={() => navigation?.goBack()} /><ScrollView  contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
       <Text style={styles.hint}>{t('att_staff')} {outlet} · {t('c_cashier')} {who}</Text>
       <Text style={styles.sec}>{t('att_inout')}</Text>

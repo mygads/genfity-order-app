@@ -46,6 +46,8 @@ const FEE_SCHEDULE_KEY = 'genfity.pos.deliveryFee';
 const ROUND_STEP_KEY = 'genfity.pos.roundingStep';
 /** S-F6: cache gerbang workforce (absen = keduanya OFF). */
 const WORKFORCE_KEY = 'genfity.pos.workforce';
+/** PRO-GATE (2026-10-31): cache tier paket (null = belum pernah sync). */
+const PLAN_TIER_KEY = 'genfity.pos.planTier';
 /** S-F12/F13: cache destinasi cetak server ([] = BE lama/lokal-only). */
 const PRINT_DEST_KEY = 'genfity.pos.printDestinations';
 /** S-F1: cache filter tab bayar ({tunai,nontunai,online,member,lainnya}; absen = semua tampil). */
@@ -194,6 +196,11 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
   try {
     await setJSON(ROUND_STEP_KEY, { step: r.data.roundingStep });
   } catch { /* abaikan */ }
+  // PRO-GATE: cache tier paket (server-wins tiap sync sukses; gagal
+  // sync = cache lama dipakai; belum pernah sync = null = tak diketahui).
+  try {
+    await setJSON(PLAN_TIER_KEY, { tier: r.data.planTier ?? null, isPro: r.data.isProPlan ?? null });
+  } catch { /* abaikan */ }
   try {
     await setJSON(WORKFORCE_KEY, {
       requirePinForPos: r.data.workforce.requirePinForPos === true,
@@ -251,6 +258,28 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
 }
 
 /** Q5: gate UI lookup/search member. Absen/error = enabled (kontrak). */
+/** PRO-GATE: tier paket cache (null = belum pernah sync = tak diketahui). */
+export async function getCachedPlanTier(): Promise<{ tier: string | null; isPro: boolean | null }> {
+  try {
+    const cur = await getJSON<{ tier?: unknown; isPro?: unknown } | null>(PLAN_TIER_KEY, null);
+    if (!cur) return { tier: null, isPro: null };
+    const tier = typeof cur.tier === 'string' && cur.tier.trim() !== '' ? cur.tier.trim().toUpperCase() : null;
+    const isPro = cur.isPro === true ? true : cur.isPro === false ? false : null;
+    return { tier, isPro };
+  } catch {
+    return { tier: null, isPro: null };
+  }
+}
+
+/** PRO-GATE: true bila paket cache eksplisit NON-Pro (Starter). Fail-open:
+ * tak diketahui (belum sync/BE lama) = false = tidak dikunci. */
+export async function isStarterPlanCached(): Promise<boolean> {
+  const { tier, isPro } = await getCachedPlanTier();
+  if (isPro === false) return true;
+  if (tier !== null) return tier !== 'PRO' && tier !== 'ENTERPRISE';
+  return false;
+}
+
 export async function getMemberLookupEnabled(): Promise<boolean> {
   try {
     const cur = await getJSON<{ enabled?: unknown } | null>(MEMBER_LOOKUP_KEY, null);
