@@ -234,7 +234,7 @@ const STR: Record<string, Entry> = {
   mem_go_points: { id: 'Poin', en: 'Points' },
   mem_go_vouchers: { id: '{n} voucher valid', en: '{n} valid vouchers' },
   mem_changed_banner: { id: 'Data member berubah, cek ulang', en: 'Member data changed, please re-check' },
-  mem_attach_needs_go: { id: 'Member belum terdaftar di server — cari lalu pilih hasil server sebelum ditempel.', en: 'Member is not registered on the server — search and pick a server result before attaching.' },
+  mem_attach_needs_go: { id: 'Member belum terdaftar di server - cari lalu pilih hasil server sebelum ditempel.', en: 'Member is not registered on the server - search and pick a server result before attaching.' },
   mem_lookup_disabled: { id: 'Pencarian member dimatikan merchant.', en: 'Member lookup is disabled by the merchant.' },
 
   // ---- voucher ----
@@ -298,10 +298,10 @@ const STR: Record<string, Entry> = {
   top_hint: { id: 'Nominal minimal {m} dan metode bayar wajib dipilih.', en: 'Minimum {m} and a payment method is required.' },
   top_queued: { id: 'Tersimpan ke antrean sync bila offline.', en: 'Saved to the sync queue when offline.' },
   top_success: { id: 'Top Up Berhasil', en: 'Top Up Successful' },
-  billing_trial: { id: 'PRO Trial — sisa {n} hari. Nikmati semua fitur, hubungi owner untuk upgrade.', en: 'PRO trial — {n} days left. Enjoy all features; ask the owner to upgrade.' },
-  billing_pastdue: { id: 'Tagihan tertunda — sisa {n} hari. Kasir tetap jalan. Hubungi owner untuk bayar/topup.', en: 'Payment overdue — {n} days left. Cashier still works. Ask the owner to pay/top up.' },
-  billing_readonly: { id: 'Mode baca saja — kasir tetap jalan. Hubungi owner untuk bayar agar fitur admin terbuka.', en: 'Read-only mode — cashier still works. Ask the owner to pay to unlock admin.' },
-  billing_suspended: { id: 'Langganan ditangguhkan — hubungi owner untuk bayar/topup. Kasir antre offline tetap tersimpan.', en: 'Subscription suspended — ask the owner to pay/top up. Offline queue is kept.' },
+  billing_trial: { id: 'PRO Trial - sisa {n} hari. Nikmati semua fitur, hubungi owner untuk upgrade.', en: 'PRO trial - {n} days left. Enjoy all features; ask the owner to upgrade.' },
+  billing_pastdue: { id: 'Tagihan tertunda - sisa {n} hari. Kasir tetap jalan. Hubungi owner untuk bayar/topup.', en: 'Payment overdue - {n} days left. Cashier still works. Ask the owner to pay/top up.' },
+  billing_readonly: { id: 'Mode baca saja - kasir tetap jalan. Hubungi owner untuk bayar agar fitur admin terbuka.', en: 'Read-only mode - cashier still works. Ask the owner to pay to unlock admin.' },
+  billing_suspended: { id: 'Langganan ditangguhkan - hubungi owner untuk bayar/topup. Kasir antre offline tetap tersimpan.', en: 'Subscription suspended - ask the owner to pay/top up. Offline queue is kept.' },
   billing_branch_note: { id: 'Tagihan dibayar oleh cabang utama (grup). Cabang tidak punya halaman billing sendiri.', en: 'Billing is paid by the main branch (group). Branches have no separate billing page.' },
   // A8: konfirmasi sebelum gerak uang (nominal + metode + penerima + saldo akhir).
   top_confirm_title: { id: 'Konfirmasi Top Up', en: 'Confirm Top Up' },
@@ -349,7 +349,7 @@ const STR: Record<string, Entry> = {
   pay_voucher_checking: { id: 'Memeriksa kode…', en: 'Checking code…' },
   pay_voucher_invalid: { id: 'Kode tidak valid / minimum belanja {m}', en: 'Invalid code / minimum spend {m}' },
   pay_tip_title: { id: 'Tambah tip?', en: 'Add a tip?' },
-  pay_tip_sub: { id: 'Gratuity pelanggan — diteruskan penuh ke server.', en: 'Customer gratuity — passed through to the server in full.' },
+  pay_tip_sub: { id: 'Gratuity pelanggan - diteruskan penuh ke server.', en: 'Customer gratuity - passed through to the server in full.' },
   pay_tip_none: { id: 'Tanpa tip', en: 'No tip' },
   pay_tip_custom: { id: 'Nominal', en: 'Custom' },
   pay_tip_added: { id: 'Tip {d} ditambahkan', en: 'Tip {d} added' },
@@ -422,14 +422,14 @@ const STR: Record<string, Entry> = {
   pay_hold_unpaid_title: { id: 'Pembayaran ditahan', en: 'Payment held' },
   pay_hold_unpaid: { id: 'Belum lunas (tahan-offline): PIN manajer wajib tapi order server belum tertaut / tak bisa dipastikan. Tetap di layar ini - ulangi setelah order tertaut atau online kembali.', en: 'Still unpaid (offline hold): manager PIN is required but the server order is not linked / could not be verified. Staying on this screen - retry once the order is linked or you are back online.' },
   // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof).
-  pay_proof_required: { id: 'Merchant mewajibkan foto bukti bayar — ambil foto dulu sebelum bayar.', en: 'This merchant requires a payment-proof photo — take one before paying.' },
+  pay_proof_required: { id: 'Merchant mewajibkan foto bukti bayar - ambil foto dulu sebelum bayar.', en: 'This merchant requires a payment-proof photo - take one before paying.' },
   pay_proof_title: { id: 'Bukti bayar *', en: 'Payment proof *' },
   pay_proof_take: { id: 'Ambil Foto Bukti', en: 'Take Proof Photo' },
   pay_proof_retake: { id: 'Ganti Foto', en: 'Retake Photo' },
   pay_proof_uploading: { id: 'Mengunggah bukti…', en: 'Uploading proof…' },
   pay_proof_uploaded: { id: 'Bukti terunggah', en: 'Proof uploaded' },
-  pay_proof_upload_fail: { id: 'Upload bukti gagal — pembayaran ditahan offline. Ulangi saat online.', en: 'Proof upload failed — payment held offline. Retry when online.' },
-  pay_proof_hold: { id: 'Bukti belum ada (server menolak: PROOF_REQUIRED). Tetap di layar ini — lengkapi foto lalu ulangi.', en: 'Proof missing (server rejected: PROOF_REQUIRED). Staying on this screen — attach the photo then retry.' },
+  pay_proof_upload_fail: { id: 'Upload bukti gagal - pembayaran ditahan offline. Ulangi saat online.', en: 'Proof upload failed - payment held offline. Retry when online.' },
+  pay_proof_hold: { id: 'Bukti belum ada (server menolak: PROOF_REQUIRED). Tetap di layar ini - lengkapi foto lalu ulangi.', en: 'Proof missing (server rejected: PROOF_REQUIRED). Staying on this screen - attach the photo then retry.' },
   pay_add: { id: '+ Tambah', en: '+ Add' },
   edc_title: { id: 'EDC', en: 'EDC' },
   edc_sub: { id: 'Non-Tunai - Kartu Debit/Kredit', en: 'Non-Cash - Debit/Credit Card' },
@@ -567,7 +567,7 @@ const STR: Record<string, Entry> = {
   xp_auth_sub: { id: 'Aksi ini dicatat atas nama penyetuju. PIN tidak disimpan di perangkat.', en: 'This action is logged under the approver name. The PIN is never stored on this device.' },
   xp_cancel: { id: 'Batal', en: 'Cancel' },
   xp_compliment_offline: { id: 'Komplimen butuh online + order server (create-first).', en: 'Compliment requires online + a server order (create-first).' },
-  xp_compliment_no_order: { id: 'Belum ada order server — buat order dulu sebelum komplimen (create-first).', en: 'No server order yet — create the order first before compliment (create-first).' },
+  xp_compliment_no_order: { id: 'Belum ada order server - buat order dulu sebelum komplimen (create-first).', en: 'No server order yet - create the order first before compliment (create-first).' },
   xp_left: { id: 'sisa {n}x', en: '{n} left' },
   xp_m_transfer: { id: 'Transfer Bank', en: 'Bank Transfer' },
   xp_m_transfer_d: { id: 'Konfirmasi manual mutasi bank', en: 'Manual bank statement confirmation' },
@@ -683,8 +683,8 @@ const STR: Record<string, Entry> = {
   fallback_user: { id: 'Pengguna', en: 'User' },
   dash_shift_open: { id: 'Shift Buka', en: 'Shift Open' },
   dash_shift_closed: { id: 'Shift Tutup', en: 'Shift Closed' },
-  // A-P1-5: DB lokal belum siap — blokir kasir + pesan ini (bukan "shift tutup").
-  shift_db_error: { id: 'Database lokal belum siap — coba lagi sesaat.', en: 'Local database is not ready — try again shortly.' },
+  // A-P1-5: DB lokal belum siap - blokir kasir + pesan ini (bukan "shift tutup").
+  shift_db_error: { id: 'Database lokal belum siap - coba lagi sesaat.', en: 'Local database is not ready - try again shortly.' },
   dash_never: { id: 'belum pernah', en: 'never' },
   sync_pending: { id: 'tertunda', en: 'pending' },
   dash_clock_in: { id: 'Masuk', en: 'Clock in' },
@@ -1015,15 +1015,15 @@ const STR: Record<string, Entry> = {
   'expense.changePhoto': { id: 'Ganti Foto', en: 'Change Photo' },
   'expense.saveBtn': { id: 'Simpan Pengeluaran', en: 'Save Expense' },
   // A-P1-6: foto lokal tersimpan, menunggu endpoint upload terminal (PARKED).
-  'expense.photoPending': { id: 'Foto tersimpan di perangkat — menunggu upload (server menyusul).', en: 'Photo saved on device — waiting for upload (server to follow).' },
-  // SESI-FINAL-APP: upload-dulu aktif — foto diunggah sebelum kirim expense.
+  'expense.photoPending': { id: 'Foto tersimpan di perangkat - menunggu upload (server menyusul).', en: 'Photo saved on device - waiting for upload (server to follow).' },
+  // SESI-FINAL-APP: upload-dulu aktif - foto diunggah sebelum kirim expense.
   'expense.photoAttached': { id: 'Foto nota terunggah ke server.', en: 'Receipt photo uploaded to the server.' },
-  'expense.photoUploadFail': { id: 'Upload foto gagal — expense tercatat lokal, foto menunggu upload ulang.', en: 'Photo upload failed — expense saved locally, photo waiting for re-upload.' },
+  'expense.photoUploadFail': { id: 'Upload foto gagal - expense tercatat lokal, foto menunggu upload ulang.', en: 'Photo upload failed - expense saved locally, photo waiting for re-upload.' },
   'printers.title': { id: 'Printer', en: 'Printers' },
   'printers.sub': { id: 'Station kasir/dapur/checker/label - BT SPP - LAN - Star', en: 'Cashier/kitchen/checker/label stations - BT SPP - LAN - Star' },
   'printers.stations': { id: 'Station Printer', en: 'Printer Stations' },
   'printers.serverTitle': { id: 'Info Destinasi Server', en: 'Server Destinations (info)' },
-  'printers.serverHint': { id: 'Daftar info dari server — BUKAN routing aktif; pencetakan tetap memakai station lokal di bawah.', en: 'Info list from the server — NOT active routing; printing still uses the local stations below.' },
+  'printers.serverHint': { id: 'Daftar info dari server - BUKAN routing aktif; pencetakan tetap memakai station lokal di bawah.', en: 'Info list from the server - NOT active routing; printing still uses the local stations below.' },
   'printers.serverPull': { id: 'Tarik & Cetak Antrean Server', en: 'Pull & Print Server Queue' },
   'printers.serverPulling': { id: 'Menarik antrean server...', en: 'Pulling server queue...' },
   'printers.serverPrinted': { id: 'Job server #{x} tercetak.', en: 'Server job #{x} printed.' },
@@ -1140,8 +1140,8 @@ const STR: Record<string, Entry> = {
   'cashier.emptyScan': { id: 'Scan', en: 'Scan' },
   'cashier.emptyImport': { id: 'Impor', en: 'Import' },
   'cashier.otherCat': { id: 'Lainnya', en: 'Others' },
-  'cashier.pulsaOfflineWarn': { id: 'Offline — harga/stok provider belum terkonfirmasi. Online-kan dulu sebelum jual pulsa.', en: 'Offline — provider prices/stock are unconfirmed. Go online before selling top-ups.' },
-  'kitchen.verticalNote': { id: 'Layar dapur untuk usaha makanan/minuman. Usaha Anda ({v}) tidak memakai dapur — tiket di sini biasanya kosong.', en: 'The kitchen screen is for food & beverage businesses. Your business ({v}) does not use a kitchen — tickets here are usually empty.' },
+  'cashier.pulsaOfflineWarn': { id: 'Offline - harga/stok provider belum terkonfirmasi. Online-kan dulu sebelum jual pulsa.', en: 'Offline - provider prices/stock are unconfirmed. Go online before selling top-ups.' },
+  'kitchen.verticalNote': { id: 'Layar dapur untuk usaha makanan/minuman. Usaha Anda ({v}) tidak memakai dapur - tiket di sini biasanya kosong.', en: 'The kitchen screen is for food & beverage businesses. Your business ({v}) does not use a kitchen - tickets here are usually empty.' },
   'settings.claimTerminal': { id: 'Klaim Terminal', en: 'Claim Terminal' },
   'settings.claimSub': { id: 'Samakan dengan data terminal di server Anda.', en: 'Match the terminal data on your server.' },
   'settings.terminalCode': { id: 'Kode Terminal', en: 'Terminal Code' },
@@ -1178,7 +1178,7 @@ const STR: Record<string, Entry> = {
   'stockMgmt.variants': { id: 'Varian', en: 'Variants' },
   'stockMgmt.empty': { id: 'Belum ada item. Tarik data dulu dari layar Sync.', en: 'No items yet. Pull data first from the Sync screen.' },
   'stockMgmt.noMatch': { id: 'Tak ada yang cocok dengan filter.', en: 'Nothing matches the filter.' },
-  'stockMgmt.readonlyNote': { id: 'Nama, harga & kategori read-only — kelola di dashboard web. Stok, ambang & Habis di sini terkirim ke server saat online.', en: 'Names, prices & categories are read-only — manage them in the web dashboard. Stock, thresholds & Out here are pushed to the server when online.' },
+  'stockMgmt.readonlyNote': { id: 'Nama, harga & kategori read-only - kelola di dashboard web. Stok, ambang & Habis di sini terkirim ke server saat online.', en: 'Names, prices & categories are read-only - manage them in the web dashboard. Stock, thresholds & Out here are pushed to the server when online.' },
   'mprint.title': { id: 'Cetakan Menu', en: 'Menu Printing' },
   'mprint.sub': { id: 'Routing cetak per grup menu ke station dapur/checker', en: 'Per-group print routing to kitchen/checker stations' },
   'mprint.kitchenOpts': { id: 'Opsi Tiket Dapur', en: 'Kitchen Ticket Options' },
@@ -1193,7 +1193,7 @@ const STR: Record<string, Entry> = {
   'stock.trackMenu': { id: 'Lacak stok menu', en: 'Track menu stock' },
   'stock.lowWarn': { id: 'Peringatan stok menipis', en: 'Low stock warning' },
   'stock.lowLimit': { id: 'Batas stok menipis', en: 'Low stock limit' },
-  'stock.lowLimitManaged': { id: 'Batas dikelola server — diselaraskan tiap login.', en: 'Limit managed by server — synced on each login.' },
+  'stock.lowLimitManaged': { id: 'Batas dikelola server - diselaraskan tiap login.', en: 'Limit managed by server - synced on each login.' },
   'stock.sellEmpty': { id: 'Tetap jual saat stok habis', en: 'Keep selling when out of stock' },
   'stock.online': { id: 'Stok Menu Online', en: 'Online Menu Stock' },
   'stock.onlineSub': { id: 'Menu online (Genfity order) ikut stok lokal bila sinkron aktif.', en: 'Online menus (Genfity orders) follow local stock when sync is on.' },
@@ -1204,8 +1204,8 @@ const STR: Record<string, Entry> = {
   'stock.opnameSub': { id: 'Kirim hasil hitung ke draf opname server. Finalisasi oleh owner.', en: 'Send counted quantities to the server draft. Finalized by owner.' },
   'stock.pushOpname': { id: 'Kirim hasil opname', en: 'Send count' },
   'stock.opnameResult': { id: 'Terkirim {ok}, tak cocok {skip}, gagal {fail}.', en: 'Sent {ok}, unmatched {skip}, failed {fail}.' },
-  'stock.opnameNoTerminal': { id: 'Belum login terminal — hasil tersimpan lokal.', en: 'Not logged in to a terminal — kept locally.' },
-  'stock.opnameFailed': { id: 'Gagal mengirim — periksa koneksi.', en: 'Send failed — check the connection.' },
+  'stock.opnameNoTerminal': { id: 'Belum login terminal - hasil tersimpan lokal.', en: 'Not logged in to a terminal - kept locally.' },
+  'stock.opnameFailed': { id: 'Gagal mengirim - periksa koneksi.', en: 'Send failed - check the connection.' },
   'stock.low': { id: 'MENIPIS', en: 'LOW' },
   'stock.empty': { id: 'HABIS', en: 'OUT' },
   'sync.title': { id: 'Sinkronisasi', en: 'Sync' },
@@ -1298,7 +1298,7 @@ const STR: Record<string, Entry> = {
   sup_v1_action: { id: 'Aksi', en: 'Action' },
   sup_v1_refid: { id: 'Ref ID', en: 'Ref ID' },
   sup_v1_refid_ph: { id: 'cth: TRX-B001-K01-20261020-0042', en: 'e.g. TRX-B001-K01-20261020-0042' },
-  sup_v1_refid_need: { id: 'RefId wajib untuk COMPLIMENT_SETTLE (id desimal order) — tak boleh kosong.', en: 'RefId is required for COMPLIMENT_SETTLE (decimal order id) — must not be empty.' },
+  sup_v1_refid_need: { id: 'RefId wajib untuk COMPLIMENT_SETTLE (id desimal order) - tak boleh kosong.', en: 'RefId is required for COMPLIMENT_SETTLE (decimal order id) - must not be empty.' },
   sup_v1_reason: { id: 'Alasan persetujuan (wajib, tercatat di audit)', en: 'Approval reason (required, recorded in audit)' },
   sup_v1_reason_ph: { id: 'cth: salah input kasir, disetujui. Min 1 karakter.', en: 'e.g. cashier input error, approved. Min 1 character.' },
 
@@ -1440,11 +1440,11 @@ const STR: Record<string, Entry> = {
   'sync.masterQueued': { id: 'Master hanya di perangkat ini (tanpa push ke server).', en: 'Master is on this device only (no server push).' },
   'sync.localOnly': { id: 'Lokal - tak perlu push.', en: 'Local-only - no push needed.' },
   'sync.depositLocal': { id: 'Deposit tercatat lokal + outbox fisik.', en: 'Deposit recorded locally + physical outbox.' },
-  // C2 Sesi-C QA3: orderType tak didukung merchant-type (BE pasti menolak) —
+  // C2 Sesi-C QA3: orderType tak didukung merchant-type (BE pasti menolak) -
   // BLOCKED jujur fail-once; {mode}/{type} diisi pemanggil via .replace.
   'sync.orderTypeUnsupported': { id: 'Mode {mode} tak didukung merchant {type} - butuh backend (BLOCKED).', en: 'Mode {mode} unsupported for {type} merchant - needs backend (BLOCKED).' },
   // C8 Sesi-C QA3: kaki group-payment tanpa identitas server {orderId,shareId}
-  // (app tak pernah membuat group-bill shares) — tanpa padanan Go, BLOCKED
+  // (app tak pernah membuat group-bill shares) - tanpa padanan Go, BLOCKED
   // jujur fail-once agar tak retry-buta ke order/finish tiap siklus.
   'sync.groupLegNoCounterpart': { id: 'Kaki grup tanpa identitas server - butuh backend (BLOCKED).', en: 'Group leg without server identity - needs backend (BLOCKED).' },
   'sync.duplicateAcked': { id: 'Duplikat (409) - sudah di server.', en: 'Duplicate (409) - already on server.' },
@@ -1488,6 +1488,14 @@ const STR: Record<string, Entry> = {
   att_save_pin: { id: 'Simpan PIN Baru', en: 'Save New PIN' },
   att_exit: { id: 'Keluar', en: 'Exit' },
   att_break: { id: 'Istirahat', en: 'Break' },
+  att_break_start: { id: 'Mulai istirahat', en: 'Start break' },
+  att_break_end: { id: 'Selesai istirahat', en: 'End break' },
+  att_on_break: { id: 'Sedang istirahat', en: 'On break' },
+  att_break_started: { id: 'Istirahat dimulai (tersinkron).', en: 'Break started (synced).' },
+  att_break_ended: { id: 'Istirahat selesai (tersinkron).', en: 'Break ended (synced).' },
+  att_break_error: { id: 'Gagal mencatat istirahat.', en: 'Could not record break.' },
+  att_break_in_progress: { id: 'Masih istirahat. Selesaikan istirahat sebelum clock-out.', en: 'Break in progress. End your break before clocking out.' },
+  att_synced: { id: 'Tersinkron ke server.', en: 'Synced to server.' },
   att_staff: { id: 'Karyawan', en: 'Staff' },
   att_cash: { id: 'Kas', en: 'Cash' },
   att_outlet: { id: 'Outlet', en: 'Outlet' },
@@ -1497,7 +1505,7 @@ const STR: Record<string, Entry> = {
   att_after_shift: { id: 'Setelah masuk - Buka Shift', en: 'After clock-in - Open Shift' },
   att_skip_dash: { id: 'Lewati - Dashboard', en: 'Skip - Dashboard' },
   att_empty_in: { id: 'Belum ada absen masuk hari ini.', en: 'No clock-in recorded today.' },
-  att_offline_only: { id: 'Absensi tercatat di perangkat ini + antrean sync (offline-only eksplisit — bukan clock server; tanpa GPS perangkat).', en: 'Attendance is recorded on this device + sync queue (explicit offline-only — not a server clock; no device GPS).' },
+  att_offline_only: { id: 'Absensi tercatat di perangkat + sinkron ke server bila online (PIN + GPS dikirim live; antrean tanpa PIN bila offline).', en: 'Attendance is recorded on-device + synced to server when online (live PIN + GPS; queue carries no PIN when offline).' },
 
   // ---- install klaim terminal (InstallScreen) ----
   inst_title: { id: 'Klaim Terminal', en: 'Claim Terminal' },
@@ -1528,7 +1536,7 @@ const STR: Record<string, Entry> = {
   // ---- B2c kasir/split (bill_rata_hint) + titipan batch-1 (booking/move warns) ----
   bill_rata_hint: { id: 'Dibagi sama besar ke tiap bill - sisa pembulatan masuk bill terakhir.', en: 'Split evenly across bills - rounding remainder goes to the last bill.' },
   bok_warn_capacity: { id: 'Tamu melebihi kapasitas meja.', en: 'Guests exceed table capacity.' },
-  bok_auto_table: { id: 'Otomatis (data lokal) — ketuk chip untuk pilih manual.', en: 'Auto (local data) — tap a chip to pick manually.' },
+  bok_auto_table: { id: 'Otomatis (data lokal) - ketuk chip untuk pilih manual.', en: 'Auto (local data) - tap a chip to pick manually.' },
   mov_warn_same: { id: 'Meja tujuan sama dengan meja asal.', en: 'Destination table is the same as the source table.' },
   mov_warn_nosrc: { id: 'Tidak ada tagihan aktif di meja asal.', en: 'No active bill on the source table.' },
 
@@ -1553,7 +1561,7 @@ const STR: Record<string, Entry> = {
   cx_reason_3: { id: 'Stok habis / menu tidak tersedia', en: 'Out of stock / menu unavailable' },
   cx_reason_4: { id: 'Kualitas / komplain dapur', en: 'Quality / kitchen complaint' },
   // #5: merchant menghapus semua preset server → kasir tulis manual di catatan.
-  cx_server_empty: { id: 'Preset alasan server kosong — tulis alasan di catatan.', en: 'No server reason presets — write the reason in the note.' },
+  cx_server_empty: { id: 'Preset alasan server kosong - tulis alasan di catatan.', en: 'No server reason presets - write the reason in the note.' },
 
   // ---- B3a M11 sync (pesan push/pull + label antrean SyncScreen) ----
   sync_never: { id: 'Belum pernah', en: 'Never' },
@@ -1678,7 +1686,7 @@ const STR: Record<string, Entry> = {
   'printers.tplTitle': { id: 'Template struk (server)', en: 'Receipt template (server)' },
   'printers.liveOk': { id: 'Terakhir OK {t}', en: 'Last OK {t}' },
   'printers.liveFail': { id: 'Terakhir dicek {t} (gagal)', en: 'Last checked {t} (failed)' },
-  'printers.liveNever': { id: 'Belum pernah diuji — tekan Uji Cetak', en: 'Never tested — press Test Print' },
+  'printers.liveNever': { id: 'Belum pernah diuji - tekan Uji Cetak', en: 'Never tested - press Test Print' },
   'printers.liveChecked': { id: 'Dicek {t}', en: 'Checked {t}' },
 
   // ---- S4-APP-337: teks alert cetak (display-only, nilai kontrak outcome tak berubah) ----
@@ -1752,10 +1760,10 @@ const STR: Record<string, Entry> = {
   rebind_button: { id: 'Ganti terminal', en: 'Switch terminal' },
   terminal_welcome: { id: '{merchant} · Terminal {terminal}', en: '{merchant} · Terminal {terminal}' },
   grant_expired: { id: 'Grant login kedaluwarsa,masuk online lagi.', en: 'Login grant expired,sign in online again.' },
-  grant_stale_pin_changed: { id: 'PIN diubah manajer — sync untuk refresh. Login offline ditolak demi keamanan.', en: 'PIN changed by manager — sync to refresh. Offline login denied for security.' },
+  grant_stale_pin_changed: { id: 'PIN diubah manajer - sync untuk refresh. Login offline ditolak demi keamanan.', en: 'PIN changed by manager - sync to refresh. Offline login denied for security.' },
   terminal_unbound_title: { id: 'Terminal belum diikat', en: 'Terminal not bound' },
   terminal_unbound_hint: { id: 'Ikat perangkat ke terminal dulu sebelum melanjutkan.', en: 'Bind this device to a terminal first to continue.' },
-  hours_outside_banner: { id: 'Di luar jam order online — kasir tetap melayani', en: 'Outside online order hours — counter still serving' },
+  hours_outside_banner: { id: 'Di luar jam order online - kasir tetap melayani', en: 'Outside online order hours - counter still serving' },
   kicked_msg: { id: 'Sesi Anda di terminal ini digantikan login lain.', en: 'Your session on this terminal was replaced by another login.' },
   pick_terminal_title: { id: 'Pilih cabang & terminal', en: 'Choose branch & terminal' },
   pick_terminal_hint: { id: 'Akun cocok di beberapa tempat,pilih terminal untuk lanjut masuk.', en: 'Your account matches several places,pick a terminal to continue signing in.' },
@@ -1778,7 +1786,7 @@ const STR: Record<string, Entry> = {
   disp_stale: { id: 'Data basi', en: 'Stale data' },
   disp_age_s: { id: '{n} dtk', en: '{n}s' },
   disp_age_m: { id: '{n} mnt', en: '{n} min' },
-  rt_idle: { id: 'Realtime idle (hemat baterai) — data mungkin basi', en: 'Realtime idle (battery saver) — data may be stale' },
+  rt_idle: { id: 'Realtime idle (hemat baterai) - data mungkin basi', en: 'Realtime idle (battery saver) - data may be stale' },
   disp_qr_offline: { id: 'QR tersedia saat online', en: 'QR available when online' },
 
   // ---- REAUDIT-2: bill / tables / move / booking ----
@@ -1918,7 +1926,7 @@ const STR: Record<string, Entry> = {
   appr_sending: { id: 'Mengirim…', en: 'Sending…' },
   appr_need_note: { id: 'Isi catatan review dulu (wajib).', en: 'Fill the review note first (required).' },
   appr_ok: { id: 'Sesi kas disetujui.', en: 'Cash session approved.' },
-  appr_queued: { id: 'Offline — approval diantrekan, terkirim saat online.', en: 'Offline — approval queued, sent when online.' },
+  appr_queued: { id: 'Offline - approval diantrekan, terkirim saat online.', en: 'Offline - approval queued, sent when online.' },
   appr_failed: { id: 'Approval gagal, coba lagi.', en: 'Approval failed, try again.' },
   endshift_pin_unknown: { id: 'PIN tak dikenal (offline)', en: 'Unknown PIN (offline)' },
   petty_approve_title: { id: 'PIN Persetujuan', en: 'Approval PIN' },
@@ -1956,9 +1964,9 @@ const STR: Record<string, Entry> = {
   mem_pay_line: { id: 'Bayar {n} ({m})', en: 'Pay {n} ({m})' },
   mem_topup_full: { id: 'Top up deposit (Top Up)', en: 'Top up deposit (Full)' },
   mem_topup_quick: { id: 'Top up deposit (Cepat)', en: 'Top up deposit (Quick)' },
-  // A-P1-3: server belum posted — tanpa saldo optimistis; kredit dijamin twin
+  // A-P1-3: server belum posted - tanpa saldo optimistis; kredit dijamin twin
   // berkunci-sama, flag pending terlihat di SyncScreen.
-  mem_topup_pending: { id: 'Top up {n} dicatat — menunggu server. Saldo diperbarui setelah terkirim.', en: 'Top up {n} recorded — waiting for server. Balance updates once delivered.' },
+  mem_topup_pending: { id: 'Top up {n} dicatat - menunggu server. Saldo diperbarui setelah terkirim.', en: 'Top up {n} recorded - waiting for server. Balance updates once delivered.' },
   mem_search_suffix: { id: ' - hasil "{q}"', en: ' - results for "{q}"' },
   mem_offline_note: { id: 'Offline - riwayat dari cache lokal, disinkron saat online.', en: 'Offline - history from local cache, syncs when online.' },
 
@@ -2016,7 +2024,7 @@ const STR: Record<string, Entry> = {
 
   // ---- DUAL-CURRENCY §4(b): varian label nominal cabang AUD (dipilih via
   // tCur di bawah; pola pasangan _idr/_aud mengikuti vou_type_disc_idr/aud).
-  // Tanpa varian _aud, tCur jatuh ke kunci dasar (label IDR) — tak pernah blank.
+  // Tanpa varian _aud, tCur jatuh ke kunci dasar (label IDR) - tak pernah blank.
   price_aud: { id: 'Harga (A$)', en: 'Price (A$)' },
   mem_nominal_label_aud: { id: 'Nominal deposit (A$)', en: 'Deposit amount (A$)' },
   ongkirNominal_aud: { id: 'Nominal (A$)', en: 'Amount (A$)' },
@@ -2027,7 +2035,7 @@ const STR: Record<string, Entry> = {
 const missingWarned = new Set<string>();
 export function tOf(key: string, lang?: Lang): string {
   const e = STR[key];
-  // S4: kunci tak terdaftar = bug kamus, BUKAN teks tampil — jangan bocorkan
+  // S4: kunci tak terdaftar = bug kamus, BUKAN teks tampil - jangan bocorkan
   // key mentah ke UI (jebakan tOf); warn sekali + string kosong.
   if (!e) {
     if (!missingWarned.has(key)) {
@@ -2048,7 +2056,7 @@ export const tr = tOf;
 
 /**
  * Label nominal sadar-currency cabang (DUAL-CURRENCY §4b): cabang AUD memakai
- * varian `<base>_aud` bila ada, selain itu kunci dasar (label IDR — perilaku
+ * varian `<base>_aud` bila ada, selain itu kunci dasar (label IDR - perilaku
  * lama). Baca cache sinkron (pola rp() di theme); currency disinkronkan saat
  * login/pilih cabang sehingga layar yang me-remount selalu benar. Tanpa
  * varian _aud = fallback dasar, tak pernah blank.

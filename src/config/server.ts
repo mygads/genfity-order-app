@@ -125,7 +125,7 @@ export const ApiPath = {
   voucherTemplateClaim: 'esb_api/voucher/claim-voucher-template',
   clockIn: 'employee-attendance/clock-in',
   // [asumsi-clean-room] TIDAK ADA di APK (REA-18).
-  // LEGACY MATI — Real mode = 404 (kontrak §4.4). authorizeSupervisor legacy
+  // LEGACY MATI - Real mode = 404 (kontrak §4.4). authorizeSupervisor legacy
   // (shift screens, E29 territory) masih memakainya sampai follow-up E29;
   // alur void/eskalasi/compliment WAJIB supervisorApproveV1 (S7).
   supervisorApprove: 'auth/supervisor-approve',
@@ -152,7 +152,7 @@ export const ApiPath = {
   memberErpDeposit: 'erp/member/deposit',
   memberErpSales: 'erp/member/sales',
   // ---- E01-E28: endpoint kontrak sesi terminal (SPEC-TERMINAL-SESSION §11,
-  // tabel final; BE Go pemilik kebenaran — yang BELUM ADA (MISSING-BE, klien
+  // tabel final; BE Go pemilik kebenaran - yang BELUM ADA (MISSING-BE, klien
   // wajib fail-closed, JANGAN di-wire diam-diam): E05 occupant, E08 (POST
   // /branches scope-terminal; scope-merchant ada di bawah auth berbeda),
   // E13 /tag khusus (ganti tag via E11 PATCH generik), E17–E22 scope-terminal
@@ -163,34 +163,34 @@ export const ApiPath = {
   terminalValidatePin: 'api/v1/terminals/{id}/validate-pin', // E02 POST cek PIN tanpa efek
   terminalBind: 'api/v1/terminals/{id}/bind', // E03 POST bind atomik {pin,deviceId}
   terminalUnbind: 'api/v1/terminals/{id}/unbind', // E04 POST owner lepas binding
-  terminalOccupant: 'api/v1/terminals/{id}/occupant', // E05 GET sesi aktif terminal — MISSING-BE (tanpa rute BE; fetchOccupant fail-closed, 0 pemanggil). Alternatif disetujui swarm: snapshot okupansi via SSE (lane BE).
+  terminalOccupant: 'api/v1/terminals/{id}/occupant', // E05 GET sesi aktif terminal - MISSING-BE (tanpa rute BE; fetchOccupant fail-closed, 0 pemanggil). Alternatif disetujui swarm: snapshot okupansi via SSE (lane BE).
   authLogout: 'api/v1/auth/terminal-logout', // E06/E31 POST akhiri sesi {deviceId} → {loggedOut, deviceStillBound} (BE tak punya /auth/logout; logout = terminal-logout, device tetap bound)
   branches: 'api/v1/branches', // E07 GET branch milik user
-  createBranch: 'api/v1/branches', // E08 POST owner bikin branch — MISSING-BE scope-terminal (scope-merchant GET+POST ada di bawah auth berbeda, tak bisa dipakai alur UserAuth terminal).
+  createBranch: 'api/v1/branches', // E08 POST owner bikin branch - MISSING-BE scope-terminal (scope-merchant GET+POST ada di bawah auth berbeda, tak bisa dipakai alur UserAuth terminal).
   branchTerminals: 'api/v1/branches/{id}/terminals', // E09 GET terminal picker
   createTerminal: 'api/v1/branches/{id}/terminals', // E10 POST owner create {name,tag}
   patchTerminal: 'api/v1/terminals/{id}', // E11 PATCH {name,tag}
   deleteTerminal: 'api/v1/terminals/{id}', // E12 DELETE hapus/revoke
-  setTerminalTag: 'api/v1/terminals/{id}/tag', // E13 KHUSUS — MISSING-BE (tanpa rute) → DEPRECATED: ganti tag via patchTerminal (E11 PATCH generik /terminals/{id} {tag}). Konstanta dipertahankan agar impor lama tak pecah; JANGAN dipakai untuk call baru.
+  setTerminalTag: 'api/v1/terminals/{id}/tag', // E13 KHUSUS - MISSING-BE (tanpa rute) → DEPRECATED: ganti tag via patchTerminal (E11 PATCH generik /terminals/{id} {tag}). Konstanta dipertahankan agar impor lama tak pecah; JANGAN dipakai untuk call baru.
   setTerminalPin: 'api/v1/terminals/{id}/set-pin', // E14 POST owner set/rotate PIN
   pairView: 'api/v1/terminals/{viewId}/pair', // E15 POST pair view→kasir (E422 bila ganda)
   unpairView: 'api/v1/terminals/{viewId}/pair', // E16 DELETE lepas pairing
-  createStaff: 'api/v1/staff', // E17 POST — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
-  listStaff: 'api/v1/staff', // E18 GET — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
-  patchStaff: 'api/v1/staff/{id}', // E19 PATCH — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
-  deleteStaff: 'api/v1/staff/{id}', // E20 DELETE — MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
-  staffBranches: 'api/v1/staff/{id}/branches', // E21 GET — MISSING-BE scope-terminal
-  branchStaff: 'api/v1/branches/{id}/staff', // E22 GET — MISSING-BE scope-terminal
-  approvals: 'api/v1/approvals', // E23 POST {action:void|cancel|compliment, ownerPin, refId} — MISSING-BE
-  ownerAudit: 'api/v1/audit/owner-actions', // E24 GET rekap pemakaian PIN owner — MISSING-BE
-  terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2) — MISSING-BE (pasangan qr-issue/qr-consume SUDAH ADA dan ter-wire; E25-login-qr endpoint terpisah bila masih dibutuhkan)
+  createStaff: 'api/v1/staff', // E17 POST - MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  listStaff: 'api/v1/staff', // E18 GET - MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  patchStaff: 'api/v1/staff/{id}', // E19 PATCH - MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  deleteStaff: 'api/v1/staff/{id}', // E20 DELETE - MISSING-BE scope-terminal (scope-merchant ada, auth berbeda)
+  staffBranches: 'api/v1/staff/{id}/branches', // E21 GET - MISSING-BE scope-terminal
+  branchStaff: 'api/v1/branches/{id}/staff', // E22 GET - MISSING-BE scope-terminal
+  approvals: 'api/v1/approvals', // E23 POST {action:void|cancel|compliment, ownerPin, refId} - MISSING-BE
+  ownerAudit: 'api/v1/audit/owner-actions', // E24 GET rekap pemakaian PIN owner - MISSING-BE
+  terminalLoginQr: 'api/v1/terminals/{id}/login-qr', // E25 POST QR login (TBD Q2) - MISSING-BE (pasangan qr-issue/qr-consume SUDAH ADA dan ter-wire; E25-login-qr endpoint terpisah bila masih dibutuhkan)
   terminalEvents: 'api/v1/terminals/{id}/events', // E26 GET SSE feed per terminal
   queueEvents: 'api/v1/branches/{id}/queue-events', // E27 GET SSE antrean per branch
   // S-READINESS: GET kesiapan terminal {deviceId?} → {needsShift, needsCash,
   // shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
   // router.go:1173, member-only; SPEC-TERMINAL-SESSION §11 baris S-READINESS).
   terminalReadiness: 'api/v1/terminals/{id}/readiness',
-  // S-POSCONFIG (audit-5d80): GET konfigurasi POS merchant untuk terminal —
+  // S-POSCONFIG (audit-5d80): GET konfigurasi POS merchant untuk terminal -
   // {posBehaviorSettings, stock{alertEnabled,defaultLowStockThreshold},
   // timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
   // member-only UserAuth + requireTerminalMember; terminal JWT tak lolos
@@ -211,28 +211,28 @@ export const ApiPath = {
   terminalLogout: 'api/v1/auth/terminal-logout', // E31 POST akhiri sesi {deviceId} → {loggedOut, deviceStillBound} (device tetap bound)
   terminalClaim: 'api/v1/terminals/{id}/claim', // E32 POST ambil alih {pin,deviceId} → {bound, kickedUserId} (fase-1b: PIN terminal WAJIB; pindah device saja, kapasitas per-tag 409 TAG_CONFLICT)
   terminalQrIssue: 'api/v1/terminals/{id}/qr-issue', // POST terbitkan token QR login sekali-pakai (tanpa body; member-only) → {qrToken, expiresAt, ttlSeconds} (TTL 60 dtk BE; E25 login-qr TBD Q2)
-  terminalQrConsume: 'api/v1/terminals/{id}/qr-consume', // POST tukar token QR hasil scan {qrToken, deviceId?} (PUBLIC, HP belum bersesi) → {terminalId, terminalCode, merchantId, pinVersion advisory} — TANPA sesi/grant/binding; PIN terminal tetap wajib tahap-B
-  // TRISISI2 ronde-2 (A10/A11/A12): kontrak terminal kasir — klien siap-
+  terminalQrConsume: 'api/v1/terminals/{id}/qr-consume', // POST tukar token QR hasil scan {qrToken, deviceId?} (PUBLIC, HP belum bersesi) → {terminalId, terminalCode, merchantId, pinVersion advisory} - TANPA sesi/grant/binding; PIN terminal tetap wajib tahap-B
+  // TRISISI2 ronde-2 (A10/A11/A12): kontrak terminal kasir - klien siap-
   // kontrak di terminalApi.ts; pemanggil fallback jujur bila BE 404/offline.
   // BE-BELUM-ADA (2026-10-25): expenses + vouchers/burn|release belum ada di
   // router BE (agen BE ronde-2 masih jalan); transition ADA (router.go:1229)
   // tapi tanpa endpoint LIST tabel → mapping id-numerik PARKED.
   terminalExpenses: 'api/v1/terminals/{id}/expenses', // POST {clientExpenseId,kind:EXPENSE|PETTY_CASH,amount,note,occurredAt} → 201 {id}; duplikat 409 + existing id
-  // SESI-FINAL-APP: upload berkas terminal — POST multipart {file} → 201 {url}
+  // SESI-FINAL-APP: upload berkas terminal - POST multipart {file} → 201 {url}
   // (kontrak BE paralel; dipakai expense-foto + payment-proof upload-dulu).
   terminalUploads: 'api/v1/terminals/{id}/uploads',
   terminalTableTransition: 'api/v1/terminals/{id}/tables/{tableId}/transition', // POST {status:OCCUPIED|AVAILABLE,guestName?,partySize?} → {id,tableNumber,status,statusSince,guestName,partySize}
   terminalVouchersBurn: 'api/v1/terminals/{id}/vouchers/burn', // POST {code,orderClientId,idempotencyKey} → 200 {ok,redemptionId}
   terminalVouchersRelease: 'api/v1/terminals/{id}/vouchers/release', // POST {idempotencyKey} → {ok,released}
   // PP-001/S7: kontrak supervisor BARU (BE router.go:1119,
-  // supervisor_approve.go) — PENGGANTI legacy auth/supervisor-approve untuk
+  // supervisor_approve.go) - PENGGANTI legacy auth/supervisor-approve untuk
   // alur void/eskalasi/compliment. '{id}' = ID numerik BE terminal (bukan
   // terminalCode), diganti caller via .replace('{id}', encodeURIComponent(id))
   // ala terminalApi.ts:109. Body {supervisorUserId:int64, supervisorPin,
   // action 1..64, refId ≤128, reason 1..500} → {approvalId, approvedAt}.
   // Supervisor = OWNER atau grant supervisor_override; self-approval direkam.
   supervisorApproveV1: 'api/v1/terminals/{id}/supervisor-approve',
-  // E28: tanpa endpoint — policy max_offline_grant_days via pull-terminal-settings
+  // E28: tanpa endpoint - policy max_offline_grant_days via pull-terminal-settings
   // (lihat offlineGrantPolicyKey di bawah).
   // ---- W2 (wiring-2): kontrak merchant Go untuk reservasi / status order /
   // riwayat + settle POS (router.go grup /api/merchant, MerchantAuth).
@@ -245,7 +245,7 @@ export const ApiPath = {
   merchantOrderStatus: 'api/merchant/orders/{id}/status', // PUT {status,...}
   merchantOrderCancel: 'api/merchant/orders/{id}/cancel', // POST {pin?,reason?}
   merchantOrderVoid: 'api/merchant/orders/{id}/void', // POST {pin?,reason?}
-  // #5 cancel-reasons: GET daftar preset alasan kasir (MerchantAuth — kasir/
+  // #5 cancel-reasons: GET daftar preset alasan kasir (MerchantAuth - kasir/
   // staff boleh baca; tulis tetap owner via CRUD admin). Konsumsi:
   // lib/cancelReasons.ts (server-wins + cache ms_setting + fallback i18n).
   merchantCancelReasons: 'api/merchant/cancel-reasons', // GET [{name,isActive,...}]
@@ -253,7 +253,7 @@ export const ApiPath = {
   merchantPosHistory: 'api/merchant/orders/pos/history', // GET (?today,limit)
   merchantPosPayment: 'api/merchant/orders/pos/payment', // POST settle
   merchantPosRefund: 'api/merchant/orders/pos/refund', // POST refund
-  // P1-2: preview voucher order-less merchant-Go (BE df15781) — estimasi
+  // P1-2: preview voucher order-less merchant-Go (BE df15781) - estimasi
   // fail-closed untuk keranjang sebelum order ada. Bearer otomatis via
   // needsSessionBearer (prefix api/). Kasir ter-cover PermOrders.
   merchantPosVoucherPreview: 'api/merchant/orders/pos/validate-voucher-preview', // POST {voucherCode,subtotal,items,orderType,tillCustomerEmail?} → {templateId,codeId,label,discountAmount,eligibleSubtotal}
@@ -280,13 +280,14 @@ export const ApiPath = {
   // receiptTemplateId?, selected?, ...} → {updated, routingVersion}.
   merchantPrintDestination: 'api/merchant/print-bridge/destinations/{id}',
   // ---- W1 (wiring-1): kontrak merchant Go untuk shift/clock + sesi kas +
-  // tutup-hari (grup /api/merchant, MerchantAuth — token sesi cermin W2).
+  // tutup-hari (grup /api/merchant, MerchantAuth - token sesi cermin W2).
   // '{sessionId}' diganti caller via .replace('{sessionId}',
   // encodeURIComponent(id)) ala terminalApi.ts:109. PIN TAK PERNAH dikirim
   // (lib/beWorkforce.ts memoles body tanpa PIN; server yang mewajibkan PIN
   // menjawab PIN_REQUIRED = error jujur, bukan antrean buta).
-  merchantClockIn: 'api/merchant/workforce/shifts/clock-in', // POST {terminalId?}
-  merchantClockOut: 'api/merchant/workforce/shifts/clock-out', // POST {terminalId?}
+  merchantClockIn: 'api/merchant/workforce/shifts/clock-in', // POST {terminalId?,pin?,latitude?,longitude?,accuracyMeters?}
+  merchantClockOut: 'api/merchant/workforce/shifts/clock-out', // POST {terminalId?,pin?,latitude?,longitude?,accuracyMeters?}
+  merchantBreak: 'api/merchant/workforce/shifts/break', // POST {action: START|END}
   merchantManagerClock: 'api/merchant/workforce/manager-clock', // POST {userId,action,note,terminalId?}
   merchantCurrentShift: 'api/merchant/workforce/current-shift', // GET shift milik sendiri
   merchantPosCashSessions: 'api/merchant/pos/cash-sessions', // GET sesi kas OPEN
@@ -297,7 +298,7 @@ export const ApiPath = {
   merchantEodPreview: 'api/merchant/end-of-day', // GET (?date)
   merchantEodClose: 'api/merchant/end-of-day/close', // POST {date?}
   // ---- M1 (loyalty): kontrak merchant Go untuk member/loyalty + struk email
-  // (router.go grup /api/merchant, MerchantAuth — token sesi terminal E01
+  // (router.go grup /api/merchant, MerchantAuth - token sesi terminal E01
   // membawa MerchantID, cermin W1/W2; Bearer otomatis via needsSessionBearer
   // karena prefix `api/`). '{orderId}' diganti caller via .replace() ala
   // terminalApi.ts:109. TANPA PIN baru (tak perlu: gerbang bound terminal +
@@ -307,7 +308,7 @@ export const ApiPath = {
   merchantOrderSendReceipt: 'api/merchant/orders/{orderId}/send-receipt', // POST {email} → antrean completed-email (isPosInvoice)
   // AUTO-PRINT APP (detail penuh 1:1 website): GET order merchant lengkap
   // (orderItems+addons, tipAmount, packagingFeeAmount, deliveryFeeAmount,
-  // payment paid/change, paidBy) — MerchantOrderDetailGet (router.go merchant).
+  // payment paid/change, paidBy) - MerchantOrderDetailGet (router.go merchant).
   // '{orderId}' diganti caller via .replace() ala merchantOrderSendReceipt.
   merchantOrderDetailGet: 'api/merchant/orders/{orderId}', // GET → {data:{...detail}}
 } as const;
@@ -456,7 +457,7 @@ export function setTerminal(next: TerminalInfo): void {
  * ID cabang aktif untuk query lokal (ms_branchmenu dsb).
  *
  * FAIL-CLOSED (SPEC-TERMINAL-SESSION, menutup termreg-branch-fallback):
- * device belum ter-bound (unbound) mengembalikan string kosong — fallback
+ * device belum ter-bound (unbound) mengembalikan string kosong - fallback
  * diam-diam 'B001' DIHAPUS. Tipe kembali tetap string sehingga pemanggil lama
  * tetap kompilasi, tetapi pemanggil WAJIB menganggap '' = unbound dan memaksa
  * (re)claim sebelum transaksi; dilarang mencatat penjualan/shift di bawah
@@ -466,7 +467,7 @@ export function getBranchId(): string {
   hydrate();
   const b = (terminal.branchId ?? '').trim();
   if (!b) {
-    console.warn('[server] getBranchId: terminal unbound (branchId kosong) — klaim terminal dulu.');
+    console.warn('[server] getBranchId: terminal unbound (branchId kosong) - klaim terminal dulu.');
   }
   return b;
 }
@@ -474,18 +475,18 @@ export function getBranchId(): string {
 /**
  * GO-POS COMPAT auth (wire-app): path kontrak-Go (`api/...`, mis.
  * `api/merchant/orders/pos` + `api/v1/...`) dilayani backend Go di belakang
- * MerchantAuth — tanpa bearer, push 401. Token dibaca MALAS (lazy) dari store
+ * MerchantAuth - tanpa bearer, push 401. Token dibaca MALAS (lazy) dari store
  * sesi pada tiap panggilan (sesi bisa terhidrasi sesudah modul ini dimuat),
  * via accessor yang SAMA dengan terminalContract requestPinReset
  * (`getSession()`, urutan `authToken` JWT E01 dulu, fallback `authKey`
  * terminal-login). Tanpa token → header dihilangkan (server 401 jujur, bukan
  * sukses palsu). Path bentuk-ESB (`main/...`, `order/...`, `posv1/...`,
  * `v1/push/...`, ...) SENGAJA tanpa bearer (jalur dummy/lokal tak pernah
- * sampai sini — apiFetch short-circuit sebelum dial network).
+ * sampai sini - apiFetch short-circuit sebelum dial network).
  * Lazy-require ala display.ts/sse.ts/realtime.ts agar nol risiko siklus impor
  * statis. Verifikasi siklus: session.ts statis→ hanya lib/storage,
  * lib/deviceRole, lib/pin; transitif→ db/dbSchema/uuidv7/secure-store/
- * AsyncStorage — tak ada yang mengimpor config/server maupun session.
+ * AsyncStorage - tak ada yang mengimpor config/server maupun session.
  */
 function resolveSessionToken(): string {
   try {
@@ -523,9 +524,9 @@ export async function apiGet(
   const url = `${apiUrl(path)}?${q.toString()}`;
   const headers: Record<string, string> = {};
   if (t.terminalCode) headers['X-Terminal-Code'] = t.terminalCode;
-  // S17: opsi auth/idempotency ala apiPost (aditif — pemanggil lama tetap jalan).
+  // S17: opsi auth/idempotency ala apiPost (aditif - pemanggil lama tetap jalan).
   // Bearer: token eksplisit menang; bila absen dan path kontrak-Go, pakai
-  // token sesi (compat push MerchantAuth) — path ESB tetap header-free.
+  // token sesi (compat push MerchantAuth) - path ESB tetap header-free.
   if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
   const getToken = opts?.token
     ? opts.token
@@ -551,13 +552,13 @@ export async function apiPost(
   if (t.branchId) headers['X-Branch-Id'] = t.branchId;
   if (opts?.idempotencyKey) {
     headers['Idempotency-Key'] = opts.idempotencyKey;
-    // W2: backend Go membaca `X-Idempotency-Key` (orders_pos_payment.go) —
+    // W2: backend Go membaca `X-Idempotency-Key` (orders_pos_payment.go) -
     // kirim DUA ejaan agar ledger idempotensi Go + kompat ESB lama jalan
     // bersamaan. Aditif: header lama tetap dikirim.
     headers['X-Idempotency-Key'] = opts.idempotencyKey;
   }
   // Bearer: token eksplisit menang; bila absen dan path kontrak-Go, pakai
-  // token sesi (compat push MerchantAuth) — path ESB tetap header-free.
+  // token sesi (compat push MerchantAuth) - path ESB tetap header-free.
   const postToken = opts?.token
     ? opts.token
     : needsSessionBearer(path)
@@ -569,13 +570,13 @@ export async function apiPost(
     headers,
     body: JSON.stringify(body),
     // S4-APP-313: teruskan sinyal abort pemanggil (timeout per-attempt /
-    // pembatalan user) — aditif, pemanggil lama tanpa signal tetap jalan.
+    // pembatalan user) - aditif, pemanggil lama tanpa signal tetap jalan.
     ...(opts?.signal ? { signal: opts.signal } : {}),
   });
 }
 
 /**
- * D (E16 unpair): DELETE tanpa body — pasangan apiPost untuk lepas-pairing
+ * D (E16 unpair): DELETE tanpa body - pasangan apiPost untuk lepas-pairing
  * view. Bearer/idempotency + header kontrak X-Terminal-Code/Branch-Id ala
  * apiPost agar konsisten dengan panggilan kontrak-Go lain.
  */
@@ -602,7 +603,7 @@ export async function apiDelete(
 }
 
 /**
- * D (E11 patch): PATCH dengan body JSON — pasangan apiPost/apiDelete untuk
+ * D (E11 patch): PATCH dengan body JSON - pasangan apiPost/apiDelete untuk
  * update parsial (E11 {name?, tag?}). Bearer/idempotency + header kontrak
  * ala apiPost.
  */
@@ -631,7 +632,7 @@ export async function apiPatch(
 }
 
 /**
- * D (W2 wiring-2): PUT dengan body JSON — pasangan apiPatch untuk endpoint
+ * D (W2 wiring-2): PUT dengan body JSON - pasangan apiPatch untuk endpoint
  * kontrak-Go merchant yang memakai PUT (reservasi cancel, order status).
  * Bearer/idempotency + header kontrak ala apiPost, termasuk DUA ejaan
  * idempotency key (BE Go membaca `X-Idempotency-Key`).
@@ -665,10 +666,10 @@ export async function apiPut(
 
 /**
  * S15: detak koneksi (pong) + ambang mati 90 dtk. Soket dimiliki realtime.ts
- * (agen lain) — modul ini hanya menyimpan stempel; pemilik realtime memanggil
+ * (agen lain) - modul ini hanya menyimpan stempel; pemilik realtime memanggil
  * notePong() tiap pong dan noteReconnect() tiap sambung-ulang.
  * pullMaster TIDAK dipicu dari sini: import master.ts akan bersiklus
- * (server → master → sync → server) — wiring reconnect→pullMaster milik
+ * (server → master → sync → server) - wiring reconnect→pullMaster milik
  * pemilik realtime (DEFERRED, lihat laporan).
  */
 let lastPongMs = 0;

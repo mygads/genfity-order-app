@@ -19,7 +19,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   const [photoErr, setPhotoErr] = useState('');
   const [saving, setSaving] = useState(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null; photoPending?: boolean }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); void retryPendingExpensePhotos().catch(() => { /* best-effort */ }); return () => { alive = false; }; }, []);
 
-  const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
+  const jumlahNum = Math.round((Number(String(jumlah).replace(/[^0-9.,]/g, '').replace(/,/g, '.')) || 0) * 100) / 100;
   const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
 
   const pickPhoto = async () => {
@@ -70,7 +70,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
       // clientExpenseId = id baris (uuidv7 mentah, dibangun SEKALI di atas,
       // dipakai ulang saat retry); sukses terminal = LEWATI antrean ESB
       // (tutup ledger ganda); gagal/BE-BELUM-ADA = fallback ESB lama.
-      // SESI-FINAL-APP: upload-DULU — foto lokal diunggah SEBELUM handoff;
+      // SESI-FINAL-APP: upload-DULU - foto lokal diunggah SEBELUM handoff;
       // sukses = kirim photoUrl + DB lokal dimutakhirkan ke URL remote;
       // gagal/offline = photoPending (marker storage + banner layar hasil +
       // retry saat mount/fokus layar kas).
@@ -109,7 +109,7 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
       if (!terminalPosted) {
         await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert', ...(localPhotoOnly ? { photoPending: true } : {}) });
       }
-      // W1 (SESI-FIX-APPW1): cermin mutasi kas ke sesi kas server — immediate-
+      // W1 (SESI-FIX-APPW1): cermin mutasi kas ke sesi kas server - immediate-
       // first fire-and-forget SETELAH lokal menang di atas. Tanpa sesi server
       // (mis. open offline belum terkirim) = langsung antrekan op be-cash-move
       // (drain menunggu open via FIFO, lalu memakai id sesi hasil open); 4xx

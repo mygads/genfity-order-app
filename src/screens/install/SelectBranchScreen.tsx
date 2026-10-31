@@ -157,7 +157,7 @@ const DEV_BRANCHES: BranchItem[] = [
               } catch { /* abaikan: local clear sudah sah */ }
             })();
           }
-          // E30: occupant melepas binding MILIKNYA sendiri via releaseTerminal —
+          // E30: occupant melepas binding MILIKNYA sendiri via releaseTerminal -
           // best-effort (offline-safe, never block UI, fire-and-forget): gagal
           // = abaikan, local clear di bawah tetap sah. WAJIB sebelum
           // exitBranchAll menghapus state lokal. Butuh terminalId + deviceId;
@@ -231,8 +231,8 @@ const DEV_BRANCHES: BranchItem[] = [
             <Text style={styles.failTitle}>{`\u26A0 ${t('need_be')}`}</Text>
             <Text style={styles.failBody}>
               {lang === 'id'
-                ? 'Server tak terjangkau sehingga daftar cabang asli belum termuat. Daftar di bawah hanya contoh lokal (dev) — mengetuknya tidak akan lanjut; tombol Pilih sengaja dinonaktifkan.'
-                : 'Server is unreachable so the real branch list has not loaded. The list below is only a local (dev) sample — tapping it will not continue; the Select button is intentionally disabled.'}
+                ? 'Server tak terjangkau sehingga daftar cabang asli belum termuat. Daftar di bawah hanya contoh lokal (dev) - mengetuknya tidak akan lanjut; tombol Pilih sengaja dinonaktifkan.'
+                : 'Server is unreachable so the real branch list has not loaded. The list below is only a local (dev) sample - tapping it will not continue; the Select button is intentionally disabled.'}
             </Text>
             <Text style={styles.failBody}>
               {lang === 'id'
@@ -272,7 +272,7 @@ const DEV_BRANCHES: BranchItem[] = [
             style={[styles.card, branchId === b.id && styles.cardOn, failClosed && styles.cardDim]}
             onPress={() => {
               // B6: radio dummy (B001 dkk) saat fail-closed BUKAN pilihan
-              // nyata — jangan tandai terpilih, beri tahu jujur via alert.
+              // nyata - jangan tandai terpilih, beri tahu jujur via alert.
               if (failClosed) { appAlert(t('need_be')); return; }
               setBranchId(b.id);
             }}>
@@ -323,12 +323,12 @@ const DEV_BRANCHES: BranchItem[] = [
             <TextInput
               style={styles.pinInput}
               value={pin}
-              onChangeText={(v) => { setPin(v.replace(/[^0-9]/g, '').slice(0, 6)); setPinError(''); }}
+              onChangeText={(v) => { setPin(v.replace(/[^0-9]/g, '').slice(0, 8)); setPinError(''); }}
               placeholder={t('cx_pin_ph')}
               placeholderTextColor={colors.faint}
               secureTextEntry
               keyboardType="number-pad"
-              maxLength={6}
+              maxLength={8}
               editable={!pinBusy}
             />
             {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}

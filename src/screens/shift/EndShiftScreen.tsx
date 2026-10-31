@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';import {
   useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { authorizeSupervisor } from '../../lib/supervisor';import { pinVerifyTerminalPin } from '../../lib/terminalApi';import { verifyAttendancePin } from '../../lib/pin';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashCloseBe,
   clockOutBe,
+  getPosLocation,
   clockOutPayload,
   flushPendingCashCloses,
   getCashSessionId,
@@ -34,7 +35,7 @@ import React, { useEffect, useState } from 'react';import {
   // Ringkasan dari shift berjalan (tr_shiftlog) + penjualan lunas + pengeluaran.
   useEffect(() => { let on = true; (async () => { try { await initDb(); const branchId = getTerminal().branchId || null; const open = await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null; }>(`SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status = 'open' AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1`, [branchId, branchId]); const latest = open ?? (await queryFirst<{ id: string; cashInDrawer: number | null; clockIn: string | null }>( 'SELECT id, cashInDrawer, clockIn FROM tr_shiftlog WHERE status <> "absen" AND (branchId = ? OR ? IS NULL) ORDER BY clockIn DESC LIMIT 1', [branchId, branchId], )); if (!on || !latest) return; const since = latest.clockIn ?? new Date(new Date().setHours(0, 0, 0, 0)).toISOString();    // Kas tunai MURNI: jumlah pembayaran cash dari tr_salespayment yang
     // head-nya lunas - tanpa fallback ke semua metode (RIW-07).
-    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since, branchId, branchId], ); const tunai = num(cash?.total); const exp = await queryFirst<{ keluar: number | null; masuk: number | null }>( 'SELECT COALESCE(-SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS keluar, COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS masuk FROM tr_branchexpense WHERE expenseDate >= ? AND (branchId = ? OR ? IS NULL)', [since, branchId, branchId], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer)), penjualanTunai: Math.round(tunai), pengeluaran: Math.round(num(exp?.keluar)), pemasukan: Math.round(num(exp?.masuk)), fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran, pemasukan } = summary; const kasSeharusnya = modalAwal + penjualanTunai + pemasukan - pengeluaran; const kasFisikNum = Number(kasFisik.replace(/\D/g, '')) || 0;
+    const cash = await queryFirst<{ total: number }>( `SELECT COALESCE(SUM(p.amount), 0) AS total FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) AND (p.paymentMethod LIKE '%cash%' OR p.paymentMethod LIKE '%tunai%')`, [since, branchId, branchId], ); const tunai = num(cash?.total); const exp = await queryFirst<{ keluar: number | null; masuk: number | null }>( 'SELECT COALESCE(-SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS keluar, COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS masuk FROM tr_branchexpense WHERE expenseDate >= ? AND (branchId = ? OR ? IS NULL)', [since, branchId, branchId], ); if (!on) return; setSummary({ openId: open ? open.id : null, modalAwal: Math.round(num(latest.cashInDrawer) * 100) / 100, penjualanTunai: Math.round(tunai * 100) / 100, pengeluaran: Math.round(num(exp?.keluar) * 100) / 100, pemasukan: Math.round(num(exp?.masuk) * 100) / 100, fromDb: true, }); } catch { /* DB belum siap - pakai angka awal */ } })(); return () => { on = false; }; }, []); const { modalAwal, penjualanTunai, pengeluaran, pemasukan } = summary; const kasSeharusnya = modalAwal + penjualanTunai + pemasukan - pengeluaran; const kasFisikNum = Math.round((Number(String(kasFisik).replace(/[^0-9.,]/g, '').replace(/,/g, '.')) || 0) * 100) / 100;
   const touched = kasFisik.length > 0;
   const selisih = touched ? kasFisikNum - kasSeharusnya : 0;
 
@@ -61,16 +62,16 @@ import React, { useEffect, useState } from 'react';import {
     // 'settings.edit') dicabut. ok===null (DB belum siap) ditolak seperti PIN
     // salah. Identitas penutup dicatat ke payload sync (closedBy); userId baris
     // shift tetap milik pembuka (atribusi tak diubah). GAP-15 (2026-10-17,
-    // terverifikasi): closedBy TIBA di server — kind 'other' tak tersentuh
+    // terverifikasi): closedBy TIBA di server - kind 'other' tak tersentuh
     // terjemahan Go-POS (toGoPosRequest hanya kind 'order') dan pushLightItem
     // (lib/sync.ts) menyebar ...rawPayload apa adanya ke body v1/push/shift.
     // Lokal: tr_shiftlog TAK punya kolom closedBy (sengaja, lihat di atas);
     // kolom closedBy sisi server (Go backend, repo terpisah) tak bisa
-    // dipastikan dari repo app ini — payload best-effort + jujur.
+    // dipastikan dari repo app ini - payload best-effort + jujur.
     let closedBy: string | null = null;
     try { await initDb(); } catch { /* DB belum siap - verifikasi di bawah tetap dicoba */ }
     const auth = await authorizeSupervisor(pin);
-    // E29-FALLBACK: cermin ShiftScreen — endpoint legacy mati 404 di Real mode.
+    // E29-FALLBACK: cermin ShiftScreen - endpoint legacy mati 404 di Real mode.
     let e29verified = false;
     if (!auth.ok && auth.code === 'endpoint-dead') {
       const termInfo = getTerminal() as unknown as { terminalIdBe?: string };
@@ -104,7 +105,7 @@ import React, { useEffect, useState } from 'react';import {
     } else {
       try { closedBy = getSession()?.userId || getSession()?.username || null; } catch { /* abaikan */ }
     }
-    // U6: penutup wajib punya baris absensi (status 'absen') — tanpa itu tutup
+    // U6: penutup wajib punya baris absensi (status 'absen') - tanpa itu tutup
     // ditolak (fail-closed). Kunci userId ATAU cashierName, cermin AttendanceScreen.
     try {
       const who = (closedBy ?? '').trim();
@@ -129,18 +130,20 @@ import React, { useEffect, useState } from 'react';import {
     // Tolak tutup tanpa shift terbuka: jangan karang baris shift 'closed' yatim
     // (dulu else-branch INSERT shift palsu dari tengah malam).
     if (!shiftId) { setError(t('endshift_no_open')); return; }
-    try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai), Math.round(kasFisikNum), Math.round(selisih), shiftId], ); }
+    try { await initDb(); let since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString(); if (shiftId) { const open = await queryFirst<{ clockIn: string | null }>( 'SELECT clockIn FROM tr_shiftlog WHERE id = ?', [shiftId], ); if (open?.clockIn) since = open.clockIn; await run( `UPDATE tr_shiftlog SET clockOut = ?, totalSales = ?, cashActual = ?, cashDiff = ?, status = 'closed', syncDate = NULL WHERE id = ?`, [nowIso, Math.round(penjualanTunai * 100) / 100, Math.round(kasFisikNum * 100) / 100, Math.round(selisih * 100) / 100, shiftId], ); }
     // Rincian per metode bayar untuk rekap + rekonsiliasi (RIW-16), dibatasi cabang aktif.
-    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total)), m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya), cashCounted: kasFisikNum, diff: Math.round(selisih), note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ }
-    // W1 (SESI-FIX-APPW1): cermin clock-out + tutup sesi kas ke BE — immediate-
+    const byMethod = await query<{ paymentMethod: string | null; total: number; n: number }>( `SELECT p.paymentMethod, COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS n FROM tr_salespayment p JOIN tr_saleshead h ON h.salesNum = p.salesNum WHERE h.status = 'paid' AND h.salesDate >= ? AND (h.branchId = ? OR ? IS NULL) GROUP BY p.paymentMethod`, [since, branchId, branchId], ); for (const m of byMethod) { const sdId = `sd-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; try { await run( `INSERT INTO tr_shiftlogdetail (id, shiftId, paymentMethod, totalAmount, totalTrx, syncDate) VALUES (?, ?, ?, ?, ?, NULL)`, [sdId, shiftId, m.paymentMethod ?? '-', Math.round(num(m.total) * 100) / 100, m.n], ); try { await enqueueOutbox('tr_shiftlogdetail', sdId, 'insert'); } catch { /* abaikan per baris */ } } catch { /* abaikan per baris */ } } try { await enqueueOutbox('tr_shiftlog', shiftId, 'update'); } catch { /* abaikan */ } } catch { /* abaikan - navigasi tetap jalan */ } try { enqueueSync('other', { op: 'shift-close', shiftId: summary.openId, closedBy, cashExpected: Math.round(kasSeharusnya * 100) / 100, cashCounted: kasFisikNum, diff: Math.round(selisih * 100) / 100, note: catatan.trim() || null, at: nowIso, }); } catch { /* antrean belum siap */ }
+    // W1 (SESI-FIX-APPW1): cermin clock-out + tutup sesi kas ke BE - immediate-
     // first fire-and-forget SETELAH lokal menang di atas. Clock-out offline/
     // error = antrekan op be-clock-out. Tutup-kas offline/error/OPEN_POS_ORDERS
     // = catat pending-close + flush (diulang eksplisit, tahan order-belum-lunas;
     // drain sync mengalihkan 409 OPEN_POS_ORDERS ke sini juga). 4xx lain =
     // error jujur. PIN tak pernah ikut.
     void (async () => {
+      let loc = null;
+      try { loc = await getPosLocation(6000); } catch { loc = null; }
       try {
-        const co = await clockOutBe();
+        const co = await clockOutBe(pin, loc);
         if (co.ok) {
           // HP-E2E-FIX-2: clock-out tercatat di server = kontak sukses
           // (gate E00044 membaca lastSyncMs modul sync).
@@ -158,9 +161,9 @@ import React, { useEffect, useState } from 'react';import {
       try {
         const sid = await getCashSessionId();
         // Tanpa sesi kas server = tak ada yang ditutup (mis. buka offline yang
-        // belum terkirim — drain open dulu via FIFO, tutup menyusul).
+        // belum terkirim - drain open dulu via FIFO, tutup menyusul).
         if (!sid) return;
-        const close = await cashCloseBe(sid, kasFisikNum, catatan.trim() || undefined);
+        const close = await cashCloseBe(sid, kasFisikNum, catatan.trim() || undefined, pin);
         if (close.ok) {
           // HP-E2E-FIX-2: tutup-kas tercatat di server = kontak sukses.
           try { noteServerContact(); } catch { /* abaikan */ }
@@ -171,7 +174,7 @@ import React, { useEffect, useState } from 'react';import {
           if (keepPending) {
             await recordPendingCashClose({
               sessionId: sid,
-              actualCash: Math.max(0, Math.round(kasFisikNum)),
+              actualCash: Math.max(0, Math.round(kasFisikNum * 100) / 100),
               note: catatan.trim() ? catatan.trim().slice(0, 500) : null,
               at: new Date().toISOString(),
             });
@@ -373,7 +376,7 @@ import React, { useEffect, useState } from 'react';import {
                     onPress={() => {
                       if (k === 'C') setPin(pin.slice(0, -1));
                       else if (k === 'OK') confirmClose();
-                      else if (pin.length < 6) setPin(pin + k);
+                      else if (pin.length < 8) setPin(pin + k);
                     }}>
                     <Text style={s.pinKeyTxt}>{k === 'C' ? '⌫' : k}</Text>
                   </TouchableOpacity>

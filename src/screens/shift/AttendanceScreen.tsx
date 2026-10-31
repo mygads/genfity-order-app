@@ -1,17 +1,14 @@
-import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
+import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
+import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1 } from '../../lib/beWorkforce';
 import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
  * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
-  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out dikirim via antrean sync.
- * S9 (PP-010): OFFLINE-ONLY EKSPLISIT — layar ini TIDAK memanggil endpoint BE
- * workforce/shifts/clock-in|out. Alasan: (1) grup /api/merchant memakai
- * MerchantAuth (bukan token sesi kasir POS — kompatibilitas TANPA live BE
- * tak bisa dibuktikan; salah tebak = 401 → logout sesi via 401-handler);
- * (2) BE clock mencatat AUTH-USER saja (ac.UserID) sehingga mengikat
- * titip-absen (clock atas pemilik PIN) tak terpetakan; (3) tanpa modul GPS
- * (tak ada expo-location) sehingga outlet geofence-wajib akan 422.
- * Sampai ketiga hal di atas diputuskan owner + E2E live, banner
- * att_offline_only tampil jujur di bawah. */export default function AttendanceScreen({ navigation }: Props) {
+  d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out lokal + live W1 ke BE.
+ * Offline-first: tulis lokal + antre legacy dulu, lalu immediate-first live
+ * clockInBe/clockOutBe/breakBe dengan PIN + lokasi GPS (bila ada).
+ * 401 PIN_REQUIRED / 422 LOCATION_CHECK_FAILED = error jujur (tak diantre);
+ * offline/5xx = antre W1. Titip-absen: server catat auth-user; pemilik PIN
+ * lokal tetap diaudit via holderName + payload attendance legacy. */export default function AttendanceScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); const s = getSession();
@@ -19,6 +16,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
   const [error, setError] = useState('');
   const [inTime, setInTime] = useState<string | null>(null);
   const [outTime, setOutTime] = useState<string | null>(null);
+  const [onBreak, setOnBreak] = useState(false);
   const [syncNote, setSyncNote] = useState(''); const [busy, setBusy] = useState(false); const [now, setNow] = useState(() => new Date());
 
   // Ganti PIN
@@ -94,7 +92,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     // maxLength 6 + verifyGrantPin sesi 6-digit). Cap 4 membuat PIN 6-digit
     // (mis. seed 246810) tak pernah bisa dimasukkan -> Wrong PIN selamanya.
     // Minimum tetap 4 (dijaga clockIn/clockOut via att_pin_short).
-    else if (pin.length < 6) setPin(pin + k);
+    else if (pin.length < 8) setPin(pin + k);
   };
 
   /** Nama tampilan pemilik PIN: nama sesi bila PIN milik sesi aktif, sonst username/id stabil (anti-titip: clock tercatat atas pemilik PIN). */
@@ -117,16 +115,57 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
   // APP-SHIFT 2026-10-17 (titip-absen CONFIRMED-1): baris + payload diikat ke
   // userId pemilik PIN terverifikasi (argumen), BUKAN nama sesi.
   /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out', verifiedUserId: string, verifiedName: string) => { const nowIso = new Date().toISOString(); const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, verifiedUserId, verifiedName, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [verifiedUserId, verifiedName], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', userId: verifiedUserId, user: verifiedName, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
-    // GAP-4: guard ganda ala changePin — ketuk ganda saat verifikasi async
+    // GAP-4: guard ganda ala changePin - ketuk ganda saat verifikasi async
     // berjalan ditolak (tombol juga disabled via busy).
     if (busy) return;
     if (pin.length < 6) { setError(t('att_pin_short')); return; } setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
     if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
-    await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClockHM(new Date(), lang));
-    setSyncNote(t('att_queued')); setPin('');
+    await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClockHM(new Date(), lang)); setOutTime(null); setOnBreak(false);
+    try {
+      let loc = null;
+      try { loc = await getPosLocation(6000); } catch { loc = null; }
+      const live = await clockInBe(pin, loc);
+      if (live.ok) {
+        try { noteServerContact(); } catch { /* abaikan */ }
+        setSyncNote(t('att_synced'));
+      } else if (shouldQueueW1(live)) {
+        try { enqueueSync('other', clockInPayload()); } catch { /* abaikan */ }
+        setSyncNote(t('att_queued'));
+      } else {
+        setError(live.message || t('att_queued'));
+        setSyncNote(t('att_queued'));
+      }
+    } catch { setSyncNote(t('att_queued')); }
+    setPin('');
   } finally { setBusy(false); } };
+
+  const toggleBreak = async () => {
+    if (busy) return;
+    if (pin.length < 6) { setError(t('att_pin_short')); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const action = onBreak ? 'END' : 'START';
+      const live = await breakBe(action);
+      if (live.ok) {
+        setOnBreak(!onBreak);
+        try { noteServerContact(); } catch { /* abaikan */ }
+        setSyncNote(onBreak ? t('att_break_ended') : t('att_break_started'));
+      } else if (live.code === 'BREAK_ALREADY_OPEN' && !onBreak) {
+        setOnBreak(true);
+      } else if (shouldQueueW1(live)) {
+        try { enqueueSync('other', breakPayload(action)); } catch { /* abaikan */ }
+        setOnBreak(!onBreak);
+        setSyncNote(t('att_queued'));
+      } else {
+        setError(live.message || t('att_break_error'));
+      }
+    } catch {
+      setError(t('att_break_error'));
+    } finally { setBusy(false); }
+  };
 
   const clockOut = async () => {
     // GAP-4: guard ganda ala changePin (cermin clockIn di atas).
@@ -136,21 +175,39 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
     const vOut = await verifyAttendancePin(pin);
     if (vOut.ok !== true || !vOut.userId) { setError(vOut.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
-    await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClockHM(new Date(), lang));
-    setSyncNote(t('att_queued')); setPin('');
+    await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClockHM(new Date(), lang)); setOnBreak(false);
+    try {
+      let loc = null;
+      try { loc = await getPosLocation(6000); } catch { loc = null; }
+      const live = await clockOutBe(pin, loc);
+      if (live.ok) {
+        try { noteServerContact(); } catch { /* abaikan */ }
+        setSyncNote(t('att_synced'));
+      } else if (live.code === 'BREAK_IN_PROGRESS') {
+        setError(t('att_break_in_progress'));
+        setSyncNote(t('att_queued'));
+      } else if (shouldQueueW1(live)) {
+        try { enqueueSync('other', clockOutPayload()); } catch { /* abaikan */ }
+        setSyncNote(t('att_queued'));
+      } else {
+        setError(live.message || t('att_queued'));
+        setSyncNote(t('att_queued'));
+      }
+    } catch { setSyncNote(t('att_queued')); }
+    setPin('');
   } finally { setBusy(false); } };
 
   /** * Ganti PIN: verifikasi PIN lama (hash), simpan hash baru - plaintext TIDAK * PERNAH ditulis ke DB. Perubahan dikirim ke server bila online, selebihnya * antre via sync (server sumber akhir). */ const changePin = async () => {
-    const clean = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 6);
+    const clean = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 8);
     const o = clean(oldPin);
     const n = clean(newPin);
     const c = clean(confirmPin);
-    if (o.length < 6) { setPinMsg(t('att_old_short')); return; }
+    if (o.length < 4) { setPinMsg(t('att_old_short')); return; }
     if (n.length < 6) { setPinMsg(t('att_new_short')); return; }
     if (n !== c) { setPinMsg(t('att_confirm_mismatch')); return; }
     if (o === n) { setPinMsg(t('att_same_pin')); return; }
     // SIDE-B: busy dikunci selama submit (tombol Save disabled) + panggilan
-    // server dibatasi timeout — BE macet tak boleh menggantung modal.
+    // server dibatasi timeout - BE macet tak boleh menggantung modal.
     if (busy) return;
     setBusy(true);
     try {
@@ -196,18 +253,16 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
       <Text style={styles.sec}>{t('att_list')}</Text>
       <View style={styles.card}>
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_in')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{inTime ?? '-- : --'}</Text></View>
-        {/* FIX3-ISTIRAHAT: placeholder disengaja — tak ada sumber break di tr_shiftlog/payload sync; tampil '--:--' agar layout visual tetap identik. Keputusan produk (sembunyikan vs lacak istirahat) lihat held/notes. */}
-        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_break')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>-- : --</Text></View>
+        <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_break')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{onBreak ? t('att_on_break') : '-- : --'}</Text></View>
         <View style={styles.row}><Text style={[styles.item, isTablet && styles.itemTablet]}>{t('att_out')}</Text><Text style={[styles.item, isTablet && styles.itemTablet]}>{outTime ?? '-- : --'}</Text></View>
       </View>
       {!inTime && <Text style={styles.empty}>{t('att_empty_in')}</Text>}
-      {/* S9: banner offline-only eksplisit — selalu tampil, bukan syarat. */}
+      {/* S9: banner offline-only eksplisit - selalu tampil, bukan syarat. */}
       <Text style={styles.hint}>{t('att_offline_only')}</Text>
 
       <Text style={styles.sec}>{t('att_pin_entry')}</Text>
       <View style={styles.pinRow}>
-        {/* E2E-HP (2026-10-26): 6 slot paritas cap pad (4-digit tetap tampil + 2 strip). */}
-        {[0, 1, 2, 3, 4, 5].map((i) => (
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
           <View key={i} style={styles.pinDot}><Text style={styles.pinChar}>{pin[i] ? '●' : '-'}</Text></View>
         ))}
       </View>
@@ -229,6 +284,17 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
             fullWidth={false}
             style={{ flex: 1, marginTop: 0 }}
             onPress={clockIn}
+          />
+        ) : null}
+        {clockedIn && !outTime ? (
+          <AppButton
+            size="md"
+            title={onBreak ? `${t('att_break_end')} ›` : `${t('att_break_start')} ›`}
+            variant="secondary"
+            disabled={busy}
+            fullWidth={false}
+            style={{ flex: 1, marginTop: 0 }}
+            onPress={toggleBreak}
           />
         ) : null}
         {clockedIn ? (
@@ -273,30 +339,30 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
                 label={t('att_old_label')}
                 keyboardType="numeric"
                 secureTextEntry
-                maxLength={6}
+                maxLength={8}
                 placeholder={t('att_old_ph')}
                 value={oldPin}
-                onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                onChangeText={(tx) => setOldPin(tx.replace(/[^0-9]/g, '').slice(0, 8))}
                 style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
               />
               <AppInput
                 label={t('att_new_label')}
                 keyboardType="numeric"
                 secureTextEntry
-                maxLength={6}
+                maxLength={8}
                 placeholder={t('att_new_ph')}
                 value={newPin}
-                onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                onChangeText={(tx) => setNewPin(tx.replace(/[^0-9]/g, '').slice(0, 8))}
                 style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
               />
               <AppInput
                 label={t('att_confirm_label')}
                 keyboardType="numeric"
                 secureTextEntry
-                maxLength={6}
+                maxLength={8}
                 placeholder={t('att_confirm_ph')}
                 value={confirmPin}
-                onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 6))}
+                onChangeText={(tx) => setConfirmPin(tx.replace(/[^0-9]/g, '').slice(0, 8))}
                 style={{ textAlign: 'center', letterSpacing: 3, fontFamily: fonts.bold }}
               />
               {pinMsg ? <Text style={styles.pinMsg}>{pinMsg}</Text> : null}

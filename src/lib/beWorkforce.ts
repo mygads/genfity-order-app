@@ -2,15 +2,16 @@
  * Wiring-1: pemanggil kontrak merchant Go untuk shift/clock + sesi kas +
  * tutup-hari (grup /api/merchant, MerchantAuth) ke Backend Go.
  *
- * Prinsip (gas mode, aditif — cermin posWire.ts):
+ * Prinsip (gas mode, aditif - cermin posWire.ts):
  * - SQLite lokal tetap cache/kebenaran; semua call ke sini best-effort dan
  *   TAK PERNAH melempar (kecuali dokumentasi sebaliknya).
- * - PIN TAK PERNAH dikirim dan TAK PERNAH diantrekan: body yang dibawa ke
- *   jaringan maupun ke antrean sync dipoles `stripPin()` dulu. Server yang
- *   mewajibkan PIN (RequirePINForPOS) menjawab PIN_REQUIRED = error jujur
- *   (reason 'rejected'), bukan antrean buta. Alur kasir lokal tetap jalan
- *   karena verifikasi PIN sudah terjadi lokal (authorizeSupervisor /
- *   verifyAttendancePin di layar) SEBELUM modul ini dipanggil.
+ * - PIN live-only: panggilan live BOLEH bawa `pin` (workforce PIN 6-8 digit)
+ *   + lokasi GPS opsional; payload ANTREAN tetap dipoles `stripPin()` dan
+ *   TANPA lokasi basi. Server yang mewajibkan PIN (RequirePINForPOS) menjawab
+ *   PIN_REQUIRED = error jujur (reason 'rejected'), bukan antrean buta.
+ *   Alur kasir lokal tetap jalan karena verifikasi PIN sudah terjadi lokal
+ *   (authorizeSupervisor / verifyAttendancePin di layar) SEBELUM modul ini
+ *   dipanggil, lalu PIN yang sama diteruskan live ke server.
  * - Stamp terminal numerik + retry-tanpa-stamp: terminalIdBe (string angka
  *   dari E09 picker) dikirim sebagai terminalId bila > 0; bila server menolak
  *   karena stamp (404 TERMINAL_NOT_FOUND / 400 INVALID_TERMINAL), ulangi
@@ -35,7 +36,7 @@ import { getLang } from './i18n';
 import { beErrorOf } from './posWire';
 
 // ---------------------------------------------------------------------------
-// Nama op antrean W1 (dishare ke sync.ts pathFor — satu sumber nama).
+// Nama op antrean W1 (dishare ke sync.ts pathFor - satu sumber nama).
 // 'be-' agar TAK PERNAH tabrakan op W2 (pos-*, booking-*) maupun op ESB
 // (shift-open/shift-close/move-*/...).
 // ---------------------------------------------------------------------------
@@ -51,15 +52,15 @@ export const W1_OP_EOD_CLOSE = 'be-eod-close';
 export const BE_WF_TIMEOUT_MS = 8000;
 
 // ---------------------------------------------------------------------------
-// Pesan bilingual lokal W1 (tak menyentuh i18n.ts yang dipakai lane lain —
+// Pesan bilingual lokal W1 (tak menyentuh i18n.ts yang dipakai lane lain -
 // append-only di modul ini agar tak tabrakan, cermin posWire WIRE_STR).
 // ---------------------------------------------------------------------------
 const WF_STR: Record<string, { id: string; en: string }> = {
-  offline: { id: 'Offline — perubahan tersimpan di perangkat.', en: 'Offline — change kept on this device.' },
-  blocked: { id: 'Tak ada id sesi server — tak dikirim (bukan kirim buta).', en: 'No server session id — not sent (never send blind).' },
+  offline: { id: 'Offline - perubahan tersimpan di perangkat.', en: 'Offline - change kept on this device.' },
+  blocked: { id: 'Tak ada id sesi server - tak dikirim (bukan kirim buta).', en: 'No server session id - not sent (never send blind).' },
   rejected: { id: 'Server menolak: {m}', en: 'Server rejected: {m}.' },
   needPin: { id: 'Server mewajibkan PIN untuk aksi ini.', en: 'Server requires a PIN for this action.' },
-  needSession: { id: 'Belum ada sesi kas server — buka sesi dulu saat online.', en: 'No server cash session yet — open one while online.' },
+  needSession: { id: 'Belum ada sesi kas server - buka sesi dulu saat online.', en: 'No server cash session yet - open one while online.' },
   openOrders: { id: 'Masih ada order belum bayar di sesi kas ini.', en: 'This cash session still has unpaid orders.' },
   ok: { id: 'Tersinkron ke server.', en: 'Synced to server.' },
 };
@@ -130,7 +131,59 @@ function withTimeoutMs<T>(promise: Promise<T>, ms = BE_WF_TIMEOUT_MS): Promise<T
 // ---------------------------------------------------------------------------
 // PIN strip + stamp terminal.
 // ---------------------------------------------------------------------------
-/** Buang SEMUA kunci PIN (defense-in-depth: pemanggil tak pernah kirim PIN). */
+/** Bulatkan ke 2 desimal (IDR/AUD aman; jangan Math.round bulat). */
+export function round2(n: unknown): number {
+  const v = numOf(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(v * 100) / 100;
+}
+
+export type WfLocation = { latitude?: number; longitude?: number; accuracyMeters?: number };
+
+function cleanPin(pin: unknown): string | null {
+  const s = String(pin ?? '').replace(/[^0-9]/g, '').slice(0, 8);
+  return s.length >= 6 ? s : null;
+}
+
+function withLiveAuth(body: Record<string, unknown>, pin?: unknown, loc?: WfLocation | null): Record<string, unknown> {
+  const out = { ...body };
+  const p = cleanPin(pin);
+  if (p) out.pin = p;
+  if (loc && Number.isFinite(loc.latitude as number) && Number.isFinite(loc.longitude as number)) {
+    out.latitude = loc.latitude;
+    out.longitude = loc.longitude;
+    if (Number.isFinite(loc.accuracyMeters as number)) out.accuracyMeters = loc.accuracyMeters;
+  }
+  return out;
+}
+
+/** Coba ambil lokasi GPS bila tersedia (web/navigator); native tanpa expo-location = undefined jujur. */
+export async function getPosLocation(timeoutMs = 8000): Promise<WfLocation | null> {
+  try {
+    const g = (globalThis as unknown as { navigator?: { geolocation?: { getCurrentPosition: (...a: unknown[]) => void } } }).navigator?.geolocation;
+    if (!g) return null;
+    return await new Promise<WfLocation | null>((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => { if (!done) { done = true; resolve(null); } }, timeoutMs);
+      try {
+        g.getCurrentPosition(
+          (pos: unknown) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            const c = (pos as { coords?: { latitude?: number; longitude?: number; accuracy?: number } }).coords || {};
+            if (!Number.isFinite(c.latitude as number) || !Number.isFinite(c.longitude as number)) { resolve(null); return; }
+            resolve({ latitude: c.latitude as number, longitude: c.longitude as number, accuracyMeters: c.accuracy as number });
+          },
+          () => { if (!done) { done = true; clearTimeout(timer); resolve(null); } },
+          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 } as unknown,
+        );
+      } catch { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
+    });
+  } catch { return null; }
+}
+
+/** Buang SEMUA kunci PIN (defense-in-depth: payload antrean tak pernah kirim PIN). */
 export function stripPin<T extends Record<string, unknown>>(body: T): T {
   const out = { ...body };
   for (const k of Object.keys(out)) {
@@ -155,10 +208,11 @@ interface BeCall {
   res: Awaited<ReturnType<typeof apiFetch>>;
 }
 
-async function postBe(path: string, body: Record<string, unknown>): Promise<BeCall | { offline: true }> {
+async function postBe(path: string, body: Record<string, unknown>, opts?: { strip?: boolean }): Promise<BeCall | { offline: true }> {
   if (!isW1Online()) return { offline: true };
+  const payload = opts?.strip === false ? body : stripPin(body);
   try {
-    const res = await withTimeoutMs(apiFetch(path, { method: 'POST', body: stripPin(body) }));
+    const res = await withTimeoutMs(apiFetch(path, { method: 'POST', body: payload }));
     if (res.fromDummy || res.status === 0) return { offline: true };
     return { res };
   } catch {
@@ -172,12 +226,13 @@ function offlineResult<T>(): WfResult<T> {
 
 /**
  * POST dengan stamp terminal + retry-tanpa-stamp SEKALI bila server menolak
- * stamp-nya (404 TERMINAL_NOT_FOUND / 400 INVALID_TERMINAL). PIN tak pernah
- * ikut (stripPin di postBe).
+ * stamp-nya (404 TERMINAL_NOT_FOUND / 400 INVALID_TERMINAL). Live boleh bawa
+ * PIN/lokasi bila `live` diisi; antrean tetap tanpa PIN (stripPin).
  */
-async function postWithStampRetry(path: string, body: Record<string, unknown>): Promise<BeCall | { offline: true }> {
+async function postWithStampRetry(path: string, body: Record<string, unknown>, live?: { pin?: unknown; loc?: WfLocation | null }): Promise<BeCall | { offline: true }> {
+  const authed = live ? withLiveAuth(body, live.pin, live.loc) : body;
   const stamp = terminalStamp();
-  const first = await postBe(path, stamp > 0 ? { ...body, terminalId: stamp } : { ...body });
+  const first = await postBe(path, stamp > 0 ? { ...authed, terminalId: stamp } : { ...authed }, { strip: live ? false : undefined });
   if (!('res' in first)) return first;
   if (!first.res.ok) {
     const be = beErrorOf(first.res.data);
@@ -186,7 +241,7 @@ async function postWithStampRetry(path: string, body: Record<string, unknown>): 
       : first.res.status === 400 ? be.code === 'INVALID_TERMINAL'
       : false
     ) {
-      if (stamp > 0) return postBe(path, { ...body });
+      if (stamp > 0) return postBe(path, { ...authed }, { strip: live ? false : undefined });
     }
   }
   return first;
@@ -207,15 +262,15 @@ function rejected<T>(status: number, body: unknown): WfResult<T> {
 const REPLAY_OK_CODES = /^(SHIFT_ALREADY_OPEN|SESSION_CLOSED|SHIFT_ALREADY_CLOSED)$/;
 
 // ---------------------------------------------------------------------------
-// Clock in / out (workforce milik sendiri — ac.UserID server).
+// Clock in / out (workforce milik sendiri - ac.UserID server).
 // ---------------------------------------------------------------------------
 export interface ClockResult {
   shiftId: number;
   replayed: boolean;
 }
 
-export async function clockInBe(): Promise<WfResult<ClockResult>> {
-  const call = await postWithStampRetry(ApiPath.merchantClockIn, {});
+export async function clockInBe(pin?: unknown, loc?: WfLocation | null): Promise<WfResult<ClockResult>> {
+  const call = await postWithStampRetry(ApiPath.merchantClockIn, {}, { pin, loc });
   if (!('res' in call)) return offlineResult();
   const { res } = call;
   if (res.ok) {
@@ -233,8 +288,8 @@ export async function clockInBe(): Promise<WfResult<ClockResult>> {
   return rejected(res.status, res.data);
 }
 
-export async function clockOutBe(): Promise<WfResult<ClockResult>> {
-  const call = await postWithStampRetry(ApiPath.merchantClockOut, {});
+export async function clockOutBe(pin?: unknown, loc?: WfLocation | null): Promise<WfResult<ClockResult>> {
+  const call = await postWithStampRetry(ApiPath.merchantClockOut, {}, { pin, loc });
   if (!('res' in call)) return offlineResult();
   const { res } = call;
   if (res.ok) {
@@ -249,6 +304,29 @@ export async function clockOutBe(): Promise<WfResult<ClockResult>> {
   if (res.status === 409 && be.code === 'NO_OPEN_SHIFT') {
     // Tak ada shift terbuka di server = sudah dalam keadaan target.
     return { ok: true, data: { shiftId: 0, replayed: true } };
+  }
+  if (res.status >= 500 || res.status === 429) {
+    return { ok: false, reason: 'error', code: be.code || `HTTP_${res.status}`, message: be.message || wfTr('offline'), status: res.status };
+  }
+  return rejected(res.status, res.data);
+}
+
+export type BreakAction = 'START' | 'END';
+
+export async function breakBe(action: BreakAction): Promise<WfResult<{ shiftId: number }>> {
+  const a = String(action || '').toUpperCase() === 'END' ? 'END' : 'START';
+  const call = await postWithStampRetry(ApiPath.merchantBreak, { action: a });
+  if (!('res' in call)) return offlineResult();
+  const { res } = call;
+  if (res.ok) {
+    const { data } = unwrap<Record<string, unknown>>(res.data);
+    const id = numOf((data as Record<string, unknown>)?.shiftId ?? (data as Record<string, unknown>)?.id);
+    return { ok: true, data: { shiftId: id > 0 ? Math.round(id) : 0 } };
+  }
+  const be = beErrorOf(res.data);
+  if (res.status === 409 && (be.code === 'BREAK_ALREADY_OPEN' || be.code === 'NO_OPEN_SHIFT')) {
+    // Idempoten longgar: START saat sudah istirahat / tanpa shift = rejected jujur agar UI bisa sinkron.
+    if (be.code === 'BREAK_ALREADY_OPEN' && a === 'START') return { ok: true, data: { shiftId: 0 } };
   }
   if (res.status >= 500 || res.status === 429) {
     return { ok: false, reason: 'error', code: be.code || `HTTP_${res.status}`, message: be.message || wfTr('offline'), status: res.status };
@@ -373,15 +451,15 @@ export interface CashOpenResult {
   sessionId: number;
 }
 
-export async function cashOpenBe(openingCash: number, note?: string): Promise<WfResult<CashOpenResult>> {
-  const cash = Math.max(0, Math.round(numOf(openingCash)));
+export async function cashOpenBe(openingCash: number, note?: string, pin?: unknown, loc?: WfLocation | null): Promise<WfResult<CashOpenResult>> {
+  const cash = Math.max(0, round2(openingCash));
   // registerId 0 = server pakai/buat 'Main register' (kontrak BE).
   // P0-03: sertakan clientSessionUuid (UUID lokal saat buka offline) agar BE cocokkan saat online.
   const body: Record<string, unknown> = { registerId: 0, openingCash: cash };
   try { const pend = await getPendingSessionUuid(); if (pend) body.clientSessionUuid = pend; } catch { /* abaikan */ }
   const n = String(note ?? '').trim();
   if (n) body.note = n.slice(0, 500);
-  const call = await postWithStampRetry(ApiPath.merchantCashOpen, body);
+  const call = await postWithStampRetry(ApiPath.merchantCashOpen, body, { pin, loc });
   if (!('res' in call)) return offlineResult();
   const { res } = call;
   if (res.ok) {
@@ -424,7 +502,7 @@ export async function cashMoveBe(
   if (!isServerSessionId(sessionId)) {
     return { ok: false, reason: 'blocked', message: wfTr('blocked') };
   }
-  const amt = Math.round(numOf(amount));
+  const amt = round2(amount);
   const rs = String(reason ?? '').trim();
   if (amt <= 0 || !rs) {
     return { ok: false, reason: 'blocked', message: wfTr('blocked') };
@@ -461,15 +539,16 @@ export async function cashCloseBe(
   sessionId: string | number,
   actualCash: number,
   note?: string,
+  pin?: unknown,
 ): Promise<WfResult<CashCloseResult>> {
   if (!isServerSessionId(sessionId)) {
     return { ok: false, reason: 'blocked', message: wfTr('blocked') };
   }
   const sid = parseInt(String(sessionId).trim(), 10);
-  const body: Record<string, unknown> = { actualCash: Math.max(0, Math.round(numOf(actualCash))) };
+  const body: Record<string, unknown> = { actualCash: Math.max(0, round2(actualCash)) };
   const n = String(note ?? '').trim();
   if (n) body.note = n.slice(0, 500);
-  const call = await postWithStampRetry(pathWithSession(ApiPath.merchantCashClose, sid), body);
+  const call = await postWithStampRetry(pathWithSession(ApiPath.merchantCashClose, sid), body, pin ? { pin } : undefined);
   if (!('res' in call)) return offlineResult();
   const { res } = call;
   if (res.ok) {
@@ -601,7 +680,7 @@ export async function flushPendingCashCloses(): Promise<FlushSummary> {
       break;
     }
     if (r.reason === 'blocked') {
-      // Sesi tak valid — buang (jangan antre selamanya).
+      // Sesi tak valid - buang (jangan antre selamanya).
       continue;
     }
     // 'rejected' deterministik (OPEN_POS_ORDERS / PIN / validasi): simpan
@@ -613,7 +692,7 @@ export async function flushPendingCashCloses(): Promise<FlushSummary> {
 }
 
 // ---------------------------------------------------------------------------
-// Tutup-hari (read-only preview + close; layar khusus belum ada — dipakai
+// Tutup-hari (read-only preview + close; layar khusus belum ada - dipakai
 // probe/flush; error jujur, offline fail-open).
 // ---------------------------------------------------------------------------
 export interface EodSnapshot {
@@ -679,7 +758,7 @@ export async function eodCloseBe(date?: string): Promise<WfResult<{ businessDate
 }
 
 // ---------------------------------------------------------------------------
-// Payload builder antrean W1 (murni, TANPA stamp terminal + TANPA PIN —
+// Payload builder antrean W1 (murni, TANPA stamp terminal + TANPA PIN -
 // drain sync mem-POST apa adanya via pathFor).
 // ---------------------------------------------------------------------------
 export function clockInPayload(): Record<string, unknown> {
@@ -690,8 +769,12 @@ export function clockOutPayload(): Record<string, unknown> {
   return { op: W1_OP_CLOCK_OUT };
 }
 
+export function breakPayload(action: 'START' | 'END'): Record<string, unknown> {
+  return { op: W1_OP_BREAK, action: action === 'END' ? 'END' : 'START' };
+}
+
 export function cashOpenPayload(openingCash: number, note?: string): Record<string, unknown> {
-  const p: Record<string, unknown> = { op: W1_OP_CASH_OPEN, openingCash: Math.max(0, Math.round(numOf(openingCash))) };
+  const p: Record<string, unknown> = { op: W1_OP_CASH_OPEN, openingCash: Math.max(0, round2(openingCash)) };
   const n = String(note ?? '').trim();
   if (n) p.note = n.slice(0, 500);
   return p;
@@ -701,20 +784,20 @@ export function cashMovePayload(type: CashMoveType, amount: number, reason: stri
   return {
     op: W1_OP_CASH_MOVE,
     type,
-    amount: Math.max(0, Math.round(numOf(amount))),
+    amount: Math.max(0, round2(amount)),
     reason: String(reason ?? '').trim().slice(0, 500),
   };
 }
 
 export function cashClosePayload(actualCash: number, note?: string): Record<string, unknown> {
-  const p: Record<string, unknown> = { op: W1_OP_CASH_CLOSE, actualCash: Math.max(0, Math.round(numOf(actualCash))) };
+  const p: Record<string, unknown> = { op: W1_OP_CASH_CLOSE, actualCash: Math.max(0, round2(actualCash)) };
   const n = String(note ?? '').trim();
   if (n) p.note = n.slice(0, 500);
   return p;
 }
 
 // ---------------------------------------------------------------------------
-// Approve sesi kas (manager KEDUA; closer tak boleh approve sesi sendiri —
+// Approve sesi kas (manager KEDUA; closer tak boleh approve sesi sendiri -
 // server menjawab 403 INDEPENDENT_REVIEW_REQUIRED = 'rejected' jujur).
 // Catatan wajib 1–500 char (aturan server). PIN tak pernah ikut.
 // ---------------------------------------------------------------------------

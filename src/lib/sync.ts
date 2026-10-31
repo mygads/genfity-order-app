@@ -20,7 +20,7 @@ import { nextSalesNumRetry } from './salesNum';
 import { getItem, setItem, getJSON } from './storage';
 import { logoutRevoke } from './terminalApi';
 // HP-E2E (2026-10-26): drain expense via handoff terminal (terminalExpense
-// TAK mengimpor sync — arah impor satu arah, tanpa siklus).
+// TAK mengimpor sync - arah impor satu arah, tanpa siklus).
 import { boundTerminalId, isRemotePhoto, postExpenseToTerminal } from './terminalExpense';
 import { uuidv7 } from './uuidv7';
 import {
@@ -39,8 +39,9 @@ import {
 } from './posWire';
 // W1 (SESI-FIX-APPW1): nama op + helper sesi-kas satu sumber di beWorkforce
 // (arah impor sync -> beWorkforce, cermin posWire; beWorkforce TAK mengimpor
-// sync agar tak ada siklus). Hanya INSERT di file ini — baris W2 tak diubah.
+// sync agar tak ada siklus). Hanya INSERT di file ini - baris W2 tak diubah.
 import {
+  W1_OP_BREAK,
   W1_OP_CASH_APPROVE,
   W1_OP_CASH_CLOSE,
   W1_OP_CASH_MOVE,
@@ -108,7 +109,7 @@ function mergeStored(items: SyncItem[]): void {
  * clock-in/cash-open/clock-out/cash-close dari layar shift) sebagai bukti
  * kontak terakhir. Tanpa ini gate E00044 (syncWarnLevel dari module
  * lastSyncMs, yang hanya ditulis touchSuccess di dalam pushAll) tak bisa
- * bersih walau W1 immediate sukses — padahal server SUDAH dihubungi dan
+ * bersih walau W1 immediate sukses - padahal server SUDAH dihubungi dan
  * baris shift/sesi kas SUDAH tercatat di sana.
  * HP-E2E-FIX-2 (2026-10-24): dipanggil dari ShiftScreen/EndShiftScreen,
  * bukan dari beWorkforce.ts (arah impor satu-arah sync→beWorkforce dijaga).
@@ -129,7 +130,7 @@ let restorePromise: Promise<void> | null = null;
 
 /**
  * Bersihkan SELURUH baris satu sale (head + kaki) saat payload ringannya
- * terbukti sampai ke server (2xx — termasuk 200 "Order already synced" untuk
+ * terbukti sampai ke server (2xx - termasuk 200 "Order already synced" untuk
  * retry client_id duplikat) atau server mengaku sudah punya baris kita
  * (duplicate-ack setelah klasifikasi 409, bukan 409 mentah).
  * Tanpa ini hanya tr_saleshead yang bersih (markClean di bawah) sedangkan
@@ -159,10 +160,10 @@ async function markCleanSale(salesNum: string): Promise<void> {
   const stamp = new Date().toISOString();
   for (const t of SALE_CLEAN_TABLES) {
     try {
-      // Nama tabel dari daftar statis (bukan input user) — aman.
+      // Nama tabel dari daftar statis (bukan input user) - aman.
       await run(`UPDATE "${t}" SET syncDate = ? WHERE salesNum = ? AND syncDate IS NULL`, [stamp, no]);
     } catch {
-      /* tabel/kolom belum ada di instalasi lama — abaikan */
+      /* tabel/kolom belum ada di instalasi lama - abaikan */
     }
   }
 }
@@ -206,10 +207,10 @@ function hydrate(): void {
 
 /**
  * Endpoint push per tabel. Tabel master (ms_*) local-only (M9-3): backend Go
- * tak punya endpoint push master generik dan pull master server-wins —
+ * tak punya endpoint push master generik dan pull master server-wins -
  * sehingga dikembalikan null dan tidak dikirim ke order/finish. (Kecuali
  * ms_branchmenu/ms_branchaddon: Opsi A memberi endpoint push terminal khusus
- * (ApiPath.pushBranchMenu) yang dikuras via pushBranchMenuPhysicalRow —
+ * (ApiPath.pushBranchMenu) yang dikuras via pushBranchMenuPhysicalRow -
  * BUKAN via tablePushPath ini, karena butuh substitusi {id} terminal + baca
  * qty/ambang LIVE. Pull tetap server-wins sehingga dapat menimpa edit lokal.)
  */
@@ -232,12 +233,12 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     return ApiPath.clockIn;
   }
   if (kind === 'other') {
-    // W1 (SESI-FIX-APPW1): op be-* SENGAJA jatuh ke null di sini — bukan
+    // W1 (SESI-FIX-APPW1): op be-* SENGAJA jatuh ke null di sini - bukan
     // endpoint salah, melainkan dikuras drain-time oleh goWorkforceOp di bawah
     // (substitusi {sessionId} dari id sesi server tersimpan + replay-code W1
     // sendiri). Namespace 'be-' dijamin tak tabrakan op W2/ESB (beWorkforce).
     const opW1 = String(payload?.op ?? '');
-    if (opW1 === W1_OP_CLOCK_IN || opW1 === W1_OP_CLOCK_OUT || opW1 === W1_OP_CASH_OPEN || opW1 === W1_OP_CASH_MOVE || opW1 === W1_OP_CASH_CLOSE || opW1 === W1_OP_EOD_CLOSE) return null;
+    if (opW1 === W1_OP_CLOCK_IN || opW1 === W1_OP_CLOCK_OUT || opW1 === W1_OP_BREAK || opW1 === W1_OP_CASH_OPEN || opW1 === W1_OP_CASH_MOVE || opW1 === W1_OP_CASH_CLOSE || opW1 === W1_OP_EOD_CLOSE) return null;
     // Shift punya endpoint sendiri (dummy push/v1-push-shift sudah ada):
     // JANGAN dilempar ke pushOrderFinish (endpoint salah).
     const op = String(payload?.op ?? '');
@@ -255,7 +256,7 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
     if (op === 'delivery-push') return ApiPath.deliveryPushData;
     if (op === 'terminal-verify') return ApiPath.terminalVerifyNotify;
     // Future-proof: varian order tambahan (kontrak §5 / ApiPath). Belum ada
-    // producer enqueueSync untuk op-op ini — routing disiapkan agar tak jatuh
+    // producer enqueueSync untuk op-op ini - routing disiapkan agar tak jatuh
     // ke endpoint salah bila kelak dipakai. Murni aditif, tanpa ubah op lama.
     if (op === 'split-bill') return ApiPath.splitBill;
     if (op === 'view') return ApiPath.pushOrderView;
@@ -295,14 +296,14 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 }
 
 // M9-3 (diputuskan, SEBAGIAN tertutup Opsi A): endpoint push master (sold-out
-// / station) TIDAK didefinisikan — backend Go tak punya domain master
+// / station) TIDAK didefinisikan - backend Go tak punya domain master
 // (tanpa tabel menu di schema.sql) sehingga kontrak push-master butuh
 // proyek lintas-repo tersendiri, bukan tambahan path di sini. Sebagai ganti:
 // edit master = local-only jujur (status 'lokal' + kartu SyncScreen +
 // master.localOnlyNote di layar penyunting). PENGECUALIAN Opsi A:
 // ms_branchmenu + ms_branchaddon kini PUNYA endpoint (POST
 // api/v1/terminals/{id}/branch-menu, BE TerminalBranchMenuUpdate, type
-// menu|addon) — dikuras via pushBranchMenuPhysicalRow.
+// menu|addon) - dikuras via pushBranchMenuPhysicalRow.
 // Antrean RINGAN (light twin via pathFor/tablePushPath) tetap mati untuk
 // SEMUA ms_* termasuk keduanya (butuh substitusi {id} + live-read yang
 // hanya ada di drain fisik); yang aktif = antrean FISIK keduanya.
@@ -311,11 +312,11 @@ function pathFor(kind: SyncKind, payload?: Record<string, unknown>): string | nu
 // GO-POS COMPAT (wire-app): backend Go TIDAK melayani path bentuk-ESB
 // (order/finish, order/view, split-bill, move-items, posv1/..., v1/push/...,
 // sales/receipt-email). Yang dilayani: POST api/merchant/orders/pos
-// (create; orderType + items WAJIB — orders_pos_create.go:196-203) dan
+// (create; orderType + items WAJIB - orders_pos_create.go:196-203) dan
 // POST api/merchant/orders/{orderId}/group-bill/payments (router.go:335;
 // butuh orderId server + shareId peserta). Ops sale-create diterjemahkan di
 // sini menjadi body bentuk-POS; ops TANPA padanan backend tetap memakai path
-// ESB (komentar eksplisit per-op di toGoPosRequest + daftar di laporan) —
+// ESB (komentar eksplisit per-op di toGoPosRequest + daftar di laporan) -
 // server menjawab 404 jujur → 'gagal' + retry, bukan sukses diam-diam.
 // Kompat ini HANYA path + body; EXPO_PUBLIC_API_BASE_URL tak disentuh.
 // Baris fisik (pushPhysicalRow) tetap ESB: payload-nya {table,rowId,op}
@@ -336,21 +337,21 @@ export const UNSUPPORTED_ORDER_TYPE = 'UNSUPPORTED';
  * Petakan mode kasir → enum orderType Go yang ketat, SADAR merchant-type
  * (C2 Sesi-C QA3; cermin validasi orders_pos_create.go:196 + gerbang
  * per-tipe :223-237). merchantType tak diisi = cache sesi (tak-dikenal =
- * default RESTAURANT, ASUMSI koordinator — perilaku lama lestari).
+ * default RESTAURANT, ASUMSI koordinator - perilaku lama lestari).
  * - RESTAURANT: DINE_IN→DINE_IN; TAKEAWAY/TAKE_AWAY→TAKEAWAY;
  *   DELIVERY/agregator→TAKEAWAY UNCONDITIONAL (proksi legacy: ongkir tetap
- *   tercatat terpisah di payload — perilaku pra-C2 persis, milik 550361a).
+ *   tercatat terpisah di payload - perilaku pra-C2 persis, milik 550361a).
  *   KOREKSI-FLAG (owner 21-Okt, offer-time only): gate flag delivery ada di
- *   DAFTAR UI (kasir sembunyikan kanal delivery bila OFF), BUKAN di sini —
+ *   DAFTAR UI (kasir sembunyikan kanal delivery bila OFF), BUKAN di sini -
  *   sync buta-flag agar pesanan lama tetap mengalir walau flag mati belakangan.
  *   Varian IN_STORE dan HOME_SERVICE →UNSUPPORTED (logika TIPE, bukan flag).
  * - PRODUCT: IN_STORE_ORDER→IN_STORE_ORDER; IN_STORE_PICKUP→IN_STORE_PICKUP
- *   distinct (BOPIS Fase 3 — ambil-di-toko pisah di laporan; BE 00213+POS-create
+ *   distinct (BOPIS Fase 3 - ambil-di-toko pisah di laporan; BE 00213+POS-create
  *   kini terima); TAKEAWAY/TAKE_AWAY→TAKEAWAY; DELIVERY/agregator/
- *   DINE_IN→UNSUPPORTED — SENGAJA tak dilipat ke TAKEAWAY (delivery ≠ takeaway;
+ *   DINE_IN→UNSUPPORTED - SENGAJA tak dilipat ke TAKEAWAY (delivery ≠ takeaway;
  *   BE menolak = BLOCKED jujur).
  * - SERVICE: IN_STORE_SERVICE→IN_STORE_SERVICE; HOME_SERVICE→HOME_SERVICE
- *   (Fase 3 — teknisi datang, alamat di deliveryAddress; BE POS-create kini
+ *   (Fase 3 - teknisi datang, alamat di deliveryAddress; BE POS-create kini
  *   terima + validasi alamat ≤500 char).
  * Mode asing RESTAURANT → DINE_IN (default lama, lestari).
  */
@@ -372,7 +373,7 @@ function goPosOrderType(raw?: unknown, merchantType?: unknown): string {
     return UNSUPPORTED_ORDER_TYPE;
   }
   // RESTAURANT + tak-dikenal (default restaurant, ASUMSI): perilaku pra-C2.
-  // Collapse legacy UNCONDITIONAL (milik 550361a) — KOREKSI-FLAG: sync
+  // Collapse legacy UNCONDITIONAL (milik 550361a) - KOREKSI-FLAG: sync
   // buta-flag; pesanan lama mengalir apa pun status flag kini.
   if (k === 'DINE_IN') return 'DINE_IN';
   if (k === 'TAKE_AWAY' || k === 'TAKEAWAY') return 'TAKEAWAY';
@@ -385,7 +386,7 @@ function goPosOrderType(raw?: unknown, merchantType?: unknown): string {
 
 /**
  * Alasan BLOCKED untuk orderType UNSUPPORTED (teks i18n + nilai dinamis via
- * .replace — pola render tabel; dipanggil saat fail-once agar bahasa catatan
+ * .replace - pola render tabel; dipanggil saat fail-once agar bahasa catatan
  * ikut bahasa sesi). null = didukung (tak ada alasan).
  */
 export function orderTypeBlockReason(raw?: unknown, merchantType?: unknown): string | null {
@@ -399,7 +400,7 @@ export function orderTypeBlockReason(raw?: unknown, merchantType?: unknown): str
  * Vertical Shell Fase 2: pagar payPolicy per vertikal (defense-in-depth;
  * UI sudah menyembunyikan tombolnya, sync menolak bila lolos).
  * - PREPAID (PULSA_DIGITAL): aksi hold/simpan-hutang/parked SELALU ditolak
- *   (SN/token tak bisa ditarik — tahan = rugi pasti). Guard berbasis aksi,
+ *   (SN/token tak bisa ditarik - tahan = rugi pasti). Guard berbasis aksi,
  *   bukan nominal: pemanggil (Simpan/Hold/Parked) sudah berarti ada utang.
  *   amountDue opsional hanya untuk pesan; bila diisi dan <=0 pun tetap tolak
  *   agar tak ada jalan pintas parked-diam untuk pulsa.
@@ -478,7 +479,7 @@ function goPosItems(raw: unknown): Record<string, unknown>[] | null {
 /**
  * Terjemahan Go-POS untuk satu item ringan. Kembali {path, body} bila ada
  * padanan backend, {unsupported} bila mode tak didukung merchant-type aktif
- * (C2: BE pasti menolak — JANGAN kirim, JANGAN jatuh ke path ESB 404-retry
+ * (C2: BE pasti menolak - JANGAN kirim, JANGAN jatuh ke path ESB 404-retry
  * buta; pushLightItem mem-BLOCKED jujur fail-once), null bila ops tetap ESB
  * (pathFor yang memutuskan).
  * - sale-create (kind 'order' tanpa op, bentuk buildSalePayload) → create POS
@@ -590,7 +591,7 @@ function toGoPosRequest(
  * method} siap drain. null = bukan op W2 (lanjut routing ESB lama).
  * {blocked} = tanpa id server desimal / target status invalid → BLOCKED
  * jujur fail-once (S10), bukan retry buta ke endpoint yang salah. Body hanya
- * membawa field kontrak BE (orderId numerik di path/body — salesNum/TRX
+ * membawa field kontrak BE (orderId numerik di path/body - salesNum/TRX
  * lokal TAK PERNAH dipakai sebagai id).
  */
 export interface GoMerchantOp {
@@ -605,7 +606,7 @@ function goMerchantOp(
 ): GoMerchantOp | { blocked: string } | null {
   // P1-1 pagar PIN: body dibangun eksplisit per-field di bawah. PIN
   // supervisor live via settlePosPayment / refundPosPayment / postOrderVerdict
-  // (param fungsi, tak dipersist) — A-P1-4: antrean GO_OP_SETTLE BOLEH
+  // (param fungsi, tak dipersist) - A-P1-4: antrean GO_OP_SETTLE BOLEH
   // membawa pin HANYA bila pemanggil (PayScreen goSuccess→mirror) sudah
   // mengumpulkannya via ManagerPinPrompt; PIN diteruskan transport-only
   // (dipangkas) agar drain memfinalisasi, bukan memaksa kasir mengulang PIN
@@ -722,16 +723,16 @@ function goMerchantOp(
 
 // ---------------------------------------------------------------------------
 // W1 (SESI-FIX-APPW1, gas mode, aditif): penerjemah antrean shift/clock +
-// sesi kas + tutup-hari ke kontrak merchant Go. Murni INSERT — goMerchantOp
+// sesi kas + tutup-hari ke kontrak merchant Go. Murni INSERT - goMerchantOp
 // (W2) di atas tak tersentuh. Beda dari W2:
 // - {sessionId} disubstitusi saat DRAIN dari id sesi server tersimpan
 //   (getCashSessionId; payload antrean SENGAJA tanpa id/stamp agar tak basi
 //   saat retry; absent = sah di server). Tanpa id sesi TAPI open masih antre
-//   = {retry} (tunggu giliran FIFO — open selalu lebih dulu diantar drain
+//   = {retry} (tunggu giliran FIFO - open selalu lebih dulu diantar drain
 //   strict-createdAt); tanpa id sesi DAN tanpa open tertunda = {blocked}
 //   fail-once jujur (S10, bukan antre-selamanya).
 // - 409 replay W1 (SHIFT_ALREADY_OPEN / SHIFT_ALREADY_CLOSED / NO_OPEN_SHIFT /
-//   SESSION_CLOSED / REVIEW_NOT_PENDING) = 'terkirim' idempoten (ditangani cabang drain di bawah —
+//   SESSION_CLOSED / REVIEW_NOT_PENDING) = 'terkirim' idempoten (ditangani cabang drain di bawah -
 //   isReplaySuccess W2 tak mengenal kode-kode ini).
 // - Tutup-kas membawa isCashClose + sessionId agar 409 OPEN_POS_ORDERS bisa
 //   dialihkan ke daftar pending-close (bukan hilang).
@@ -762,7 +763,7 @@ async function goWorkforceOp(
   if (item.kind !== 'other') return null;
   const op = String(p.op ?? '');
   if (
-    op !== W1_OP_CLOCK_IN && op !== W1_OP_CLOCK_OUT && op !== W1_OP_CASH_OPEN &&
+    op !== W1_OP_CLOCK_IN && op !== W1_OP_CLOCK_OUT && op !== W1_OP_BREAK && op !== W1_OP_CASH_OPEN &&
     op !== W1_OP_CASH_MOVE && op !== W1_OP_CASH_CLOSE && op !== W1_OP_CASH_APPROVE &&
     op !== W1_OP_EOD_CLOSE
   ) {
@@ -775,8 +776,12 @@ async function goWorkforceOp(
   if (op === W1_OP_CLOCK_OUT) {
     return { path: ApiPath.merchantClockOut, body: {}, method: 'POST', idemKey };
   }
+  if (op === W1_OP_BREAK) {
+    const action = String(p.action ?? '').toUpperCase() === 'END' ? 'END' : 'START';
+    return { path: ApiPath.merchantBreak, body: { action }, method: 'POST', idemKey };
+  }
   if (op === W1_OP_CASH_OPEN) {
-    const cash = Math.round(Number(p.openingCash) || 0);
+    const cash = Math.round((Number(p.openingCash) || 0) * 100) / 100;
     if (!Number.isFinite(cash) || cash < 0) {
       return { blocked: 'beWorkforce: cash-open butuh openingCash >= 0' };
     }
@@ -820,7 +825,7 @@ async function goWorkforceOp(
   }
   if (op === W1_OP_CASH_MOVE) {
     const type = String(p.type ?? '').trim().toUpperCase();
-    const amount = Math.round(Number(p.amount) || 0);
+    const amount = Math.round((Number(p.amount) || 0) * 100) / 100;
     const reason = String(p.reason ?? '').trim();
     if ((type !== 'PAID_IN' && type !== 'PAID_OUT' && type !== 'CASH_DROP') || amount <= 0 || !reason) {
       return { blocked: 'beWorkforce: move butuh type enum + amount > 0 + reason' };
@@ -850,7 +855,7 @@ async function goWorkforceOp(
     };
   }
   // W1_OP_CASH_CLOSE.
-  const actual = Math.round(Number(p.actualCash) || 0);
+  const actual = Math.round((Number(p.actualCash) || 0) * 100) / 100;
   if (!Number.isFinite(actual) || actual < 0) {
     return { blocked: 'beWorkforce: cash-close butuh actualCash >= 0' };
   }
@@ -881,7 +886,7 @@ async function goWorkforceOp(
     try {
       await restorePromise;
     } catch {
-      /* best-effort — drain/persist tetap jalan */
+      /* best-effort - drain/persist tetap jalan */
     }
   }
 }
@@ -889,7 +894,7 @@ async function goWorkforceOp(
 export function enqueueSync(kind: SyncKind, payload: Record<string, unknown>, id?: string): SyncItem {
   hydrate();
   // S6: id eksplisit = twin berbagi client_id dengan POST immediate (tanpa
-  // UUID ganda); idempotent — twin yang sama tak antre dua kali.
+  // UUID ganda); idempotent - twin yang sama tak antre dua kali.
   if (typeof id === 'string' && id) {
     const prior = outbox.find((o) => o.id === id);
     if (prior) return prior;
@@ -953,7 +958,7 @@ interface PhysicalQueueRow {
  * Identitas pengirim Q7 (§12 SPEC): setiap body push membawa `client_id` +
  * `uuid` (keduanya = id baris UUIDv7: time-ordered, unik lintas-device),
  * `branchId`, dan `terminalCode` dari klaim terminal aktif. Kunci camelCase
- * `clientId` dipertahankan apa adanya (kontrak lama) — field baru ADITIF,
+ * `clientId` dipertahankan apa adanya (kontrak lama) - field baru ADITIF,
  * path endpoint tidak berubah.
  */
 function identityFields(clientId: string): Record<string, string> {
@@ -964,7 +969,7 @@ function identityFields(clientId: string): Record<string, string> {
     branchId = t.branchId ?? '';
     terminalCode = t.terminalCode ?? '';
   } catch {
-    /* klaim belum ada — kirim kosong, jangan blokir antrean */
+    /* klaim belum ada - kirim kosong, jangan blokir antrean */
   }
   return { client_id: clientId, branchId, terminalCode, uuid: clientId };
 }
@@ -973,7 +978,7 @@ function identityFields(clientId: string): Record<string, string> {
  * SATU-SATUNYA pengecualian FIFO yang diizinkan (temuan
  * offline-kind-rank-breaks-fifo): baris shift-open boleh dikuras duluan
  * HANYA bila server mensyaratkan shift terbuka sebelum menerima push lain.
- * Kontrak BE E01–E28 belum ada sehingga syarat itu belum diketahui —
+ * Kontrak BE E01–E28 belum ada sehingga syarat itu belum diketahui -
  * pengecualian MATI (false) dan drain murni FIFO createdAt ASC. Jangan tambah
  * pengecualian kind lain tanpa kontrak BE tertulis.
  */
@@ -1007,7 +1012,7 @@ async function fetchPhysicalRows(): Promise<PhysicalQueueRow[]> {
  * Kontrak konflik push (ground truth, menggantikan anggapan lama "409 =
  * UNIQUE(client_id) duplikat"): retry client_id duplikat kembali sebagai 200
  * "Order already synced" (jalur 2xx biasa → terkirim). HTTP 409 HANYA untuk
- * SALE_DISPLAY_CONFLICT (display_no sudah dipakai order lain) — server TIDAK
+ * SALE_DISPLAY_CONFLICT (display_no sudah dipakai order lain) - server TIDAK
  * punya baris kita, sehingga 409 mentah tak boleh dianggap terkirim (itu
  * menghilangkan penjualan). Hanya bukti-duplikat yang boleh duplicate-ack.
  */
@@ -1026,7 +1031,7 @@ const MAX_DISPLAY_REISSUES = 2;
  * Baca body respons 409. apiPost mengembalikan fetch Response mentah (status +
  * ok saja, tanpa body terparse), jadi kupas di sini: objek JSON bila bisa,
  * teks mentah bila bukan JSON, null bila kosong/tak terbaca. Body hanya bisa
- * dibaca sekali — panggil sekali per respons.
+ * dibaca sekali - panggil sekali per respons.
  */
 async function readConflictBody(res: Response): Promise<unknown> {
   try {
@@ -1072,7 +1077,7 @@ function conflictField(body: unknown, ...names: string[]): string {
  * Klasifikasikan body 409 terhadap client_id yang kita kirim.
  * - 'duplicate': bukti server sudah punya baris KITA (existingOrderId cocok
  *   dengan client_id kita, atau pesan sudah-ada/sudah-sync/UNIQUE client).
- * - 'display': SALE_DISPLAY_CONFLICT / bukti display_no — server TAK punya
+ * - 'display': SALE_DISPLAY_CONFLICT / bukti display_no - server TAK punya
  *   baris kita → terbitkan display_no baru + kirim ulang (bukan terkirim).
  * - 'unknown': tak ada bukti → 'gagal' jujur dengan kode, bukan terkirim.
  */
@@ -1094,7 +1099,7 @@ function classify409(body: unknown, ourClientId: string): Conflict409Info {
   // 2. Server menunjuk order yang sudah ada = baris KITA (client_id sama).
   if (cid && existingId && existingId === cid) return { kind: 'duplicate', code };
   const hay = `${code} ${message}`;
-  // 3. Bukti display_no (ejaan apa pun) — server tak punya baris kita.
+  // 3. Bukti display_no (ejaan apa pun) - server tak punya baris kita.
   if (/sale_display_conflict|display[\s_-]?no/i.test(hay)) return { kind: 'display', code };
   // 4. Bukti duplikat (sudah-ada / sudah-sync / UNIQUE client_id).
   if (/already[\s_-]?(exist|sync)|sudah[\s_-]?ada|duplikat|duplicate|unique[\s_-]?.*client|client[\s_-]?.*unique|client[\s_-]?.*exist/i.test(hay)) {
@@ -1111,9 +1116,9 @@ function conflictTag(code: string): string {
 /**
  * HP-E2E (2026-10-26): handoff drain-time satu expense → endpoint terminal Go.
  * Baris lokal menyimpan amount NEGATIF (konvensi ledger kas); kontrak BE
- * menuntut amount > 0 — postExpenseToTerminal menormalisasi abs() + guard
+ * menuntut amount > 0 - postExpenseToTerminal menormalisasi abs() + guard
  * nol/NaN. clientExpenseId = uuid di balik prefix EX- (ExpenseScreen) atau
- * uuid mentah (PettyCash) — SAMA dengan handoff immediate-first layar,
+ * uuid mentah (PettyCash) - SAMA dengan handoff immediate-first layar,
  * sehingga retry/drain = replay idempoten (409-duplicate = sukses, tanpa
  * ledger ganda). Sukses → markClean + watermark; true = terkirim.
  * Tak pernah melempar; false = pemanggil menandai 'gagal' jujur (retry).
@@ -1145,7 +1150,7 @@ async function drainExpenseToTerminal(rowId: string): Promise<boolean> {
       amount: Math.round(Number(row.amount ?? 0) || 0),
       note: String(row.note ?? '').slice(0, 500),
       occurredAt: String(row.expenseDate ?? row.createdAt ?? new Date().toISOString()),
-      // Foto lokal (file://) = omit — alur photoPending/retry yang mengurus;
+      // Foto lokal (file://) = omit - alur photoPending/retry yang mengurus;
       // remote (https, sudah di-upload) = ikut sebagai photoUrl.
       ...(isRemotePhoto(row.photoPath) ? { photoUrl: String(row.photoPath).trim().slice(0, 2048) } : {}),
     });
@@ -1168,7 +1173,7 @@ async function drainExpenseToTerminal(rowId: string): Promise<boolean> {
 
 /**
  * HP-E2E (2026-10-26): kuras satu baris fisik tr_branchexpense via handoff
- * terminal (bukan path ESB legacy — 404 vs Go). Sukses/409-duplikat =
+ * terminal (bukan path ESB legacy - 404 vs Go). Sukses/409-duplikat =
  * 'sent' (DELETE antrean fisik + markClean + watermark); gagal = 'gagal'
  * jujur (retry push berikut). Baris DB hilang lokal (dihapus kasir) =
  * 'sent' + DELETE (tak ada yang bisa dikirim; cegah racun breaker S4).
@@ -1225,7 +1230,7 @@ async function pushExpensePhysicalRow(row: PhysicalQueueRow): Promise<'sent' | '
  * 'sent' = DELETE + markClean + watermark; 'failed' = 'gagal' jujur (retry);
  * 'skipped' = racun _dead4xx (tak dihitung, tak trip breaker; kartu tetap
  * 'gagal'). Qty + ambang dibaca LIVE saat drain (bukan payload antrean)
- * sehingga edit beruntun koalesensi — last-write-wins aman.
+ * sehingga edit beruntun koalesensi - last-write-wins aman.
  * 401 = apiFetch yang mengurus (silent-refresh sekali → logout); helper tak
  * pernah melempar agar drain tak mati.
  */
@@ -1309,7 +1314,7 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
   };
   try {
     const path = ApiPath.pushBranchMenu.replace('{id}', encodeURIComponent(tid));
-    // P0-02: optimistic-lock BENAR — baseQty dari payload saat edit (bukan qty baru).
+    // P0-02: optimistic-lock BENAR - baseQty dari payload saat edit (bukan qty baru).
     // Tanpa base (edit lama/antre legacy) = tanpa baseQty agar BE perlakukan legacy tanpa false-409.
     let baseQty: number | null = null;
     try {
@@ -1366,12 +1371,12 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
 /**
  * Dorong satu baris fisik via tablePushPath (path endpoint tidak berubah).
  * 'sent' = DELETE + watermark; 'failed' = tandai 'gagal'; 'skipped' = master
- * lain (ms_* local-only M9-3) atau tanpa endpoint push — ms_branchmenu dan
+ * lain (ms_* local-only M9-3) atau tanpa endpoint push - ms_branchmenu dan
  * ms_branchaddon DIKECUALIKAN (Opsi A: drain sendiri via
  * pushBranchMenuPhysicalRow). Untuk ms_* pemanggil (drain) memfinalkan
- * status 'lokal' — bukan antre, bukan gagal.
+ * status 'lokal' - bukan antre, bukan gagal.
  *
- * HP-E2E (2026-10-26): tr_branchexpense TIDAK lewat tablePushPath — path ESB
+ * HP-E2E (2026-10-26): tr_branchexpense TIDAK lewat tablePushPath - path ESB
  * legacy (v1/push/branch-expenses) 404 vs Go → 'gagal' tiap push + trip
  * breaker S4. Expense punya padanan Go (POST api/v1/terminals/{id}/expenses,
  * idempoten via clientExpenseId) → drain via pushExpensePhysicalRow di bawah.
@@ -1379,7 +1384,7 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
 async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed' | 'skipped'> {
   const table = String(row.tableName ?? '');
   // Opsi A (penutup M9-3): ms_branchmenu PUNYA endpoint push terminal
-  // (ApiPath.pushBranchMenu) — kuras via helper di atas (baca qty LIVE saat
+  // (ApiPath.pushBranchMenu) - kuras via helper di atas (baca qty LIVE saat
   // drain agar edit beruntun koalesensi, last-write-wins). ms_* LAIN tetap
   // local-only (tanpa endpoint push) + pull server-wins.
   if (table === 'ms_branchmenu' || table === 'ms_branchaddon') return pushBranchMenuPhysicalRow(row);
@@ -1388,7 +1393,7 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
   if (!table || table.startsWith('ms_')) return 'skipped';
   // HP-E2E-FIX (2026-10-26): expense → handoff terminal Go (lihat helper).
   if (table === 'tr_branchexpense') return pushExpensePhysicalRow(row);
-  // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): tr_shiftlog tanpa padanan Go —
+  // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): tr_shiftlog tanpa padanan Go -
   // absensi offline-only eksplisit (S9/PP-010, AttendanceScreen); data shift
   // dibawa W1 be-cash-open/be-cash-close ke endpoint Go workforce. Transport
   // ESB legacy (v1/push/shift) 404 vs Go + masuk hitungan breaker S4 (3 gagal
@@ -1416,7 +1421,7 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
     } catch {
       body = {};
     }
-    // S22: baris deposit fisik hanya membawa {table,rowId,op} — perkaya dari
+    // S22: baris deposit fisik hanya membawa {table,rowId,op} - perkaya dari
     // kolom nyata (memberId/amount/trxType) agar server tak terima body kosong.
     if (table === 'tr_memberdeposit') {
       try {
@@ -1433,7 +1438,7 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
           };
         }
       } catch {
-        /* abaikan — body generik tetap dikirim */
+        /* abaikan - body generik tetap dikirim */
       }
     }
     // DEPOSIT-SINGLE-POST: baris tr_memberdeposit berbagi kunci idempotensi
@@ -1443,27 +1448,27 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
     const depositKey = table === 'tr_memberdeposit' ? String(row.orderID ?? '').trim() : '';
     const physCid = depositKey || row.id;
     // Kunci `_…` di payload = catatan lokal (mis. _conflict409 di bawah), bukan
-    // untuk server — kupas sebelum POST agar body wire tetap bersih.
+    // untuk server - kupas sebelum POST agar body wire tetap bersih.
     const wireBody: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body)) {
       if (!k.startsWith('_')) wireBody[k] = v;
     }
     // GAP-1: timeout abort eksplisit agar drain fisik tak gantung (lihat
-    // apiPostWithTimeout di bawah — hoisted, aman dipakai di sini).
+    // apiPostWithTimeout di bawah - hoisted, aman dipakai di sini).
     const res = await apiPostWithTimeout(
       path,
       { ...wireBody, table, rowId: row.orderID, op: row.op, clientId: physCid, ...identityFields(physCid) },
       { idempotencyKey: physCid },
     );
     if (res.status === 409) {
-      // 409 HANYA SALE_DISPLAY_CONFLICT (display_no dipakai order lain) —
+      // 409 HANYA SALE_DISPLAY_CONFLICT (display_no dipakai order lain) -
       // server TIDAK punya baris ini. Jangan pernah anggap terkirim (itu
       // menghilangkan penjualan). Hanya bukti-duplikat (server sudah punya
       // baris dengan client_id SAMA) yang boleh duplicate-ack.
       const conflict = classify409(await readConflictBody(res), physCid);
       if (conflict.kind !== 'duplicate') {
         // Jujur gagal: server tak punya baris kita. Baris fisik tak punya
-        // kolom note, jadi kode disimpan di payload (_conflict409 — dikupas
+        // kolom note, jadi kode disimpan di payload (_conflict409 - dikupas
         // dari body POST pada retry berikutnya, bukan dikirim ke server).
         // Catatan: jalur fisik tak membawa payload sale sehingga tak bisa
         // terbitkan-ulang display_no di sini; twin ringan sale (bila ada)
@@ -1522,7 +1527,7 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
   } catch (e) {
     // APP-8: 4xx deterministik (404 kontrak/validasi) = tandai _dead4xx di
     // payload (dikupas dari wire body pola _conflict409) agar siklus berikut
-    // 'skipped' — bukan 'failed' tiap push + trip breaker S4. 5xx/timeout/
+    // 'skipped' - bukan 'failed' tiap push + trip breaker S4. 5xx/timeout/
     // jaringan = retry jujur (tanpa marker). Kartu fisik tetap 'gagal'.
     const msg = e instanceof Error ? e.message : '';
     try {
@@ -1548,7 +1553,7 @@ async function pushPhysicalRow(row: PhysicalQueueRow): Promise<'sent' | 'failed'
 }
 
 // Operasi cermin-lokal tanpa endpoint push di kontrak §5 (status meja di
-// ms_table + data booking di AsyncStorage): tak ada yang perlu dikirim —
+// ms_table + data booking di AsyncStorage): tak ada yang perlu dikirim -
 // tandai terkirim-lokal agar badge antrean tak menumpuk selamanya. Mutasi
 // DB-nya tetap kotor (syncDate NULL) + tercatat di outbox fisik.
 const LOCAL_OPS = new Set([
@@ -1562,7 +1567,7 @@ const LOCAL_OPS = new Set([
   'booking-update',
   'booking-cancel',
   // S3: ganti PIN = hash lokal di ms_posuser (+ updatePinOnServer bila online
-  // di AttendanceScreen) — item sync-nya cermin-lokal, tanpa POST server.
+  // di AttendanceScreen) - item sync-nya cermin-lokal, tanpa POST server.
   'pin-change',
 ]);
 
@@ -1570,7 +1575,7 @@ const LOCAL_OPS = new Set([
 // member-deposit-withdrawal/topup + inquiry-deposit): baris mutasi
 // tr_memberdeposit-nya tetap terkirim via outbox fisik (jalur tabel generik),
 // sehingga item ringan ini cukup ditandai terkirim-lokal. JANGAN arahkan ke
-// endpoint topup — semantiknya berbalik (kredit vs debit).
+// endpoint topup - semantiknya berbalik (kredit vs debit).
 const DEPOSIT_LOCAL_KINDS = new Set(['deposit-refund', 'deposit-withdraw']);
 
 /** S4: jeda pacing antar-item drain. */
@@ -1582,7 +1587,7 @@ function sleepMs(ms: number): Promise<void> {
 export const IMMEDIATE_TIMEOUT_MS = 8000;
 
 /**
- * S6: balapkan janji dengan timeout — menolak bila lewat batas. Tak pernah
+ * S6: balapkan janji dengan timeout - menolak bila lewat batas. Tak pernah
  * menelan hasil; pemanggil memutuskan arti timeout (offline → antre twin).
  */
 export function withTimeout<T>(promise: Promise<T>, ms = IMMEDIATE_TIMEOUT_MS): Promise<T> {
@@ -1597,7 +1602,7 @@ export function withTimeout<T>(promise: Promise<T>, ms = IMMEDIATE_TIMEOUT_MS): 
 
 /**
  * GAP-1: POST antrean dengan timeout abort eksplisit (pola callStaffLogin
- * LoginScreen:266) — apiPost tanpa signal bisa gantung selamanya di
+ * LoginScreen:266) - apiPost tanpa signal bisa gantung selamanya di
  * SYN-blackhole; di sini fetch benar-benar di-abort agar drain tak macet.
  * Timeout default IMMEDIATE_TIMEOUT_MS (8 dtk) selaras postImmediate.
  * AbortError dilempar ke pemanggil (push* memetakan ke 'failed' jujur).
@@ -1626,7 +1631,7 @@ async function apiPostWithTimeout(
 /**
  * W2: PUT antrean dengan timeout abort eksplisit (cermin apiPostWithTimeout)
  * untuk op merchant Go ber-metode PUT (resv-cancel, pos-status). Drain
- * POST-only sebelumnya tak bisa mengurasnya — tanpa ini retry offline
+ * POST-only sebelumnya tak bisa mengurasnya - tanpa ini retry offline
  * PUT macet selamanya.
  */
 async function apiPutWithTimeout(
@@ -1673,7 +1678,7 @@ export async function postImmediate(path: string, body: Record<string, unknown>)
 // setelah create). Sapuan ini, dijalankan tiap awal pushAll (best-effort,
 // tak pernah melempar), mengantren GO_OP_SETTLE untuk sale lokal yang:
 // lunas-penuh + tertaut onlineOrderId numerik + TANPA baris settle apa pun
-// di outbox (status apa saja — fail-once PIN dsb. dihormati, tak dibangkitkan).
+// di outbox (status apa saja - fail-once PIN dsb. dihormati, tak dibangkitkan).
 // Idempoten: idemKey = client_id rantai sale; replay BE (kunci-sama =
 // sukses-tersimpan, PAYMENT_ALREADY_RECORDED = replay-sukses) membuat
 // enqueue-ganda aman. Campuran ber-transfer dilewati (semantik SPLIT BE =
@@ -1716,7 +1721,7 @@ async function repairUnsettledSales(): Promise<number> {
       const sid = parseInt(String(h.onlineOrderId ?? '').trim(), 10);
       const amt = Math.max(0, Math.round(Number(h.grandTotal) || 0));
       if (!no || !Number.isFinite(sid) || sid <= 0 || amt <= 0) continue;
-      // Sudah punya settle (status apa pun) = bukan korban skip-diam — lewati.
+      // Sudah punya settle (status apa pun) = bukan korban skip-diam - lewati.
       const dup = outbox.some(
         (o) =>
           String(((o.payload ?? {}) as { op?: unknown }).op ?? '') === GO_OP_SETTLE &&
@@ -1772,7 +1777,7 @@ export async function pushAll(): Promise<PushResult> {
   if (getServerEnv() !== 'custom') {
     throw new Error('Pilih Server Custom (milik sendiri) di Pengaturan sebelum sync.');
   }
-  // S5: custom tanpa URL = belum dikonfigurasi — tolak SEBELUM drain apa pun.
+  // S5: custom tanpa URL = belum dikonfigurasi - tolak SEBELUM drain apa pun.
   if (!getCustomBaseUrl().trim()) {
     throw new Error(tr('sync_no_url'));
   }
@@ -1813,7 +1818,7 @@ export async function pushAll(): Promise<PushResult> {
   };
   // Drain GABUNGAN (temuan offline-kind-rank-breaks-fifo + causal FIFO per
   // bill): antrean fisik DAN ringan dikuras dalam SATU urutan strict by
-  // createdAt ASC — sale selalu sebelum void/pay-change/move-nya walau keduanya
+  // createdAt ASC - sale selalu sebelum void/pay-change/move-nya walau keduanya
   // tercatat di antrean berbeda. Pengurutan ulang by kind ("other" dulu)
   // DIHAPUS; satu-satunya pengecualian adalah shift-open dan itu pun hanya
   // bila SHIFT_OPEN_FIRST_IF_SERVER_REQUIRES hidup (mati saat ini).
@@ -1855,12 +1860,12 @@ export async function pushAll(): Promise<PushResult> {
     }
     if (a.createdAt < b.createdAt) return -1;
     if (a.createdAt > b.createdAt) return 1;
-    // createdAt seri (resolusi ms): baris fisik dulu — produsen selalu
+    // createdAt seri (resolusi ms): baris fisik dulu - produsen selalu
     // mencatat fisik sebelum cermin ringannya (history.ts/sales.ts).
     if (a.physicalFirst !== b.physicalFirst) return a.physicalFirst - b.physicalFirst;
     return a.seq - b.seq;
   });
-  // S4: pacing ~150ms antar-item + breaker — 3 gagal beruntun = jeda drain
+  // S4: pacing ~150ms antar-item + breaker - 3 gagal beruntun = jeda drain
   // sampai siklus berikut (tulis antre tak pernah hilang, hanya ditunda).
   let consecFails = 0;
   for (const e of entries) {
@@ -1874,14 +1879,14 @@ export async function pushAll(): Promise<PushResult> {
         failed += 1;
         consecFails += 1;
       } else if (
-        // Opsi A: ms_branchmenu/ms_branchaddon DIKECUALIKAN — sudah punya
+        // Opsi A: ms_branchmenu/ms_branchaddon DIKECUALIKAN - sudah punya
         // drain sendiri (pushBranchMenuPhysicalRow); 'skipped' darinya = racun
         // _dead4xx yang kartunya tetap 'gagal' (bukan 'lokal').
         (String(e.row.tableName ?? '').startsWith('ms_') &&
           String(e.row.tableName ?? '') !== 'ms_branchmenu' &&
           String(e.row.tableName ?? '') !== 'ms_branchaddon') ||
         // HP-E2E-FIX (2026-10-24): tr_shiftlog ikut difinalkan 'lokal'
-        // (lihat pushPhysicalRow — absensi offline-only, shift dibawa W1).
+        // (lihat pushPhysicalRow - absensi offline-only, shift dibawa W1).
         String(e.row.tableName ?? '') === 'tr_shiftlog'
       ) {
         // Cermin master local-only (M9-3, tanpa endpoint push): finalkan
@@ -1890,10 +1895,10 @@ export async function pushAll(): Promise<PushResult> {
         // starvasi drain), keluar dari badge pending (tak menggelembungkan
         // hitungan Sync), tapi barisnya TETAP ADA dan tampil di layar Sync
         // ("Hanya di perangkat ini") via listLocalOnly. Mutasi DB-nya tetap
-        // kotor (syncDate NULL) + pull server tetap menang via REPLACE —
+        // kotor (syncDate NULL) + pull server tetap menang via REPLACE -
         // semantik ini dinyatakan jujur di UI (master.localOnlyNote).
         // Tabel non-ms_ LAIN tanpa endpoint tetap dibiarkan antre
-        // (kontrak BE menyusul) — hanya tr_shiftlog yang dikecualikan di atas.
+        // (kontrak BE menyusul) - hanya tr_shiftlog yang dikecualikan di atas.
         try {
           await run("UPDATE tr_esoprocessqueue SET status = 'lokal' WHERE id = ?", [e.row.id]);
         } catch {
@@ -1903,7 +1908,7 @@ export async function pushAll(): Promise<PushResult> {
       continue;
     }
     if (!e.lightId) continue;
-    // S2: resolve ke objek LIVE (bisa hilang/terkirim antar-await) — lewati
+    // S2: resolve ke objek LIVE (bisa hilang/terkirim antar-await) - lewati
     // bila sudah tak ada.
     const live = outbox.find((o) => o.id === e.lightId);
     if (!live || live.status === 'terkirim') continue;
@@ -1917,7 +1922,7 @@ export async function pushAll(): Promise<PushResult> {
       consecFails += 1;
     } else if (outcome === 'failed-once') {
       // C8: guard pra-ESB (counterpart-less: group-payment tanpa identitas
-      // server dkk) — tally failed jujur SEKALI, tapi consecFails SENGAJA tak
+      // server dkk) - tally failed jujur SEKALI, tapi consecFails SENGAJA tak
       // tersentuh: transport tak dicoba, breaker hanya mengukur kesehatan
       // jaringan (kegagalan transport nyata di 'failed' di atas + catch bawah).
       failed += 1;
@@ -1925,7 +1930,7 @@ export async function pushAll(): Promise<PushResult> {
     if (consecFails >= 3) break; // S4: jeda drain sampai siklus berikut
     await sleepMs(150); // S4: pacing antar-item
   }
-  // S1: batasi memori — tulis antre ('antre'/'gagal') TAK PERNAH dibuang;
+  // S1: batasi memori - tulis antre ('antre'/'gagal') TAK PERNAH dibuang;
   // yang terkirim hanya 100 terakhir; total array ~500.
   const queued = outbox.filter((i) => i.status !== 'terkirim');
   let keptSent = outbox.filter((i) => i.status === 'terkirim');
@@ -1936,7 +1941,7 @@ export async function pushAll(): Promise<PushResult> {
   }
   persist();
   // C9: retensi 'lokal' tiap akhir drain (best-effort; gagal = abaikan).
-  // Purge server pos_offline_order_sync milik BE (migration 00045 —
+  // Purge server pos_offline_order_sync milik BE (migration 00045 -
   // catatan owner-need, bukan kode APP).
   try {
     await pruneLocalOnly();
@@ -1973,10 +1978,10 @@ function isDeterministicFailNote(note: unknown): boolean {
   if (!s || s.includes('(retry)')) return false;
   // APP-10 (HP-E2E 2026-10-26): 401/403/429 = TRANSIEN (token kedaluwarsa →
   // relogin sembuh; rate-limit → cooldown sembuh). TERBUKTI: settle transfer
-  // order 9 gagal 401 saat token basi ("posWire: 401 — Authorization token
-  // required") lalu di-skip SELAMANYA pasca-relogin — antrean mati diam-diam.
+  // order 9 gagal 401 saat token basi ("posWire: 401 - Authorization token
+  // required") lalu di-skip SELAMANYA pasca-relogin - antrean mati diam-diam.
   // Kecualikan kode-transien dari fail-once; 4xx lain tetap final.
-  // BILLING (2026-10-29): 402 INSUFFICIENT_DEPOSIT = TRANSIEN — saldo habis
+  // BILLING (2026-10-29): 402 INSUFFICIENT_DEPOSIT = TRANSIEN - saldo habis
   // sembuh setelah owner topup; jangan fail-once/skip agar antre offline
   // otomatis flush pasca-topup (kasir tetap jalan saat PAST_DUE/READ_ONLY).
   if (/INSUFFICIENT_DEPOSIT/i.test(s)) return false;
@@ -1996,10 +2001,10 @@ function isDeterministicFailNote(note: unknown): boolean {
  * 'failed-once' dihitung pushAll; 'skipped' = master-local-only atau cermin
  * lokal (LOCAL_OPS/deposit-lokal → tandai terkirim, bukan antre selamanya)
  * atau counterpart-less yang SUDAH difinalkan-gagal sebelumnya.
- * C8: 'failed-once' = guard pra-ESB (tanpa path — transport TAK PERNAH
+ * C8: 'failed-once' = guard pra-ESB (tanpa path - transport TAK PERNAH
  * dicoba, mis. kaki group-payment tanpa {orderId, shareId} server): status
  * 'gagal' + note SEKALI (fail-once S10, tally failed jujur), tapi BUKAN
- * 'failed' transport sehingga breaker consecFails tak tersentuh — 3 item
+ * 'failed' transport sehingga breaker consecFails tak tersentuh - 3 item
  * counterpart-less baru tak boleh menjeda drain seolah jaringan putus.
  */
 async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'failed-once' | 'skipped'> {
@@ -2012,7 +2017,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // (syncDate NULL) + tercatat di tr_esoprocessqueue (status 'lokal' oleh
   // drain fisik). Tandai flag local ala S21 agar badge Sync menampilkannya
   // sebagai "lokal", bukan antre-selamanya. Hanya relevan untuk antrean
-  // ringan warisan — enqueueOutbox tak lagi membuat twin ringan ms_*.
+  // ringan warisan - enqueueOutbox tak lagi membuat twin ringan ms_*.
   const itemTable = String((item.payload as { table?: unknown })?.table ?? '');
   if (itemTable.startsWith('ms_')) {
     item.local = true;
@@ -2026,7 +2031,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): absensi + shift-legacy TANPA
   // padanan Go → finalkan lokal pola LOCAL_OPS/'terkirim' (bukan antre,
   // bukan gagal, tak trip breaker S4):
-  // - kind 'attendance' (clock-in/out): offline-only eksplisit S9/PP-010 —
+  // - kind 'attendance' (clock-in/out): offline-only eksplisit S9/PP-010 -
   //   endpoint BE clock-in/out mencatat AUTH-USER (titip-absen tak terpetakan)
   //   + grup /api/merchant memakai MerchantAuth (bukan token sesi kasir).
   //   Legacy ESB employee-attendance/(...) 404 vs Go.
@@ -2044,7 +2049,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   ) {
     // HP-E2E-FIX-2: twin ringan tr_shiftlog dari enqueueOutbox (payload
     // {table:'tr_shiftlog', op:'insert', ...}) tak punya padanan Go (shift
-    // dibawa W1 ke workforce/cash-sessions; jalur fisiknya 404/skipped) —
+    // dibawa W1 ke workforce/cash-sessions; jalur fisiknya 404/skipped) -
     // finalkan lokal agar tak 'gagal' TIAP push.
     item.status = 'terkirim';
     item.local = true;
@@ -2055,7 +2060,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // Expense/PettyCash) → handoff terminal Go via drainExpenseToTerminal
   // (cermin drain fisik pushExpensePhysicalRow). Path legacy ESB
   // (v1/push/branch-expenses) 404 vs Go. Sukses = 'terkirim'; gagal =
-  // 'gagal' jujur (retry — offline/transien adalah kasus utamanya).
+  // 'gagal' jujur (retry - offline/transien adalah kasus utamanya).
   // Op expense-approve/expense-unapprove tak tersentuh (tanpa padanan BE).
   if (
     item.kind === 'other' &&
@@ -2077,7 +2082,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
   // group-payment dengan identitas server menuju group-bill/payments.
   // null = tanpa padanan backend → path ESB apa adanya (dilaporkan).
   const compat = toGoPosRequest(item.kind, rawPayloadEarly, item.id);
-  // C2: orderType tak didukung merchant-type (BE pasti menolak) — BLOCKED
+  // C2: orderType tak didukung merchant-type (BE pasti menolak) - BLOCKED
   // jujur fail-once pola S10: 'gagal' + catatan SEKALI, siklus berikut
   // skipped agar hitungan gagal/breaker tak bertambah tiap push. Bukan
   // 'skipped' langsung: kaki sale lokal tetap kotor (syncDate NULL) + kartu
@@ -2089,7 +2094,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     return 'failed';
   }
   const path = compat ? compat.path : pathFor(item.kind, item.payload);
-  // C8: kaki group-payment TANPA identitas server ({orderId, shareId} — app
+  // C8: kaki group-payment TANPA identitas server ({orderId, shareId} - app
   // tak pernah membuat group-bill shares) = ops-tanpa-padanan Go. Tanpa
   // cabang ini ia jatuh ke fallback pushOrderFinish ESB lalu 'gagal' TIAP
   // siklus (retry-buta + men-trip breaker drain 3-gagal-beruntun). BLOCKED
@@ -2193,28 +2198,28 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       }
       const be = beErrorOf(beBody);
       // BILLING (2026-10-29): 402 deposit habis = retry (tunggu topup owner),
-      // bukan fail-once — antre offline harus flush otomatis pasca-topup.
+      // bukan fail-once - antre offline harus flush otomatis pasca-topup.
       if (goRes.status === 402 || be.code === 'INSUFFICIENT_DEPOSIT') {
         item.status = 'gagal';
-        item.note = `posWire: ${be.code || 402}${be.message ? ` — ${be.message}` : ''} (retry)`.slice(0, 160);
+        item.note = `posWire: ${be.code || 402}${be.message ? ` - ${be.message}` : ''} (retry)`.slice(0, 160);
         return 'failed';
       }
       item.status = 'gagal';
-      // P1-1: PIN supervisor live-only — antrean REFUND/CANCEL/VOID/STATUS
+      // P1-1: PIN supervisor live-only - antrean REFUND/CANCEL/VOID/STATUS
       // TAK pernah membawa PIN (goMerchantOp membangun body per-field tanpa
-      // pin). A-P1-4: pengecualian SEMATA GO_OP_SETTLE — antrean BOLEH
+      // pin). A-P1-4: pengecualian SEMATA GO_OP_SETTLE - antrean BOLEH
       // membawa pin yang dikumpulkan via ManagerPinPrompt (transport-only).
       // Bila server menuntut PIN untuk op antrean (setelan berubah tengah
       // antre, atau PIN salah) = gagalkan jujur sekali: kasir ulangi aksi
       // secara live + PIN.
       item.note = (/^(PIN_REQUIRED|SUPERVISOR_PIN_)/.test(be.code)
-        ? `posWire: ${be.code} — butuh PIN supervisor, ulangi live`
-        : `posWire: ${be.code || goRes.status}${be.message ? ` — ${be.message}` : ''}`).slice(0, 160);
+        ? `posWire: ${be.code} - butuh PIN supervisor, ulangi live`
+        : `posWire: ${be.code || goRes.status}${be.message ? ` - ${be.message}` : ''}`).slice(0, 160);
       return 'failed-once';
     }
     // W1 (SESI-FIX-APPW1): drain shift/kas/tutup-hari. Pola hasil cermin W2
     // di atas; beda: replay-code W1 sendiri (W1_REPLAY_RE) + alih 409
-    // OPEN_POS_ORDERS pada tutup-kas ke pending-close (bukan hilang — kasir
+    // OPEN_POS_ORDERS pada tutup-kas ke pending-close (bukan hilang - kasir
     // selesaikan order dulu, flushPendingCashCloses() mengulanginya) +
     // {retry} tanpa-sesi = 'failed' (tunggu open FIFO, bukan fail-once).
     const wfWrap = await goWorkforceOp(item);
@@ -2315,11 +2320,11 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       item.note = `beWorkforce: ${wbe.code || wfRes.status}${wbe.message ? ' - ' + wbe.message : ''}`.slice(0, 160);
       return 'failed-once';
     }
-    // S10: kind 'other' tanpa endpoint (kontrak BE menyusul) — finalkan
+    // S10: kind 'other' tanpa endpoint (kontrak BE menyusul) - finalkan
     // 'gagal' SEKALI dengan catatan, bukan antre-selamanya. Siklus berikut
     // dilewati (skipped) agar hitungan gagal tak bertambah tiap push.
     // Legacy ms_* (return lebih awal di atas) tak tersentuh.
-    // C8: 'failed-once' (bukan 'failed') — guard pra-ESB ini tak menyentuh
+    // C8: 'failed-once' (bukan 'failed') - guard pra-ESB ini tak menyentuh
     // transport, jadi drain tak boleh menghitungnya ke breaker consecFails
     // (kaki group-payment counterpart-less dkk tak menjeda drain).
     if (item.status === 'gagal') return 'skipped';
@@ -2337,11 +2342,11 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     // GO-POS COMPAT: basis body = hasil terjemahan bila ada (bentuk-POS),
     // jika tidak payload ESB mentah; gabung identitas + idempotency di bawah
     // berlaku untuk keduanya (displayNo selalu berpasangan dengan clientId
-    // final — syarat parsePOSSaleIdentity backend).
+    // final - syarat parsePOSSaleIdentity backend).
     const rawPayload = compat ? compat.body : ((item.payload ?? {}) as Record<string, unknown>);
     const saleCid = String(rawPayload.client_id ?? rawPayload.clientId ?? '').trim();
     // DEPOSIT-SINGLE-POST: light generik {table:'tr_memberdeposit',rowId,op}
-    // (warisan enqueueOutbox) tak membawa clientId — pakai rowId (=deposit key
+    // (warisan enqueueOutbox) tak membawa clientId - pakai rowId (=deposit key
     // `dep-…`, sama dengan ledger id + fisik orderID) sebagai identitas klien
     // agar satu kunci dengan POST langsung + fisik. Header Idempotency-Key
     // tetap item.id (tak berubah). Logika sale C1 di atas tak tersentuh: sale
@@ -2354,12 +2359,12 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     const lightCid = saleCid || depositRowId;
     const sender = identityFields(lightCid || item.id);
     const body: Record<string, unknown> = lightCid
-      // Touchup: normalisasi kunci campuran — BOTH clientId + client_id = lightCid
+      // Touchup: normalisasi kunci campuran - BOTH clientId + client_id = lightCid
       // (uuid = lightCid tetap) agar server/campur-casing baca kunci yang sama.
       ? { ...rawPayload, ...sender, clientId: lightCid, client_id: lightCid, uuid: lightCid, outboxId: item.id }
       : { ...rawPayload, clientId: item.id, ...sender, outboxId: item.id };
     // Nomor display lokal (untuk pembersihan kaki sale + re-issue): payload
-    // tak pernah dimutasi — retry memakai salinan sendBody agar nomor lokal
+    // tak pernah dimutasi - retry memakai salinan sendBody agar nomor lokal
     // (struk/QR/DB) tetap, sedangkan yang dikirim ke server bisa baru.
     const origSalesNum = String(
       ((item.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '',
@@ -2376,7 +2381,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
     // 409 = display_no dipakai order lain (server TAK punya baris kita):
     // terbitkan display_no segar via nextSalesNumRetry + kirim ulang dengan
     // client_id YANG SAMA (maks MAX_DISPLAY_REISSUES re-issue; habis itu
-    // 'gagal' jujur — tak pernah 'terkirim'). Duplikat client_id tak sampai
+    // 'gagal' jujur - tak pernah 'terkirim'). Duplikat client_id tak sampai
     // sini: backend menjawab 200 "Order already synced" (jalur 2xx di bawah).
     // Re-issue hanya untuk payload sale (membawa salesNum/displayNo);
     // non-sale (deposit/shift/voucher/…) tak punya display_no → langsung gagal
@@ -2526,7 +2531,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
       const p = (item.payload ?? {}) as { op?: unknown; salesNum?: unknown };
       const sNo = String(p.salesNum ?? '').trim();
       if (sNo && (item.kind === 'order' || String(p.op ?? '') === 'group-payment')) {
-        // Seluruh kaki sale (bukan cuma head) — lihat markCleanSale.
+        // Seluruh kaki sale (bukan cuma head) - lihat markCleanSale.
         await markCleanSale(sNo);
       }
     } catch {
@@ -2571,7 +2576,7 @@ export interface LocalOnlyRow {
   createdAt: string;
 }
 
-/** Jumlah baris local-only — tampil di SyncScreen, tak masuk badge pending. */
+/** Jumlah baris local-only - tampil di SyncScreen, tak masuk badge pending. */
 export async function countLocalOnly(): Promise<number> {
   try {
     const row = await queryFirst<{ n: number }>(
@@ -2604,7 +2609,7 @@ export async function listLocalOnly(limit = 50): Promise<LocalOnlyRow[]> {
 }
 
 /**
- * C9 (SESI-C): retensi baris 'lokal' esoprocessqueue — status terminal yang
+ * C9 (SESI-C): retensi baris 'lokal' esoprocessqueue - status terminal yang
  * informatif (kartu SyncScreen, maks 200 via listLocalOnly) tapi TAK PERNAH
  * dihapus drain (bukan antre/bukan gagal/bukan terkirim) sehingga tumbuh tanpa
  * batas. Pangkas ke `keep` terbaru (default 200 = jendela tampil penuh);
@@ -2614,7 +2619,7 @@ export async function listLocalOnly(limit = 50): Promise<LocalOnlyRow[]> {
 export async function pruneLocalOnly(keep = 200): Promise<number> {
   try {
     const n = Math.max(50, Math.min(1000, Math.floor(keep) || 200));
-    // Tanpa initDb eksplisit (konvensi berkas ini — pushAll sudah menyentuh DB
+    // Tanpa initDb eksplisit (konvensi berkas ini - pushAll sudah menyentuh DB
     // via fetchPhysicalRows sebelum prune dipanggil).
     await run(
       `DELETE FROM tr_esoprocessqueue WHERE status = 'lokal' AND id NOT IN (
@@ -2651,7 +2656,7 @@ export async function countDirtyRows(): Promise<number> {
         );
         total += row?.n ?? 0;
       } catch {
-        /* kolom tak cocok — lewati */
+        /* kolom tak cocok - lewati */
       }
     }
     return total;
@@ -2691,7 +2696,7 @@ export async function markPendingRevoke(sessionId: string): Promise<void> {
       await setItem(LS_REVOKE, JSON.stringify(cur));
     }
   } catch {
-    /* storage gagal — pemanggil (logout) tetap lanjut offline */
+    /* storage gagal - pemanggil (logout) tetap lanjut offline */
   }
 }
 
@@ -2736,16 +2741,16 @@ export async function flushPendingRevokes(): Promise<void> {
       if (Number.isFinite(mk)) sessionMarkMs = mk;
       // HP-E2E-FIX-4 (2026-10-24, E2E HP Xiaomi): tanda revoke milik sesi LAMA
       // (ditandai sebelum login sesi berjalan) TIDAK BOLEH di-flush dengan
-      // token sesi BARU — BE terminal-logout mengabaikan field
+      // token sesi BARU - BE terminal-logout mengabaikan field
       // sessionId/userId dan me-revoke sesi BEARER (terminalApi.ts), sehingga
       // flush basi = bunuh diri sesi baru (login→flush→revoke→kick→tandai
       // lagi = lockout login permanen; terbukti id5 ACTIVE→REVOKED 1 detik
       // sesudah pin-verify). Tanda basi dibuang tanpa panggil jaringan: sesi
-      // lama (bila masih ACTIVE server-side) bocor sampai kedaluwarsa — trade-
+      // lama (bila masih ACTIVE server-side) bocor sampai kedaluwarsa - trade-
       // off diterima dan dicatat; pencabutan saat logout online (DrawerMenu E31
       // best-effort) tetap jalan bila jaringan tersedia saat itu. Tanpa sesi
       // berjalan (current null, mis. flush pushAll pasca-logout) guard nonaktif
-      // — tanpa token tak ada bunuh diri yang mungkin (401 jujur, tetap pending).
+      // - tanpa token tak ada bunuh diri yang mungkin (401 jujur, tetap pending).
       try {
         const cur = getCurrentSession();
         const loginMs = Date.parse(String(cur?.loginAt ?? ''));
@@ -2759,7 +2764,7 @@ export async function flushPendingRevokes(): Promise<void> {
           sessionUid = '';
         }
       } catch {
-        /* abaikan — anggap tidak basi, perilaku lama dipertahankan */
+        /* abaikan - anggap tidak basi, perilaku lama dipertahankan */
       }
       if (sessionSid && !jobs.some((j) => j.sessionId === sessionSid)) {
         jobs.push({ sessionId: sessionSid });
@@ -2773,7 +2778,7 @@ export async function flushPendingRevokes(): Promise<void> {
     for (const job of jobs) {
       try {
         const r = await logoutRevoke(job);
-        if (!r.ok) continue; // tetap pending — coba lagi siklus berikut
+        if (!r.ok) continue; // tetap pending - coba lagi siklus berikut
         if (job.sessionId) {
           try {
             await clearPendingRevoke(job.sessionId);
@@ -2789,7 +2794,7 @@ export async function flushPendingRevokes(): Promise<void> {
           }
         }
       } catch {
-        /* tetap pending — coba lagi siklus berikut */
+        /* tetap pending - coba lagi siklus berikut */
       }
     }
   } catch {
@@ -2814,7 +2819,7 @@ export interface Watermark {
  * Tidak pernah melempar - kasir tidak boleh diblokir antrean.
  */
 /**
- * Inti fisik outbox (#22): baris `tr_esoprocessqueue` + tandai kotor — tanpa
+ * Inti fisik outbox (#22): baris `tr_esoprocessqueue` + tandai kotor - tanpa
  * menyentuh AsyncStorage. Dipakai di dalam transaksi SQLite agar baris outbox
  * ikut rollback bila tulis gagal total; pemanggil mem-flush antrean ringan
  * secara terpisah setelah COMMIT.
@@ -2985,9 +2990,9 @@ export function syncWarnLevel(lastMs?: number): 'ok' | 'warn3' | 'block7' {
 // P2 roadmap (tanpa dep baru): WorkManager (Android)/BGTask (iOS) untuk antrean >0 saat background.
   // Jalur Expo: expo-task-manager + expo-background-fetch (opsional, belum dipasang agar bundle tetap kecil).
   // Sampai dipasang, foreground-only + EFF-09 skip (antrean 0) + banner block7/warn3 adalah perilaku jujur.
-// SYNC-03 (C12, batas jujur — BUKAN background sync): timer ini HANYA hidup
+// SYNC-03 (C12, batas jujur - BUKAN background sync): timer ini HANYA hidup
 // saat app foreground (JS timer suspend saat layar mati; repo ini SENGAJA
-// tanpa TaskManager/BackgroundFetch — tak ada klaim "sync saat screen mati").
+// tanpa TaskManager/BackgroundFetch - tak ada klaim "sync saat screen mati").
 // Timing jujur: lastSyncMs HANYA ditulis pushAll yang sukses (pullMaster tak
 // menyentuh); notifikasi/teks sukses HANYA bila sent>0 (notifyPushSyncSuccess
 // di bawah); umur sync dihitung dari sumber yang sama (SyncScreen).
@@ -3032,7 +3037,7 @@ export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): 
         if (!(await wifiOk(wifiOnly))) return;
         // EFF-09 gate: tanpa antrean pending = lewati pushAll (hemat
         // baterai/radio). Antrean ringan via pendingCount; antrean fisik
-        // (tr_esoprocessqueue) via COUNT — keduanya nol = diam.
+        // (tr_esoprocessqueue) via COUNT - keduanya nol = diam.
         try {
           if (pendingCount() === 0) {
             let physical = 1;
@@ -3043,12 +3048,12 @@ export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): 
               );
               physical = Number(r?.n) || 0;
             } catch {
-              physical = 1; // DB belum siap — anggap ada agar tak menahan sync
+              physical = 1; // DB belum siap - anggap ada agar tak menahan sync
             }
             if (physical === 0) return;
           }
         } catch {
-          /* gate best-effort — lanjut pushAll */
+          /* gate best-effort - lanjut pushAll */
         }
         await pushAll();
       } catch {
@@ -3058,12 +3063,12 @@ export function applyAutoSyncPrefs(opts: { auto: boolean; wifiOnly: boolean }): 
   }, 5 * 60 * 1000);
 }
 
-/** Kunci preferensi sync otomatis (satu sumber — dipakai SyncScreen). */
+/** Kunci preferensi sync otomatis (satu sumber - dipakai SyncScreen). */
 export const SYNC_OPTS_KEY = 'genfity.sync.opts';
 
 /**
  * SYNC-02 (C12, SESI-C): pulihkan timer auto-sync dari preferensi tersimpan.
- * Sebelumnya timer HANYA dinyalakan saat SyncScreen dibuka — pasca-restart
+ * Sebelumnya timer HANYA dinyalakan saat SyncScreen dibuka - pasca-restart
  * auto-sync mati diam-diam meski toggle ON. Panggil sekali saat boot (App.tsx,
  * setelah restore sesi) + tiap login sukses (LoginScreen, samping
  * startRealtime) agar interval 5 menit benar-benar berjalan. Idempoten
@@ -3076,11 +3081,11 @@ export async function restoreAutoSyncPrefs(): Promise<void> {
       SYNC_OPTS_KEY,
       { autoSync: true, syncOnWifi: false },
     );
-    // Audit 2026-10-26: opsi wifi-only dihapus — pulihkan selalu ke jaringan
+    // Audit 2026-10-26: opsi wifi-only dihapus - pulihkan selalu ke jaringan
     // apa pun (abaikan simpanan syncOnWifi lama agar tak mengunci wifi).
     applyAutoSyncPrefs({ auto: o.autoSync !== false, wifiOnly: false });
   } catch {
-    /* preferensi tak terbaca — timer tetap mati, SyncScreen yang menyalakan */
+    /* preferensi tak terbaca - timer tetap mati, SyncScreen yang menyalakan */
   }
 }
 
@@ -3098,4 +3103,4 @@ export async function getSyncLagSummary(): Promise<{ pending: number; dirty: num
 
 // P2 Sentry roadmap (tanpa dep baru): bungkus drain/pushAll/pullMaster dengan captureException bila DSN terisi.
 // Sampai DSN dipasang, tr_applog + LogScreen + readiness + syncWarnLevel adalah observability jujur (tanpa klaim crash-reporting).
-// Jangan kirim PII (PIN/token) ke crash-report — scrub authToken/authKey/clientId sebelum kirim.
+// Jangan kirim PII (PIN/token) ke crash-report - scrub authToken/authKey/clientId sebelum kirim.

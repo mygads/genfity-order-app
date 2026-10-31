@@ -11,12 +11,13 @@ import React, { useEffect, useRef, useState } from 'react';import {
   cashOpenBe,
   cashOpenPayload,
   clockInBe,
+  getPosLocation,
   setPendingSessionUuid,
   clockInPayload,
   getPendingReviewSid,
   shouldQueueW1,
 } from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { pinVerifyTerminalPin } from '../../lib/terminalApi';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';
-import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang —
+import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang -
  *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
 const MAX_KAS_AWAL_IDR = 10000000;
 const MAX_KAS_AWAL_AUD = 10000;
@@ -37,7 +38,7 @@ const terbilang = (n: number): string => {
     if (x < 1000000000) return `${sebut(Math.floor(x / 1000000))} juta ${sebut(x % 1000000)}`.trim();
     return `${sebut(Math.floor(x / 1000000000))} miliar ${sebut(x % 1000000000)}`.trim();
   };
-  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift — sadar-bahasa (id/en)
+  return `${sebut(n).replace(/\s+/g, ' ').trim()} rupiah`;};/** Format ISO ke "14 Okt 2026 · 08:00" ala kartu shift - sadar-bahasa (id/en)
  * + sadar-zona-merchant (PW-4/S3; dulu id-ID-only + jam perangkat). */const fmtShift = (iso: string | null, lang: 'id' | 'en' = 'id', timeZone?: string): string => { if (!iso) return '-'; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const locale = lang === 'id' ? 'id-ID' : 'en-AU'; const tz = (timeZone ?? '').trim() || getCachedTimezone(); let tgl: string; let jam: string; try { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: tz }).replace(/\./g, ':'); } catch { tgl = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }); jam = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':'); } return `${tgl} · ${jam}`;};interface LastShift { status: string; cashier: string; opened: string | null; closed: string | null;}/** Buka kasir/shift: kas awal + PIN, tercatat ke tr_shiftlog dan antrean sync. */export default function ShiftScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -62,7 +63,7 @@ const terbilang = (n: number): string => {
   const [approveBusy, setApproveBusy] = useState(false);
   const [approveMsg, setApproveMsg] = useState('');
   // Shift terakhir dari SQLite (tr_shiftlog), bukan hardcoded.
-  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE status IN (\'open\', \'closed\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1', [getBranchId()]); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || '-', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Number(kasAwal.replace(/\D/g, '')) || 0;
+  useEffect(() => { let on = true; (async () => { try { await initDb(); const row = await queryFirst<{ status: string | null; userId: string | null; cashierName: string | null; clockIn: string | null; clockOut: string | null; }>('SELECT status, userId, cashierName, clockIn, clockOut FROM tr_shiftlog WHERE status IN (\'open\', \'closed\') AND (branchId = ? OR branchId IS NULL OR branchId = \'\') ORDER BY clockIn DESC LIMIT 1', [getBranchId()]); if (on && row) { setLastShift({ status: row.status === 'open' ? t('dash_shift_open') : t('dash_shift_closed'), cashier: row.cashierName || row.userId || '-', opened: row.clockIn, closed: row.clockOut, }); } } catch { /* DB belum siap - kartu menampilkan status kosong */ } })(); return () => { on = false; }; }, []); const kasAwalNum = Math.round((Number(String(kasAwal).replace(/[^0-9.,]/g, '').replace(/,/g, '.')) || 0) * 100) / 100;
   // Muat sid menunggu-review tiap mount (persist di storage).
   useEffect(() => { let on = true; (async () => { try { const sid = await getPendingReviewSid(); if (on) setPendingSid(sid); } catch { /* abaikan */ } })(); return () => { on = false; }; }, []);
   // S-F6: muat gerbang workforce sekali saat layar dibuka (cache gagal = OFF).
@@ -202,7 +203,7 @@ const terbilang = (n: number): string => {
       const sess = getSession();
       const shiftUserId = openerUserId || sess?.userId || sess?.username || '';
       const shiftCashier = sess?.name || sess?.username || '';
-      // S9 (PP-010): GERBANG ABSENSI buka-shift — pembuka WAJIB punya baris
+      // S9 (PP-010): GERBANG ABSENSI buka-shift - pembuka WAJIB punya baris
       // 'absen' hari-ini-lokal (paritas gerbang tutup di EndShiftScreen).
       // Lokal SQLite sehingga berlaku offline; DB tak terbaca = fail-closed
       // (jatuh ke shf_open_failed di catch). Pesan = tautan ke Absensi.
@@ -249,14 +250,15 @@ const terbilang = (n: number): string => {
         note: catatan.trim() || null,
         at: nowIso,
       });
-      // W1 (SESI-FIX-APPW1): cermin clock-in + buka sesi kas ke BE — immediate-
-      // first fire-and-forget SETELAH lokal menang di atas. Offline/error =
-      // antrekan op be-* (drain sync mem-POST tanpa stamp/PIN); 4xx deterministik
-      // = error jujur (tak diantre). PIN tak pernah ikut (verifikasi PIN sudah
-      // selesai di atas; beWorkforce memoles body via stripPin).
+      // W1: cermin clock-in + buka sesi kas ke BE - immediate-first
+      // fire-and-forget SETELAH lokal menang di atas. Live bawa PIN + lokasi
+      // GPS (bila ada); antrean tetap tanpa PIN/lokasi basi. 4xx deterministik
+      // = error jujur (tak diantre).
       void (async () => {
+        let loc = null;
+        try { loc = await getPosLocation(6000); } catch { loc = null; }
         try {
-          const ci = await clockInBe();
+          const ci = await clockInBe(pin, loc);
           if (ci.ok) {
             // HP-E2E-FIX-2: kontak server sukses = bukti kontak terakhir
             // (gate E00044 membaca lastSyncMs modul sync).
@@ -272,7 +274,7 @@ const terbilang = (n: number): string => {
           /* abaikan */
         }
         try {
-          const co = await cashOpenBe(kasAwalNum, catatan.trim() || undefined);
+          const co = await cashOpenBe(kasAwalNum, catatan.trim() || undefined, pin, loc);
           if (co.ok) {
             // HP-E2E-FIX-2: sesi kas TERCATAT di server = kontak sukses.
             try { noteServerContact(); } catch { /* abaikan */ }
@@ -302,7 +304,7 @@ const terbilang = (n: number): string => {
   };
 
   const pressPinKey = (d: string) => {
-    if (pin.length >= 6) return;
+    if (pin.length >= 8) return;
     setPin(pin + d);
   };
 
@@ -363,7 +365,7 @@ const terbilang = (n: number): string => {
           {wfGates.requireCashRegisterForPos ? (
             <Text style={s.hint}>{t('shf_policy_cash')}</Text>
           ) : null}
-          {/* S-F7: tanpa endpoint sesi-kas terminal di BE — kas terminal
+          {/* S-F7: tanpa endpoint sesi-kas terminal di BE - kas terminal
               resmi offline-dengan-rekonsiliasi via antrean sync. */}
           <Text style={s.hint}>{t('shf_offline_recon')}</Text>
           <AppInput
@@ -371,11 +373,11 @@ const terbilang = (n: number): string => {
             placeholder="0"
             textAlign="right"
             value={kasAwalNum ? numGrouping(kasAwalNum) : '0'}
-            onChangeText={(tx) => setKasAwal(tx.replace(/\D/g, ''))}
+            onChangeText={(tx) => setKasAwal(tx.replace(/[^0-9.,]/g, '').replace(/,/g, '.'))}
             boxStyle={{ borderColor: colors.orange, backgroundColor: colors.paleOrange, marginTop: 8 }}
             style={{ textAlign: 'right', fontFamily: fonts.bold, fontSize: 24 }}
           />
-          {/* S4: terbilang HANYA untuk UI Indonesia — merchant EN/AUD
+          {/* S4: terbilang HANYA untuk UI Indonesia - merchant EN/AUD
               melihat nominal format-currency (terbilang-ID dilarang tampil). */}
           <Text style={s.rpPreview}>{kasAwalNum > 0 ? (lang === 'id' ? terbilang(kasAwalNum) : rp(kasAwalNum)) : t('shf_zero_hint')}</Text>
           <Text style={s.chipHint}>{t('shf_chip_hint').replace('{m}', rp(MAX_KAS_AWAL))}</Text>

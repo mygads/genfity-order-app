@@ -29,10 +29,10 @@ const LS_SUP_LOCKED = 'genfity.supervisor.lockedUntil';
 
 // A-P0-1: flag wajib-ganti-PIN pasca-seed. PIN seed = acak sekali-pakai yang
 // tak diketahui siapa pun; eskalasi supervisor akun default ('u-admin')
-// DITOLAK selama flag '1' — kasir wajib buat PIN via Install/CreatePin atau
+// DITOLAK selama flag '1' - kasir wajib buat PIN via Install/CreatePin atau
 // reset via Lupa PIN (keduanya membersihkan flag). Instalasi lama yang
 // record-nya sudah ada tak tersentuh (hash tak bisa membuktikan PIN default)
-// — limitasi terdokumentasi, bukan celah baru.
+// - limitasi terdokumentasi, bukan celah baru.
 export const PIN_MUST_CHANGE_PREFIX = 'genfity.pin.mustChange.';
 export async function isPinChangeRequired(userId: string): Promise<boolean> {
   const id = String(userId ?? '').trim();
@@ -120,8 +120,8 @@ export interface AuthResult {
   ok: boolean;
   message: string;
   code: SupervisorCode;
-  /** R40: identitas approver — diisi jalur lokal dari sesi; jalur server
-   * membiarkan null (pemanggil fallback ke user sesi — JANGAN edit pemanggil). */
+  /** R40: identitas approver - diisi jalur lokal dari sesi; jalur server
+   * membiarkan null (pemanggil fallback ke user sesi - JANGAN edit pemanggil). */
   userId?: string;
   role?: string;
 }
@@ -144,7 +144,7 @@ function locked(): AuthResult {
 }
 
 export interface EscalationResult extends AuthResult {
-  /** Id user ms_posuser pemilik PIN (hanya bila ok) — untuk audit/eskalasi. */
+  /** Id user ms_posuser pemilik PIN (hanya bila ok) - untuk audit/eskalasi. */
   userId?: string;
 }
 
@@ -155,7 +155,7 @@ export interface EscalationResult extends AuthResult {
  * shift di ShiftScreen/EndShiftScreen).
  *
  * Jujur + fail-closed: PIN dicocokkan ke hash lokal (lib/pin.ts), lalu
- * pemegang PIN (APPROVER — belum tentu pemegang sesi login kasir) WAJIB punya
+ * pemegang PIN (APPROVER - belum tentu pemegang sesi login kasir) WAJIB punya
  * hak accessKey via requireEscalationAccess: device HARUS terikat terminal
  * ('terminal-unbound' bila belum bind) + hirarki RBAC untuk userId approver,
  * TANPA gerbang grant sesi kasir (D3-05: grant milik approver tak boleh
@@ -169,7 +169,7 @@ export async function verifyLocalEscalation(
 ): Promise<EscalationResult> {
   await hydrateThrottle();
   // R36: kunci kedaluwarsa memberi jendela baru (decay, cermin
-  // authorizeSupervisor di bawah — attempts harus meluruh, bukan abadi).
+  // authorizeSupervisor di bawah - attempts harus meluruh, bukan abadi).
   if (lockedUntil !== 0 && !isLocked()) {
     attempts = 0;
     lockedUntil = 0;
@@ -177,17 +177,16 @@ export async function verifyLocalEscalation(
   }
   if (isLocked()) return locked();
   const clean = pin.replace(/[^0-9]/g, '');
-  // R38: panjang PIN 4-6 di jalur lokal juga (full-string, tanpa pemotongan).
-  // M1: PIN kosong/pendek/panjang ikut dihitung via fail() — tebakan
-  // panjang-salah tetap tebakan (it's a guess).
-  if (!clean || clean.length < 4 || clean.length > 6) {
+  // Workforce PIN 4-8 digit (kompatibel seed 4-digit lama + BE/FE 6-8 baru). Full-string tanpa pemotongan.
+  // M1: PIN kosong/pendek/panjang ikut dihitung via fail() - tebakan panjang-salah tetap tebakan.
+  if (!clean || clean.length < 4 || clean.length > 8) {
     return fail('invalid', tOf('sup_invalid'));
   }
   let v: { ok: boolean | null; userId?: string };
   try {
     v = await verifyAttendancePin(clean);
   } catch {
-    // R35: error/thrown = offline — kembalikan hasil offline jujur TANPA
+    // R35: error/thrown = offline - kembalikan hasil offline jujur TANPA
     // membakar attempt (klasifikasi SEBELUM penghitungan).
     return { ok: false, code: 'offline', message: tOf('sup_offline') };
   }
@@ -201,7 +200,7 @@ export async function verifyLocalEscalation(
   }
   // A-P0-1: tolak akun default selama flag wajib-ganti menyala (PIN seed
   // acak sekali-pakai belum diganti manusia). Bakar attempt seperti tebakan
-  // gagal — PIN default bukan kredensial sah.
+  // gagal - PIN default bukan kredensial sah.
   if (v.userId === 'u-admin') {
     let must = true;
     try {
@@ -221,7 +220,7 @@ export async function verifyLocalEscalation(
     return fail('denied', tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1)));
   }
   // R40: userId approver + role dari sesi (jalur server membiarkan keduanya
-  // null — pemanggil fallback ke user sesi).
+  // null - pemanggil fallback ke user sesi).
   let role: string | undefined;
   try {
     role = getSession()?.role?.trim() || undefined;
@@ -240,7 +239,7 @@ export async function verifyLocalEscalation(
 /** Minta persetujuan supervisor ke server; offline selalu ditolak. */
 export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
   await hydrateThrottle();
-  // R38: TANPA slice(0,6) — cocokkan string PENUH apa adanya (no
+  // R38: TANPA slice(0,6) - cocokkan string PENUH apa adanya (no
   // slice-prefix acceptance: '1234567' tak boleh lolos sebagai '123456').
   const clean = pin.replace(/[^0-9]/g, '');
   // Kunci kedaluwarsa memberi jendela baru; kunci aktif menolak tanpa panggil server.
@@ -251,7 +250,7 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
   }
   if (isLocked()) return locked();
   // R39: status 'unconfigured' (mode local / tanpa base URL) kembali AWAL
-  // sebelum fail() — PIN dummy/tak-terkonfigurasi tak membakar attempt.
+  // sebelum fail() - PIN dummy/tak-terkonfigurasi tak membakar attempt.
   // (Perubahan perilaku vs M1: PIN kosong di mode local kini 'unconfigured'
   // tanpa burn; di jalur evaluasi nyata, PIN kosong tetap 'invalid' + burn.)
   // Mode local = offline-first tanpa server: pemanggil shift (buka/tutup)
@@ -261,14 +260,13 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
   if (getApiMode() === 'local' || !getBaseUrl()) {
     return { ok: false, code: 'unconfigured', message: tOf('sup_unconfigured') };
   }
-  // R38: panjang 4-6 di jalur server juga (full-string); M1: tebakan
-  // panjang-salah ikut dihitung (attempt-limit + kunci berlaku).
-  if (!clean || clean.length < 4 || clean.length > 6) {
+  // Workforce PIN 4-8 digit di jalur server juga (full-string); M1: tebakan panjang-salah ikut dihitung.
+  if (!clean || clean.length < 4 || clean.length > 8) {
     return fail('invalid', tOf('sup_invalid'));
   }
   try {
     // GAP-5: timeout eksplisit via AbortController (pola callStaffLogin
-    // LoginScreen:266) — BE macet tak boleh menggantung UI void/eskalasi
+    // LoginScreen:266) - BE macet tak boleh menggantung UI void/eskalasi
     // selamanya. 15 dtk selaras endpoint auth; AbortError jatuh ke offline
     // jujur di catch bawah (tanpa bakar attempt).
     const ctrl = new AbortController();
@@ -288,13 +286,13 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
       clearTimeout(timer);
     }
     if (r.fromDummy && getApiMode() === 'real') {
-      // R35: jaringan gagal lalu jatuh ke dummy = offline — fail-closed jujur
+      // R35: jaringan gagal lalu jatuh ke dummy = offline - fail-closed jujur
       // TANPA membakar attempt (klasifikasi sebelum penghitungan).
       return { ok: false, code: 'offline', message: tOf('sup_offline') };
     }
     if (r.status === 404 && !r.fromDummy) {
       // Endpoint legacy DINYATAKAN MATI di Real mode (BE 404 by-design):
-      // bukan tebakan salah — JANGAN bakar attempt. Pemanggil shift
+      // bukan tebakan salah - JANGAN bakar attempt. Pemanggil shift
       // (E29 territory) boleh fallback ke pin-verify terminal.
       return { ok: false, code: 'endpoint-dead', message: tOf('sup_endpoint_dead') };
     }
@@ -306,11 +304,11 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
     attempts = 0;
     lockedUntil = 0;
     persistThrottle();
-    // R40: jalur server membiarkan userId/role null — pemanggil fallback ke
+    // R40: jalur server membiarkan userId/role null - pemanggil fallback ke
     // user sesi (JANGAN edit pemanggil).
     return { ok: true, code: 'ok', message: tOf('sup_ok') };
   } catch {
-    // R35: network error tak membakar attempt — hasil offline jujur.
+    // R35: network error tak membakar attempt - hasil offline jujur.
     return { ok: false, code: 'offline', message: tOf('sup_offline') };
   }
 }
@@ -320,11 +318,11 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
 // POST /api/v1/terminals/{id}/supervisor-approve {supervisorUserId,
 // supervisorPin, action, refId, reason} (BE router.go:1119,
 // supervisor_approve.go). PENGGANTI legacy authorizeSupervisor {pin} untuk
-// alur void/eskalasi/compliment — legacy DINYATAKAN MATI di Real mode (404,
+// alur void/eskalasi/compliment - legacy DINYATAKAN MATI di Real mode (404,
 // kontrak API-CONTRACT §4.4) dan NOL dipakai alur-alur tersebut; shift screens
 // tetap legacy (E29 territory, follow-up eksplisit, bukan urusan S7).
 //
-// Perbedaan vs legacy: identitas supervisor EKSPLISIT (userId numerik BE —
+// Perbedaan vs legacy: identitas supervisor EKSPLISIT (userId numerik BE -
 // APP tak punya roster staf, E18 MISSING-BE, jadi UI memakai input ID numerik
 // eksplisit; follow-up owner: endpoint roster) + aksi/refId/alasan tercatat
 // append-only di pos_supervisor_approvals. Supervisor = OWNER atau grant
@@ -333,7 +331,7 @@ export async function authorizeSupervisor(pin: string): Promise<AuthResult> {
 // Throttle 5x/60 dtk + klasifikasi offline-sebelum-hitung (R35) + PIN
 // full-string tanpa slice (R38) + abort 15 dtk (GAP-5) dipertahankan sama
 // dengan legacy. Kegagalan bentuk-formulir (userId/aksi/refId/alasan)
-// TIDAK membakar attempt — itu kesalahan isi, bukan tebakan PIN; hanya
+// TIDAK membakar attempt - itu kesalahan isi, bukan tebakan PIN; hanya
 // PIN-shape salah (M1) dan penolakan server yang membakar.
 // ---------------------------------------------------------------------------
 
@@ -342,21 +340,21 @@ export const SUPERVISOR_V1_LIMITS = { actionMin: 1, actionMax: 64, refIdMax: 128
 
 /**
  * COND-2 (syarat merge, PP-028/BE orders_pos_payment.go:404): aksi kanonis
- * yang WAJIB dipakai approval compliment — persis `COMPLIMENT_SETTLE`
+ * yang WAJIB dipakai approval compliment - persis `COMPLIMENT_SETTLE`
  * (case-sensitive, tanpa trim-toleransi di sisi APP: BE memang trim, tapi
  * APP mengirim persis agar tak ada ambiguitas). Satu char salah = baris
  * approval tak cocok → settle COMPLIMENT 403 COMPLIMENT_APPROVAL_REQUIRED
- * permanen yang benar. JANGAN hardcode string ini di layar — impor konstanta.
+ * permanen yang benar. JANGAN hardcode string ini di layar - impor konstanta.
  */
 export const SUPERVISOR_ACTION_COMPLIMENT_SETTLE = 'COMPLIMENT_SETTLE';
 
 /**
  * COND-3 (PP-007 Tahap 0, kunci kontrak): aksi kanonis yang WAJIB dipakai
- * approval void/refund — persis `ORDER_VOID` / `ORDER_REFUND` (case-sensitive,
+ * approval void/refund - persis `ORDER_VOID` / `ORDER_REFUND` (case-sensitive,
  * pola sama seperti COMPLIMENT_SETTLE di atas). Enforcement BE (W9) hanya
  * mengenali kedua string ini; approval yang dibuat dengan literal lowercase
  * (`void`/`refund`) TAKKAN cocok → void/refund staf 403 permanen yang benar.
- * JANGAN hardcode string ini di layar — impor konstanta.
+ * JANGAN hardcode string ini di layar - impor konstanta.
  * Scope: HANYA action supervisor-approve V1. Namespace outbox lokal
  * (`history.ts` action `void`) dan approval `cancel` (Belum ada enforcement
  * BE; tetap lowercase) TIDAK ikut dikunci tahap ini.
@@ -366,9 +364,9 @@ export const SUPERVISOR_ACTION_ORDER_REFUND = 'ORDER_REFUND';
 
 /**
  * COND-2: refId approval compliment = id-desimal order BE
- * (strconv.FormatInt(orderID, 10) — tanpa nol depan, bukan nomor struk
+ * (strconv.FormatInt(orderID, 10) - tanpa nol depan, bukan nomor struk
  * human-readable/salesNum). False = jangan kunci (dialog tetap bisa diisi
- * manual, tapi approval itu TAKKAN cocok untuk settle — lihat ExtraPaySection).
+ * manual, tapi approval itu TAKKAN cocok untuk settle - lihat ExtraPaySection).
  */
 export function isDecimalOrderId(s: string): boolean {
   return /^[1-9][0-9]{0,18}$/.test((s ?? '').trim());
@@ -377,19 +375,19 @@ export function isDecimalOrderId(s: string): boolean {
 export interface SupervisorV1Input {
   /** ID numerik BE terminal untuk path /terminals/{id} (bukan terminalCode). */
   terminalId: string;
-  /** ID numerik BE supervisor (merchant_users) — input eksplisit di UI. */
+  /** ID numerik BE supervisor (merchant_users) - input eksplisit di UI. */
   supervisorUserId: number;
   /** PIN workforce milik supervisor (bukan PIN kasir yang login). */
   supervisorPin: string;
   /** Aksi bebas 1..64 char. Untuk void/refund WAJIB konstanta kanonis
-   * (SUPERVISOR_ACTION_ORDER_VOID/REFUND — BE hanya cocok persis itu);
+   * (SUPERVISOR_ACTION_ORDER_VOID/REFUND - BE hanya cocok persis itu);
    * `cancel` tetap lowercase (tanpa enforcement BE); `compliment` via konstanta. */
   action: string;
-  /** Referensi bebas ≤128 char (cth. order id); boleh kosong — KECUALI
+  /** Referensi bebas ≤128 char (cth. order id); boleh kosong - KECUALI
    * untuk COMPLIMENT_SETTLE (OFFLINE-RULE: wajib id-desimal, lihat gate di
    * authorizeSupervisorV1). */
   refId?: string;
-  /** Alasan WAJIB 1..500 char — tercatat di audit BE. */
+  /** Alasan WAJIB 1..500 char - tercatat di audit BE. */
   reason: string;
 }
 
@@ -455,7 +453,7 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
   }
   // OFFLINE-RULE (putusan koordinator): approval COMPLIMENT_SETTLE wajib
   // refId id-desimal order (create-first). BE membolehkan refId kosong, tapi
-  // approval begitu TAKKAN cocok untuk settle (403 permanen) — jadi APP
+  // approval begitu TAKKAN cocok untuk settle (403 permanen) - jadi APP
   // menolak mengirimnya di sini (tanpa bakar attempt). Non-desimal lain
   // (salesNum/nomor struk) ikut ditolak dengan pesan yang sama.
   if (action === SUPERVISOR_ACTION_COMPLIMENT_SETTLE && !isDecimalOrderId(refId)) {
@@ -466,11 +464,11 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
     return { ok: false, code: 'invalid', message: badField };
   }
   // R38: PIN full-string TANPA pemotongan; kebijakan panjang = BE 4..8 digit
-  // (merchant_workforce.go:898,945; terminal.go:329) — AUDIT-V2: gate 4..6
+  // (merchant_workforce.go:898,945; terminal.go:329) - AUDIT-V2: gate 4..6
   // + truncate dialog = PIN 7-8 digit sah tak pernah lolos (bahkan membakar
   // lockout server via 6-digit terpotong yang SALAH). M1: shape salah bakar.
   // (Gate legacy authorizeSupervisor + verifyLocalEscalation tetap 4..6:
-  // pre-existing, dipakai alur shared di luar S7 — follow-up owner.)
+  // pre-existing, dipakai alur shared di luar S7 - follow-up owner.)
   const clean = String(input?.supervisorPin ?? '').replace(/[^0-9]/g, '');
   if (!clean || clean.length < 4 || clean.length > 8) {
     return fail('invalid', tOf('sup_invalid'));
@@ -496,7 +494,7 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
       clearTimeout(timer);
     }
     if (r.fromDummy && getApiMode() === 'real') {
-      // R35: jatuh ke dummy = offline — fail-closed jujur tanpa bakar attempt.
+      // R35: jatuh ke dummy = offline - fail-closed jujur tanpa bakar attempt.
       return { ok: false, code: 'offline', message: tOf('sup_offline') };
     }
     const { success, data } = unwrap<Record<string, unknown>>(r.data);
@@ -532,13 +530,13 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
       return locked();
     }
     if (code === 'VALIDATION_ERROR') {
-      // Bentuk ditolak server — kesalahan isi, bukan tebakan: tanpa burn.
+      // Bentuk ditolak server - kesalahan isi, bukan tebakan: tanpa burn.
       return { ok: false, code: 'invalid', message: message || badField };
     }
     const msg = message || tOf('sup_denied').replace('{n}', String(attemptsLeft() - 1));
     return fail('denied', msg);
   } catch {
-    // R35: network error tak membakar attempt — hasil offline jujur.
+    // R35: network error tak membakar attempt - hasil offline jujur.
     return { ok: false, code: 'offline', message: tOf('sup_offline') };
   }
 }
