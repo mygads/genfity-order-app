@@ -334,10 +334,10 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
     <View style={[styles.actions, isTablet && styles.actionsStack]}>
       {printQueued ? <Text style={styles.mailMsg}>{t('sync.queued')}</Text> : null}
       <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`🖨 ${printing ? '...' : t('rc_print')}`} variant="secondary" onPress={() => void doPrint()} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={printing ? '...' : t('rc_print')} variant="secondary" onPress={() => void doPrint()} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title="WA" variant="secondary" onPress={() => { void (async () => { try { const mod = await import("../../lib/posWire"); const ok = await mod.openWaShare(shareText); if (!ok) await shareReceipt(shareText); } catch { try { await shareReceipt(shareText); } catch { /* abaikan */ } } })(); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`✉ ${t('ok_email')}`} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={t('ok_email')} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={t('rc_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
     </View>
   );

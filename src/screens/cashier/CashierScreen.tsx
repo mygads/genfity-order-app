@@ -1780,7 +1780,7 @@ export default function CashierScreen({ navigation, route }: Props) {
               {inCart && !inCart.voided && (
                 <TouchableOpacity onPress={() => openEditor(inCart)} style={styles.cardEdit}>
                   <Text style={styles.cardEditT}>
-                    {inCart.note ? `📝 ${inCart.note}` : `✎ ${t('editNoteDisc')}`}
+                    {inCart.note ? inCart.note : `✎ ${t('editNoteDisc')}`}
                     {inCart.discount > 0 ? ` · -${rp(inCart.discount)}` : ''}
                   </Text>
                 </TouchableOpacity>
@@ -1803,7 +1803,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                   <Text style={styles.rowName} numberOfLines={2}>{item.name}</Text>
                   <Text style={styles.rowPrice}>{rp(item.price)}{item.unitLabel ? ` / ${item.unitLabel}` : ''}{item.sku ? ` · ${item.sku}` : ''}</Text>
                   {!item.soldOut && item.low ? (<Text style={styles.rowLow}>Stok menipis</Text>) : null}
-                  {inCart?.note ? <Text style={styles.rowNote} numberOfLines={1}>📝 {inCart.note}</Text> : null}
+                  {inCart?.note ? <Text style={styles.rowNote} numberOfLines={1}>{inCart.note}</Text> : null}
                   {inCart && inCart.discount > 0 ? (
                     <Text style={styles.rowDisc}>{t('discount')} -{rp(inCart.discount)}</Text>
                   ) : null}
@@ -1941,7 +1941,7 @@ export default function CashierScreen({ navigation, route }: Props) {
                     + {m.name} + {rp(m.price)}
                   </Text>
                 ))}
-                {item.note ? <Text style={styles.cartNote}>📝 {item.note}</Text> : null}
+                {item.note ? <Text style={styles.cartNote}>{item.note}</Text> : null}
                 {item.discount > 0 && (
                   <Text style={styles.cartDisc}>{t('discount')} -{rp(item.discount)}</Text>
                 )}

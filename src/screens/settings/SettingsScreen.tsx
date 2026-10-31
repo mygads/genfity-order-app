@@ -252,12 +252,12 @@ export default function SettingsScreen({ navigation }: Props) {
       <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
       <MenuRow
         title={t('settings.vertical')}
-        sub={(() => { try { const v = VERTICALS[getCachedVerticalId()]; return v ? `${v.icon} ${v.label} — ${v.example}` : t('settings.verticalSub'); } catch { return t('settings.verticalSub'); } })()}
+        sub={(() => { try { const v = VERTICALS[getCachedVerticalId()]; return v ? `${v.label} — ${v.example}` : t('settings.verticalSub'); } catch { return t('settings.verticalSub'); } })()}
         onPress={() => setVerticalPinOpen(true)}
       />
       <MenuRow
         title="Jualan tambahan (hybrid)"
-        sub={hybrid.length ? hybrid.map((h) => { try { const v = VERTICALS[h as VerticalId]; return v ? `${v.icon} ${v.label}` : h; } catch { return h; } }).join(' + ') : 'Satu usaha utama + tambahan (mis. warung + pulsa)'}
+        sub={hybrid.length ? hybrid.map((h) => { try { const v = VERTICALS[h as VerticalId]; return v ? v.label : h; } catch { return h; } }).join(' + ') : 'Satu usaha utama + tambahan (mis. warung + pulsa)'}
         onPress={() => setHybridPickOpen(true)}
       />
       <MenuRow title={t('settings.tableTimer')} sub={t('settings.tableTimerSub')} onPress={() => go('TableTimer')} />

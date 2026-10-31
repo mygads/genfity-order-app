@@ -2010,7 +2010,7 @@ const STR: Record<string, Entry> = {
   bok_today_only: { id: 'Hari ini saja', en: 'Today only' },
   bok_edited: { id: '● Diedit…', en: '● Edited…' },
   bok_edit: { id: '✎ Edit', en: '✎ Edit' },
-  bok_del: { id: '🗑 Batal/Hapus', en: '🗑 Cancel/Delete' },
+  bok_del: { id: 'Batal/Hapus', en: 'Cancel/Delete' },
 
   // ---- DUAL-CURRENCY §4(b): varian label nominal cabang AUD (dipilih via
   // tCur di bawah; pola pasangan _idr/_aud mengikuti vou_type_disc_idr/aud).
