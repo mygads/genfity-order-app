@@ -208,7 +208,15 @@ export function beErrorOf(body: unknown): BeErr {
   const r = body as Record<string, unknown>;
   const inner = (r.data ?? r) as Record<string, unknown>;
   const errObj = (r as { error?: unknown }).error;
+  // Bentuk Go response.Error: {success:false, error:"CODE_STRING", message}.
+  // `error` string di sini BUKAN pesan melainkan kode (UPPER_SNAKE); baca
+  // sebagai code agar cabang 409/403/401 POS (SESSION_CLOSED,
+  // OPEN_POS_ORDERS, TERMINAL_ACCESS_DENIED, PIN_*) hidup. Kalimat
+  // human-readable (ada spasi/huruf kecil) bukan kode - jangan jadikan code.
+  const errStr = typeof errObj === 'string' ? errObj.trim() : '';
+  const errCode = /^[A-Z][A-Z0-9_]{2,60}$/.test(errStr) ? errStr : '';
   const code =
+    errCode ||
     pickStr(errObj, 'code', 'errorCode', 'error_code', 'name') ||
     pickStr(inner, 'code', 'errorCode', 'error_code', 'name') ||
     pickStr(r, 'code', 'errorCode', 'error_code', 'name');
