@@ -41,6 +41,7 @@ import {
 import { ApiPath, apiPost } from '../../config/server';
 import { startRealtime } from '../../lib/realtime';
 import { flushPendingRevokes, restoreAutoSyncPrefs } from '../../lib/sync';
+import { pullMaster } from '../../lib/master';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
 import { pinVerifyTerminalPin, fetchTerminalReadiness } from '../../lib/terminalApi';
@@ -812,6 +813,11 @@ async function completeOnline(
   // (hash hanya akselerator offline; server tetap sumber benar).
   await withTimeout(ensureLocalPinHash(userId, pin), 8000).catch(() => {});
   try { startRealtime(); } catch { /* abaikan */ }
+  // LOGIN-PULL (audit): segarkan katalog Go (menu/branchmenu) pasca-login
+  // agar kasir tak jualan dengan harga/stok basi bila WS/FORCE_PULL
+  // terlewat (mis. WS mati saat owner ubah menu). Fire-and-forget
+  // best-effort — login tak diblokir bila gagal.
+  try { void pullMaster(['menu', 'branchmenu']).catch(() => {}); } catch { /* abaikan */ }
   // SYNC-02 (C12): timer auto-sync ikut login online (bukan hanya buka SyncScreen).
   try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }
