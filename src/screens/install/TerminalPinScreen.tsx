@@ -146,6 +146,12 @@ export default function TerminalPinScreen({
           setOccupied(r.serverMessage || t('takeover_msg'));
           return;
         }
+        // Allow-list (403 TERMINAL_ACCESS_DENIED): pesan server jujur (minta
+        // owner grant), bukan need_be/sup_offline yang menyesatkan.
+        if (r.status === 403 && r.serverMessage) {
+          setError(r.serverMessage);
+          return;
+        }
         setError(r.reason === 'need_be' ? t('need_be') : t('sup_offline'));
         return;
       }
@@ -183,6 +189,12 @@ export default function TerminalPinScreen({
         }
         if (r.status === 409 && r.serverMessage) {
           setOccupied(r.serverMessage);
+          return;
+        }
+        // Allow-list (403): sama jujurnya dengan jalur bind di atas.
+        if (r.status === 403 && r.serverMessage) {
+          setOccupied('');
+          setError(r.serverMessage);
           return;
         }
         setError(r.reason === 'need_be' ? t('need_be') : t('sup_offline'));

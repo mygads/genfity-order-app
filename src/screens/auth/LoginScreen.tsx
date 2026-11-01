@@ -1410,6 +1410,14 @@ export default function LoginScreen({ navigation }: Props) {
         }
         if (isExplicitReject(first)) {
           // Server MENOLAK eksplisit (bukan offline): kredensial salah.
+          // PENGECUALIAN: allow-list terminal (403 TERMINAL_ACCESS_DENIED) =
+          // pesan server jujur (minta owner grant), bukan login_fail generik
+          // agar staff tak mengulang password sia-sia.
+          const rej = loginErrorOf(first);
+          if (rej.code === 'TERMINAL_ACCESS_DENIED' && rej.message) {
+            setServerError(rej.message);
+            return;
+          }
           setServerError(t('login_fail'));
           return;
         }
