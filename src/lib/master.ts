@@ -433,6 +433,28 @@ export async function ensureFirstSessionMaster(branchId?: string, terminalId?: s
       cur = null;
     }
     if (cur && (!b || String(cur.branch ?? '') === b) && (!t || String(cur.terminal ?? '') === t)) return false;
+    // SWITCH-CABANG: ms_table TANPA kolom branchId + dibaca tanpa filter cabang
+    // (TablesScreen) — pindah cabang tanpa prune = meja cabang lama menghantui
+    // cabang baru (ghost tables). Prune HANYA bila flag cabang lama ada & beda;
+    // ganti terminal satu cabang = status meja kebenaran cabang, jangan hapus.
+    // Cache timer/hold keyed nomor/id meja ikut diprune (tabrakan nomor antar
+    // cabang → durasi/hold salah meja). Kunci kanonis: TIM_KEY di
+    // settings/TableTimerScreen, SEATED_KEY/HELD_KEY di tables/TablesScreen
+    // (+ duplikat SEATED_KEY di lib/terminalTable) — string disalin eksplisit
+    // agar lib tak mengimpor lapisan screens.
+    const prevBranch = String(cur?.branch ?? '').trim();
+    const switchedBranch = !!prevBranch && !!b && prevBranch !== b;
+    if (switchedBranch) {
+      try {
+        await initDb();
+        await run('DELETE FROM ms_table');
+      } catch {
+        /* prune best-effort - pull di bawah tetap jalan */
+      }
+      try { await setItem('genfity.tabletimer.timers', '[]'); } catch { /* abaikan */ }
+      try { await setItem('genfity.tables.seatedMin', '{}'); } catch { /* abaikan */ }
+      try { await setItem('genfity.tables.held', '{}'); } catch { /* abaikan */ }
+    }
     const keys = DOMAINS.map((d) => d.key).filter((k) => !FIRST_MASTER_SKIP.has(k));
     await pullMaster(keys);
     try {
