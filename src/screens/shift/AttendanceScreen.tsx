@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
 import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1, updateWorkforcePinOnServer } from '../../lib/beWorkforce';
-import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
+import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinPendingSync, isPinPendingSync, markPinPendingSync, savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
  * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
   d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out lokal + live W1 ke BE.
@@ -26,6 +26,18 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
   const [pinMsg, setPinMsg] = useState('');
   /** Popup ganti PIN (dibuka via tombol, bukan seksi inline). */
   const [pinModal, setPinModal] = useState(false);
+  const [pinPending, setPinPending] = useState(false);
+  /** Buka modal ganti PIN + muat status pending-sinkron user sesi. */
+  const openPinModal = () => {
+    setPinMsg('');
+    const sid = s?.userId ?? s?.username;
+    if (sid) {
+      void isPinPendingSync(String(sid)).then(setPinPending).catch(() => undefined);
+    } else {
+      setPinPending(false);
+    }
+    setPinModal(true);
+  };
   /** Seed 4-digit lama: banner non-blocking + deep-link ke modal ganti PIN. Baru wajib 6-8, lama 4-8 (migrasi). */
   const [legacyPin, setLegacyPin] = useState(false);
   /** PRO-GATE: null = belum tahu (fail-open); true = Starter = kunci. */
@@ -215,7 +227,12 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     if (busy) return;
     setBusy(true);
     try {
-    const v = await verifyAttendancePin(o); if (v.ok !== true || !v.userId) { setPinMsg(v.ok === false ? t('att_old_wrong') : t('shf_pin_offline_unknown')); return; } const userId = v.userId; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; let goDenied = ''; try { const g = await withTimeout(updateWorkforcePinOnServer(o, n), 8000); if (g.ok) { sent = true; } else if ((g as { rejected?: boolean }).rejected) { const m = String((g as { message?: unknown }).message ?? '').trim(); if (m) goDenied = m; } } catch { /* offline/timeout - coba legacy di bawah */ } if (!sent) { try { const r = await withTimeout(updatePinOnServer(userId, o, n), 8000); if (r.ok) sent = true; } catch { /* offline/timeout - antre di bawah */ } } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } try { if (n.length >= 6) setLegacyPin(false); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : (goDenied || t('att_pin_saved_pending')));
+    const v = await verifyAttendancePin(o); if (v.ok !== true || !v.userId) { setPinMsg(v.ok === false ? t('att_old_wrong') : t('shf_pin_offline_unknown')); return; } const userId = v.userId; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; }
+    /* GAP-L: live-update sukses = server + lokal konvergen (bersihkan
+       flag); offline = lokal saja (tandai pending; JANGAN klaim "terkirim
+       saat online" — antrean 'attendance' difinalkan lokal tanpa POST). */ try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; let goDenied = ''; try { const g = await withTimeout(updateWorkforcePinOnServer(o, n), 8000); if (g.ok) { sent = true; } else if ((g as { rejected?: boolean }).rejected) { const m = String((g as { message?: unknown }).message ?? '').trim(); if (m) goDenied = m; } } catch { /* offline/timeout - coba legacy di bawah */ } if (!sent) { try { const r = await withTimeout(updatePinOnServer(userId, o, n), 8000); if (r.ok) sent = true; } catch { /* offline/timeout - antre di bawah */ } } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } try { if (n.length >= 6) setLegacyPin(false); } catch { /* abaikan */ } if (sent) { try { await clearPinPendingSync(userId); } catch { /* abaikan */ } setPinPending(false); setPinMsg(t('att_pin_changed_ok')); }
+    else if (goDenied) { setPinMsg(goDenied); }
+    else { try { await markPinPendingSync(userId); } catch { /* abaikan */ } setPinPending(true); setPinMsg(t('att_pin_saved_pending')); }
     } finally { setBusy(false); }
     setOldPin('');
     setNewPin('');
@@ -268,7 +285,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
           <Text style={[styles.item, isTablet && styles.itemTablet, { fontFamily: fonts.bold, color: colors.orangeDark }]}>{t('att_pin_legacy_title')}</Text>
           <Text style={[styles.meta, isTablet && styles.metaTablet, { marginTop: 4 }]}>{t('att_pin_legacy_banner')}</Text>
           <View style={{ marginTop: 10 }}>
-            <AppButton size="md" title={t('att_pin_legacy_action')} onPress={() => { setPinModal(true); }} />
+            <AppButton size="md" title={t('att_pin_legacy_action')} onPress={() => { openPinModal(); }} />
           </View>
         </View>
       ) : null}
@@ -339,7 +356,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
         size="md"
         variant="secondary"
         title={t('att_change_pin')}
-        onPress={() => { setPinMsg(''); setPinModal(true); }}
+        onPress={() => { openPinModal(); }}
         style={{ marginTop: 16 }}
       />
       <Modal visible={pinModal} transparent animationType="slide" onRequestClose={() => setPinModal(false)}>
@@ -348,6 +365,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
           <View style={[styles.modalCard, isTablet && styles.modalCardTablet]} onStartShouldSetResponder={() => true}>
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <Text style={[styles.modalTitle, isTablet && styles.modalTitleBig]}>{t('att_change_pin')}</Text>
+              {pinPending ? (<Text style={[styles.meta, isTablet && styles.metaTablet, { color: colors.orangeDark, marginTop: 6 }]}>{t('att_pin_pending_banner')}</Text>) : null}
               <AppInput
                 label={t('att_old_label')}
                 keyboardType="numeric"
