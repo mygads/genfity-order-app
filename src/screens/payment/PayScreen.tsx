@@ -974,6 +974,10 @@ export default function PayScreen({ navigation, route }: Props) {
     // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
     if (goRef.current) return;
     goRef.current = true;
+    /* GAP-M: ok=true hanya tepat sebelum navigasi Success; finally
+       me-reset HANYA bila gagal — sukses = guard bertahan (anti nota-ganda
+       bila kembali dari Success; layar Pay baru = mount baru = guard segar). */
+    let ok = false;
     try {
     // nextSalesNum melempar 'terminal-unbound' saat device belum klaim (cermin
     // QrisScreen/EdcScreen M10): tangkap di sini agar tap Bayar tunai selalu
@@ -1091,6 +1095,7 @@ export default function PayScreen({ navigation, route }: Props) {
       } catch {
         /* abaikan */
       }
+      ok = true;
       navigation?.navigate('Success', {
         total: orderTotalFull, method, cash, change, orderNo: paramSalesNum,
         ...(saleClientId ? { clientId: saleClientId } : {}),
@@ -1174,6 +1179,7 @@ export default function PayScreen({ navigation, route }: Props) {
     recordSale(input);
     // W2: cermin lunas ke BE bila tertaut order server.
     mirrorSettleToServer(orderNo, method, payable, tipAmount, effVoucherCode, saleClientId, pin, saleCustomerId, memberPoinParam, detail?.approvalCode);
+    ok = true;
     navigation?.navigate('Success', {
       total: payable, method, cash, change, orderNo,
       items: route?.params?.items, discount: effDiscount,
@@ -1200,7 +1206,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}),
     });
     } finally {
-      goRef.current = false;
+      if (!ok) goRef.current = false;
     }
   };
 
