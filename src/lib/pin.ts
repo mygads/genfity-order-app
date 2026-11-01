@@ -221,6 +221,39 @@ export async function savePinHash(userId: string, pin: string): Promise<void> {
   await setItem(key, raw);
 }
 
+/** GAP-L: PIN diubah offline = server tak pernah tahu (antrean sync tak
+ *  boleh membawa PIN). Flag per-user ini menandai "menunggu sinkron ulang
+ *  saat online" agar UI jujur + meminta simpan-ulang, bukan mengklaim
+ *  "terkirim saat online" yang tak pernah terjadi. */
+const pinPendingKey = (userId: string) => `genfity.pin.pendingSync.${userId}`;
+
+/** Tandai PIN user ini belum sinkron ke server (best-effort, tak melempar). */
+export async function markPinPendingSync(userId: string): Promise<void> {
+  try {
+    await setItem(pinPendingKey(userId), '1');
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Bersihkan tanda pending (dipanggil bila live-update server sukses). */
+export async function clearPinPendingSync(userId: string): Promise<void> {
+  try {
+    await removeItem(pinPendingKey(userId));
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** True bila PIN user ini menunggu sinkron-ulang saat online. */
+export async function isPinPendingSync(userId: string): Promise<boolean> {
+  try {
+    return (await getItem(pinPendingKey(userId))) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Muat record hash PIN; null bila belum pernah dibuat. */
 export async function loadPinRecord(userId: string): Promise<PinRecord | null> {
   const key = pinKey(userId);
