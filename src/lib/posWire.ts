@@ -600,7 +600,7 @@ export function voidMerchantOrder(serverId: number, reason?: string, pin?: strin
 // 409 PAYMENT_ALREADY_RECORDED / ORDER_ALREADY_REFUNDED / ORDER_CLOSED +
 // replayed:true = sukses idempoten.
 // ---------------------------------------------------------------------------
-export type BePayMethod = 'CASH_ON_COUNTER' | 'CARD_ON_COUNTER' | 'QRIS' | 'SPLIT' | 'COMPLIMENT' | 'MANUAL_TRANSFER';
+export type BePayMethod = 'CASH_ON_COUNTER' | 'CARD_ON_COUNTER' | 'QRIS' | 'SPLIT' | 'COMPLIMENT' | 'MANUAL_TRANSFER' | 'GPAY_QRIS' | 'GPAY_VA';
 
 /**
  * Petakan label metode lokal → enum BE. null = tak ada padanan → BLOCKED
@@ -608,13 +608,21 @@ export type BePayMethod = 'CASH_ON_COUNTER' | 'CARD_ON_COUNTER' | 'QRIS' | 'SPLI
  * APP-9 (HP-E2E 2026-10-26): transfer bank MANUAL kini punya padanan BE
  * MANUAL_TRANSFER (migrasi 00206 + validasi settle) — tak lagi BLOCKED diam.
  */
-export function mapPayMethodToBe(method: unknown): BePayMethod | null {
+export function mapPayMethodToBe(method: unknown, gpayChargeId?: unknown): BePayMethod | null {
   const m = String(method ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
   // Transfer bank manual (label mentah 'transfer' dari extraLabelToMethod +
   // varian) — cek DULU agar tak tertelan pola lain.
   if (/transfer|manualtransfer|banktransfer/.test(m)) return 'MANUAL_TRANSFER';
+  // Genfity Pay dinamis kasir (charge GF-POS-* via QrisScreen): audit
+  // terpisah sebagai GPAY_* agar tak terbaur QRIS statis di laporan.
+  // Label eksplisit 'gpay_qris'/'gpay_va' ('gopay' mock lama TAK cocok,
+  // pola jangkar penuh) ATAU kaki QRIS yang membawa charge ref (jalur
+  // drain grup). Tanpa charge = QRIS seperti sebelumnya.
+  if (/^gpayqris$/.test(m) || /^genfitypay(qris)?$/.test(m)) return 'GPAY_QRIS';
+  if (/^gpayva$/.test(m) || /^genfitypayva$/.test(m)) return 'GPAY_VA';
   if (/^qris$/.test(m) || /qris|ovo|gopay|dana|shopee|wallet|online/.test(m)) {
     if (/tunai|cash/.test(m)) return 'CASH_ON_COUNTER';
+    if (String(gpayChargeId ?? '').trim()) return 'GPAY_QRIS';
     return 'QRIS';
   }
   if (/tunai|cash/.test(m)) return 'CASH_ON_COUNTER';

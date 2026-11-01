@@ -18,7 +18,7 @@ import { useLang, tCur } from '../../lib/i18n';
 import { useConnectivity } from '../../hooks/useConnectivity';
 import DrawerMenu from '../../components/DrawerMenu';
 import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';
-import { SUPERVISOR_ACTION_ORDER_VOID, getBoundSupervisorTerminalId } from '../../lib/supervisor';
+import { SUPERVISOR_ACTION_ORDER_DISCOUNT, SUPERVISOR_ACTION_ORDER_VOID, getBoundSupervisorTerminalId } from '../../lib/supervisor';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
@@ -570,6 +570,9 @@ export default function CashierScreen({ navigation, route }: Props) {
    * persetujuan server otoritatif, fallback lokal dialog fail-closed sendiri
    * (pola guardVoidOpen HistoryScreen/CancelScreen). */
   const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
+  // GAP-E: diskon per-item >20% = eskalasi PIN owner (anti-fraud kasir).
+  // Staging tertunda sampai dialog supervisor menyetujui; <=20% langsung.
+  const [discApprove, setDiscApprove] = useState<{ id: string; disc: number; note: string } | null>(null);
   // Drawer /home APK asli (order, table, shift, sales-history, detail-recap,
   // esb-order-dashboard, member, expense, petty-cash, settings).
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -1079,6 +1082,14 @@ export default function CashierScreen({ navigation, route }: Props) {
       setDiscMsg(t('disc_over_line'));
       return;
     }
+    // GAP-E: >20% nilai line = minta PIN owner via dialog supervisor.
+    // requiresDiscountPin (posPinGate) = aturan yang sama; dialog = enforcement.
+    if (lineGross > 0 && disc / lineGross > 0.2) {
+      setDiscMsg('');
+      setDiscApprove({ id: editingId, disc, note: noteDraft.trim() });
+      setEditingId(null);
+      return;
+    }
     setDiscMsg('');
     setCart((prev) =>
       prev.map((c) =>
@@ -1086,6 +1097,18 @@ export default function CashierScreen({ navigation, route }: Props) {
       ),
     );
     setEditingId(null);
+  };
+
+  /** Persetujuan supervisor ok → terapkan diskon >20% yang tertunda. */
+  const approveDisc = () => {
+    const target = discApprove;
+    setDiscApprove(null);
+    if (!target) return;
+    setCart((prev) =>
+      prev.map((c) =>
+        c.id === target.id ? { ...c, note: target.note || undefined, discount: target.disc } : c,
+      ),
+    );
   };
 
   const subtotalGross = activeCart.reduce(
@@ -1402,6 +1425,21 @@ export default function CashierScreen({ navigation, route }: Props) {
       fallbackAccessKey="order.void"
       onApproved={() => approveVoid()}
       onCancel={() => setVoidTarget(null)}
+    />
+  );
+
+  // GAP-E: dialog eskalasi diskon >20% (owner/PIN supervisor, offline-first).
+  const renderDiscDialog = () => (
+    <SupervisorApprovalDialog
+      visible={discApprove !== null}
+      action={SUPERVISOR_ACTION_ORDER_DISCOUNT}
+      refId={discApprove?.id ?? ''}
+      reasonPreset={t('disc_appr_reason')}
+      title={t('disc_appr_title')}
+      sub={t('disc_appr_sub')}
+      fallbackAccessKey="order.discount"
+      onApproved={() => approveDisc()}
+      onCancel={() => setDiscApprove(null)}
     />
   );
 
@@ -2196,6 +2234,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         </View>
         {renderOngkirDialog()}
         {renderVoidDialog()}
+        {renderDiscDialog()}
         {renderLoadDialog()}
       </View>
     );
@@ -2295,6 +2334,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       </View>
       {renderOngkirDialog()}
       {renderVoidDialog()}
+      {renderDiscDialog()}
       {renderLoadDialog()}
     </View>
   );

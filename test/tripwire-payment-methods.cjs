@@ -197,6 +197,13 @@ function run() {
   ok(/R4-DOCS\(c\)/.test(readRaw('screens/settings/MenuPrintingScreen.tsx')) && /DEVICE-LOCAL/.test(readRaw('screens/settings/MenuPrintingScreen.tsx')),
     'PM-06c: menu-print routing = device-local (MenuPrintingScreen)');
 
+  // ---- PM-07: referensi per-tender (approval EDC / ref transfer) ----
+  const drain = read('lib/sync.ts');
+  ok(/paymentReference/.test(drain) && /approvalCode/.test(drain),
+    'PM-07: drain settle teruskan paymentReference (fallback approvalCode) ke BE');
+  ok(/paymentReference: ref\.slice\(0, 100\)/.test(drain),
+    'PM-07: drain ringan pangkas paymentReference 100 char');
+
   return { failures, checks };
 }
 

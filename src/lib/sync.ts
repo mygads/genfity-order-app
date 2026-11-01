@@ -516,8 +516,9 @@ function toGoPosRequest(
     const shareId = String(p.shareId ?? p.share_id ?? '').trim();
     if (!/^[0-9]+$/.test(orderId) || !shareId) return null;
     // groupOrderBillPaymentRequest backend: paymentMethod ∈
-    // {CASH_ON_COUNTER, CARD_ON_COUNTER, QRIS} + tenderedAmount wajib menutup
-    // amount untuk tunai (0 untuk kartu/QRIS) + idempotencyKey 16-128 char.
+    // {CASH_ON_COUNTER, CARD_ON_COUNTER, QRIS, MANUAL_TRANSFER} +
+    // tenderedAmount wajib menutup amount untuk tunai (0 untuk yang lain) +
+    // idempotencyKey 16-128 char.
     const legs = Array.isArray(payload.payments) ? payload.payments : [];
     const first = (legs[0] ?? {}) as { method?: unknown; amount?: unknown; approvalCode?: unknown };
     const mKey = String(first.method ?? payload.method ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
@@ -643,7 +644,7 @@ function goMerchantOp(
   if (op === GO_OP_SETTLE) {
     const method = String(p.method ?? '').trim().toUpperCase();
     const amount = Math.max(0, Math.round(Number(p.amountPaid ?? p.amount) || 0));
-    if (!['CASH_ON_COUNTER', 'CARD_ON_COUNTER', 'QRIS', 'SPLIT', 'COMPLIMENT', 'MANUAL_TRANSFER'].includes(method) || amount <= 0) {
+    if (!['CASH_ON_COUNTER', 'CARD_ON_COUNTER', 'QRIS', 'SPLIT', 'COMPLIMENT', 'MANUAL_TRANSFER', 'GPAY_QRIS', 'GPAY_VA'].includes(method) || amount <= 0) {
       return { blocked: 'posWire: settle butuh method enum BE + nominal > 0' };
     }
     return {
@@ -658,6 +659,10 @@ function goMerchantOp(
         // APP-9: ref transfer (approvalCode kaki) ikut sebagai notes agar
         // terekam di payments.notes/metadata BE, bukan hilang di jalan.
         ...(String(p.notes ?? '').trim() ? { notes: String(p.notes).trim().slice(0, 500) } : {}),
+        // Referensi per-tender BE (kolom reference): approval EDC untuk
+        // kartu, ref transfer untuk manual, charge id untuk GPay dinamis.
+        ...(String((p as Record<string, unknown>).paymentReference ?? (p as Record<string, unknown>).approvalCode ?? '').trim()
+          ? { paymentReference: String((p as Record<string, unknown>).paymentReference ?? (p as Record<string, unknown>).approvalCode).trim().slice(0, 100) } : {}),
         ...(p.tipAmount ? { tipAmount: Math.round(Number(p.tipAmount) || 0) } : {}),
         ...(p.voucherCode ? { voucherCode: String(p.voucherCode).slice(0, 64) } : {}),
         // P1-2: teruskan sesi kas W1 bila pemanggil menyimpannya di payload
@@ -2551,7 +2556,7 @@ async function pushLightItem(item: SyncItem): Promise<'sent' | 'failed' | 'faile
                   amountPaid: amt,
                   ...(tipN > 0 ? { tipAmount: tipN } : {}),
                   ...(vch ? { voucherCode: vch.slice(0, 64) } : {}),
-                  ...(ref ? { notes: ref.slice(0, 500) } : {}),
+                  ...(ref ? { notes: ref.slice(0, 500), paymentReference: ref.slice(0, 100) } : {}),
                   ...(lightCid ? { clientId: lightCid } : {}),
                   salesNum: linkNo,
                   at: new Date().toISOString(),

@@ -973,6 +973,10 @@ export interface GroupPayLeg {
   method?: string;
   amount?: number;
   approvalCode?: string;
+  /** Genfity Pay dinamis kasir: id charge GF-POS-* kaki ini. Dibawa ke
+   *  drain agar settle terpetakan GPAY_QRIS (audit terpisah dari QRIS
+   *  statis). Absen = perilaku lama. */
+  gpayChargeId?: string;
   /** Ronde-3 Q1: customerId GO (int) bila member ditempel di kaki ini. */
   customerId?: number;
   memberId?: string;
@@ -994,6 +998,7 @@ export async function appendGroupPayment(
       method: String(x?.method ?? p.method ?? 'split'),
       amount: Math.max(0, Math.round(Number(x?.amount) || 0)),
       approvalCode: x?.approvalCode,
+      gpayChargeId: String(x?.gpayChargeId ?? '').trim() || undefined,
       customerId: parseCustomerId(x?.customerId) ?? undefined,
       memberId: String(x?.memberId ?? '').trim() || undefined,
       voucherCode: String(x?.voucherCode ?? '').trim() || undefined,
@@ -1208,6 +1213,7 @@ export async function appendGroupPayment(
         method: l.method,
         amount: l.amount,
         ...(l.approvalCode ? { approvalCode: l.approvalCode } : {}),
+        ...(l.gpayChargeId ? { gpayChargeId: l.gpayChargeId } : {}),
         ...(l.customerId != null ? { customerId: l.customerId } : {}),
         ...(l.voucherCode ? { voucherCode: l.voucherCode } : {}),
       })),
@@ -1238,7 +1244,7 @@ export async function appendGroupPayment(
   // settle antre/gagal untuk salesNum ini (twin S6 + cek outbox).
   if (outFullyPaid && outGrand > 0 && outGroupClientId) {
     try {
-      const bem = legs.map((l) => mapPayMethodToBe(l.method));
+      const bem = legs.map((l) => mapPayMethodToBe(l.method, l.gpayChargeId));
       const allMapped = bem.every((m): m is BePayMethod => m != null);
       if (allMapped) {
         const uniq = [...new Set<string>(bem)];
@@ -1249,13 +1255,17 @@ export async function appendGroupPayment(
         // APP-10: jangan return dini - display di bawah wajib tetap disiarkan;
         // tandai agar UI bisa memperingatkan kasir untuk settle manual.
         const transferMix = uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER');
-        if (transferMix) outServerSettleSkipped = true;
+        // Campuran ber-Genfity-Pay (mis. tunai + QR dinamis) TAK bisa
+        // diwakilkan SPLIT (semantik BE = tunai+kartu): perlakukan seperti
+        // transferMix, settle server dilewati, kasir selesaikan manual.
+        const gpayMix = uniq.length !== 1 && (uniq.includes('GPAY_QRIS') || uniq.includes('GPAY_VA'));
+        if (transferMix || gpayMix) outServerSettleSkipped = true;
         const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
         const bemSingle: BePayMethod =
-          only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER'
+          only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER' || only === 'GPAY_QRIS' || only === 'GPAY_VA'
             ? (only as BePayMethod)
             : 'SPLIT';
-        if (transferMix) {
+        if (transferMix || gpayMix) {
           // Settle server dilewati: order BE tetap terbuka sampai kasir
           // menyelesaikan manual di dashboard. Ledger lokal tetap sah.
         } else {
@@ -1277,7 +1287,11 @@ export async function appendGroupPayment(
               /* abaikan: BE me-resolve */
             }
             // APP-9: ref kaki tunggal (transfer/EDC) ikut sebagai notes.
+            // Kaki Genfity Pay: sertakan gpay:{chargeId} agar validasi BE
+            // lolos (wajib ada charge ref untuk GPAY_*).
             const gRef = String(legs[0]?.approvalCode ?? '').trim();
+            const gCharge = String(legs[0]?.gpayChargeId ?? '').trim();
+            const gNotes = [gRef, gCharge ? `gpay:${gCharge}` : ''].filter(Boolean).join(' ');
             enqueueSync(
               'other',
               {
@@ -1286,7 +1300,7 @@ export async function appendGroupPayment(
                 method: bemSingle,
                 amountPaid: outGrand,
                 ...(outOwnerCustomer != null ? { customerId: outOwnerCustomer } : {}),
-                ...(gRef && uniq.length === 1 ? { notes: gRef.slice(0, 500) } : {}),
+                ...(gNotes && uniq.length === 1 ? { notes: gNotes.slice(0, 500) } : {}),
                 ...(cashSid > 0 ? { cashSessionId: cashSid } : {}),
                 clientId: outGroupClientId,
                 salesNum: no,

@@ -570,7 +570,9 @@ export async function ensureSeeded(): Promise<void> {
   // Baris peran (userId = nama peran kanonis) adalah template default
   // offline: access.ts jatuh kembali dari userId ke peran (via
   // normalizeRole) bila user tak punya baris sendiri.
-  const sensitiveKeys = ['order.void', 'order.cancel', 'sale.refund', 'settings.edit'];
+  // GAP-E: 'order.discount' ikut = instalasi lama dapat baris deny saat
+  // boot berikut (INSERT OR IGNORE); Owner wildcard-allow tak terdampak.
+  const sensitiveKeys = ['order.void', 'order.cancel', 'sale.refund', 'settings.edit', 'order.discount'];
   for (const k of sensitiveKeys) {
     await run(
       `INSERT OR IGNORE INTO ms_posuseraccess (userId, accessKey, flagAllow)

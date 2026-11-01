@@ -361,6 +361,12 @@ export const SUPERVISOR_ACTION_COMPLIMENT_SETTLE = 'COMPLIMENT_SETTLE';
  */
 export const SUPERVISOR_ACTION_ORDER_VOID = 'ORDER_VOID';
 export const SUPERVISOR_ACTION_ORDER_REFUND = 'ORDER_REFUND';
+/**
+ * GAP-E (audit 2026-11-01): aksi kanonis approval diskon per-item >20%.
+ * Aksi bebas 1..64 char (tanpa enforcement BE - tercatat audit lokal +
+ * pos_supervisor_approvals bila online). JANGAN hardcode di layar.
+ */
+export const SUPERVISOR_ACTION_ORDER_DISCOUNT = 'ORDER_DISCOUNT';
 
 /**
  * COND-2: refId approval compliment = id-desimal order BE

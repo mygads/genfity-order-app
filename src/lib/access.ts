@@ -95,6 +95,9 @@ export const ACCESS_KEYS = [
   'order.cancel',
   'sale.refund',
   'settings.edit',
+  // GAP-E: diskon per-item >20% = eskalasi PIN owner (kasir tak bisa
+  // nol-kan harga sendiri). Fail-closed seperti kunci sensitif lain.
+  'order.discount',
   // Q18 STAFF-BISA-APPROVE-PETTY: kunci khusus approve petty/kasbon - Staff
   // dan Owner lolos (tanpa deny Staff di seed; fail-open default-allow).
   // Void/cancel/kompliment TETAP lewat 4 kunci owner-only di atas.
@@ -117,6 +120,7 @@ export const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   'order.cancel',
   'sale.refund',
   'settings.edit',
+  'order.discount',
 ]);
 
 /** Deskripsi tiap kunci untuk dokumentasi pemilik layar. */
@@ -125,6 +129,7 @@ export const ACCESS_KEY_DESCRIPTIONS: Record<string, string> = {
   'order.cancel': 'Batalkan pesanan (perlu Owner bila Staff di-deny)',
   'sale.refund': 'Refund penjualan (perlu Owner bila Staff di-deny)',
   'settings.edit': 'Ubah pengaturan (khusus Owner)',
+  'order.discount': 'Diskon per-item >20% di kasir (perlu Owner bila Staff di-deny)',
   // Q18: approve petty/kasbon boleh Staff maupun Owner (PIN siapa pun yang
   // dikenal sistem lolos; Staff TIDAK di-deny untuk kunci ini).
   'petty.approve': 'Setujui petty cash/kasbon (Staff maupun Owner)',
