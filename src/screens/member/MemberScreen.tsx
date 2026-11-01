@@ -26,7 +26,7 @@ import {
   localMemberKeyForCustomer,
   parseCustomerId,
 } from '../../lib/memberRef';
-import { getMemberLookupEnabled } from '../../lib/posConfigSync';
+import { getMemberLookupEnabled, isStarterPlanCached } from '../../lib/posConfigSync';
 import { isValidEmail } from '../../lib/payments';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
 import { tOf, useLang, tCur } from '../../lib/i18n';
@@ -376,6 +376,10 @@ export default function MemberScreen({ navigation, route }: Props) {
   const localToServer = useRef(new Map<string, number>());
   // Ronde-3 Q5: gate lookup/search server (absen = enabled).
   const [lookupEnabled, setLookupEnabled] = useState(true);
+  /** PRO-GATE (fail-open): true = paket Starter = banner loyalty Pro-only.
+   * null/belum sync = tampil normal; BE tetap enforcer (LOYALTY_REQUIRES_PRO).
+   * Member inti (daftar/tambah/deposit/terapkan) TIDAK dikunci. */
+  const [starterLock, setStarterLock] = useState<boolean | null>(null);
   // Ronde-3 Q1: pesan blokir tempel (member tanpa customerId GO).
   const [applyErr, setApplyErr] = useState('');
   // WIRE REA-3: saldo via erp/member balance-deposit di samping inquiry-deposit
@@ -410,6 +414,18 @@ export default function MemberScreen({ navigation, route }: Props) {
       }
     })();
     return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const v = await isStarterPlanCached();
+        if (alive) setStarterLock(v);
+      } catch {
+        if (alive) setStarterLock(false);
+      }
+    })();
+    return () => { alive = false; };
   }, []);
   useEffect(() => {
     let live = true;
@@ -1086,6 +1102,10 @@ export default function MemberScreen({ navigation, route }: Props) {
           {lookupEnabled ? null : (
             <Text style={s.minErr}>{t('mem_lookup_disabled')}</Text>
           )}
+          {/* PRO-GATE fail-open: Starter = info loyalty Pro-only; member inti tetap jalan. */}
+          {starterLock === true ? (
+            <Text style={s.offlineNote}>{t('mem_pro_loyalty')}</Text>
+          ) : null}
         </View>
       </View>
 
