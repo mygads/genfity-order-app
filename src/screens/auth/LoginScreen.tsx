@@ -53,7 +53,7 @@ import {
 } from '../../lib/terminalContract';
 import { queryFirst } from '../../lib/db';
 import { isSeedReady, whenSeedReady } from '../../lib/seed';
-import { loadPinRecord, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
+import { checkGrantLoginThrottle, loadPinRecord, noteGrantLoginFailure, resetGrantLoginThrottle, savePinHash, verifyAttendancePin, verifyPinHash } from '../../lib/pin';
 import { requireEscalationAccess } from '../../lib/access';
 
 import { syncCurrencyFromProfile } from '../../lib/currency';
@@ -1779,20 +1779,47 @@ export default function LoginScreen({ navigation }: Props) {
             setPinError(recheck === 'grant-expired' ? grantExpiredText() : needBeText());
             return;
           }
+          // AUDIT-PIN-PERSIST: throttle otoritatif PERSISTEN — cek dulu
+          // (restart aplikasi tak me-reset; state pinLockUntil hanya cermin UI).
+          try {
+            const gPre = await checkGrantLoginThrottle();
+            if (gPre.locked) {
+              setPinLockUntil(Date.now() + gPre.remainingSec * 1000);
+              setPinError(t('g_pin_offline_locked').split('{n}').join(String(gPre.remainingSec)));
+              return;
+            }
+          } catch {
+            /* storage gagal = lanjut verifikasi + cek state cepat */
+          }
           if (!verifyGrantPin(pin, { userId: candidate.userId, terminalId: offTerm, deviceId: offDevice })) {
             // Throttle: 5x salah → kunci modal 60 dtk (anti brute-force).
-            const n = pinAttempts + 1;
-            if (n >= 5) {
-              setPinLockUntil(Date.now() + 60_000);
-              setPinAttempts(0);
-              setPinError(t('g_pin_offline_locked').split('{n}').join('60'));
+            // AUDIT-PIN-PERSIST: tally persisten; state disinkronkan untuk UI.
+            let locked = false;
+            let secs = 60;
+            try {
+              const g = await noteGrantLoginFailure();
+              locked = g.locked;
+              secs = Math.max(1, g.remainingSec);
+              setPinAttempts(Math.max(0, 5 - g.attemptsLeft));
+            } catch {
+              const n = pinAttempts + 1;
+              locked = n >= 5;
+              setPinAttempts(locked ? 0 : n);
+            }
+            if (locked) {
+              setPinLockUntil(Date.now() + secs * 1000);
+              setPinError(t('g_pin_offline_locked').split('{n}').join(String(secs)));
             } else {
-              setPinAttempts(n);
               setPinError(pinWrongText());
             }
             return;
           }
           try {
+            try {
+              await resetGrantLoginThrottle();
+            } catch {
+              /* abaikan */
+            }
             await completeOffline(candidate.userId, candidate.username, pin);
           } catch (e) {
             // completeOffline hanya melempar 'unbound' (tanpa ikatan); gate

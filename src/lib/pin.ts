@@ -256,8 +256,140 @@ export interface AttendanceVerify {
 const PIN_MAX_ATTEMPTS = 5;
 const PIN_LOCK_MS = 60_000;
 
+// AUDIT-PIN-PERSIST: throttle PERSISTEN (cermin supervisor.ts CONFIRMED-2):
+// counter in-memory + cermin AsyncStorage agar RESTART aplikasi tak me-reset
+// jendela brute-force (sebelumnya in-memory murni: tiap restart = 5 tebakan
+// gratis baru; KDF PIN hanya 2000x SHA-256 sehingga throttle adalah
+// satu-satunya rem brute-force lokal). Hydrate sekali + sapu latar agar
+// getter sinkron benar segera setelah restart; titik masuk async menunggu
+// hydrate sebelum menilai kunci.
+const LS_PIN_ATT_ATTEMPTS = 'genfity.pin.attendance.attempts';
+const LS_PIN_ATT_LOCKED = 'genfity.pin.attendance.lockedUntil';
+
 let pinAttempts = 0;
 let pinLockedUntil = 0;
+let pinThrottleHydrated = false;
+let pinThrottleHydratePromise: Promise<void> | null = null;
+
+function persistPinThrottle(): void {
+  void setItem(LS_PIN_ATT_ATTEMPTS, String(pinAttempts));
+  void setItem(LS_PIN_ATT_LOCKED, String(pinLockedUntil));
+}
+
+function hydratePinThrottle(): Promise<void> {
+  if (pinThrottleHydrated) return Promise.resolve();
+  if (!pinThrottleHydratePromise) {
+    pinThrottleHydratePromise = (async () => {
+      try {
+        const [a, l] = await Promise.all([
+          getItem(LS_PIN_ATT_ATTEMPTS),
+          getItem(LS_PIN_ATT_LOCKED),
+        ]);
+        const pa = a !== null ? Number.parseInt(a, 10) : 0;
+        const pl = l !== null ? Number.parseInt(l, 10) : 0;
+        pinAttempts = Number.isFinite(pa) && pa > 0 ? Math.min(pa, PIN_MAX_ATTEMPTS) : 0;
+        pinLockedUntil = Number.isFinite(pl) && pl > Date.now() ? pl : 0;
+        if (pinLockedUntil === 0 && pinAttempts >= PIN_MAX_ATTEMPTS) pinAttempts = 0;
+        if (pinAttempts === 0 && pl) persistPinThrottle();
+      } catch {
+        /* memori saja bila storage gagal */
+      } finally {
+        pinThrottleHydrated = true;
+      }
+    })();
+  }
+  return pinThrottleHydratePromise;
+}
+
+// Sapu latar agar getter sinkron (pinAttemptsLeft/isPinLocked) benar segera
+// setelah restart tanpa menunggu panggilan async pertama.
+void hydratePinThrottle();
+
+// ---------------------------------------------------------------------------
+// Throttle LOGIN OFFLINE grant-PIN (LoginScreen, AUDIT-PIN-PERSIST): scope
+// TERPISAH dari attendance di atas agar tally absensi dan tally login tak
+// saling mengunci (paritas pemisahan supervisor-vs-attendance yang sudah
+// ada). Storage-first (tanpa cermin modul) — frekuensi tap cukup rendah
+// sehingga baca-tulis langsung aman; restart aplikasi tak me-reset.
+// Kunci: 5x salah -> 60 dtk (paritas PIN_MAX_ATTEMPTS/PIN_LOCK_MS).
+// ---------------------------------------------------------------------------
+
+const LS_PIN_GRANT_ATTEMPTS = 'genfity.pin.grantlogin.attempts';
+const LS_PIN_GRANT_LOCKED = 'genfity.pin.grantlogin.lockedUntil';
+
+export interface GrantLoginThrottle {
+  locked: boolean;
+  remainingSec: number;
+  attemptsLeft: number;
+}
+
+async function readGrantLoginThrottle(): Promise<{ attempts: number; lockedUntil: number }> {
+  try {
+    const [a, l] = await Promise.all([
+      getItem(LS_PIN_GRANT_ATTEMPTS),
+      getItem(LS_PIN_GRANT_LOCKED),
+    ]);
+    const pa = a !== null ? Number.parseInt(a, 10) : 0;
+    const pl = l !== null ? Number.parseInt(l, 10) : 0;
+    let attempts = Number.isFinite(pa) && pa > 0 ? Math.min(pa, PIN_MAX_ATTEMPTS) : 0;
+    let lockedUntil = Number.isFinite(pl) && pl > Date.now() ? pl : 0;
+    if (lockedUntil === 0 && attempts >= PIN_MAX_ATTEMPTS) {
+      attempts = 0;
+      try {
+        await setItem(LS_PIN_GRANT_ATTEMPTS, '0');
+      } catch {
+        /* abaikan */
+      }
+    }
+    return { attempts, lockedUntil };
+  } catch {
+    return { attempts: 0, lockedUntil: 0 };
+  }
+}
+
+/** Nilai throttle login-offline saat ini (decay bila kunci kedaluwarsa). Tak pernah melempar. */
+export async function checkGrantLoginThrottle(): Promise<GrantLoginThrottle> {
+  const { attempts, lockedUntil } = await readGrantLoginThrottle();
+  const remainingSec = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+  return {
+    locked: remainingSec > 0,
+    remainingSec,
+    attemptsLeft: Math.max(0, PIN_MAX_ATTEMPTS - attempts),
+  };
+}
+
+/** Catat 1 tebakan login-offline salah; kunci bila batas tercapai. Tak pernah melempar. */
+export async function noteGrantLoginFailure(): Promise<GrantLoginThrottle> {
+  try {
+    const { attempts } = await readGrantLoginThrottle();
+    const next = attempts + 1;
+    const lockedUntil = next >= PIN_MAX_ATTEMPTS ? Date.now() + PIN_LOCK_MS : 0;
+    try {
+      await setItem(LS_PIN_GRANT_ATTEMPTS, String(Math.min(next, PIN_MAX_ATTEMPTS)));
+      await setItem(LS_PIN_GRANT_LOCKED, String(lockedUntil));
+    } catch {
+      /* abaikan */
+    }
+    const remainingSec = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+    return {
+      locked: remainingSec > 0,
+      remainingSec,
+      attemptsLeft: Math.max(0, PIN_MAX_ATTEMPTS - Math.min(next, PIN_MAX_ATTEMPTS)),
+    };
+  } catch {
+    return { locked: false, remainingSec: 0, attemptsLeft: 0 };
+  }
+}
+
+/** Reset tally login-offline (dipanggil saat PIN benar / sesi terbentuk). Tak pernah melempar. */
+export async function resetGrantLoginThrottle(): Promise<void> {
+  try {
+    await setItem(LS_PIN_GRANT_ATTEMPTS, '0');
+    await setItem(LS_PIN_GRANT_LOCKED, '0');
+  } catch {
+    /* abaikan */
+  }
+}
 
 /** Sisa detik kunci throttle PIN; 0 bila tidak dikunci. */
 export function pinLockRemainingSec(): number {
@@ -283,11 +415,13 @@ export function pinAttemptsLeft(): number {
 export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify> {
   const clean = pin.replace(/[^0-9]/g, '');
   if (!clean) return { ok: null };
+  await hydratePinThrottle();
   // Kunci kedaluwarsa memberi jendela baru (decay); kunci aktif menolak
   // TANPA verifikasi dan TANPA membakar attempt baru.
   if (pinLockedUntil !== 0 && !isPinLocked()) {
     pinAttempts = 0;
     pinLockedUntil = 0;
+    persistPinThrottle();
   }
   if (isPinLocked()) return { ok: false };
   try {
@@ -300,6 +434,7 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
         if (rec && verifyPinHash(clean, rec)) {
           pinAttempts = 0;
           pinLockedUntil = 0;
+          persistPinThrottle();
           return { ok: true, userId: u.id };
         }
       } catch {
@@ -330,6 +465,7 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
           if (sid) {
             pinAttempts = 0;
             pinLockedUntil = 0;
+            persistPinThrottle();
             return { ok: true, userId: sid };
           }
         }
@@ -343,6 +479,7 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
           if (rec && verifyPinHash(clean, rec)) {
             pinAttempts = 0;
             pinLockedUntil = 0;
+            persistPinThrottle();
             return { ok: true, userId: cand };
           }
         } catch {
@@ -354,6 +491,7 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
         if (rec && verifyPinHash(clean, rec)) {
           pinAttempts = 0;
           pinLockedUntil = 0;
+          persistPinThrottle();
           return { ok: true, userId: sid };
         }
       }
@@ -368,6 +506,7 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
     // PIN salah = tebakan → bakar 1 attempt; capai batas → kunci 60 detik.
     pinAttempts += 1;
     if (pinAttempts >= PIN_MAX_ATTEMPTS) pinLockedUntil = Date.now() + PIN_LOCK_MS;
+    persistPinThrottle();
     return { ok: false };
   } catch {
     // DB belum siap/gagal = BUKAN tebakan → jangan bakar attempt (fail-closed

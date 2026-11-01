@@ -54,6 +54,19 @@ function run() {
   ok(/pinAttempts \+= 1/.test(pin),
     'C6: tebakan salah membakar attempt (throttle hidup)');
 
+  // 5. AUDIT-PIN-PERSIST: throttle tahan restart (sebelumnya in-memory murni
+  //    = tiap restart memberi 5 tebakan gratis; KDF 2000x SHA-256 itu cepat).
+  ok(/hydratePinThrottle/.test(pin) && /genfity\.pin\.attendance\.attempts/.test(pin),
+    'C6: throttle attendance persisten + hydrate (anti reset-restart)');
+  ok(/persistPinThrottle/.test(pin),
+    'C6: tiap mutasi tally attendance di-persist');
+  ok(/checkGrantLoginThrottle/.test(pin) && /noteGrantLoginFailure/.test(pin) && /resetGrantLoginThrottle/.test(pin),
+    'C6: scope grant-login persisten terpisah di pin.ts');
+  ok(/genfity\.pin\.grantlogin\.attempts/.test(pin),
+    'C6: kunci storage grant-login terpisah dari attendance');
+  ok(/checkGrantLoginThrottle/.test(login) && /noteGrantLoginFailure/.test(login),
+    'C6: cabang offline LoginScreen memakai throttle persisten (otoritatif)');
+
   return { failures, checks };
 }
 
