@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
-import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1 } from '../../lib/beWorkforce';
+import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1, updateWorkforcePinOnServer } from '../../lib/beWorkforce';
 import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
  * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
@@ -26,6 +26,8 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
   const [pinMsg, setPinMsg] = useState('');
   /** Popup ganti PIN (dibuka via tombol, bukan seksi inline). */
   const [pinModal, setPinModal] = useState(false);
+  /** Seed 4-digit lama: banner non-blocking + deep-link ke modal ganti PIN. Baru wajib 6-8, lama 4-8 (migrasi). */
+  const [legacyPin, setLegacyPin] = useState(false);
   /** PRO-GATE: null = belum tahu (fail-open); true = Starter = kunci. */
   const [starterLock, setStarterLock] = useState<boolean | null>(null);
   useEffect(() => {
@@ -122,6 +124,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
     if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
+    try { const digits = pin.replace(/[^0-9]/g, ''); if (digits.length >= 4 && digits.length < 6) setLegacyPin(true); } catch { /* abaikan */ }
     await recordClock('in', vIn.userId, await holderName(vIn.userId)); setInTime(fmtClockHM(new Date(), lang)); setOutTime(null); setOnBreak(false);
     try {
       let loc = null;
@@ -175,6 +178,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
     const vOut = await verifyAttendancePin(pin);
     if (vOut.ok !== true || !vOut.userId) { setError(vOut.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
+    try { const digits = pin.replace(/[^0-9]/g, ''); if (digits.length >= 4 && digits.length < 6) setLegacyPin(true); } catch { /* abaikan */ }
     await recordClock('out', vOut.userId, await holderName(vOut.userId)); setOutTime(fmtClockHM(new Date(), lang)); setOnBreak(false);
     try {
       let loc = null;
@@ -211,7 +215,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     if (busy) return;
     setBusy(true);
     try {
-    const v = await verifyAttendancePin(o); if (v.ok !== true || !v.userId) { setPinMsg(v.ok === false ? t('att_old_wrong') : t('shf_pin_offline_unknown')); return; } const userId = v.userId; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; try { const r = await withTimeout(updatePinOnServer(userId, o, n), 8000); sent = r.ok; } catch { /* offline/timeout - antre di bawah */ } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : t('att_pin_saved_pending'));
+    const v = await verifyAttendancePin(o); if (v.ok !== true || !v.userId) { setPinMsg(v.ok === false ? t('att_old_wrong') : t('shf_pin_offline_unknown')); return; } const userId = v.userId; try { await savePinHash(userId, n); } catch { setPinMsg(t('att_save_fail')); return; } try { await initDb(); await markDirty('ms_posuser', userId); } catch { /* abaikan */ } let sent = false; try { const g = await withTimeout(updateWorkforcePinOnServer(o, n), 8000); if (g.ok) sent = true; } catch { /* offline/timeout - coba legacy di bawah */ } if (!sent) { try { const r = await withTimeout(updatePinOnServer(userId, o, n), 8000); if (r.ok) sent = true; } catch { /* offline/timeout - antre di bawah */ } } try { enqueueSync('attendance', { type: 'pin-change', userId, at: new Date().toISOString() }); } catch { /* abaikan */ } try { if (n.length >= 6) setLegacyPin(false); } catch { /* abaikan */ } setPinMsg(sent ? t('att_pin_changed_ok') : t('att_pin_saved_pending'));
     } finally { setBusy(false); }
     setOldPin('');
     setNewPin('');
@@ -259,6 +263,15 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
       {!inTime && <Text style={styles.empty}>{t('att_empty_in')}</Text>}
       {/* S9: banner offline-only eksplisit - selalu tampil, bukan syarat. */}
       <Text style={styles.hint}>{t('att_offline_only')}</Text>
+      {(legacyPin || (pin.replace(/[^0-9]/g, '').length >= 4 && pin.replace(/[^0-9]/g, '').length < 6)) ? (
+        <View style={[styles.card, { borderColor: colors.orange, borderWidth: 1.5 }]}>
+          <Text style={[styles.item, isTablet && styles.itemTablet, { fontFamily: fonts.bold, color: colors.orangeDark }]}>{t('att_pin_legacy_title')}</Text>
+          <Text style={[styles.meta, isTablet && styles.metaTablet, { marginTop: 4 }]}>{t('att_pin_legacy_banner')}</Text>
+          <View style={{ marginTop: 10 }}>
+            <AppButton size="md" title={t('att_pin_legacy_action')} onPress={() => { setPinModal(true); }} />
+          </View>
+        </View>
+      ) : null}
 
       <Text style={styles.sec}>{t('att_pin_entry')}</Text>
       <View style={styles.pinRow}>

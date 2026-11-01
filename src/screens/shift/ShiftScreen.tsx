@@ -269,6 +269,14 @@ const terbilang = (n: number): string => {
             } catch {
               /* abaikan */
             }
+          } else if (ci.reason === 'rejected') {
+            // 4xx deterministik (PIN/validasi): cerminkan ke Sync agar kasir
+            // MELIHAT divergensi lokal-vs-server (drain fail-once jujur).
+            try {
+              enqueueSync('other', clockInPayload());
+            } catch {
+              /* abaikan */
+            }
           }
         } catch {
           /* abaikan */
@@ -279,6 +287,14 @@ const terbilang = (n: number): string => {
             // HP-E2E-FIX-2: sesi kas TERCATAT di server = kontak sukses.
             try { noteServerContact(); } catch { /* abaikan */ }
           } else if (shouldQueueW1(co)) {
+            try {
+              enqueueSync('other', cashOpenPayload(kasAwalNum, catatan.trim() || undefined));
+            } catch {
+              /* abaikan */
+            }
+          } else if (co.reason === 'rejected') {
+            // Buka-sesi ditolak server (mis. register terkunci): cerminkan ke
+            // Sync agar kasir melihatnya (drain fail-once + catatan ramah).
             try {
               enqueueSync('other', cashOpenPayload(kasAwalNum, catatan.trim() || undefined));
             } catch {

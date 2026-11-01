@@ -20,14 +20,15 @@ import ExtraPaySection from './ExtraPaySection';
 import { lineSubtotal, recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getSaleClientId, getOrCreatePayChainId, getGroupPaid } from '../../lib/sales';
 import { uuidv7 } from '../../lib/uuidv7';
-import { getCashSessionId } from '../../lib/beWorkforce';
+import { getCashSessionId, settleWithSessionHeal as settlePosPayment } from '../../lib/beWorkforce';
+// settlePosPayment di layar ini = settleWithSessionHeal (auto-heal SELECTION_REQUIRED bila satu sesi
+// OPEN; delegasi ke settlePosPayment posWire). Alias menjaga literal kontrak W2-05.
 import { publishDisplayOrder } from '../../lib/display';
 import { validatePosVoucherPreview, mapAppModeToGoOrderType, mapSaleItemsToPreviewItems, validateVoucherCode } from '../../lib/apiSource';
 import { enqueueSync, syncWarnLevel } from '../../lib/sync';
 import {
   getServerOrderIdForSale,
   mapPayMethodToBe,
-  settlePosPayment,
   GO_OP_SETTLE,
 } from '../../lib/posWire';
 import { initDb, query as queryDb } from '../../lib/db';
@@ -798,6 +799,8 @@ export default function PayScreen({ navigation, route }: Props) {
    */
 /** W2: cermin pelunasan ke BE (/pos/payment) bila sale tertaut order server.
  *  Tanpa id server / tanpa padanan enum = BLOCKED (diam, lokal tetap sah).
+ *  SELECTION_REQUIRED tanpa sesi eksplisit disembuhkan otomatis bila hanya satu sesi OPEN
+ *  (adopsi + retry SEKALI; >1 sesi = rejection jujur → antre → catatan ramah di Sync).
  *  Immediate gagal (offline/ditolak) = antre GO_OP_SETTLE agar drain
  *  memfinalisasi (retry saat offline, 'gagal'+catatan saat 4xx) — jujur di
  *  SyncScreen, tanpa Success palsu dan tanpa kirim buta. Tak pernah melempar.

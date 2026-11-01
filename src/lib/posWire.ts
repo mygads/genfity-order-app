@@ -38,6 +38,8 @@ const WIRE_STR: Record<string, { id: string; en: string }> = {
   rejected: { id: 'Server menolak: {m}', en: 'Server rejected: {m}' },
   invalidTransition: { id: 'Transisi tak valid: {f} → {t}.', en: 'Invalid transition: {f} → {t}.' },
   needPin: { id: 'Butuh PIN supervisor untuk aksi ini.', en: 'Supervisor PIN required for this action.' },
+  selectionRequired: { id: 'Ada beberapa sesi kas terbuka - pilih satu sesi di FE Laci kas (atau tutup yang lain), lalu ulangi. Tak diantrekan buta.', en: 'Multiple cash sessions are open - pick one in FE Cash drawer (or close the others), then retry. Not queued blindly.' },
+  locationFailed: { id: 'Lokasi tak terverifikasi (geofence aktif). Dekatkan perangkat ke outlet / aktifkan GPS, lalu ulangi.', en: 'Location not verified (geofence on). Move closer to the outlet / enable GPS, then retry.' },
   ok: { id: 'Tersinkron ke server.', en: 'Synced to server.' },
 };
 
@@ -63,7 +65,30 @@ export function wireTr(key: string, vars?: Record<string, string>): string {
 export type GoReason = 'offline' | 'blocked' | 'rejected' | 'error';
 export type GoResult<T> =
   | { ok: true; data: T }
-  | { ok: false; reason: GoReason; code?: string; message?: string };
+  | { ok: false; reason: GoReason; code?: string; message?: string; status?: number };
+
+const W2_SELECTION_CODES = new Set(['CASH_SESSION_SELECTION_REQUIRED', 'SESSION_SELECTION_REQUIRED', 'SELECTION_REQUIRED']);
+
+export function isSelectionRequiredCodeW2(code: unknown): boolean {
+  return W2_SELECTION_CODES.has(String(code ?? '').trim().toUpperCase());
+}
+
+function friendlyWireMessage(code: string, fallback: string): string {
+  const c = String(code ?? '').trim().toUpperCase();
+  if (!c) return fallback;
+  if (c === 'PIN_REQUIRED' || c.startsWith('SUPERVISOR_PIN_') || c.startsWith('USER_PIN_')) return wireTr('needPin');
+  if (c === 'LOCATION_CHECK_FAILED') return wireTr('locationFailed');
+  if (W2_SELECTION_CODES.has(c)) return wireTr('selectionRequired');
+  return fallback;
+}
+
+/** Layak antre (offline/5xx) vs error jujur final (4xx deterministik: PIN/SELECTION/LOCATION/validasi). */
+export function shouldQueueW2<T extends { ok: boolean; reason?: string; status?: number }>(r: T): boolean {
+  if (r.ok) return false;
+  if ((r as { reason?: string }).reason === 'offline') return true;
+  if ((r as { reason?: string }).reason === 'error') return true;
+  return false;
+}
 
 /** P1-1b: 400 PIN_REQUIRED seragam (payment/refund/void/cancel) → pemanggil
  * boleh minta PIN manajer lalu ulangi live SEKALI (transport-only; antrean
@@ -492,11 +517,17 @@ export async function pushOrderStatus(
     const { data } = unwrap<unknown>(res.data);
     if (res.ok) return { ok: true, data: { replayed: isReplaySuccess(data) } };
     const be = beErrorOf(data ?? res.data);
+    const code = be.code || String(res.status);
+    const fallback = wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` });
+    if (res.status >= 500 || res.status === 429) {
+      return { ok: false, reason: 'error', code, message: be.message || fallback, status: res.status };
+    }
     return {
       ok: false,
       reason: 'rejected',
-      code: be.code || String(res.status),
-      message: wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` }),
+      code,
+      message: friendlyWireMessage(code, fallback),
+      status: res.status,
     };
   } catch {
     return { ok: false, reason: 'offline', message: wireTr('offline') };
@@ -676,13 +707,20 @@ export async function settlePosPayment(inp: SettleInput): Promise<GoResult<Settl
       return { ok: true, data: { replayed: true, ...withMember, ...withDropped } };
     }
     const be = beErrorOf(data ?? res.data);
-    // SESI-FINAL-APP: 409 PROOF_REQUIRED dilewatkan apa adanya (be.code) —
+    const code = be.code || String(res.status);
+    const fallback = wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` });
+    // 5xx/429 = layak antre (error), 4xx deterministik = rejected jujur (jangan antre buta).
+    if (res.status >= 500 || res.status === 429) {
+      return { ok: false, reason: 'error', code, message: be.message || fallback, status: res.status };
+    }
+    // SESI-FINAL-APP: 409 PROOF_REQUIRED dilewatkan apa adanya (be.code) -
     // PayScreen menahannya sebagai hold + banner, BUKAN Success palsu.
     return {
       ok: false,
       reason: 'rejected',
-      code: be.code || String(res.status),
-      message: wireTr('rejected', { m: be.message || be.code || `HTTP ${res.status}` }),
+      code,
+      message: friendlyWireMessage(code, fallback),
+      status: res.status,
     };
   } catch {
     return { ok: false, reason: 'offline', message: wireTr('offline') };

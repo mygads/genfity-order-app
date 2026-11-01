@@ -288,9 +288,11 @@ export const ApiPath = {
   merchantClockIn: 'api/merchant/workforce/shifts/clock-in', // POST {terminalId?,pin?,latitude?,longitude?,accuracyMeters?}
   merchantClockOut: 'api/merchant/workforce/shifts/clock-out', // POST {terminalId?,pin?,latitude?,longitude?,accuracyMeters?}
   merchantBreak: 'api/merchant/workforce/shifts/break', // POST {action: START|END}
+  merchantWorkforcePin: 'api/merchant/workforce/pin', // PUT {pin (baru 6-8), currentPin (lama apa adanya, bcrypt-only), password?}
   merchantManagerClock: 'api/merchant/workforce/manager-clock', // POST {userId,action,note,terminalId?}
   merchantCurrentShift: 'api/merchant/workforce/current-shift', // GET shift milik sendiri
   merchantPosCashSessions: 'api/merchant/pos/cash-sessions', // GET sesi kas OPEN
+  merchantCashRegisters: 'api/merchant/cash-registers', // GET daftar register + sesi OPEN (picker multi-register)
   merchantCashOpen: 'api/merchant/cash-registers/sessions', // POST {registerId,openingCash,note?,terminalId?}
   merchantCashMove: 'api/merchant/cash-registers/sessions/{sessionId}/movements', // POST {type,amount,reason}
   merchantCashClose: 'api/merchant/cash-registers/sessions/{sessionId}/close', // POST {actualCash,note?}

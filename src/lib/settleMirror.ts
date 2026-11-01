@@ -17,12 +17,11 @@
  * berisiko settle-duplikat beda nominal; kunjungan grup mengandalkan drain
  * (create → tautan HP-E2E → GO_OP_SETTLE idempoten).
  */
-import { getCashSessionId } from './beWorkforce';
+import { getCashSessionId, settleWithSessionHeal } from './beWorkforce';
 import {
   GO_OP_SETTLE,
   getServerOrderIdForSale,
   mapPayMethodToBe,
-  settlePosPayment,
   type SettleResult,
 } from './posWire';
 import { parseCustomerId } from './memberRef';
@@ -76,7 +75,7 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
         ? String(inp.proofUrl ?? '').trim().slice(0, 2048)
         : '';
       const notesClean = String(inp.notes ?? '').trim().slice(0, 500);
-      const res = await settlePosPayment({
+      const res = await settleWithSessionHeal({
         serverId,
         method: beMethod,
         amountPaid: inp.amount,

@@ -178,6 +178,19 @@ import React, { useEffect, useState } from 'react';import {
               note: catatan.trim() ? catatan.trim().slice(0, 500) : null,
               at: new Date().toISOString(),
             });
+          } else if (close.reason === 'rejected') {
+            // Ditolak deterministik (mis. PIN/server-sesi basi): JANGAN diam -
+            // cerminkan ke Sync dgn hint sesi agar drain fail-once jujur
+            // (kasir melihat + menyelesaikan di FE Laci kas).
+            try {
+              const { cashClosePayload } = await import('../../lib/beWorkforce');
+              enqueueSync('other', {
+                ...cashClosePayload(kasFisikNum, catatan.trim() || undefined),
+                serverSessionId: sid,
+              });
+            } catch {
+              /* abaikan */
+            }
           }
         } else if (close.data.pendingManagerReview) {
           // Sesi butuh review manager kedua: stash sid agar ShiftScreen

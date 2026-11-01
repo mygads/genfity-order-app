@@ -128,6 +128,14 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
               } catch {
                 /* abaikan */
               }
+            } else if (!mv.ok && mv.reason === 'rejected') {
+              // Ditolak deterministik: cerminkan ke Sync dgn hint sesi agar
+              // kasir melihatnya (drain fail-once + catatan ramah).
+              try {
+                enqueueSync('other', { ...cashMovePayload(moveType, jumlahNum, reason), serverSessionId: sid });
+              } catch {
+                /* abaikan */
+              }
             }
           } else {
             try {

@@ -33,7 +33,8 @@ import { ApiPath, getTerminal } from '../config/server';
 import { apiFetch, getApiMode, unwrap } from './apiSource';
 import { getItem, setItem } from './storage';
 import { getLang } from './i18n';
-import { beErrorOf } from './posWire';
+import { beErrorOf, isSelectionRequiredCodeW2, settlePosPayment } from './posWire';
+import type { GoResult, SettleInput, SettleResult } from './posWire';
 
 // ---------------------------------------------------------------------------
 // Nama op antrean W1 (dishare ke sync.ts pathFor - satu sumber nama).
@@ -42,6 +43,7 @@ import { beErrorOf } from './posWire';
 // ---------------------------------------------------------------------------
 export const W1_OP_CLOCK_IN = 'be-clock-in';
 export const W1_OP_CLOCK_OUT = 'be-clock-out';
+export const W1_OP_BREAK = 'be-break';
 export const W1_OP_CASH_OPEN = 'be-cash-open';
 export const W1_OP_CASH_MOVE = 'be-cash-move';
 export const W1_OP_CASH_CLOSE = 'be-cash-close';
@@ -62,6 +64,10 @@ const WF_STR: Record<string, { id: string; en: string }> = {
   needPin: { id: 'Server mewajibkan PIN untuk aksi ini.', en: 'Server requires a PIN for this action.' },
   needSession: { id: 'Belum ada sesi kas server - buka sesi dulu saat online.', en: 'No server cash session yet - open one while online.' },
   openOrders: { id: 'Masih ada order belum bayar di sesi kas ini.', en: 'This cash session still has unpaid orders.' },
+  selectionRequired: { id: 'Ada beberapa sesi kas terbuka - pilih salah satu di FE Laci kas (atau tutup yang lain), lalu ulangi. Tak diantrekan buta.', en: 'Multiple cash sessions are open - pick one in FE Cash drawer (or close the others), then retry. Not queued blindly.' },
+  locationFailed: { id: 'Lokasi tak terverifikasi (geofence aktif). Dekatkan perangkat ke outlet / aktifkan GPS akurasi tinggi, lalu ulangi.', en: 'Location not verified (geofence on). Move closer to the outlet / enable high-accuracy GPS, then retry.' },
+  sessionClosed: { id: 'Sesi kas ini sudah ditutup di server.', en: 'This cash session is already closed on the server.' },
+  shiftRequired: { id: 'Butuh shift aktif - clock-in dulu sebelum aksi kas.', en: 'An active shift is required - clock in before cash actions.' },
   ok: { id: 'Tersinkron ke server.', en: 'Synced to server.' },
 };
 
@@ -157,14 +163,61 @@ function withLiveAuth(body: Record<string, unknown>, pin?: unknown, loc?: WfLoca
   return out;
 }
 
-/** Coba ambil lokasi GPS bila tersedia (web/navigator); native tanpa expo-location = undefined jujur. */
+/**
+ * Ambil lokasi GPS POS (native-first expo-location, fallback web).
+ * - Native: minta izin foreground SEKALI, baca Balanced (hemat baterai, cukup
+ *   untuk geofence outlet), timeout 8 dtk. Izin ditolak = null jujur (layar
+ *   menampilkan LOCATION_CHECK_FAILED ramah, tak menggantung UI).
+ * - Web/dev: fallback navigator.geolocation.
+ * - Offline: GPS tetap dicoba (GPS tak butuh internet); gagal = null.
+ * Tak pernah melempar.
+ */
 export async function getPosLocation(timeoutMs = 8000): Promise<WfLocation | null> {
+  const ms = Math.max(1000, Math.floor(Number(timeoutMs) || 8000));
+  // 1) Native expo-location (dinamis agar bundel web tanpa modul tetap jalan).
+  try {
+    type ExpoLoc = {
+      requestForegroundPermissionsAsync?: () => Promise<{ status?: string }>;
+      getCurrentPositionAsync?: (opts?: Record<string, unknown>) => Promise<{ coords?: { latitude?: number; longitude?: number; accuracy?: number | null } }>;
+      Accuracy?: { Balanced?: number };
+    };
+    let Loc: ExpoLoc | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const req = require('expo-location') as ExpoLoc | null | undefined;
+      Loc = req ?? null;
+    } catch {
+      Loc = null;
+    }
+    if (Loc?.requestForegroundPermissionsAsync && Loc?.getCurrentPositionAsync) {
+      try {
+        const perm = await withTimeoutMs(Loc.requestForegroundPermissionsAsync(), Math.min(ms, 8000));
+        if (String((perm as { status?: unknown })?.status ?? '').toLowerCase() !== 'granted') return null;
+        const pos = await withTimeoutMs(
+          Loc.getCurrentPositionAsync({ accuracy: Loc.Accuracy?.Balanced ?? 3 }),
+          ms,
+        );
+        const c = (pos as { coords?: { latitude?: number; longitude?: number; accuracy?: number | null } })?.coords;
+        if (c && Number.isFinite(c.latitude as number) && Number.isFinite(c.longitude as number)) {
+          const out: WfLocation = { latitude: c.latitude as number, longitude: c.longitude as number };
+          if (Number.isFinite(c.accuracy as number)) out.accuracyMeters = c.accuracy as number;
+          return out;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    }
+  } catch {
+    /* jatuh ke fallback web di bawah */
+  }
+  // 2) Fallback web/navigator (Expo web + dev-client tanpa expo-location).
   try {
     const g = (globalThis as unknown as { navigator?: { geolocation?: { getCurrentPosition: (...a: unknown[]) => void } } }).navigator?.geolocation;
     if (!g) return null;
     return await new Promise<WfLocation | null>((resolve) => {
       let done = false;
-      const timer = setTimeout(() => { if (!done) { done = true; resolve(null); } }, timeoutMs);
+      const timer = setTimeout(() => { if (!done) { done = true; resolve(null); } }, ms);
       try {
         g.getCurrentPosition(
           (pos: unknown) => {
@@ -176,10 +229,24 @@ export async function getPosLocation(timeoutMs = 8000): Promise<WfLocation | nul
             resolve({ latitude: c.latitude as number, longitude: c.longitude as number, accuracyMeters: c.accuracy as number });
           },
           () => { if (!done) { done = true; clearTimeout(timer); resolve(null); } },
-          { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 } as unknown,
+          { enableHighAccuracy: true, timeout: ms, maximumAge: 30000 } as unknown,
         );
       } catch { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
     });
+  } catch { return null; }
+}
+
+/** Izin lokasi foreground sudah diberikan? null = modul lokasi tak tersedia. */
+export async function getLocationPermissionState(): Promise<'granted' | 'denied' | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Loc = require('expo-location') as { getForegroundPermissionsAsync?: () => Promise<{ status?: string }> };
+    if (!Loc?.getForegroundPermissionsAsync) return null;
+    const r = await withTimeoutMs(Loc.getForegroundPermissionsAsync(), 4000);
+    const st = String((r as { status?: unknown })?.status ?? '').toLowerCase();
+    if (st === 'granted') return 'granted';
+    if (st) return 'denied';
+    return null;
   } catch { return null; }
 }
 
@@ -247,13 +314,37 @@ async function postWithStampRetry(path: string, body: Record<string, unknown>, l
   return first;
 }
 
+const SELECTION_CODES = new Set(['CASH_SESSION_SELECTION_REQUIRED', 'SESSION_SELECTION_REQUIRED', 'SELECTION_REQUIRED']);
+
+export function isSelectionRequiredCode(code: unknown): boolean {
+  return SELECTION_CODES.has(String(code ?? '').trim().toUpperCase());
+}
+
+export function isSelectionRequiredResult<T>(r: WfResult<T>): boolean {
+  return !r.ok && r.reason === 'rejected' && isSelectionRequiredCode((r as { code?: unknown }).code);
+}
+
+function friendlyWfMessage(code: string, fallback: string): string {
+  const c = String(code ?? '').trim().toUpperCase();
+  if (!c) return fallback;
+  if (c === 'PIN_REQUIRED' || c.startsWith('SUPERVISOR_PIN_') || c.startsWith('USER_PIN_')) return wfTr('needPin');
+  if (c === 'LOCATION_CHECK_FAILED') return wfTr('locationFailed');
+  if (SELECTION_CODES.has(c)) return wfTr('selectionRequired');
+  if (c === 'OPEN_POS_ORDERS') return wfTr('openOrders');
+  if (c === 'CASH_SESSION_REQUIRED' || c === 'CASH_SESSION_CLOSED' || c === 'SESSION_CLOSED') return wfTr('needSession');
+  if (c === 'SHIFT_REQUIRED' || c === 'NO_OPEN_SHIFT' || c === 'SHIFT_ALREADY_CLOSED') return wfTr('shiftRequired');
+  return fallback;
+}
+
 function rejected<T>(status: number, body: unknown): WfResult<T> {
   const be = beErrorOf(body);
+  const code = be.code || `HTTP_${status}`;
+  const fallback = wfTr('rejected', { m: be.message || be.code || `HTTP ${status}` });
   return {
     ok: false,
     reason: 'rejected',
-    code: be.code || `HTTP_${status}`,
-    message: wfTr('rejected', { m: be.message || be.code || `HTTP ${status}` }),
+    code,
+    message: friendlyWfMessage(code, fallback),
     status,
   };
 }
@@ -867,13 +958,145 @@ export function cashApprovePayload(sessionId: string | number, note: string): Re
   };
 }
 
+/** Ganti PIN workforce ke Backend Go (PUT workforce/pin {pin baru 6-8, currentPin lama}).
+ * - PIN lama diteruskan APA ADANYA (4-8 digit): BE hanya bcrypt-verify tanpa cek panjang,
+ *   sehingga seed 4-digit lama LOLOS migrasi ke 6-8.
+ * - PIN baru digate lokal 6-8 digit cermin BE (hemat round-trip).
+ * - Best-effort: offline/timeout/local-mode = {ok:false}; TAK PERNAH melempar.
+ * - Dipakai AttendanceScreen berdampingan legacy esb/employee/update-pin (fallback),
+ *   agar hash server Go (staff_pos_pins) ikut mutakhir - bukan cuma hash lokal + legacy.
+ */
+export async function updateWorkforcePinOnServer(
+  oldPin: string,
+  newPin: string,
+): Promise<{ ok: boolean; fromDummy: boolean }> {
+  try {
+    const o = String(oldPin ?? '').replace(/[^0-9]/g, '');
+    const n = String(newPin ?? '').replace(/[^0-9]/g, '');
+    if (o.length < 4 || o.length > 8 || n.length < 6 || n.length > 8) return { ok: false, fromDummy: false };
+    if (!isW1Online()) return { ok: false, fromDummy: false };
+    const res = await withTimeoutMs(
+      apiFetch(ApiPath.merchantWorkforcePin, { method: 'PUT', body: { pin: n, currentPin: o } }),
+      BE_WF_TIMEOUT_MS,
+    );
+    if (res.fromDummy || res.status === 0) return { ok: false, fromDummy: true };
+    if (!res.ok) return { ok: false, fromDummy: false };
+    return { ok: true, fromDummy: false };
+  } catch {
+    return { ok: false, fromDummy: false };
+  }
+}
+
+/**
+ * Settle dengan penyembuhan-sesi otomatis (auto-heal SELECTION_REQUIRED).
+ * Rumahnya di sisi W1 (beWorkforce) agar sekat lane terjaga: posWire (W2)
+ * TAK mengimpor beWorkforce (tripwire W1-05). Dipakai PayScreen + settleMirror.
+ * Alur kasir tanpa friksi: sale lokal sudah sah, uang sudah diterima.
+ * - Settle tanpa cashSessionId eksplisit yang ditolak SELECTION_REQUIRED
+ *   (perangkat tak punya id sesi tapi server punya BANYAK sesi OPEN):
+ *   ambil daftar sesi OPEN; bila TEPAT SATU → adopsi (persist) + ulangi settle
+ *   SEKALI. Bila >1/nol/gagal-list → kembalikan rejection jujur (pemanggil
+ *   mengantrekan GO_OP_SETTLE → Sync menampilkan catatan ramah; kasir memilih
+ *   di FE Laci kas).
+ * Tak pernah melempar (gagal-heal = rejection pertama).
+ */
+export async function settleWithSessionHeal(inp: SettleInput): Promise<GoResult<SettleResult>> {
+  const first = await settlePosPayment(inp);
+  if (first.ok) return first;
+  if (first.reason !== 'rejected' || !isSelectionRequiredCodeW2(first.code)) return first;
+  if (Math.max(0, Math.round(Number(inp.cashSessionId) || 0)) > 0) return first;
+  try {
+    const list = await listOpenCashSessionsBe();
+    if (list.ok && list.data.length === 1) {
+      const sid = String(list.data[0].sessionId ?? '').trim();
+      const n = parseInt(sid, 10);
+      if (!Number.isFinite(n) || n <= 0) return first;
+      try { await chooseCashSessionId(sid); } catch { /* lanjut retry walau persist gagal */ }
+      return settlePosPayment({ ...inp, cashSessionId: n });
+    }
+  } catch { /* abaikan: kembalikan rejection jujur */ }
+  return first;
+}
+
 /** Layak diantrekan ke sync (offline/5xx/429) vs error jujur final (4xx deterministik). */
 export function shouldQueueW1<T>(r: WfResult<T>): boolean {
   if (r.ok) return false;
   if (r.reason === 'offline') return true;
   if (r.reason === 'error') {
-    const s = r.status ?? 0;
-    return s === 0 || s >= 500 || s === 429;
+    const st = r.status ?? 0;
+    return st === 0 || st >= 500 || st === 429;
   }
+  // 'rejected' (PIN_REQUIRED / LOCATION_CHECK_FAILED / SELECTION_REQUIRED /
+  // OPEN_POS_ORDERS / validasi) = JANGAN antre buta - kasir perbaiki live.
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-register: daftar register + sesi OPEN untuk picker jujur.
+// Single LS_CASH_SESSION per device tetap (multi-register via FE per-register,
+// BE per-register). Bila server menjawab CASH_SESSION_SELECTION_REQUIRED,
+// layar memanggil listOpenCashSessionsBe() lalu kasir memilih satu sesi untuk
+// setCashSessionId() - tanpa tebak-tebakan, tanpa kirim buta.
+// ---------------------------------------------------------------------------
+export interface OpenCashSession {
+  sessionId: string;
+  registerId: number;
+  registerName: string;
+  openedBy: string;
+  openingCash: number;
+  openedAt: string;
+}
+
+function parseOpenSessions(body: unknown): OpenCashSession[] {
+  try {
+    const root = (body ?? {}) as Record<string, unknown>;
+    const inner = ((root.data ?? root) ?? {}) as Record<string, unknown>;
+    const items = (inner.items ?? inner.registers ?? inner.sessions ?? []) as unknown;
+    if (!Array.isArray(items)) return [];
+    const out: OpenCashSession[] = [];
+    for (const e of items) {
+      if (!e || typeof e !== 'object') continue;
+      const r = e as Record<string, unknown>;
+      const sess = (r.session ?? r) as Record<string, unknown>;
+      const sid = sess.id ?? r.sessionId ?? r.session_id;
+      const sidStr = String(sid ?? '').trim();
+      if (!isServerSessionId(sidStr)) continue;
+      out.push({
+        sessionId: sidStr,
+        registerId: Math.round(numOf(r.id ?? r.registerId ?? r.register_id)),
+        registerName: strOf(r.name ?? r.registerName ?? r.register_name) || `Register ${r.id ?? ''}`.trim(),
+        openedBy: strOf(sess.openedBy ?? sess.opened_by ?? r.openedBy ?? ''),
+        openingCash: numOf(sess.openingCash ?? sess.opening_cash),
+        openedAt: strOf(sess.openedAt ?? sess.opened_at),
+      });
+    }
+    return out;
+  } catch { return []; }
+}
+
+export async function listOpenCashSessionsBe(): Promise<WfResult<OpenCashSession[]>> {
+  if (!isW1Online()) return offlineResult();
+  try {
+    const res = await withTimeoutMs(apiFetch(ApiPath.merchantCashRegisters, { method: 'GET' }));
+    if (res.fromDummy || res.status === 0) return offlineResult();
+    if (res.ok) {
+      const { data } = unwrap<unknown>(res.data);
+      return { ok: true, data: parseOpenSessions(data) };
+    }
+    const be = beErrorOf(res.data);
+    if (res.status >= 500 || res.status === 429) {
+      return { ok: false, reason: 'error', code: be.code || `HTTP_${res.status}`, message: be.message || wfTr('offline'), status: res.status };
+    }
+    return rejected(res.status, res.data);
+  } catch {
+    return offlineResult();
+  }
+}
+
+/** Pilih sesi kas secara eksplisit pasca-SELECTION_REQUIRED (persist single id). */
+export async function chooseCashSessionId(sessionId: string | number): Promise<boolean> {
+  const sid = String(sessionId ?? '').trim();
+  if (!isServerSessionId(sid)) return false;
+  await setCashSessionId(sid);
+  return true;
 }

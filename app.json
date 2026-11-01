@@ -17,7 +17,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "id.genfity.pos"
+      "bundleIdentifier": "id.genfity.pos",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Izinkan Genfity POS memakai lokasi untuk verifikasi absensi (geofence outlet)."
+      }
     },
     "android": {
       "package": "id.genfity.pos",
@@ -32,8 +35,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -57,6 +60,14 @@
         {
           "photosPermission": "Izinkan Genfity POS mengakses galeri untuk melampirkan foto bukti kas kecil.",
           "cameraPermission": "Izinkan Genfity POS memakai kamera untuk memotret bukti kas kecil."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Izinkan Genfity POS memakai lokasi untuk verifikasi absensi (geofence outlet).",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": false
         }
       ],
       "./modules/genfity-printer/app.plugin.js",
