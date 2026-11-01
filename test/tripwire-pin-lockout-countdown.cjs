@@ -42,6 +42,21 @@ function run() {
   ok(/retryAfterSec: readTerminalErrorRetryAfter\(raw\)/.test(tapi),
     'terminalApi: cabang gagal pin-verify membawa retryAfterSec dari body');
   // 4. Supervisor: countdown server jujur di pesan (tanpa ubah throttle).
+  //    AUDIT-V3: klasifikasi 401 faktor-PIN juga mencakup terminal-PIN
+  //    (PIN_INVALID) + gerbang manager/owner (INVALID_PIN) — salah ketik PIN
+  //    manajer saat bayar tak boleh me-logout kasir (regex diekstrak asli).
+  const apiSrc = readRaw('lib/apiSource.ts');
+  const rxSrc = (apiSrc.match(/const PIN_FACTOR_401_RE\s*=\s*(\/.*?\/);/) || [])[1];
+  ok(!!rxSrc, 'apiSource: PIN_FACTOR_401_RE terekstrak dari sumber');
+  if (rxSrc) {
+    const rx = eval(rxSrc);
+    for (const code of ['PIN_REQUIRED', 'PIN_INVALID', 'USER_PIN_INVALID', 'USER_PIN_LOCKED', 'SUPERVISOR_PIN_INVALID', 'INVALID_PIN']) {
+      ok(rx.test(code), `apiSource: 401 ${code} = faktor-PIN (tanpa logout)`);
+    }
+    for (const code of ['UNAUTHORIZED', 'SESSION_EXPIRED', 'TOKEN_INVALID', 'SESSION_INVALID']) {
+      ok(!rx.test(code), `apiSource: 401 ${code} tetap sesi-mati (refresh+logout)`);
+    }
+  }
   ok(/bodyRetryAfterSeconds\(r\.data\)/.test(sup) && /locked\(serverRetrySec\)/.test(sup),
     'supervisor: countdown server diteruskan ke pesan locked');
   ok(/const LOCK_MS = 60_000/.test(sup) && /const MAX_ATTEMPTS = 5/.test(sup),

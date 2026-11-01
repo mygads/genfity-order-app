@@ -303,8 +303,11 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler): void {
  * AUDIT-V2 (kill): SUPERVISOR_PIN_* milik endpoint supervisor-approve V1 -
  * PIN supervisor salah = 401 SUPERVISOR_PIN_INVALID (supervisor_approve.go:
  * 231-232), BUKAN sesi kasir mati. Tanpa prefix ini, satu PIN supervisor
- * salah di Real mode memicu unauthorizedHandler → logout() kasir. */
-const PIN_FACTOR_401_RE = /^(USER_PIN_|PIN_REQUIRED|SUPERVISOR_PIN_)/;
+ * salah di Real mode memicu unauthorizedHandler → logout() kasir.
+ * AUDIT-V3: PIN_INVALID (terminal-PIN salah di bind/claim/validate)
+ * dan INVALID_PIN (gerbang manager/owner di payment/edit/void) juga faktor-PIN:
+ * tanpanya satu salah ketik PIN manajer saat bayar me-logout kasir tengah shift. */
+const PIN_FACTOR_401_RE = /^(USER_PIN_|PIN_REQUIRED|SUPERVISOR_PIN_|PIN_INVALID|INVALID_PIN$)/;
 function errorCodeOf(body: unknown): string {
   try {
     const b = (body ?? {}) as Record<string, unknown>;
