@@ -244,7 +244,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         /* abaikan */
       }
       try {
-        enqueueSync('other', { op: 'table-clear', table: tb, at: new Date().toISOString() });
+        enqueueSync('other', { op: 'table-clear', id: `tc-${Date.now()}`, table: tb, at: new Date().toISOString() });
       } catch {
         /* abaikan */
       }

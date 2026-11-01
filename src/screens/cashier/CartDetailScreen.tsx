@@ -351,7 +351,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           try {
             await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', table.trim()]);
             try {
-              enqueueSync('other', { op: 'table-occupy', table, at: now });
+              enqueueSync('other', { op: 'table-occupy', id: `to-${Date.now()}`, table, at: now });
             } catch {
               /* abaikan */
             }

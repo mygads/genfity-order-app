@@ -1485,6 +1485,7 @@ const STR: Record<string, Entry> = {
   att_save_fail: { id: 'Gagal menyimpan PIN baru.', en: 'Failed to save the new PIN.' },
   att_pin_changed_ok: { id: 'PIN berhasil diganti.', en: 'PIN changed successfully.' },
   att_pin_saved_pending: { id: 'PIN berubah di perangkat ini saja. Ulangi ganti PIN saat online agar sinkron ke server.', en: 'PIN changed on this device only. Repeat the change while online to sync it to the server.' },
+  att_pin_diverged: { id: 'PIN perangkat dan server berbeda (perubahan offline belum sinkron). Minta manajer reset PIN via dashboard, lalu masuk online untuk sinkron.', en: 'Device and server PINs differ (offline change not synced). Ask a manager to reset the PIN via dashboard, then sign in online to sync.' },
   att_pin_pending_banner: { id: 'PIN perangkat ini belum sinkron ke server. Ganti + simpan ulang saat online.', en: 'This device PIN is not yet synced to the server. Change + save again while online.' },
   att_pin_legacy_title: { id: 'PIN lama terdeteksi', en: 'Legacy PIN detected' },
   att_pin_legacy_banner: { id: 'PIN kamu masih 4-5 digit (seed lama). Ganti ke 6-8 digit agar absensi + buka shift tetap lancar.', en: 'Your PIN is still 4-5 digits (legacy seed). Change it to 6-8 digits to keep attendance + shift open smooth.' },
