@@ -271,7 +271,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
   // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
   // APP-11: gerbang template yang sama dengan kertas (thanks/branding hanya
   // di mode template - legacy tak pernah memilikinya di teks bagikan).
-  const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...((tplOn && tp?.showUnitPrice) ? [`  @ ${rp(Math.round(lineTotal(it) / Math.max(1, it.qty)))}`] : []), ...((!tp || tp.showAddons) ? (it.modifiers ?? []) : []).map((m) => ` + ${m.name}${(!tp || tp.showAddonPrices) ? ` ${rp(m.price * it.qty)}` : ''}`), ...(((tp?.showItemNotes && it.note) || (it.note && /tujuan|pulsa|→/i.test(`${it.name} ${it.note}`))) ? [`★ ${it.note}`] : []), ]) : [];
+  const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${tplOn ? `${it.qty} x ${it.name}` : `${it.qty}x ${it.name}`} - ${rp(lineTotal(it))}`, ...((tplOn && tp?.showUnitPrice) ? [`  @ ${rp(Math.round(lineTotal(it) / Math.max(1, it.qty)))}${tplLang === 'id' ? ' per item' : ' each'}`] : []), ...((!tp || tp.showAddons) ? (it.modifiers ?? []) : []).map((m) => ` + ${m.name}${(!tp || tp.showAddonPrices) ? ` ${rp(m.price * it.qty)}` : ''}`), ...(((tp?.showItemNotes && it.note) || (it.note && /tujuan|pulsa|→/i.test(`${it.name} ${it.note}`))) ? [`★ ${it.note}`] : []), ]) : [];
   const shareHead = tplOn
     ? [tplEff.showMerchantName ? shopName : '', [orderNoLabelTpl, typeLineTpl].filter((s) => s).join(' - ')].filter((s) => s).join(' - ')
     : `${shopName} - Struk ${no} - ${mode}`;
