@@ -141,31 +141,45 @@ function sha256Hex(input: string): string {
 // KDF: salt acak + iterasi SHA-256 berantai.
 // ---------------------------------------------------------------------------
 
-const PIN_ITER = 2000;
+// KDF 20_000x (naik 10x dari 2000x; benchmark 2026-11: ~200ms di node dev,
+// <1 dtk di perangkat low-end — 100_000x = 1.5 dtk di dev = terlalu berat
+// untuk UX login. Biaya offline-brute-force naik 10x; pertahanan utama tetap
+// throttle 5x/60dtk + SecureStore + salt acak. Record lama (iter 2000) tetap
+// lolos verifikasi; hash baru dibuat saat ganti-PIN (migrasi alami).
+const PIN_ITER = 20000;
 
 function randomHex(len: number): string {
   // CSPRNG (Q7): salt PIN 64-bit tak boleh dari Math.random yang prediktabel.
   return randomHexCsprng(len);
 }
 
+/** Jepit iterasi ke rentang sah agar record korup tak memicu loop raksasa. */
+function clampIter(n: unknown): number {
+  const v = typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : PIN_ITER;
+  return Math.min(Math.max(v, 1), PIN_ITER);
+}
+
 /** Turunkan record hash dari PIN (PIN asli tidak dikembalikan). */
-export function hashPin(pin: string, salt?: string): {
+export function hashPin(pin: string, salt?: string, iter?: number): {
   salt: string;
   hash: string;
   iter: number;
 } {
   const s = salt ?? randomHex(16);
+  const n = clampIter(iter);
   let h = sha256Hex(`${s}:${pin}`);
-  for (let i = 1; i <= PIN_ITER; i += 1) {
+  for (let i = 1; i <= n; i += 1) {
     h = sha256Hex(`${h}:${pin}:${i}`);
   }
-  return { salt: s, hash: h, iter: PIN_ITER };
+  return { salt: s, hash: h, iter: n };
 }
 
 /** Cocokkan PIN kandidat dengan record tersimpan (tanpa membocorkan PIN). */
 export function verifyPinHash(pin: string, rec: PinRecord): boolean {
   if (!rec || rec.iter <= 0 || !rec.salt || !rec.hash) return false;
-  const { hash } = hashPin(pin, rec.salt);
+  // Kompatibel-mundur: record lama (iter 2000) diverifikasi dengan iterasi
+  // aslinya (dijepit); hash baru (iter 20000) lahir saat ganti-PIN.
+  const { hash } = hashPin(pin, rec.salt, clampIter(rec.iter));
   if (hash.length !== rec.hash.length) return false;
   let diff = 0;
   for (let i = 0; i < hash.length; i += 1) {
@@ -259,7 +273,7 @@ const PIN_LOCK_MS = 60_000;
 // AUDIT-PIN-PERSIST: throttle PERSISTEN (cermin supervisor.ts CONFIRMED-2):
 // counter in-memory + cermin AsyncStorage agar RESTART aplikasi tak me-reset
 // jendela brute-force (sebelumnya in-memory murni: tiap restart = 5 tebakan
-// gratis baru; KDF PIN hanya 2000x SHA-256 sehingga throttle adalah
+// gratis baru; KDF PIN 20000x SHA-256 sehingga throttle + SecureStore adalah
 // satu-satunya rem brute-force lokal). Hydrate sekali + sapu latar agar
 // getter sinkron benar segera setelah restart; titik masuk async menunggu
 // hydrate sebelum menilai kunci.
