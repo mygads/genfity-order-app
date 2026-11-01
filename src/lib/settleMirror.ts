@@ -21,6 +21,7 @@ import { getCashSessionId, settleWithSessionHeal } from './beWorkforce';
 import {
   GO_OP_SETTLE,
   getServerOrderIdForSale,
+  isSelectionRequiredCodeW2,
   mapPayMethodToBe,
   type SettleResult,
 } from './posWire';
@@ -49,6 +50,14 @@ export type MirrorSettleInput = {
   /** SESI-FINAL-APP: URL foto bukti bayar (https) - diteruskan aditif ke
    *  settlePosPayment + antrean GO_OP_SETTLE. Absen = perilaku lama. */
   proofUrl?: string;
+  /**
+   * GAP-D (audit 2026-11-01): dipanggil (best-effort, tanpa throw) bila
+   * settle ditolak SELECTION_REQUIRED (>1 sesi OPEN, auto-heal gagal).
+   * Layar kasir-only memakai ini untuk membuka CashSessionSheet di
+   * perangkat + mengulang mirror (clientId sama = idempoten). Tanpa
+   * callback = perilaku lama (antre jujur + catatan Sync).
+   */
+  onSelectionRequired?: () => void;
 };
 
 export function mirrorSettleToServer(inp: MirrorSettleInput): void {
@@ -87,6 +96,14 @@ export function mirrorSettleToServer(inp: MirrorSettleInput): void {
         ...(cashSid ? { cashSessionId: cashSid } : {}),
         ...(proofClean ? { proofUrl: proofClean } : {}),
       });
+      // GAP-D: tawarkan pemilih sesi di perangkat (bukan hanya antre).
+      if (!res.ok && res.reason === 'rejected' && isSelectionRequiredCodeW2(res.code)) {
+        try {
+          inp.onSelectionRequired?.();
+        } catch {
+          /* best-effort: antrean di bawah tetap jalan */
+        }
+      }
       if (res.ok || res.reason === 'blocked') {
         if (res.ok) {
           // Q4: snapshot pra vs block pasca → banner persisten; view

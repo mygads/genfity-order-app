@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';import {
+import React, { useEffect, useRef, useState } from 'react';import {
   AppState, Image, Modal,
   Pressable,
   ScrollView,
@@ -240,7 +240,8 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         return tb;
       }),
     );
-    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); }
+    // GAP-F: id unik per aksi agar retry drain tak menggandakan mutasi server.
+    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { id: `tm-${Date.now()}`, from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); }
     // Bill SQLite ikut pindah agar "pembayaran meja" tetap benar offline (dulu
     // hanya memori + ms_table sehingga bill yatim di meja asal): pindah maupun
     // gabung memindahkan bill terbuka (bukan paid/void) ke meja tujuan.
@@ -349,8 +350,11 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         : tb.status === 'terisi',
   );
 
+  // GAP-F: guard ketuk-ganda simpan booking (dua op tanpa id = booking ganda).
+  const bookingSavingRef = useRef(false);
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
-    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
+    if (bookingSavingRef.current) return;
+    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null }); bookingSavingRef.current = false;
     // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
     void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); }
   setBookingVisible(false);

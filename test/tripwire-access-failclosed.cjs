@@ -21,9 +21,9 @@ function run() {
 
   const acc = read('lib/access.ts');
 
-  // 1. SENSITIVE_KEYS = tepat 4 kunci, tanpa petty.approve.
-  ok(/SENSITIVE_KEYS[^=]*=\s*new Set\(\[\s*'order\.void',\s*'order\.cancel',\s*'sale\.refund',\s*'settings\.edit',\s*\]\)/.test(acc),
-    'C5: SENSITIVE_KEYS tepat 4 kunci (order.void/order.cancel/sale.refund/settings.edit)');
+  // 1. SENSITIVE_KEYS = tepat 5 kunci (GAP-E: + order.discount), tanpa petty.approve.
+  ok(/SENSITIVE_KEYS[^=]*=\s*new Set\(\[\s*'order\.void',\s*'order\.cancel',\s*'sale\.refund',\s*'settings\.edit',\s*'order\.discount',\s*\]\)/.test(acc),
+    'C5: SENSITIVE_KEYS tepat 5 kunci (order.void/order.cancel/sale.refund/settings.edit/order.discount)');
   ok(!/SENSITIVE_KEYS[^;]*petty/.test(acc),
     'C5: petty.approve (Q18) BUKAN kunci sensitif (tetap fail-open)');
 

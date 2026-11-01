@@ -9,7 +9,8 @@ import { appAlert } from '../../lib/appAlert';
 import { startEdcPayment } from '../../native/edc';import { NATIVE_PREF_KEYS } from '../../lib/master';
 import { recordSale, type SaleInput, type SaleItemIn } from '../../lib/payments';
 import { saveSale, saleHeadExists, appendGroupPayment, nextSalesNum, getOrCreatePayChainId } from '../../lib/sales';
-import { mirrorSettleToServer } from '../../lib/settleMirror';
+import { mirrorSettleToServer, type MirrorSettleInput } from '../../lib/settleMirror';
+import CashSessionSheet from '../../components/CashSessionSheet';
 import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -78,6 +79,9 @@ export default function EdcScreen({ navigation, route }: Props) {
   const deliveryAddressParam = String((route?.params as { deliveryAddress?: unknown } | undefined)?.deliveryAddress ?? '').trim();
   const deliveryFeeParam = Math.max(0, Math.round(Number((route?.params as { deliveryFee?: unknown } | undefined)?.deliveryFee) || 0));
   const [phase, setPhase] = useState<Phase>('waiting');
+  // GAP-D: tunda ulang mirror pasca-pilih sesi kas (clientId sama = idempoten).
+  const [sessSheetOpen, setSessSheetOpen] = useState(false);
+  const sessRetryRef = useRef<MirrorSettleInput | null>(null);
   const [secs, setSecs] = useState(60);
   const [approval, setApproval] = useState('');
   const [bank, setBank] = useState(BANKS[0]);
@@ -371,7 +375,16 @@ export default function EdcScreen({ navigation, route }: Props) {
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), notes: approval, clientId: saleClientId });
+    // GAP-D: SELECTION_REQUIRED (>1 sesi OPEN) = buka pemilih sesi di
+    // perangkat; retry memakai input SAMA (clientId idempoten).
+    const mirrorInp: MirrorSettleInput = { salesNum: orderNo, methodLabel: method, amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(p.voucherCode ? { voucherCode: p.voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), notes: approval, clientId: saleClientId };
+    mirrorInp.onSelectionRequired = () => {
+      const { onSelectionRequired: _drop, ...rest } = mirrorInp;
+      void _drop;
+      sessRetryRef.current = rest;
+      setSessSheetOpen(true);
+    };
+    mirrorSettleToServer(mirrorInp);
     navigation?.navigate('Success', {
       total: fullTotal,
       method,
@@ -567,6 +580,17 @@ export default function EdcScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
     </ScrollView>
+      {/* GAP-D: pemilih sesi kas pasca-SELECTION_REQUIRED. */}
+      <CashSessionSheet
+        visible={sessSheetOpen}
+        onPicked={() => {
+          const retry = sessRetryRef.current;
+          sessRetryRef.current = null;
+          setSessSheetOpen(false);
+          if (retry) mirrorSettleToServer(retry);
+        }}
+        onCancel={() => { sessRetryRef.current = null; setSessSheetOpen(false); }}
+      />
     </View>
   );
 }

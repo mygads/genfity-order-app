@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';import {
+import React, { useEffect, useRef, useState } from 'react';import {
   Modal,
   ScrollView,
   StyleSheet,
@@ -54,7 +54,13 @@ import React, { useEffect, useState } from 'react';import {
     setPinVisible(true);
   };
 
+  // GAP-I: guard tutup-ganda (tanpa ini dua ketuk = dua baris
+  // tr_shiftlogdetail + dua op shift-close; UPDATE idempoten tapi INSERT tidak).
+  const closingRef = useRef(false);
   const confirmClose = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
     // APP-SHIFT 2026-10-17 (Q17 CLOSED: tutup shift = PIN staff, ikut spec):
     // server dulu via authorizeSupervisor; offline/unconfigured lanjut ke PIN
     // kasir lokal (verifyAttendancePin, cermin ShiftScreen) - PIN staff mana
@@ -210,6 +216,11 @@ import React, { useEffect, useState } from 'react';import {
         /* abaikan */
       }
     })();
+    } catch {
+      /* abaikan - tulis lokal best-effort di atas */
+    } finally {
+      closingRef.current = false;
+    }
     setPinVisible(false);
     setPin('');
     // HP-E2E-FIX-HEADER: shift lokal tertutup → guard App hitung ulang.
