@@ -55,7 +55,7 @@ function run() {
     'C6: tebakan salah membakar attempt (throttle hidup)');
 
   // 5. AUDIT-PIN-PERSIST: throttle tahan restart (sebelumnya in-memory murni
-  //    = tiap restart memberi 5 tebakan gratis; KDF 2000x SHA-256 itu cepat).
+  //    = tiap restart memberi 5 tebakan gratis; KDF 20000x SHA-256 (~200ms) itu ringan).
   ok(/hydratePinThrottle/.test(pin) && /genfity\.pin\.attendance\.attempts/.test(pin),
     'C6: throttle attendance persisten + hydrate (anti reset-restart)');
   ok(/persistPinThrottle/.test(pin),
