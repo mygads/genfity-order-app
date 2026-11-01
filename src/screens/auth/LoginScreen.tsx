@@ -60,6 +60,7 @@ import { syncCurrencyFromProfile } from '../../lib/currency';
 import { readMerchantTypeFromLoginBody, readVerticalIdFromLoginBody, setCachedVerticalId, syncMerchantTypeFromProfile, syncVerticalIdFromProfile } from '../../lib/posModes';
 import { syncTimezoneFromProfile } from '../../lib/timezone';
 import { useLang, applyBranchLanguagePolicy } from '../../lib/i18n';
+import { lockCountdownSuffix, parseRetryAfterSeconds } from '../../lib/pinLockout';
 import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import BackChevron from '../../components/BackChevron';
@@ -308,6 +309,8 @@ interface StaffLoginCall {
   reached: boolean;
   status: number;
   body: Record<string, unknown>;
+  /** Countdown 423 BE (Retry-After header) — 0 bila tak ada/tak valid. */
+  retryAfterSec: number;
 }
 
 async function callStaffLogin(
@@ -325,7 +328,7 @@ async function callStaffLogin(
   // controller yang sama — abort user TIDAK memicu retry, langsung jatuh ke
   // jalur offline. Semua lemparan termasuk AbortError → {reached:false} =
   // jalur offline-path yang sama dengan fast-fail; tak pernah melempar.
-  if (getApiMode() === 'local') return { reached: false, status: 0, body: {} };
+  if (getApiMode() === 'local') return { reached: false, status: 0, body: {}, retryAfterSec: 0 };
   const TIMEOUT_MS = opts?.timeoutMs ?? 15000;
   const userSignal = opts?.signal;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -361,7 +364,13 @@ async function callStaffLogin(
         json = null;
       }
       const b = (unwrapData<unknown>(json) ?? {}) as Record<string, unknown>;
-      return { reached: true, status: res.status, body: b && typeof b === 'object' ? b : {} };
+      let retryAfterSec = 0;
+      try {
+        retryAfterSec = parseRetryAfterSeconds(res.headers?.get('Retry-After'));
+      } catch {
+        retryAfterSec = 0;
+      }
+      return { reached: true, status: res.status, body: b && typeof b === 'object' ? b : {}, retryAfterSec };
     } catch {
       // Abort user = niat pembatalan → JANGAN retry, langsung offline-path.
       if (userSignal?.aborted && !timedOut) break;
@@ -374,7 +383,7 @@ async function callStaffLogin(
       }
     }
   }
-  return { reached: false, status: 0, body: {} };
+  return { reached: false, status: 0, body: {}, retryAfterSec: 0 };
 }
 
 /** E29 pin-verify (fase-1a, faktor 3 login staged): INTI HTTP TUNGGAL di
@@ -390,10 +399,12 @@ interface PinVerifyCall {
   errorCode: string;
   serverMessage: string;
   pinVersion: number;
+  /** Countdown 423 BE (body retryAfter via terminalApi) — 0 bila tak ada. */
+  retryAfterSec: number;
 }
 
 async function callPinVerify(terminalId: string, pin: string, token?: string): Promise<PinVerifyCall> {
-  const blank: PinVerifyCall = { reached: false, status: 0, errorCode: '', serverMessage: '', pinVersion: 0 };
+  const blank: PinVerifyCall = { reached: false, status: 0, errorCode: '', serverMessage: '', pinVersion: 0, retryAfterSec: 0 };
   try {
     if (!terminalId || getApiMode() === 'local') return blank;
     const r = await withTimeout(
@@ -404,11 +415,11 @@ async function callPinVerify(terminalId: string, pin: string, token?: string): P
     if (!r.ok) {
       // Server menjawab penolakan (INVALID/LOCKED/NOT_SET): reached = server
       // menang; kode + pesan diteruskan agar layar bedakan enroll vs tolak.
-      return { reached: true, status: r.status, errorCode: r.errorCode ?? '', serverMessage: r.serverMessage ?? '', pinVersion: 0 };
+      return { reached: true, status: r.status, errorCode: r.errorCode ?? '', serverMessage: r.serverMessage ?? '', pinVersion: 0, retryAfterSec: r.retryAfterSec ?? 0 };
     }
     // Inti sukses selalu 2xx (BE 200): status literal cukup — pemanggil hanya
     // cabang 2xx vs 400 vs lainnya.
-    return { reached: true, status: 200, errorCode: '', serverMessage: '', pinVersion: r.data.pinVersion };
+    return { reached: true, status: 200, errorCode: '', serverMessage: '', pinVersion: r.data.pinVersion, retryAfterSec: 0 };
   } catch {
     return blank;
   }
@@ -1465,7 +1476,10 @@ export default function LoginScreen({ navigation }: Props) {
               loginErr.code === 'PIN_LOCKED')
           ) {
             setNeedTermPin(true);
-            setServerError(loginErr.message || t('login_fail'));
+            setServerError(
+              (loginErr.message || t('login_fail')) +
+                (loginErr.code === 'PIN_LOCKED' ? lockCountdownSuffix(first.retryAfterSec, lang) : ''),
+            );
             return;
           }
         }
@@ -1632,7 +1646,10 @@ export default function LoginScreen({ navigation }: Props) {
           ) {
             setPickPinNeeded(true);
             setPickPin('');
-            setServerError(loginErr.message || t('login_fail'));
+            setServerError(
+              (loginErr.message || t('login_fail')) +
+                (loginErr.code === 'PIN_LOCKED' ? lockCountdownSuffix(second.retryAfterSec, lang) : ''),
+            );
             return;
           }
         }
@@ -1879,7 +1896,10 @@ export default function LoginScreen({ navigation }: Props) {
             if (!(pv.status === 400 && pv.errorCode === 'USER_PIN_NOT_SET')) {
               // USER_PIN_INVALID (401) / USER_PIN_LOCKED (423) / lainnya =
               // server menang — tampilkan pesan server jujur.
-              setPinError(pv.serverMessage || pinWrongText());
+              setPinError(
+              (pv.serverMessage || pinWrongText()) +
+                (pv.errorCode === 'USER_PIN_LOCKED' ? lockCountdownSuffix(pv.retryAfterSec, lang) : ''),
+            );
               return;
             }
             // USER_PIN_NOT_SET → belum enroll: lanjut ke gerbang lokal di

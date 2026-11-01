@@ -590,7 +590,26 @@ export type PinVerifyResult =
       fromDummy: boolean;
       errorCode: string;
       serverMessage: string;
+      /** Countdown 423 BE (body retryAfter, detik) — 0 bila tak ada. */
+      retryAfterSec: number;
     };
+
+/** Baca countdown 423 BE (body `retryAfter`, detik) — 0 bila tak ada/tak valid. */
+function readTerminalErrorRetryAfter(body: unknown): number {
+  try {
+    const b = (body ?? {}) as Record<string, unknown>;
+    const inner = (b.data ?? b) as Record<string, unknown>;
+    const raw = (inner.retryAfter ?? b.retryAfter) as unknown;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const n = Number.parseInt(raw.trim(), 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
 
 function readTerminalErrorField(body: unknown, field: 'error' | 'message'): string {
   try {
@@ -617,6 +636,7 @@ export async function pinVerifyTerminalPin(
       ...fail<PinVerifyData>(r.status, r.fromDummy),
       errorCode: readTerminalErrorField(raw, 'error'),
       serverMessage: readTerminalErrorField(raw, 'message'),
+      retryAfterSec: readTerminalErrorRetryAfter(raw),
     };
   }
   const { data } = unwrap<Record<string, unknown>>(r.data);

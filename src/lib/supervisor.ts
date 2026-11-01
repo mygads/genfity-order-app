@@ -14,6 +14,7 @@ import { apiFetch, getApiMode, unwrap } from './apiSource';
 import { requireEscalationAccess } from './access';
 import { verifyAttendancePin } from './pin';
 import { tOf } from './i18n';
+import { bodyRetryAfterSeconds } from './pinLockout';
 import { getItem, setItem } from './storage';
 import { getSession } from '../session';
 
@@ -138,8 +139,11 @@ function fail(code: Exclude<SupervisorCode, 'ok' | 'locked'>, message: string): 
   return { ok: false, code, message };
 }
 
-function locked(): AuthResult {
-  const msg = tOf('sup_locked').replace('{n}', String(lockRemainingSec()));
+function locked(serverRetrySec?: number): AuthResult {
+  // Countdown tampil = max(kunci lokal, countdown server 423 bila ada) agar
+  // copy jujur selama server masih mengunci (E29 5 mnt vs throttle lokal).
+  const sec = Math.max(lockRemainingSec(), Math.floor(serverRetrySec ?? 0));
+  const msg = tOf('sup_locked').replace('{n}', String(sec));
   return { ok: false, code: 'locked', message: msg };
 }
 
@@ -530,10 +534,12 @@ export async function authorizeSupervisorV1(input: SupervisorV1Input): Promise<S
     }
     if (code === 'SUPERVISOR_PIN_LOCKED' || r.status === 423 || r.status === 429) {
       // Kunci sisi server (E29 5x/5 mnt) → kunci lokal juga agar tak spam.
+      // Countdown server (body retryAfter) diteruskan ke pesan bila ada.
+      const serverRetrySec = bodyRetryAfterSeconds(r.data);
       attempts = MAX_ATTEMPTS;
       lockedUntil = Date.now() + LOCK_MS;
       persistThrottle();
-      return locked();
+      return locked(serverRetrySec);
     }
     if (code === 'VALIDATION_ERROR') {
       // Bentuk ditolak server - kesalahan isi, bukan tebakan: tanpa burn.
