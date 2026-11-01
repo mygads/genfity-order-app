@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View , useWindowDimensions } from 'react-native';
-import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';
+import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
@@ -293,7 +293,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         const eff = tplOn ? getEffectiveTogglesForMode(tpl, p.mode) : null;
         const show = (k: keyof ReceiptTemplateToggles): boolean => (eff ? eff[k] as boolean : true);
         const narrow = tplOn && eff && eff.paperSize === '58mm';
-        return (<View style={[styles.bill, isTablet && wideCenterSm, narrow && styles.billNarrow]}>
+        return (<View style={[styles.bill, isTablet && styles.billTablet, narrow && styles.billNarrow]}>
         <Text style={styles.unpaid}>** {t('rc_unpaid')} **</Text>
         {(tplOn && eff && eff.showLogo && (mInfo.logoUrl ?? '').trim()) ? (<Image source={{ uri: (mInfo.logoUrl ?? '').trim() }} style={styles.logo} resizeMode="contain" />) : null}
         {show('showMerchantName') ? (<Text style={styles.shop}>{shopName}</Text>) : null}
@@ -313,16 +313,16 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
         {tplOn && eff && eff.paperSize ? (<Text style={styles.paperTag}>{eff.paperSize === '58mm' ? '58mm' : '80mm'} · {eff.receiptLanguage === 'id' ? 'ID' : 'EN'}</Text>) : null}
         {orderItems.map((i, idx) => (
           <View key={`${itemKey(i)}-${idx}`} style={styles.row}>
-            <Text style={styles.item}>{i.qty}× {i.name}</Text>
+            <Text style={styles.item}>{i.qty} {'\u00d7'} {i.name}</Text>
             <Text style={styles.price}>{rp(lineAmount(i))}</Text>
           </View>
         ))}
         {orderItems.map((i, idx) => (
           <View key={`sub-${itemKey(i)}-${idx}`}>
-            {(tplOn && eff && eff.showUnitPrice) ? (<Text style={styles.note}>@ {rp(unitPrice(i))}</Text>) : null}
+            {(tplOn && eff && eff.showUnitPrice) ? (<Text style={styles.note}>@ {rp(unitPrice(i))}{' '}{(eff.receiptLanguage ?? lang) === 'id' ? 'per item' : 'each'}</Text>) : null}
             {(() => {
               const n = (i as unknown as { note?: string }).note;
-              return (tplOn && eff && eff.showItemNotes && n) ? (<Text style={styles.note}>* {n}</Text>) : null;
+              return (tplOn && eff && eff.showItemNotes && n) ? (<Text style={styles.note}>{'\u2605'} {n}</Text>) : null;
             })()}
             {((!eff || eff.showAddons) ? (i.modifiers ?? []) : []).map((m) => (
               <Text key={m.name} style={styles.note}>+ {m.name}{(!eff || eff.showAddonPrices) ? ` ${rp(m.price * i.qty)}` : ''}</Text>
@@ -527,22 +527,23 @@ const styles = StyleSheet.create({
   body: { padding: 16, paddingBottom: 40 },
   meta: { fontFamily: fonts.medium, fontSize: 13, color: colors.muted },
   bill: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginTop: 10, borderWidth: 1, borderColor: colors.line },
-  billNarrow: { maxWidth: 300, alignSelf: 'center', width: '100%' },
+  billTablet: { width: '100%', alignSelf: 'center', maxWidth: 280 },
+  billNarrow: { maxWidth: 200, alignSelf: 'center', width: '100%' },
   unpaid: { fontFamily: fonts.bold, fontSize: 13, color: colors.red, textAlign: 'center', marginBottom: 6 },
   paperTag: { fontFamily: fonts.medium, fontSize: 11, color: colors.faint, textAlign: 'center', marginTop: 4 },
-  thanks: { fontFamily: fonts.bold, fontSize: 13, color: colors.text, textAlign: 'center', marginTop: 10 },
-  note: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  thanks: { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: colors.text, textAlign: 'center', marginTop: 10 },
+  note: { fontFamily: 'monospace', fontSize: 12, color: colors.muted, marginTop: 2 },
   logo: { width: 56, height: 56, alignSelf: 'center', marginBottom: 4 },
-  shop: { fontFamily: fonts.bold, fontSize: 16, color: colors.text, textAlign: 'center' },
-  addr: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 2 },
-  trx: { fontFamily: fonts.medium, fontSize: 12, color: colors.faint, textAlign: 'center', marginVertical: 10 },
+  shop: { fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold', color: colors.text, textAlign: 'center' },
+  addr: { fontFamily: 'monospace', fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 2 },
+  trx: { fontFamily: 'monospace', fontSize: 12, color: colors.faint, textAlign: 'center', marginVertical: 10 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
-  item: { fontFamily: fonts.regular, fontSize: 13, color: colors.text, flex: 1 },
-  price: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
-  disc: { fontFamily: fonts.semibold, fontSize: 13, color: colors.red },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: colors.line, marginTop: 8, paddingTop: 10 },
-  totalL: { fontFamily: fonts.bold, fontSize: 16, color: colors.navy },
-  totalV: { fontFamily: fonts.bold, fontSize: 18, color: colors.orangeDark },
+  item: { fontFamily: 'monospace', fontSize: 13, color: colors.text, flex: 1 },
+  price: { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: colors.text },
+  disc: { fontFamily: 'monospace', fontSize: 13, fontWeight: 'bold', color: colors.red },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#000', marginTop: 8, paddingTop: 10 },
+  totalL: { fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold', color: colors.navy },
+  totalV: { fontFamily: 'monospace', fontSize: 18, fontWeight: 'bold', color: colors.orangeDark },
   member: { fontFamily: fonts.medium, fontSize: 12, color: colors.greenDark, marginTop: 8 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   actionBtn: { flex: 1, marginTop: 0 },
