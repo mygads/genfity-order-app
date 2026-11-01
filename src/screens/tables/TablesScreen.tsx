@@ -307,7 +307,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
           tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
         ),
       );
-      queueTableOp('table-clear', { table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
+      queueTableOp('table-clear', { id: `tc-${Date.now()}`, table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
       // A11: kosongkan meja di server terminal (best-effort; antrean sync di
       // atas tetap jadi fallback offline; sukses AVAILABLE membersihkan banner).
       void postTableTransition({ tableRef: no, status: 'AVAILABLE' }).then((h) => {
@@ -334,7 +334,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       })();
       return next;
     });
-  queueTableOp('order-hold-toggle', { table: selected.no, held: !held[id] }); };
+  queueTableOp('order-hold-toggle', { id: `th-${Date.now()}`, table: selected.no, held: !held[id] }); };
 
   /** Transaksi cepat (QS): order tanpa meja - langsung buka kasir mode TAKE AWAY. */
   const quickTransaction = () => {
