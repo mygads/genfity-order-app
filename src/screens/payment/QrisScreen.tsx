@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';import { Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import { ApiPath } from '../../config/server';import { apiFetch, getApiMode, unwrap } from '../../lib/apiSource';import { QRIS_ACQUIRERS } from '../../lib/master';import { recordSale,
 
-type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer } from '../../lib/settleMirror';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';import { toQR } from 'toqr';import { asciiToBytes, createGpayCharge, pickGpayQrisMethod, pollGpayCharge, type GpayCharge } from '../../lib/gpayCharges';type Nav = {
+type SaleInput, type SaleItemIn } from '../../lib/payments';import { nextSalesNum, saveSale, saleHeadExists, appendGroupPayment, getOrCreatePayChainId, buildSaleQrPayload } from '../../lib/sales';import { publishDisplayOrder } from '../../lib/display';import { mirrorSettleToServer, type MirrorSettleInput } from '../../lib/settleMirror';import CashSessionSheet from '../../components/CashSessionSheet';import { customerIdFromLocalKey, parseCustomerId } from '../../lib/memberRef';import { toQR } from 'toqr';import { asciiToBytes, createGpayCharge, pickGpayQrisMethod, pollGpayCharge, type GpayCharge } from '../../lib/gpayCharges';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
   goBack: () => void;};type Props = {
   navigation?: Nav;
@@ -52,6 +52,9 @@ function RealQr({ payload }: { payload: string }) {
    *  settle (tanpa ini respons telat menimpa status expired → Success palsu
    *  atas QR basi). Direset hanya oleh tombol Buat-kode-baru. */
   const expiredRef = useRef(false);
+  // GAP-D (paritas EDC): tunda ulang mirror pasca-pilih sesi kas (clientId sama = idempoten).
+  const [sessSheetOpen, setSessSheetOpen] = useState(false);
+  const sessRetryRef = useRef<MirrorSettleInput | null>(null);
   const refCode = useMemo(() => {
     const n = Math.abs(Math.floor(total * 7 + 123456)) % 1000000;
     return `QRIS-${String(n).padStart(6, '0')}`;
@@ -300,7 +303,16 @@ function RealQr({ payload }: { payload: string }) {
     }
     // A4: cermin immediate ke BE + atribusi sesi kas (paritas cash lane);
     // grup = drain saja (client_id rantai bersama, hindari settle ganda).
-    mirrorSettleToServer({ salesNum: orderNo, methodLabel: charge?.id ? 'gpay_qris' : 'qris', amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(voucherCode ? { voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), ...(String(refCode ?? '').trim() || charge?.id ? { notes: [String(refCode ?? '').trim(), charge?.id ? `gpay:${String(charge.id)}` : ''].filter(Boolean).join(' ') } : {}), clientId: saleClientId });
+    // GAP-D (paritas EDC): SELECTION_REQUIRED (>1 sesi OPEN) = buka pemilih
+    // sesi di perangkat; retry memakai input SAMA (clientId idempoten).
+    const mirrorInp: MirrorSettleInput = { salesNum: orderNo, methodLabel: charge?.id ? 'gpay_qris' : 'qris', amount: fullTotal, ...(tipParam > 0 ? { tip: tipParam } : {}), ...(voucherCode ? { voucherCode } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(memberPoinParam != null ? { prevPoints: memberPoinParam } : {}), ...(String(refCode ?? '').trim() || charge?.id ? { notes: [String(refCode ?? '').trim(), charge?.id ? `gpay:${String(charge.id)}` : ''].filter(Boolean).join(' ') } : {}), clientId: saleClientId };
+    mirrorInp.onSelectionRequired = () => {
+      const { onSelectionRequired: _drop, ...rest } = mirrorInp;
+      void _drop;
+      sessRetryRef.current = rest;
+      setSessSheetOpen(true);
+    };
+    mirrorSettleToServer(mirrorInp);
     navigation?.navigate('Success', { total: fullTotal, method: 'qris', orderNo, clientId: saleClientId, approvalCode: charge?.id ? `${refCode} · gpay:${String(charge.id)}` : refCode, items, discount, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(serviceParam > 0 ? { service: serviceParam } : {}), ...(taxParam > 0 ? { tax: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(packagingParam > 0 ? { packaging: packagingParam } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(tableNo ? { table: tableNo } : {}), ...(customerName ? { customer: customerName } : {}), ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}), ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}), ...(technicianParam ? { technician: technicianParam } : {}), ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}), ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}), ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(tipParam > 0 ? { tip: tipParam } : {}), }); }; /** * Cek status QRIS per mode sumber data: * - Real Mode: status PAID wajib dari backend (order/view), tanpa
    *   simulasi; respons dummy (offline) = tetap menunggu, bukan lunas. * - Local Mode (tanpa server): simulasi lunas setelah N poll SEBAGAI
    *   "mode uji" yang diberi label jelas ke user (qris_test_mode). * - Dummy Mode eksplisit (screenshot): perilaku lama (simulasi realistis,
@@ -494,6 +506,17 @@ function RealQr({ payload }: { payload: string }) {
           </TouchableOpacity>
         )}
       </View>
+      {/* GAP-D: pemilih sesi kas pasca-SELECTION_REQUIRED (paritas EDC). */}
+      <CashSessionSheet
+        visible={sessSheetOpen}
+        onPicked={() => {
+          const retry = sessRetryRef.current;
+          sessRetryRef.current = null;
+          setSessSheetOpen(false);
+          if (retry) mirrorSettleToServer(retry);
+        }}
+        onCancel={() => { sessRetryRef.current = null; setSessSheetOpen(false); }}
+      />
     </View>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
