@@ -56,6 +56,13 @@ function run() {
   // 7. WS SEKUNDER (verdict PP-004): start hanya bila SSE primer tak live.
   ok(/if \(sseOk && isBackendConfigured/.test(custRaw),
     'display: WS sekunder digerbang SSE-live (bukan primer)');
+  // 8. AUDIT-SSE-401: JWT sesi BE 1 jam; display idle tanpa trafik apiFetch
+  //    bisa 401 selamanya. Klien WAJIB probe refresh sesi sekali per 401
+  //    (throttle) lalu sambung ulang - bukan backoff buta.
+  ok(/res\.status === 401/.test(sse) && /lastAuthRefreshMs/.test(sse),
+    'sse: 401 picu sekali probe refresh sesi + reconnect (anti display-mati pasca JWT 1 jam)');
+  ok(/fetchPosVersion/.test(sse) && !/terminalRefresh/.test(sse) && !/apiPost/.test(sse),
+    'sse: probe 401 via apiFetch read-only (single-flight apiSource; tanpa rotasi ganda anti replay-revoke)');
 
   return { checks, failures };
 }

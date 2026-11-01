@@ -34,7 +34,13 @@ export type SseStatusHandler = (status: SseStatus) => void;
 /** Kunci i18n banner offline SSE (dirender layar, bukan modul ini). */
 export const SSE_OFFLINE_KEY = 'sse_offline';
 
-/** P0-04: TTL token SSE scope sse-only (15 mnt). Rotasi tiap reconnect; token di URL tak disimpan di log lokal. */
+/** AUDIT-SSE-401: ambang throttle percobaan refresh sesi pasca-401 (60 dtk).
+ * Nilai lama SSE_TOKEN_TTL_MS dipertahankan sebagai KONSTANTA KOMPATIBILITAS
+ * (tripwire P0-04 + kemungkinan konsumen); ia BUKAN TTL token server - token
+ * SSE = JWT sesi biasa (BE JWT_EXPIRY default 3600 dtk) yang dibaca ulang
+ * dari sesi tiap connect() + probe apiFetch sekali per 401 agar single-flight
+ * refresh milik apiSource berputar (lihat connect).
+ * Jangan pernah log URL penuh (?token=) - log hanya host+path. */
 export const SSE_TOKEN_TTL_MS = 15 * 60 * 1000;
 const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 30000;
@@ -63,7 +69,7 @@ function withId(path: string, id: string): string {
  * APP-FIXUP(R-sse-token-order): urutan disamakan authToken-dulu (sebelumnya
  * authKey-dulu, berlawanan dengan server.ts:342).
  */
-/** P0-04: rotasi token SSE tiap reconnect (TTL 15 mnt scope sse-only). Jangan pernah log URL penuh (?token=) - log hanya host+path. */
+/** AUDIT-SSE-401: stempel pasang-token terakhir (diagnostik sseTokenAgeMs). Token dibaca ulang dari sesi tiap connect(); rotasi nyata = probe apiFetch di connect() saat 401. Jangan pernah log URL penuh (?token=) - log hanya host+path. */
 let __sseTokenAt = 0;
 export function sseTokenAgeMs(): number { return __sseTokenAt ? Date.now() - __sseTokenAt : 999999999; }
 /** P0-04: token SSE via ?token= (EventSource tanpa header). Jangan log URL penuh - token di query. TTL pendek scope sse-only. */
@@ -75,7 +81,7 @@ function withQueryToken(url: string): string {
     const token = String(s?.authToken ?? s?.authKey ?? '').trim();
     if (!token) return url;
     __sseTokenAt = Date.now();
-    // P0-04: token scope sse-only TTL 15 mnt; pemanggil wajib reconnect bila sseTokenAgeMs() > SSE_TOKEN_TTL_MS.
+    // AUDIT-SSE-401: token = JWT sesi saat ini (re-read tiap connect); kedaluwarsa (401) ditangani connect() via probe apiFetch.
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
   } catch {
     return url;
@@ -194,6 +200,7 @@ export class SseClient {
   private feedId: string;
   private status: SseStatus = 'offline';
   private running = false;
+  private lastAuthRefreshMs = 0;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private ctrl: AbortController | null = null;
@@ -318,6 +325,37 @@ export class SseClient {
       // tersedia untuk EventSource; backend menolak tanpa auth.
       const res = await fetch(withQueryToken(this.url), { method: 'GET', headers, signal: ctrl.signal });
       if (!res.ok) {
+        // AUDIT-SSE-401: JWT sesi kedaluwarsa tiap jam (BE JWT_EXPIRY=3600);
+        // layar display yang idle tak punya trafik apiFetch pemicu refresh,
+        // sehingga reconnect SSE bisa 401 selamanya. Picu SATU probe apiFetch
+        // terautentikasi (fetchPosVersion: read-only) agar single-flight
+        // silent-refresh milik apiSource berputar memakai MEKANISME TUNGGAL
+        // (throttle 60 dtk; refresh ganda paralel = token replay -> sesi
+        // di-REVOKE server). Lalu sambung ulang segera bila sesi masih ada.
+        // 403 = masalah izin (bukan sesi) -> langsung backoff, jangan probe.
+        // W1-05: perbaikan sepenuhnya di file ini; apiSource.ts tak tersentuh.
+        if (res.status === 401 && Date.now() - this.lastAuthRefreshMs > 60000) {
+          this.lastAuthRefreshMs = Date.now();
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const api = require('./apiSource') as typeof import('./apiSource');
+            await api.fetchPosVersion();
+          } catch {
+            /* probe gagal = jatuh ke backoff biasa */
+          }
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const sess = require('../session') as typeof import('../session');
+            if (sess.getSession?.() && this.running && !ctrl.signal.aborted) {
+              void this.connect();
+              return;
+            }
+            // Sesi sudah mati (logout fail-closed jalur apiFetch) -> jangan
+            // reconnect agresif; backoff biasa sampai login ulang.
+          } catch {
+            /* abaikan */
+          }
+        }
         this.scheduleRetry();
         return;
       }
