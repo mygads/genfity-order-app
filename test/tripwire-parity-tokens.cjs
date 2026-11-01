@@ -24,13 +24,15 @@ function run() {
   const input = fs.readFileSync(inputPath, 'utf8');
   const appButton = fs.readFileSync(appButtonPath, 'utf8');
 
-  // FE: brand-* disatukan ke primary-* (GENFITY #FF6B35)
-  ok(/--color-brand-500:\s*#ff6b35/i.test(css), 'FE brand-500 harus #ff6b35 (kanonis primary)');
-  ok(/--color-brand-600:\s*#e55a2b/i.test(css), 'FE brand-600 harus #e55a2b (primary-hover)');
-  ok(/--color-primary-500:\s*#ff6b35/i.test(css), 'FE primary-500 harus #ff6b35');
+  // FE: brand ungu (keputusan produk cd029ed6: brand primary #7C3AED,
+  // oranye jadi sekunder). Tripwire lama (PAR-01 oranye-tunggal) basi untuk
+  // ketiga token ini; guard anti-indigo + radius + border di bawah tetap jalan.
+  ok(/--color-brand-500:\s*#7c3aed/i.test(css), 'FE brand-500 harus #7c3aed (kanonis brand ungu)');
+  ok(/--color-brand-600:\s*#6d28d9/i.test(css), 'FE brand-600 harus #6d28d9 (brand-hover)');
+  ok(/--color-primary-500:\s*#ff6b35/i.test(css), 'FE primary-500 oranye dipertahankan (sekunder)');
   ok(/--color-gray-300:\s*#d0d5dd/i.test(css), 'FE gray-300 harus #d0d5dd (border input)');
   ok(/--color-border-focus:\s*#ff6b35/i.test(css), 'FE border-focus harus #ff6b35');
-  ok(/--shadow-focus-ring:[^;]*255,\s*107,\s*53/i.test(css), 'FE shadow-focus-ring harus orange 255,107,53');
+  ok(/--shadow-focus-ring:[^;]*124,\s*58,\s*237/i.test(css), 'FE shadow-focus-ring harus ungu 124,58,237');
   ok(!/--color-brand-500:\s*#465fff/i.test(css), 'FE brand-500 indigo #465fff harus hilang');
   ok(!/[:\s]#465fff/i.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), 'FE literal indigo #465fff harus hilang di luar komentar (flatpickr ikut primer)');
 
