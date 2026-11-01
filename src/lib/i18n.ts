@@ -1830,6 +1830,7 @@ const STR: Record<string, Entry> = {
   tbl_warn_not_empty: { id: 'Meja {no} sedang {st} - kosongkan dulu sebelum dihapus.', en: 'Table {no} is {st} - clear it before deleting.' },
   tbl_warn_open_bill_del: { id: 'Meja {no} masih punya bill terbuka - lunasi atau void dulu sebelum dihapus.', en: 'Table {no} still has an open bill - settle or void it before deleting.' },
   tbl_table_conflict: { id: 'Server menolak perubahan meja (kapasitas terlampaui) - data lokal tetap disimpan, sinkronisasi menyusul.', en: 'Server rejected the table change (capacity exceeded) - local data kept, will sync.' },
+  'tbl.tableConflict': { id: 'Server menolak perubahan meja (kapasitas terlampaui) - data lokal tetap disimpan, sinkronisasi menyusul.', en: 'Server rejected the table change (capacity exceeded) - local data kept, will sync.' },
   tbl_warn_no: { id: 'Isi nomor meja dulu.', en: 'Enter the table number first.' },
   tbl_warn_cap: { id: 'Isi kapasitas kursi dulu (angka > 0).', en: 'Enter the seat capacity first (number > 0).' },
   tbl_del_fail: { id: 'Gagal menghapus meja - coba lagi.', en: 'Could not delete the table - try again.' },
@@ -2056,6 +2057,7 @@ const STR: Record<string, Entry> = {
   idle_unlock: { id: 'Buka Kunci', en: 'Unlock' },
   idle_logout: { id: 'Keluar', en: 'Sign out' },
   stock_opname_menu_only: { id: 'Hanya item menu yang dikirim (addon dihitung di Stok & finalisasi owner).', en: 'Only menu items are sent (addons are counted in Stock & owner finalization).' },
+  'stock.opname_menu_only': { id: 'Hanya item menu yang dikirim (addon dihitung di Stok & finalisasi owner).', en: 'Only menu items are sent (addons are counted in Stock & owner finalization).' },
 };
 
 const missingWarned = new Set<string>();
