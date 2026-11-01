@@ -969,7 +969,7 @@ export function cashApprovePayload(sessionId: string | number, note: string): Re
 export async function updateWorkforcePinOnServer(
   oldPin: string,
   newPin: string,
-): Promise<{ ok: boolean; fromDummy: boolean }> {
+): Promise<{ ok: boolean; fromDummy: boolean; rejected?: boolean; code?: string; message?: string; status?: number }> {
   try {
     const o = String(oldPin ?? '').replace(/[^0-9]/g, '');
     const n = String(newPin ?? '').replace(/[^0-9]/g, '');
@@ -980,7 +980,14 @@ export async function updateWorkforcePinOnServer(
       BE_WF_TIMEOUT_MS,
     );
     if (res.fromDummy || res.status === 0) return { ok: false, fromDummy: true };
-    if (!res.ok) return { ok: false, fromDummy: false };
+    if (!res.ok) {
+      // Jujur: bedakan offline vs ditolak deterministik (PIN salah/terkunci)
+      // agar layar tak mengklaim "tersimpan, terkirim saat online" padahal
+      // server sudah menjawab TIDAK (401/423/400).
+      const be = beErrorOf(res.data);
+      if (res.status >= 500 || res.status === 429 || res.status === 0) return { ok: false, fromDummy: false };
+      return { ok: false, fromDummy: false, rejected: true, code: be.code, message: be.message, status: res.status };
+    }
     return { ok: true, fromDummy: false };
   } catch {
     return { ok: false, fromDummy: false };
