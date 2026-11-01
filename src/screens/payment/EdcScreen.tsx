@@ -210,7 +210,8 @@ export default function EdcScreen({ navigation, route }: Props) {
       const visitPay = [...fwdSplits, { method, amount: total, approvalCode: approval }];
       try {
         if (await saleHeadExists(groupNo)) {
-          await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}) });
+          const grpRes = await appendGroupPayment(groupNo, { payments: visitPay, method, change: 0, clientId: saleClientId, ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}) });
+          if (grpRes && grpRes.serverSettleSkipped) appAlert(t('pay_group_mix_title'), t('pay_group_mix'));
         } else {
           const gInput: SaleInput = {
             method,

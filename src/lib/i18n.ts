@@ -419,6 +419,8 @@ const STR: Record<string, Entry> = {
   pay_tender_checking: { id: 'Memeriksa kode tender…', en: 'Checking tender code…' },
   pay_tender_invalid: { id: 'Kode tender tidak valid / minimum {m}', en: 'Invalid tender code / minimum {m}' },
   pay_issue_fail: { id: 'Gagal menyiapkan pembayaran - coba lagi.', en: 'Could not start the payment - try again.' },
+  pay_group_mix_title: { id: 'Lunas lokal - settle manual', en: 'Paid locally - manual settle needed' },
+  pay_group_mix: { id: 'Kunjungan grup lunas (tunai + transfer). Order server tetap terbuka - selesaikan manual di dashboard agar laporan dan stok sinkron.', en: 'Group visit paid (cash + transfer). The server order stays open - settle it manually in the dashboard so reports and stock stay in sync.' },
   pay_hold_unpaid_title: { id: 'Pembayaran ditahan', en: 'Payment held' },
   pay_hold_unpaid: { id: 'Belum lunas (tahan-offline): PIN manajer wajib tapi order server belum tertaut / tak bisa dipastikan. Tetap di layar ini - ulangi setelah order tertaut atau online kembali.', en: 'Still unpaid (offline hold): manager PIN is required but the server order is not linked / could not be verified. Staying on this screen - retry once the order is linked or you are back online.' },
   // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof).

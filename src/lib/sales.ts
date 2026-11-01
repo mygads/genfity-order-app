@@ -982,7 +982,7 @@ export interface GroupPayLeg {
 export async function appendGroupPayment(
   salesNum: string,
   p: { payments: GroupPayLeg[]; method: string; change?: number; clientId?: string; customerId?: number; memberId?: string },
-): Promise<void> {
+): Promise<{ serverSettleSkipped: boolean }> {
   // Gate bound (D3-03, cermin saveSale): device belum ter-bound dilarang
   // memutasi state uang. Tanpa ini kunjungan grup ke-2+ menulis kaki + head
   // diam-diam sementara saveSale/nextSalesNum melempar di device yang sama.
@@ -1018,6 +1018,10 @@ export async function appendGroupPayment(
   let outDepId = '';
   // A12: kode voucher kaki yang terbakar (di-flush pasca-commit di bawah).
   let outBurnedCodes: string[] = [];
+  // APP-10: kunjungan grup lunas campuran ber-transfer (tunai+transfer) tak
+  // bisa diwakilkan SPLIT BE - settle server dilewati, kasir wajib diberi
+  // tahu (lihat return value). Display tetap disiarkan di bawah.
+  let outServerSettleSkipped = false;
   // L3: SELURUH mutasi (kaki + head + deposit + voucher) dalam SATU transaksi
   // - kill di tengah tak menyisakan kaki tanpa head / head tanpa debit.
   await withTransaction(async () => {
@@ -1242,12 +1246,19 @@ export async function appendGroupPayment(
         // SPLIT (semantik BE = tunai+kartu) → skip settle, ledger lokal tetap
         // sah (perilaku lama pra-APP-9 lestari untuk kasus campuran ini).
         // Campuran non-transfer (tunai+kartu) tetap SPLIT seperti sebelumnya.
-        if (uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER')) return;
+        // APP-10: jangan return dini - display di bawah wajib tetap disiarkan;
+        // tandai agar UI bisa memperingatkan kasir untuk settle manual.
+        const transferMix = uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER');
+        if (transferMix) outServerSettleSkipped = true;
         const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
         const bemSingle: BePayMethod =
           only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' || only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER'
             ? (only as BePayMethod)
             : 'SPLIT';
+        if (transferMix) {
+          // Settle server dilewati: order BE tetap terbuka sampai kasir
+          // menyelesaikan manual di dashboard. Ledger lokal tetap sah.
+        } else {
         const serverId = await getServerOrderIdForSale(no);
         if (serverId != null) {
           const hasSettle = listOutbox().some((o) => {
@@ -1284,6 +1295,7 @@ export async function appendGroupPayment(
               `pos-settle-group-${no}`,
             );
           }
+        }
         }
       }
     } catch {
@@ -1335,6 +1347,7 @@ export async function appendGroupPayment(
   } catch {
     /* bus lokal belum siap - pembayaran tetap sah */
   }
+  return { serverSettleSkipped: outServerSettleSkipped };
 }
 
 /** Bungkus aman untuk UI: gagal simpan = log diam, kasir tetap jalan. */

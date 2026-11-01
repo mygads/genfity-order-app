@@ -957,7 +957,8 @@ export default function PayScreen({ navigation, route }: Props) {
       ];
       try {
         if (await saleHeadExists(paramSalesNum)) {
-          await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change, clientId: saleClientId, ...(saleMemberId ? { memberId: saleMemberId } : {}), ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}) });
+          const grpRes = await appendGroupPayment(paramSalesNum, { payments: visitPay, method, change, clientId: saleClientId, ...(saleMemberId ? { memberId: saleMemberId } : {}), ...(saleCustomerId != null ? { customerId: saleCustomerId } : {}) });
+          if (grpRes && grpRes.serverSettleSkipped) appAlert(t('pay_group_mix_title'), t('pay_group_mix'));
         } else {
           const gInput: SaleInput = {
             method,
