@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
@@ -284,6 +284,9 @@ export default function BookingScreen({ navigation }: Props) {
     setEditingId(null); setWarn('');
   };
 
+  // GAP-F (paritas TablesScreen bookingSavingRef): guard ketuk-ganda save.
+  const savingRef = useRef(false);
+
   const save = () => {
     // U5: mutasi booking = gerbang bound terminal (fail-closed).
     if (!branchId.trim()) {
@@ -299,6 +302,10 @@ export default function BookingScreen({ navigation }: Props) {
       return;
     }
     setWarn('');
+    // GAP-F: save sinkron + fire-and-forget — tanpa guard, dua ketuk =
+    // dua op booking-create tanpa id = reservasi ganda.
+    if (savingRef.current) return;
+    savingRef.current = true;
     const code = canonTableNo(table);
     // Validasi kapasitas ala POSLite: tamu tak boleh melebihi kursi meja tujuan.
     // Kunci i18n khusus belum ada (lihat laporan) - pesan ID ringkas di sini.
@@ -328,6 +335,7 @@ export default function BookingScreen({ navigation }: Props) {
       } catch {
         /* antrean belum siap */
       }
+      savingRef.current = false;
       resetForm();
       return;
     }
@@ -340,7 +348,7 @@ export default function BookingScreen({ navigation }: Props) {
     // Sinkron ke denah: tandai meja dipesan di master + antre sync (best-effort).
     try {
       enqueueSync('other', {
-        op: 'booking-create', table: code, name: row.name, time: row.time,
+        op: 'booking-create', id: `bk-${Date.now()}`, table: code, name: row.name, time: row.time,
         pax: row.tamu, date: row.date, at: new Date().toISOString(),
       });
     } catch {
@@ -355,6 +363,7 @@ export default function BookingScreen({ navigation }: Props) {
       }
     })();
     setName(''); setPhone(''); setPax(''); setTime(''); setNote('');
+    savingRef.current = false;
   };
 
   // U5: mutasi booking = gerbang bound terminal (fail-closed).
