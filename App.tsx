@@ -21,6 +21,7 @@ import { initMonitor, reportError } from './src/lib/monitor';
 import { startTerminalAutoPrintPoll, stopTerminalAutoPrintPoll } from './src/lib/printBridge';
 import { printBytes } from './src/native/printer';
 import { pullMaster } from './src/lib/master';
+import { syncPosConfigFromServer } from './src/lib/posConfigSync';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
 import { subscribeShiftGuard } from './src/lib/shiftGuard';
@@ -566,6 +567,9 @@ export default function App() {
           if (getSession() && bb && bb.terminalId) {
             void (async () => {
               try { await pushAll().catch(() => {}); } catch { /* abaikan */ }
+              // pos-config (tier paket Pro-gate, flag kasir, threshold stok):
+              // server-wins tiap sync sukses; gagal = cache lama dipakai.
+              try { await syncPosConfigFromServer(bb.terminalId).catch(() => {}); } catch { /* abaikan */ }
               try { await pullMaster(['menu', 'branchmenu']).catch(() => {}); } catch { /* abaikan */ }
             })().catch(() => {});
           }
