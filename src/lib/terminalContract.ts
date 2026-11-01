@@ -136,6 +136,9 @@ export interface TerminalGrant {
  * (getMaxOfflineGrantDays, default 7 hari, server-wins).
  * @deprecated Nol pembaca (audit 2026-10-17) - jangan pakai untuk logika baru;
  * hapus setelah satu siklus rilis bila tetap tanpa pemanggil. */
+// Nilai historis default 7 hari - TAK dipakai logika grant (tanpa importer).
+// TTL efektif = policy server getMaxOfflineGrantDays (server-wins) di
+// session.ts describeGrantProblem. Dipertahankan agar impor lama tak pecah.
 export const GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const LS_BINDING = 'genfity.terminal.binding.v1';
