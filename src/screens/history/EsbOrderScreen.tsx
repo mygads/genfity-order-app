@@ -6,10 +6,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import type { EsbOrder, EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { getSession } from '../../session';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';
+import ManagerPinPrompt from '../../components/ManagerPinPrompt';import type { EsbOrder, EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { getSession } from '../../session';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';
 import { uuidv7 } from '../../lib/uuidv7';import { enqueueOutbox, enqueueSync, withTimeout } from '../../lib/sync';
 import {
   cancelMerchantOrder,
+  isPinRequiredRejection,
   pullActiveOrders,
   pushOrderStatus,
   GO_OP_CANCEL,
@@ -67,7 +69,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
   const [history, setHistory] = useState<HistoryKey>('today');
   const [selected, setSelected] = useState<EsbRow | null>(null);
   const [moved, setMoved] = useState<Record<string, EsbStatusLocal>>({});
-  const [rejectFor, setRejectFor] = useState<EsbRow | null>(null); const [rejectText, setRejectText] = useState(''); const [rejectOf, setRejectOf] = useState<Record<string, string>>({});
+  const [rejectFor, setRejectFor] = useState<EsbRow | null>(null); const [rejectText, setRejectText] = useState(''); const [rejectOf, setRejectOf] = useState<Record<string, string>>({}); const [cancelPin, setCancelPin] = useState<{ id: string; sid: number; reason?: string } | null>(null); const [cancelPinBusy, setCancelPinBusy] = useState(false);
 
   const [liveNew, setLiveNew] = useState(0); const [notice, setNotice] = useState('');
   // WIRE REA-2: status/schedule delivery via helper deliveryApi (best-effort,
@@ -131,6 +133,15 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
         ? await cancelMerchantOrder(sid, reason)
         : await pushOrderStatus(sid, target ?? 'READY', { current: row.serverStatus, ...(reason ? { note: reason } : {}) });
       if (res.ok) { void pullLive(); return; }
+      // P1-1b-POS: BE menuntut PIN manajer (requirePinForCancel) - jangan
+      // antre (PIN transport-only, antrean tak pernah bawa PIN), kembalikan
+      // optimistik + minta PIN sekali lalu ulangi live.
+      if (s === 'Batal' && res.reason === 'rejected' && isPinRequiredRejection(res)) {
+        setMoved((m) => { const n = { ...m }; delete n[id]; return n; });
+        setSelected((sel) => (sel && sel.id === id ? { ...sel, status: prev } : sel));
+        setCancelPin({ id, sid, ...(reason ? { reason } : {}) });
+        return;
+      }
       // Gagal = antrekan (drain PUT-capable: offline dicoba lagi, 4xx final
       // jadi 'gagal' + catatan di SyncScreen). Optimistik dipertahankan.
       try {
@@ -151,6 +162,19 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
   }
   void (async () => { const ok = await persistEsbStatus(id, s, reason); if (ok) { void pullLive(); return; } setMoved((m) => ({ ...m, [id]: prev })); setSelected((sel) => (sel && sel.id === id ? { ...sel, status: prev } : sel)); })(); };
 
+  const submitCancelPin = (pin: string) => {
+    const cur = cancelPin;
+    if (!cur) return;
+    if (!pin) { setCancelPin(null); return; }
+    setCancelPinBusy(true);
+    void (async () => {
+      try {
+        const r2 = await cancelMerchantOrder(cur.sid, cur.reason, pin);
+        if (r2.ok) { setCancelPin(null); void pullLive(); return; }
+        setNotice(r2.message || '');
+      } finally { setCancelPin(null); setCancelPinBusy(false); }
+    })();
+  };
   const tabLabel = (k: EsbStatusLocal) => k === 'Baru' ? t('esb_new') : k === 'Diproses' ? t('esb_proc') : k === 'Selesai' ? t('esb_done') : t('esb_void'); const histLabel = (h: HistoryKey) => h === 'today' ? t('esb_today') : h === 'yesterday' ? t('esb_yesterday') : t('esb_7days'); const fresh = counts.Baru + liveNew;
 
   return (
@@ -345,6 +369,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
           </View>
         </View>
       </Modal>
+      <ManagerPinPrompt visible={cancelPin !== null} busy={cancelPinBusy} onSubmit={submitCancelPin} onCancel={() => setCancelPin(null)} />
     </View>
   );}const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
