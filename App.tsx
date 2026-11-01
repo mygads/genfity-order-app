@@ -16,7 +16,7 @@ import { loadServerState, getBranchId, getTerminal } from './src/config/server';
 import { startRealtime, stopRealtime, onWsMessage } from './src/lib/realtime';
 import { subscribeTerminalEvents } from './src/lib/sse';
 import { getApiMode } from './src/lib/apiSource';
-import { flushPendingRevokes, restoreAutoSyncPrefs } from './src/lib/sync';
+import { flushPendingRevokes, pushAll, restoreAutoSyncPrefs } from './src/lib/sync';
 import { initMonitor, reportError } from './src/lib/monitor';
 import { startTerminalAutoPrintPoll, stopTerminalAutoPrintPoll } from './src/lib/printBridge';
 import { printBytes } from './src/native/printer';
@@ -555,6 +555,21 @@ export default function App() {
         // hanya nyala bila SyncScreen dibuka (mati diam-diam pasca-restart).
         try { try { initMonitor(); } catch (e) { reportError(e); }
     void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
+        // BOOT-SYNC (audit): restart dengan sesi valid = tanpa completeOnline —
+        // katalog bisa basi + antrean menunggu timer 5 mnt. Sekali per launch
+        // (efek boot ini []): flush antrean + light pull menu/branchmenu,
+        // fire-and-forget best-effort. Login segar di launch yang sama diurus
+        // completeOnline (flush + full/first-session pull); overlap = upsert
+        // idempoten + watermark inkremental. Tanpa sesi/binding = diam.
+        try {
+          const bb = st.binding;
+          if (getSession() && bb && bb.terminalId) {
+            void (async () => {
+              try { await pushAll().catch(() => {}); } catch { /* abaikan */ }
+              try { await pullMaster(['menu', 'branchmenu']).catch(() => {}); } catch { /* abaikan */ }
+            })().catch(() => {});
+          }
+        } catch { /* abaikan */ }
         const b = st.binding;
         setBound(!!(b && b.terminalId));
         const tag = b?.tag ? parseDeviceRole(b.tag) : null;
