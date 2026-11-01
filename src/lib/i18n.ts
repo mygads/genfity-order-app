@@ -2039,6 +2039,19 @@ const STR: Record<string, Entry> = {
   ongkirNominal_aud: { id: 'Nominal (A$)', en: 'Amount (A$)' },
   discItemRp_aud: { id: 'Diskon item (A$)', en: 'Item discount (A$)' },
   unitPriceRp_aud: { id: 'Harga satuan (A$)', en: 'Unit price (A$)' },
+  cashsess_title: { id: 'Pilih Sesi Kas', en: 'Choose Cash Session' },
+  cashsess_hint: { id: 'Beberapa sesi kas terbuka di server. Pilih satu agar pelunasan tercatat di sesi yang benar.', en: 'Multiple cash sessions are open on the server. Pick one so the payment lands in the right session.' },
+  cashsess_loading: { id: 'Memuat sesi kas…', en: 'Loading cash sessions…' },
+  cashsess_empty: { id: 'Tak ada sesi kas terbuka. Buka shift / sesi kas dulu, lalu coba lagi.', en: 'No open cash sessions. Open a shift / cash session first, then retry.' },
+  cashsess_use: { id: 'Pakai sesi ini', en: 'Use this session' },
+  cashsess_cancel: { id: 'Nanti', en: 'Later' },
+  cashsess_retrying: { id: 'Mengirim ulang ke sesi terpilih…', en: 'Retrying with the chosen session…' },
+  idle_title: { id: 'Kasir Terkunci Otomatis', en: 'Cashier Auto-Locked' },
+  idle_sub: { id: 'Tak ada aktivitas 30 menit. Masukkan PIN staff Anda untuk lanjut (shift tetap berjalan).', en: 'No activity for 30 minutes. Enter your staff PIN to continue (shift keeps running).' },
+  idle_wrong: { id: 'PIN salah - coba lagi.', en: 'Wrong PIN - try again.' },
+  idle_unlock: { id: 'Buka Kunci', en: 'Unlock' },
+  idle_logout: { id: 'Keluar', en: 'Sign out' },
+  stock_opname_menu_only: { id: 'Hanya item menu yang dikirim (addon dihitung di Stok & finalisasi owner).', en: 'Only menu items are sent (addons are counted in Stock & owner finalization).' },
 };
 
 const missingWarned = new Set<string>();

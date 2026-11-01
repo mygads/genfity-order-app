@@ -23,7 +23,39 @@ export interface StockCountPushResult {
   failed: number;
 }
 
-const normName = (s: string): string => (s ?? '').trim().toLowerCase();
+const normName = (s: unknown): string => String(s ?? '').trim().toLowerCase();
+
+export interface DraftCountItem {
+  itemType: string;
+  itemId: number;
+  name: string;
+}
+
+/**
+ * GAP-C (audit 2026-11-01): pencocokan nama sadar-tipe.
+ * Dulu first-wins lintas tipe: "Teh Manis" versi menu vs addon (atau dua
+ * varian senama) bisa mendaratkan qty menu ke baris ADDON. Sumber lokal
+ * StockScreen = menu saja -> menangkan tipe MENU bila ada; baris non-MENU
+ * senama = skip jujur (bukan submit-buta), dihitung sebagai skipped.
+ * Murni (tanpa I/O) agar dikunci tripwire.
+ */
+export function matchDraftItem(
+  draft: DraftCountItem[],
+  name: string,
+): DraftCountItem | null {
+  const key = normName(name);
+  if (!key) return null;
+  let firstMenu: DraftCountItem | null = null;
+  for (const it of draft) {
+    if (!it || normName(it.name) !== key) continue;
+    if (String(it.itemType ?? '').trim().toUpperCase() !== 'MENU') continue;
+    if (!firstMenu) firstMenu = it;
+    break;
+  }
+  // Menangkan MENU (sumber lokal = menu). Tanpa baris MENU = skip (null)
+  // meski ada baris ADDON senama — submit-buta ke tipe salah = korupsi data.
+  return firstMenu;
+}
 
 function cleanQty(v: unknown): number {
   const n = Number(v);
@@ -51,17 +83,11 @@ export async function pushStockCount(
   const draft = await fetchStockCountItems(id, countId);
   if (!draft.ok) throw new Error(`items:${draft.status ?? 'offline'}`);
   if (!draft.data) throw new Error('items:empty');
-  const byName = new Map<string, { itemType: string; itemId: number }>();
-  for (const it of draft.data) {
-    const k = normName(it.name);
-    if (k && !byName.has(k)) byName.set(k, { itemType: it.itemType, itemId: it.itemId });
-  }
-
   let submitted = 0;
   let skipped = 0;
   let failed = 0;
   for (const it of local) {
-    const match = byName.get(normName(it.name));
+    const match = matchDraftItem(draft.data, it.name);
     if (!match) {
       skipped += 1;
       continue;

@@ -25,6 +25,17 @@ import { syncPosConfigFromServer } from './src/lib/posConfigSync';
 import { registerPushToken, notifyLocal } from './src/lib/push';
 import { FULL_FEATURE_TAGS, allowedRoutesFor, getDeviceRole, homeRouteFor, normalizeTag, parseDeviceRole, setDeviceRoleForTag, subscribeDeviceRole, type DeviceRole } from './src/lib/deviceRole';
 import { subscribeShiftGuard } from './src/lib/shiftGuard';
+import {
+  isCashierIdleLocked,
+  onCashierLockChange,
+  startCashierIdleWatcher,
+  stopCashierIdleWatcher,
+  touchCashierActivity,
+  unlockCashierAfterPin,
+} from './src/lib/cashierIdle';
+import IdleLockOverlay from './src/components/IdleLockOverlay';
+import { isGrantValid, type GrantTriple } from './src/session';
+import { getDeviceId } from './src/lib/apiSource';
 
 import IntroScreen from './src/screens/install/IntroScreen';
 import InstallScreen from './src/screens/install/InstallScreen';
@@ -481,6 +492,9 @@ export default function App() {
     'HKGrotesk-Bold': require('./assets/fonts/HKGrotesk-Bold.ttf'),
   });
   const [loggedIn, setLoggedIn] = useState(() => getSession() !== null);
+  // GAP-B: kunci otomatis kasir idle (watcher + overlay PIN re-auth).
+  const [idleLocked, setIdleLocked] = useState(false);
+  const [idleTriple, setIdleTriple] = useState<GrantTriple | null>(null);
   /** B2: status binding device (SPEC §2). Unbound → BindFlow, bound → Login/tag home. */
   const [bound, setBound] = useState(() => getBinding() !== null);
   const [booted, setBooted] = useState(false);
@@ -719,6 +733,56 @@ export default function App() {
     return off;
   }, []);
 
+  // GAP-B: nyalakan watcher idle saat sesi aktif; kunci HANYA bila grant
+  // offline valid (tanpa grant = PIN tak bisa diverifikasi → jangan kunci).
+  useEffect(() => {
+    if (!loggedIn) {
+      setIdleLocked(false);
+      setIdleTriple(null);
+      try { stopCashierIdleWatcher(); } catch { /* abaikan */ }
+      return undefined;
+    }
+    try { touchCashierActivity(); } catch { /* abaikan */ }
+    try { startCashierIdleWatcher(); } catch { /* abaikan */ }
+    // Cold-start: aplikasi dibuka dalam keadaan idle (background 30+ mnt) =
+    // kunci segera bila grant valid (tanpa tunggu tick 5 dtk).
+    try {
+      const st = getSession();
+      const b = getBinding();
+      const uid = String(st?.userId ?? '').trim();
+      const tid = String(b?.terminalId ?? st?.terminalId ?? '').trim();
+      const dev = String(b?.deviceId ?? st?.deviceId ?? '').trim();
+      if (uid && tid && dev && isGrantValid(uid, tid, dev) && isCashierIdleLocked()) {
+        setIdleTriple({ userId: uid, terminalId: tid, deviceId: dev });
+        setIdleLocked(true);
+      }
+    } catch { /* abaikan */ }
+    const off = onCashierLockChange((locked) => {
+      if (!locked) return;
+      try {
+        const st = getSession();
+        if (!st) return;
+        const b = getBinding();
+        const uid = String(st.userId ?? '').trim();
+        const tid = String(b?.terminalId ?? st.terminalId ?? '').trim();
+        const dev = String(b?.deviceId ?? st.deviceId ?? '').trim();
+        if (!uid || !tid || !dev) return;
+        // deviceId sesi/binding boleh kosong di instalasi lama → resolve async.
+        const done = (d: string) => {
+          if (!d) return;
+          try {
+            if (!isGrantValid(uid, tid, d)) return;
+            setIdleTriple({ userId: uid, terminalId: tid, deviceId: d });
+            setIdleLocked(true);
+          } catch { /* abaikan */ }
+        };
+        if (dev) done(dev);
+        else void getDeviceId().then((d) => done(String(d ?? '').trim())).catch(() => {});
+      } catch { /* abaikan */ }
+    });
+    return () => { try { off(); } catch { /* abaikan */ } };
+  }, [loggedIn]);
+
   useEffect(() => {
     if (loggedIn) {
       startRealtime();
@@ -764,10 +828,25 @@ export default function App() {
     );
   }
 
+  const unlockIdle = () => {
+    try { unlockCashierAfterPin(); } catch { /* abaikan */ }
+    setIdleLocked(false);
+  };
+
   return (
     <SafeAreaProvider>
+      {/* GAP-B: tiap sentuhan = aktivitas kasir (reset timer idle 30 mnt). */}
+      <View style={{ flex: 1 }} onTouchStart={() => { try { touchCashierActivity(); } catch { /* abaikan */ } }}>
+      <IdleLockOverlay
+        visible={idleLocked}
+        triple={idleTriple}
+        onUnlocked={unlockIdle}
+        onLogout={() => { setIdleLocked(false); try { logout(); } catch { /* abaikan */ } }}
+      />
       <NavigationContainer
       ref={navRef}
+      // GAP-B: pindah layar = aktivitas kasir (sinyal kedua selain sentuhan).
+      onStateChange={() => { try { touchCashierActivity(); } catch { /* abaikan */ } }}
       onReady={() => {
         if (!showNavHook) return;
         // Hook verifikasi visual (dev only, aktif bila EXPO_PUBLIC_NAV_HOOK=1)
@@ -820,6 +899,7 @@ export default function App() {
       {/* S2-C308: host Modal appAlert agar failure-path Alert tampil di web. */}
       <AppAlertHost />
       </NavigationContainer>
+      </View>
     </SafeAreaProvider>
   );
 }

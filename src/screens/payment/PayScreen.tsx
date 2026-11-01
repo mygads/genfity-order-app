@@ -28,9 +28,12 @@ import { validatePosVoucherPreview, mapAppModeToGoOrderType, mapSaleItemsToPrevi
 import { enqueueSync, syncWarnLevel } from '../../lib/sync';
 import {
   getServerOrderIdForSale,
+  isSelectionRequiredCodeW2,
   mapPayMethodToBe,
   GO_OP_SETTLE,
+  type BePayMethod,
 } from '../../lib/posWire';
+import CashSessionSheet from '../../components/CashSessionSheet';
 import { initDb, query as queryDb } from '../../lib/db';
 import { getCachedTipEnabled, getCachedVerticalId, subscribeTipFlag } from '../../lib/posModes';
 import { payPolicyBlockReason } from '../../lib/sync';
@@ -492,6 +495,14 @@ export default function PayScreen({ navigation, route }: Props) {
   // mewajibkan PIN payment DAN sale tertaut order server; batal = bayar
   // dibatalkan (paritas FE: gate memblokir konfirmasi).
   const [mgrPinOpen, setMgrPinOpen] = useState(false);
+  // GAP-A: menunggu pilih sesi kas pasca-SELECTION_REQUIRED (>1 sesi OPEN).
+  // Retry memakai clientId yang SAMA (idempoten server: 200 "already synced").
+  const [sessSheetOpen, setSessSheetOpen] = useState(false);
+  const sessRetryRef = useRef<null | {
+    salesNum: string; serverId: number; method: BePayMethod; amount: number;
+    tip: number; voucherCode?: string; clientId?: string; custId?: number | null;
+    pin?: string; proofClean?: string; notesClean?: string;
+  }>(null);
   const pinRetryRef = useRef<{ method: string; cash: number; change: number; detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string } } | null>(null);
 
   // SESI-FINAL-APP: gerbang wajib-foto-bukti-bayar (merchant requirePaymentProof,
@@ -884,6 +895,21 @@ export default function PayScreen({ navigation, route }: Props) {
           }
           return;
         }
+        // GAP-A: SELECTION_REQUIRED (>1 sesi OPEN, auto-heal gagal) = kasir
+        // kasir-only sebelumnya buntu (hanya pesan "buka FE"). Tawarkan
+        // pemilih sesi di perangkat; antrean tetap jalan (idempoten).
+        if (!res.ok && res.reason === 'rejected' && isSelectionRequiredCodeW2(res.code)) {
+          sessRetryRef.current = {
+            salesNum, serverId, method: beMethod, amount,
+            tip, ...(voucherCode ? { voucherCode } : {}),
+            ...(clientId ? { clientId } : {}),
+            ...(custId != null ? { custId } : {}),
+            ...(pin ? { pin } : {}),
+            ...(proofClean ? { proofClean } : {}),
+            ...(notesClean ? { notesClean } : {}),
+          };
+          setSessSheetOpen(true);
+        }
         try {
           enqueueSync('other', {
             op: GO_OP_SETTLE, serverId, method: beMethod, amountPaid: amount,
@@ -906,6 +932,43 @@ export default function PayScreen({ navigation, route }: Props) {
       } catch { /* abaikan: sale lokal tetap sah */ }
     })();
   };
+  // GAP-A: ulang settle SEKALI ke sesi kas pilihan (clientId sama =
+  // idempoten; antrean yang sudah masuk jadi 200 "already synced").
+  const retrySettleToSession = () => {
+    const r = sessRetryRef.current;
+    sessRetryRef.current = null;
+    setSessSheetOpen(false);
+    if (!r) return;
+    void (async () => {
+      try {
+        let cashSid: number | undefined;
+        try {
+          const sv = await getCashSessionId();
+          const n = parseInt(String(sv ?? '').trim(), 10);
+          if (Number.isFinite(n) && n > 0) cashSid = n;
+        } catch { /* abaikan */ }
+        const res = await settlePosPayment({
+          serverId: r.serverId, method: r.method, amountPaid: r.amount,
+          ...(r.tip > 0 ? { tipAmount: r.tip } : {}),
+          ...(r.voucherCode ? { voucherCode: r.voucherCode } : {}),
+          ...(r.notesClean ? { notes: r.notesClean } : {}),
+          ...(r.clientId ? { idempotencyKey: r.clientId } : {}),
+          ...(r.custId != null ? { customerId: r.custId } : {}),
+          ...(cashSid ? { cashSessionId: cashSid } : {}),
+          ...(r.pin ? { pin: r.pin } : {}),
+          ...(r.proofClean ? { proofUrl: r.proofClean } : {}),
+        });
+        if (res.ok) {
+          void recordSettleMemberResult(
+            r.salesNum,
+            res.data,
+            { customerId: r.custId ?? null, pointsBalance: null, vouchersValid: null },
+          ).catch(() => undefined);
+        }
+      } catch { /* abaikan: antrean tetap memfinalisasi */ }
+    })();
+  };
+
   const goSuccess = async (method: string, cash: number, change: number, detail?: { approvalCode?: string; memberId?: string; customerId?: number; approvedBy?: string }, pin?: string) => {
     // Guard ketuk-ganda (#8/#21): tiap goSuccess menerbitkan nomor + tulis
     // DB; tanpa guard, dua ketukan cepat = dua saveSale (dua struk/stok ganda).
@@ -2157,6 +2220,12 @@ export default function PayScreen({ navigation, route }: Props) {
         visible={mgrPinOpen}
         onSubmit={submitManagerPin}
         onCancel={cancelManagerPin}
+      />
+      {/* GAP-A: pemilih sesi kas pasca-SELECTION_REQUIRED. */}
+      <CashSessionSheet
+        visible={sessSheetOpen}
+        onPicked={() => retrySettleToSession()}
+        onCancel={() => { sessRetryRef.current = null; setSessSheetOpen(false); }}
       />
       {hasTotal ? (
       <ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>

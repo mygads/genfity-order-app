@@ -77,7 +77,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t('stock.opname')}</Text>
-        <Text style={styles.cardSub}>{t('stock.opnameSub')}</Text>
+        <Text style={styles.cardSub}>{t('stock.opnameSub')}</Text><Text style={styles.cardSub}>{t('stock.opname_menu_only')}</Text>
         <View style={styles.rowBetween}>
           <Text style={styles.rowLabel}>{t('stock.pushOpname')}</Text>
           <Pressable style={[styles.pushBtn, pushing && styles.pushBtnBusy]} onPress={pushOpname} disabled={pushing}>
