@@ -120,7 +120,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
     // GAP-4: guard ganda ala changePin - ketuk ganda saat verifikasi async
     // berjalan ditolak (tombol juga disabled via busy).
     if (busy) return;
-    if (pin.length < 6) { setError(t('att_pin_short')); return; } setBusy(true); try {
+    if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
     if (vIn.ok !== true || !vIn.userId) { setError(vIn.ok === false ? t('att_pin_wrong') : t('shf_pin_offline_unknown')); return; }
@@ -146,7 +146,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
 
   const toggleBreak = async () => {
     if (busy) return;
-    if (pin.length < 6) { setError(t('att_pin_short')); return; }
+    if (pin.length < 4) { setError(t('att_pin_short')); return; }
     setBusy(true);
     setError('');
     try {
@@ -173,7 +173,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { savePinHa
   const clockOut = async () => {
     // GAP-4: guard ganda ala changePin (cermin clockIn di atas).
     if (busy) return;
-    if (pin.length < 6) { setError(t('att_pin_need_out')); return; }
+    if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
     setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
     const vOut = await verifyAttendancePin(pin);
