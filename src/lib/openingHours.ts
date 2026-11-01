@@ -1,12 +1,12 @@
 /**
- * SESI-R5-APP — jam operasional merchant dari GET pos-config terminal.
+ * SESI-R5-APP - jam operasional merchant dari GET pos-config terminal.
  * Putusan owner Q1: jam = buka-tutup order ONLINE customer saja; kasir
  * fleksibel + BANNER info TANPA blokir (NOL gate pada settle/create).
  *
  * KONTRAK BE (dipatok SESI-R5-BE, paralel):
  *   openingHours: [{dayOfWeek: int (0=Minggu..6=Sabtu, samakan dgn BE
  *   day_of_week), openTime: "HH:MM"|null, closeTime: "HH:MM"|null,
- *   isClosed: bool}]; merchant tanpa jam → [] (banner TIDAK tampil —
+ *   isClosed: bool}]; merchant tanpa jam → [] (banner TIDAK tampil -
  *   jujur, bukan placeholder).
  *
  * Modul MURNI (nol-impor, erasable-only) agar dapat ditranspile + diuji

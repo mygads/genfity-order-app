@@ -2,14 +2,14 @@
  * Klien SSE (Server-Sent Events) untuk feed display online-only
  * (SPEC-TERMINAL-SESSION §8: view_pelanggan ← E26 cart+QR dari kasir
  * pasangan; view_queue ← E27 feed branch; kasir/dapur/full_access memakai
- * WS dua-arah — lihat realtime.ts).
+ * WS dua-arah - lihat realtime.ts).
  *
  * Tanpa dependensi baru (aturan C1): streaming via fetch ReadableStream bila
  * didukung runtime (web/dev-client modern); fallback POLLING jujur (GET ulang
  * + Last-Event-ID + dedupe id) di runtime tanpa streaming (Expo Go/native).
  * Klien tak pernah melempar ke UI: status online/offline dilaporkan lewat
  * onStatus agar layar menampilkan banner (kunci i18n 'sse_offline' dipakai
- * layar via t()/useTranslation — modul ini hanya mengekspor SSE_OFFLINE_KEY
+ * layar via t()/useTranslation - modul ini hanya mengekspor SSE_OFFLINE_KEY
  * sebagai kontrak string, tanpa menambah kunci kamus).
  *
  * BE E26/E27 sebagian BELUM ADA: base kosong / env bukan custom / HTTP gagal
@@ -54,19 +54,19 @@ function withId(path: string, id: string): string {
 /**
  * EventSource/fetch-SSE tak bisa menyetel header Authorization, sedangkan
  * backend WAJIB auth (TerminalEventsSSE → 401 tanpa konteks user; grup route
- * menerima bearerFromQueryParam("token") SEBELUM UserAuth — router.go).
+ * menerima bearerFromQueryParam("token") SEBELUM UserAuth - router.go).
  * Selipkan kredensial sesi (authToken JWT E01 dulu, fallback authKey
- * terminal-login — selaras server.ts resolveSessionToken +
+ * terminal-login - selaras server.ts resolveSessionToken +
  * terminalContract.ts:179) sebagai ?token= pada URL SSE; tanpa
  * token, URL dibiarkan apa adanya (server 401 jujur → status offline).
  * Lazy-require agar tak ada siklus impor (session tak mengimpor modul ini).
  * APP-FIXUP(R-sse-token-order): urutan disamakan authToken-dulu (sebelumnya
  * authKey-dulu, berlawanan dengan server.ts:342).
  */
-/** P0-04: rotasi token SSE tiap reconnect (TTL 15 mnt scope sse-only). Jangan pernah log URL penuh (?token=) — log hanya host+path. */
+/** P0-04: rotasi token SSE tiap reconnect (TTL 15 mnt scope sse-only). Jangan pernah log URL penuh (?token=) - log hanya host+path. */
 let __sseTokenAt = 0;
 export function sseTokenAgeMs(): number { return __sseTokenAt ? Date.now() - __sseTokenAt : 999999999; }
-/** P0-04: token SSE via ?token= (EventSource tanpa header). Jangan log URL penuh — token di query. TTL pendek scope sse-only. */
+/** P0-04: token SSE via ?token= (EventSource tanpa header). Jangan log URL penuh - token di query. TTL pendek scope sse-only. */
 function withQueryToken(url: string): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -314,7 +314,7 @@ export class SseClient {
     try {
       const headers = sseHeaders(this.extraHeaders);
       if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
-      // Kredensial via ?token= (lihat withQueryToken) — header tak
+      // Kredensial via ?token= (lihat withQueryToken) - header tak
       // tersedia untuk EventSource; backend menolak tanpa auth.
       const res = await fetch(withQueryToken(this.url), { method: 'GET', headers, signal: ctrl.signal });
       if (!res.ok) {
@@ -434,7 +434,7 @@ function sseAggregateLive(): boolean {
       if (c.getStatus() === 'online') return true;
     }
   } catch {
-    /* abaikan — anggap offline */
+    /* abaikan - anggap offline */
   }
   return false;
 }

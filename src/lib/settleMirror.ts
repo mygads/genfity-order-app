@@ -1,18 +1,18 @@
 /**
  * A4: cermin pelunasan immediate-first ke BE (/pos/payment) untuk lane
- * QRIS/EDC — paritas mirrorSettleToServer PayScreen (cash lane).
+ * QRIS/EDC - paritas mirrorSettleToServer PayScreen (cash lane).
  *
  * Tanpa id server / tanpa padanan enum BE = BLOCKED diam (lokal tetap sah).
  * Immediate gagal (offline/ditolak) = antre GO_OP_SETTLE agar drain
- * memfinalisasi — jujur di SyncScreen, tanpa Success palsu, tanpa kirim buta.
+ * memfinalisasi - jujur di SyncScreen, tanpa Success palsu, tanpa kirim buta.
  * P1-2: sesi kas W1 yang diketahui disertakan (atribusi setoran benar);
  * tak diketahui = BE me-resolve sendiri. Tak pernah melempar.
  *
  * Deposits-gate (paritas PayScreen): deposit/member TAK punya padanan
- * enum BE — cermin server DILARANG untuk keduanya (hanya ledger lokal +
+ * enum BE - cermin server DILARANG untuk keduanya (hanya ledger lokal +
  * antre ESB). Transfer MANUAL kini mirrored (APP-9).
  *
- * Grup split: kunjungan grup SENGAJA tak memanggil helper ini — semua
+ * Grup split: kunjungan grup SENGAJA tak memanggil helper ini - semua
  * kunjungan berbagi SATU client_id rantai (Q7) sehingga immediate ganda
  * berisiko settle-duplikat beda nominal; kunjungan grup mengandalkan drain
  * (create → tautan HP-E2E → GO_OP_SETTLE idempoten).
@@ -46,7 +46,7 @@ export type MirrorSettleInput = {
   onSettled?: (r: SettleResult & { memberChanged?: boolean }) => void;
   /** APP-9: ref kaki (EDC approval / QRIS refCode) → notes settle. */
   notes?: string;
-  /** SESI-FINAL-APP: URL foto bukti bayar (https) — diteruskan aditif ke
+  /** SESI-FINAL-APP: URL foto bukti bayar (https) - diteruskan aditif ke
    *  settlePosPayment + antrean GO_OP_SETTLE. Absen = perilaku lama. */
   proofUrl?: string;
 };

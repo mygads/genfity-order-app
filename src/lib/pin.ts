@@ -1,11 +1,11 @@
 /**
  * PIN kasir: hash KDF + penyimpanan aman.
  *
- * CORONG TIGA PIN (AUDIT-ALIGNMENT-TERMINAL baris 5, paket app-model —
+ * CORONG TIGA PIN (AUDIT-ALIGNMENT-TERMINAL baris 5, paket app-model -
  * dokumentasi saja, tak ada perubahan format penyimpanan):
  * - PIN terminal = mengikat device↔terminal (sekali per device, bertahan
  *   melewati logout); disimpan sebagai Binding (session.ts) + kontrak
- *   terminalContract.ts — tak pernah plaintext.
+ *   terminalContract.ts - tak pernah plaintext.
  * - PIN staff = login, absensi, buka/tutup shift. verifyAttendancePin di bawah
  *   adalah BENIH corong ini (dipakai verifyLocalEscalation + alur absensi).
  * - PIN owner = eskalasi void/cancel/kompliment via authorizeSupervisor
@@ -249,7 +249,7 @@ export interface AttendanceVerify {
 // ---------------------------------------------------------------------------
 // Attempt-throttle modul (R33, audit 2026-10-17): 5x salah beruntun mengunci
 // 60 detik. Penghitung TERPISAH dari supervisor (PIN_ATTEMPTS_* di bawah,
-// bukan LS_SUP_*). In-memory per proses — guard brute-force lokal, bukan
+// bukan LS_SUP_*). In-memory per proses - guard brute-force lokal, bukan
 // otorisasi; kunci kedaluwarsa memberi jendela baru (decay).
 // ---------------------------------------------------------------------------
 
@@ -275,7 +275,7 @@ export function pinAttemptsLeft(): number {
 /**
  * Verifikasi PIN absensi ke ms_posuser (RIW-05/17): cocokkan hash lokal
  * (SecureStore) untuk tiap user. R34 CLOSED (2026-10-17): cabang plaintext
- * legacy + auto-upgrade DIHAPUS — kolom pinHash/password ms_posuser selalu
+ * legacy + auto-upgrade DIHAPUS - kolom pinHash/password ms_posuser selalu
  * NULL pasca-migrasi satu-kali (migrateLegacyPinColumns di lib/seed.ts, flag
  * ms_setting Security/PinMigrationV1) dan pull tak lagi menuliskannya
  * (master.ts). Tidak pernah melempar (gagal DB → null).
@@ -307,17 +307,17 @@ export async function verifyAttendancePin(pin: string): Promise<AttendanceVerify
       }
     }
     // HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): user sesi kasir tak tercatat di
-    // ms_posuser (master user milik Go; kontrak pull-user belum ada — pull
+    // ms_posuser (master user milik Go; kontrak pull-user belum ada - pull
     // master tak membawa user, seed lokal hanya user demo). Sebelum menilai
     // PIN salah, coba userId sesi aktif: pasca-login-staged-B, PIN milik sesi
     // adalah identitas paling otoritatif. Import statis dilarang (session.ts
-    // mengimpor pin.ts — siklus); dynamic import hanya di jalur fallback ini
+    // mengimpor pin.ts - siklus); dynamic import hanya di jalur fallback ini
     // (terbukti jalan di dev-client Hermes pada E2E HP).
     try {
       const { getSession, verifyGrantPin } = await import('../session');
       const sess = getSession();
       const sid = sess?.userId || sess?.username;
-      // HP-E2E-FIX-3 (2026-10-24): grant aktif DULU — hash PIN sesi login ini
+      // HP-E2E-FIX-3 (2026-10-24): grant aktif DULU - hash PIN sesi login ini
       // (staffPinHash) adalah pembanding paling otoritatif. Record
       // loadPinRecord di-seed completeLogin di bawah kunci s.userId yang
       // belum tentu sama dengan userId sesi berjalan ('2' vs email), sehingga

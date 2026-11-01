@@ -5,7 +5,7 @@
  * respons Go `{success, data: {merchant, categories, menuItems}}` ke
  * ms_category / ms_menu / ms_branchmenu + ms_setting (currency, PPN).
  * Server menang; stationId lokal dipertahankan (cermin domain station di
- * master.ts — server tak tahu alamat printer per-terminal).
+ * master.ts - server tak tahu alamat printer per-terminal).
  * 401 = sesi kedaluwarsa (login ulang); 404 = bukan backend Go (pemanggil
  * boleh fallback ke domain ESB).
  */
@@ -71,31 +71,31 @@ interface GoCategory {
 
 interface GoMerchant {
   currency: string;
-  /** Identitas merchant untuk header struk 1:1 BE (showMerchantName/Address/Phone/Email). Opsional — BE lama tak mengirim. */
+  /** Identitas merchant untuk header struk 1:1 BE (showMerchantName/Address/Phone/Email). Opsional - BE lama tak mengirim. */
   name?: string | null;
   address?: string | null;
   phone?: string | null;
   email?: string | null;
   /** 1:1 BE: kode/logo/tipe merchant untuk prefix nomor, pratinjau logo,
-   * dan cabang label retail. Opsional — BE lama tak mengirim. */
+   * dan cabang label retail. Opsional - BE lama tak mengirim. */
   code?: string | null;
   logoUrl?: string | null;
   merchantType?: string | null;
   enableTax: boolean;
   taxPercentage: number;
-  /** Knob service charge merchant (audit trisisi #1 — server-driven).
+  /** Knob service charge merchant (audit trisisi #1 - server-driven).
    * Skala serviceChargePercent = persen (5 = 5%), cermin BE
-   * MerchantPOSMenuGet. Opsional — BE lama tak mengirim; ketidakhadiran =
+   * MerchantPOSMenuGet. Opsional - BE lama tak mengirim; ketidakhadiran =
    * jangan sentuh cache lokal (fallback legacy 5% + label estimasi). */
   enableServiceCharge?: boolean;
   serviceChargeType?: string;
   serviceChargePercent?: number;
   serviceChargeFixedAmount?: number;
-  /** Biaya kemasan merchant (BE /pos/menu → merchant block). Opsional —
+  /** Biaya kemasan merchant (BE /pos/menu → merchant block). Opsional -
    * BE lama tak mengirim; ketidakhadiran = jangan sentuh cache lokal. */
   enablePackagingFee?: boolean;
   packagingFeeAmount?: number;
-  /** Preferensi struk merchant (A3, server-wins). Opsional — BE lama tak
+  /** Preferensi struk merchant (A3, server-wins). Opsional - BE lama tak
    * mengirim; ketidakhadiran = jangan sentuh cache lokal. */
   receiptShowTax?: boolean;
   receiptShowFooter?: boolean;
@@ -140,7 +140,7 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
   const res = await apiGet('api/merchant/pos/menu', { limit: 500, ...(since ? { since } : {}) });
   if (res.status === 404) throw new GoCatalogUnavailable();
   if (res.status === 401) {
-    throw new Error('Sesi kedaluwarsa (401) — login ulang sebelum sync katalog.');
+    throw new Error('Sesi kedaluwarsa (401) - login ulang sebelum sync katalog.');
   }
   if (!res.ok) throw new Error(`Pull katalog Go: HTTP ${res.status}`);
   const body = (await res.json()) as GoMenuResponse;
@@ -179,7 +179,7 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     const id = String(m.id ?? '');
     if (!id) continue;
     // Harga efektif kasir = promo aktif (sudah digerbang jadwal di BE)
-    // bila ada, else harga dasar — sama dengan yang dipakai FE web.
+    // bila ada, else harga dasar - sama dengan yang dipakai FE web.
     const price = m.promoPrice !== undefined && m.promoPrice !== null
       ? num(m.promoPrice)
       : num(m.price);
@@ -228,11 +228,11 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
         );
       }
     } catch {
-      /* DB lama tanpa kolom polimorfik — pull tetap sukses */
+      /* DB lama tanpa kolom polimorfik - pull tetap sukses */
     }
     // Stok cabang: habis = trackStock + stockQty <= 0. stationId +
     // lowThreshold lokal dipertahankan (printer milik layar Printer; ambang
-    // milik Stock Management — pull tak mengirim keduanya).
+    // milik Stock Management - pull tak mengirim keduanya).
     const qty = m.stockQty !== undefined && m.stockQty !== null ? num(m.stockQty) : 0;
     const soldOut = m.trackStock && m.stockQty !== undefined && m.stockQty !== null && num(m.stockQty) <= 0 ? 1 : 0;
     await run(
@@ -317,7 +317,7 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       );
     }
   } catch {
-    /* abaikan — header fallback ke nama cabang lokal */
+    /* abaikan - header fallback ke nama cabang lokal */
   }
   // Raster logo thermal (pull-time, fire-and-forget): unduh logoUrl → mono →
   // Merchant/LogoMonoJSON; print-time hanya baca (offline tetap jalan).
@@ -417,7 +417,7 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       // List kosong perlu dibedakan dari BE lama (404 juga []): cek via
       // endpoint mentah? fetchReceiptTemplates menelan 404. Di sini [] =
       // kemungkinan BE baru tanpa template ATAU BE lama/offline. Tulis
-      // default hanya bila katalog Go sukses (BE baru terbukti) — BE lama
+      // default hanya bila katalog Go sukses (BE baru terbukti) - BE lama
       // takkan sampai ke lane ini (GoCatalogUnavailable lebih dulu).
       await persistReceiptTemplate(
         { id: 0, name: 'default', templateType: 'CUSTOMER_RECEIPT', settings: { ...RECEIPT_TEMPLATE_DEFAULTS } },
@@ -428,7 +428,7 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
       await persistKitchenTemplate(kitchenTpl, run);
     }
   } catch {
-    /* abaikan — render fallback ke default kanonik BE */
+    /* abaikan - render fallback ke default kanonik BE */
   }
 
   await setWatermark('menu', { pull: now });

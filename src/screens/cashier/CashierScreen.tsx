@@ -40,7 +40,7 @@ import { payPolicyBlockReason } from '../../lib/sync';
 import { getBillingStatus, type BillingStatus } from '../../lib/billingStatus';
 import ModeBar from '../../components/cashier/ModeBar';
 // CatalogGrid (components/cashier) = versi ramping reusable; CashierScreen memakai grid custom
-// superset (soldOut/void/edit/modifier + low + unit/SKU) — parity dijaga tripwire-vertical-shell.
+// superset (soldOut/void/edit/modifier + low + unit/SKU) - parity dijaga tripwire-vertical-shell.
 import { getHybridVerticals } from '../../lib/posModes';
 import { getPosCustomItemsEnabled, getPosEditOrderEnabled, getPosPayImmediately, getRequireTableNumberForDineIn, getDeliveryFeeSchedule } from '../../lib/posConfigSync';
 import { fetchTerminalPosConfig } from '../../lib/terminalApi';
@@ -129,7 +129,7 @@ const PRODUCTS_DEV_FALLBACK: Product[] = [
 /** P1-09: prod tanpa fallback fiksi; dev boleh pakai dummy agar preview jalan. */
 const PRODUCTS: Product[] = __DEV__ ? PRODUCTS_DEV_FALLBACK : [];
 
-/** M9: cabang aktif = terminal yang diklaim; '' = unbound (fail-closed — tanpa
+/** M9: cabang aktif = terminal yang diklaim; '' = unbound (fail-closed - tanpa
  * fallback diam-diam 'B001'; query di bawah + banner unbound menanganinya). */
 
 /** Petakan categoryId master (C01.. / nama grup lokal) ke chip kategori kasir.
@@ -150,7 +150,7 @@ const CATEGORY_OF: Record<string, string> = {
 
 function mapCategory(raw: string | null): string {
   const v = (raw ?? '').trim();
-  // Vertical Shell P0: fallback JUJUR 'Lainnya' (bukan 'Makanan') — toko
+  // Vertical Shell P0: fallback JUJUR 'Lainnya' (bukan 'Makanan') - toko
   // baju/pulsa/jasa tak boleh melihat kategori F&B saat katalog kosong.
   if (!v) return 'Lainnya';
   if (CATEGORY_OF[v]) return CATEGORY_OF[v];
@@ -208,7 +208,7 @@ function MenuThumb({ size = 52 }: { size?: number }) {
 export default function CashierScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isWide = width >= TABLET_BP;
-  // Inset status bar (jam/notif HP) — paritas ScreenHeader (insets.top + 12),
+  // Inset status bar (jam/notif HP) - paritas ScreenHeader (insets.top + 12),
   // karena header kasir kustom (judul kiri + burger + badge) tak pakai ScreenHeader.
   const insets = useSafeAreaInsets();
   const { lang, t } = useLang();
@@ -224,7 +224,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [query, setQuery] = useState('');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
   /** C2: daftar mode per merchant-type dari binding (RESTAURANT default bila
-   * tak diketahui — [ASUMSI] koordinator). Dihitung per render (murah, murni)
+   * tak diketahui - [ASUMSI] koordinator). Dihitung per render (murah, murni)
    * agar re-bind lintas-tipe langsung tercermin tanpa restart.
    * KOREKSI-FLAG (owner 21-Okt, offer-time only): kanal delivery (GOFOOD/
    * GRABFOOD/SHOPEEFOOD/DELIVERY) disembunyikan bila flag OFF. Flag dibaca ke
@@ -234,7 +234,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [deliveryOn, setDeliveryOn] = useState(getCachedDeliveryEnabled());
   useEffect(() => subscribeDeliveryFlag(setDeliveryOn), []);
   // W1 (SESI-FIX-APPW1): ulangi tutup-kas tertunda tiap layar kasir dibuka
-  // (efek terpisah — langganan delivery di atas tak tersentuh). Best-effort,
+  // (efek terpisah - langganan delivery di atas tak tersentuh). Best-effort,
   // tak pernah melempar; offline = tetap pending untuk mount berikut.
   useEffect(() => {
     void (async () => {
@@ -308,7 +308,7 @@ export default function CashierScreen({ navigation, route }: Props) {
    * untuk gate di dalam effect params; state untuk gate render tombol. */
   const [customItemsEnabled, setCustomItemsEnabled] = useState(true);
   const [payImmediately, setPayImmediately] = useState(false);
-  /** Vertical Shell Fase 2: varian fashion (Size/Warna) — ditempel ke nama item agar SKU unik per varian. */
+  /** Vertical Shell Fase 2: varian fashion (Size/Warna) - ditempel ke nama item agar SKU unik per varian. */
   const [selSize, setSelSize] = useState<string | null>(null);
   const [selColor, setSelColor] = useState<string | null>(null);
   /** Vertical Shell Fase 2: jadwal jasa (wajib YYYY-MM-DD + HH:MM) + teknisi + DP%. Dibawa ke Pay via goCart/goPayDirect. */
@@ -318,7 +318,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   const [svcDp, setSvcDp] = useState(50);
   /** Fase 3: alamat antar/jemput (HOME_SERVICE wajib, PICKUP opsional catatan). */
   const [svcAddress, setSvcAddress] = useState('');
-  /** Fase 3 hybrid: panel tambahan (warung+pulsa) — view lokal, tak ubah vertical utama/BE gate. */
+  /** Fase 3 hybrid: panel tambahan (warung+pulsa) - view lokal, tak ubah vertical utama/BE gate. */
   const [hybridList, setHybridList] = useState<string[]>([]);
   const [hybridView, setHybridView] = useState<string | ''>('');
   useEffect(() => { void getHybridVerticals().then((h) => setHybridList(h)).catch(() => {}); }, []);
@@ -346,7 +346,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         posFlagsRef.current = { custom: c, edit: e, payNow: p, reqTable: rt };
         setCustomItemsEnabled(c);
         setPayImmediately(p);
-        // S-F3: seed ongkir dari jadwal server — HANYA bila semua aman:
+        // S-F3: seed ongkir dari jadwal server - HANYA bila semua aman:
         // pemanggil tak menetapkan ongkir + bukan DINE IN + keranjang masih
         // segar + pengguna belum mengubah dari default mode. Selain itu =
         // diam (kasir yang sedang jalan tak disentuh).
@@ -382,7 +382,7 @@ export default function CashierScreen({ navigation, route }: Props) {
    * pra-grant. Tak pernah memblokir karena gate gagal dibaca (fail-open
    * baca, login yang memutuskan). */
   const [grantDenied, setGrantDenied] = useState(false);
-  /** G3: cek grant terminal — dipakai ulang saat mount DAN setiap fokus layar
+  /** G3: cek grant terminal - dipakai ulang saat mount DAN setiap fokus layar
    * (kembali dari Install/klaim ulang), plus tombol "Coba Lagi" di layar blokir. */
   const recheckGrant = useCallback(async () => {
     let left = 3;
@@ -391,7 +391,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         const uid = (getSession()?.userId ?? '').trim();
         const tid = (getBinding()?.terminalId ?? '').trim();
         // restore() session/binding async fire-and-forget: cold start bisa baca
-        // null di cek pertama — tunggu 1.5 dtk lalu coba lagi (maks 3x) agar
+        // null di cek pertama - tunggu 1.5 dtk lalu coba lagi (maks 3x) agar
         // blokir E00045 tetap muncul walau restore belum selesai.
         if ((!uid || !tid) && left > 1) {
           await new Promise<void>((res) => setTimeout(res, 1500));
@@ -423,7 +423,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Text style={styles.modeNoteT}>{t('sync.blocked')} - {t('sync.openSync')} ›</Text>
       </TouchableOpacity>
     ) : null;
-  /** M9: '' = unbound — banner jujur di bawah header (tanpa fallback B001). */
+  /** M9: '' = unbound - banner jujur di bawah header (tanpa fallback B001). */
   const branchUnbound = (() => {
     try {
       return !(getTerminal().branchId ?? '').trim();
@@ -431,7 +431,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       return true;
     }
   })();
-  /** B10: branch unbound — banner blokir + tombol Klaim Terminal (fail-closed:
+  /** B10: branch unbound - banner blokir + tombol Klaim Terminal (fail-closed:
    *  CTA Bayar ikut mati via branchUnbound, klaim diarahkan ke Install). */
   const renderUnboundNotice = () =>
     branchUnbound ? (
@@ -444,7 +444,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   /** SESI-R5-APP (putusan owner Q1): jam operasional = buka-tutup order
    *  ONLINE customer; kasir fleksibel + BANNER info TANPA blokir. Snapshot
    *  dibaca langsung dari GET pos-config (fetch fokus + TTL 5 mnt, cermin
-   *  posPinGate) — posConfigSync TAK disentuh. Absen/kosong = tak render.
+   *  posPinGate) - posConfigSync TAK disentuh. Absen/kosong = tak render.
    *  NOL gate: settle/create/CTA tak membaca state ini. */
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [onlineHours, setOnlineHours] = useState<OpeningHour[]>([]);
@@ -553,7 +553,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   // DB kosong + tanpa draft = empty-state kasir yang jujur.
   const [cart, setCart] = useState<CartItem[]>([]);
   /** S-F3: cermin live (mode/ongkir/keranjang) untuk seed ongkir server di
-   * efek flags async — dibaca saat cache tiba, bukan saat render. */
+   * efek flags async - dibaca saat cache tiba, bukan saat render. */
   const liveRef = useRef({ mode: '', ongkir: 0, cartEmpty: true, routeOngkir: false });
   liveRef.current = { mode, ongkir, cartEmpty: cart.length === 0, routeOngkir: route?.params?.ongkir !== undefined };
   /** Muat order saat keranjang terisi: tahan dulu, minta konfirmasi hapus keranjang. */
@@ -566,7 +566,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   // PP-026: pesan validasi diskon per-item (negatif / melebihi nilai line).
   const [discMsg, setDiscMsg] = useState('');
   /** Eskalasi void: gate RBAC order.void, deny -> dialog persetujuan supervisor
-   * V1 (kontrak BE baru; S7). Gate-throw (DB error) tetap buka dialog —
+   * V1 (kontrak BE baru; S7). Gate-throw (DB error) tetap buka dialog -
    * persetujuan server otoritatif, fallback lokal dialog fail-closed sendiri
    * (pola guardVoidOpen HistoryScreen/CancelScreen). */
   const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
@@ -599,7 +599,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     (async () => {
       try {
         await initDb();
-        // M9: '' = unbound (tanpa fallback B001) — peta sold-out kosong, jujur.
+        // M9: '' = unbound (tanpa fallback B001) - peta sold-out kosong, jujur.
         const branchId = (getTerminal().branchId ?? '').trim();
         let rows: { id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }[] = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }>(
           'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
@@ -713,7 +713,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         );
       } catch {
         /* P1-09: Query DB melempar -> banner retry, bukan katalog fiksi di prod. */
-        if (alive) { setDbFailed(true); setDbError('DB katalog gagal dibaca — tarik sync / retry.'); }
+        if (alive) { setDbFailed(true); setDbError('DB katalog gagal dibaca - tarik sync / retry.'); }
       }
     })();
     return () => {
@@ -773,7 +773,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     (async () => {
       try {
         await initDb();
-        // M9: '' = unbound (tanpa fallback B001) — status shift tak terisi.
+        // M9: '' = unbound (tanpa fallback B001) - status shift tak terisi.
         const branchId = (getTerminal().branchId ?? '').trim();
         const row = await queryFirst<{ clockOut: string | null; status: string | null }>(
           'SELECT clockOut, status FROM tr_shiftlog WHERE branchId = ? AND (status IS NULL OR status <> \'absen\') ORDER BY clockIn DESC LIMIT 1',
@@ -1058,10 +1058,10 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   /**
    * PP-026 (definisi koordinator): validasi lokal batas diskon per-item.
-   * Field ini nominal Rupiah (bukan persen) — padanan jujur ">100%" adalah
+   * Field ini nominal Rupiah (bukan persen) - padanan jujur ">100%" adalah
    * diskon melebihi nilai bruto line. Negatif DITOLAK eksplisit dengan pesan
    * (dulu diam-diam jadi 0 via Math.max). RESIDU jujur: validasi server-side
-   * belum diuji — BE boleh punya batas sendiri; klaim = lokal saja.
+   * belum diuji - BE boleh punya batas sendiri; klaim = lokal saja.
    */
   const saveEditor = () => {
     if (!editingId) return;
@@ -1158,7 +1158,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     });
   };
 
-  /** Vertical Shell Fase 2: panel adaptif per vertikal (additive — resto tak berubah).
+  /** Vertical Shell Fase 2: panel adaptif per vertikal (additive - resto tak berubah).
    * FASHION/GROCERY: ScanBar (barcode/SKU/nama) + VariantPicker (fashion).
    * PULSA: 3-langkah kaku nomor→nominal→lunas. SERVICE: jadwal+teknisi+DP (format BE). */
   const renderVerticalPanel = () => {
@@ -1217,7 +1217,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             technicians={['Kasir', 'Kapster 1', 'Kapster 2', 'Teknisi']}
             onSubmit={(s) => {
               setSvcDate(s.date); setSvcTime(s.time); setSvcTech(s.technician); setSvcDp(s.dp);
-              setBlockMsg(`Jadwal ${s.date} ${s.time} · ${s.technician} · DP ${s.dp}% — lanjut Bayar.`);
+              setBlockMsg(`Jadwal ${s.date} ${s.time} · ${s.technician} · DP ${s.dp}% - lanjut Bayar.`);
             }}
           />
           {svcDate ? (
@@ -1250,7 +1250,7 @@ export default function CashierScreen({ navigation, route }: Props) {
             <View style={{ gap: 8, marginTop: 8 }}>
               <VariantPicker label="Size" options={['S', 'M', 'L', 'XL', 'XXL']} selected={selSize} onSelect={(s) => setSelSize(s === selSize ? null : s)} />
               <VariantPicker label="Warna" options={['Hitam', 'Putih', 'Navy', 'Abu', 'Cream']} selected={selColor} onSelect={(s) => setSelColor(s === selColor ? null : s)} />
-              {variantSuffix ? <Text style={styles.verticalNote}>Varian: {variantSuffix} — ditempel ke nama saat tambah.</Text> : null}
+              {variantSuffix ? <Text style={styles.verticalNote}>Varian: {variantSuffix} - ditempel ke nama saat tambah.</Text> : null}
             </View>
           ) : null}
         </View>
@@ -1393,7 +1393,7 @@ export default function CashierScreen({ navigation, route }: Props) {
   );
 
   // S7: eskalasi void via dialog persetujuan supervisor V1 (kontrak BE baru;
-  // legacy PIN-modal {pin} NOL — Real mode 404).
+  // legacy PIN-modal {pin} NOL - Real mode 404).
   const renderVoidDialog = () => (
     <SupervisorApprovalDialog
       visible={voidTarget !== null}
@@ -1447,7 +1447,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       </View>
     ) : null;
   /** Simpan membawa payload + salesNum agar muncul di Muat Order (dulu navigate tanpa params).
-   * Vertical Shell Fase 2: PREPAID (pulsa) tak boleh parked/simpan-hutang — SN/token tak bisa ditarik.
+   * Vertical Shell Fase 2: PREPAID (pulsa) tak boleh parked/simpan-hutang - SN/token tak bisa ditarik.
    * Blokir jujur di UI (bukan parked diam), cermin payPolicyBlockReason sync. */
   const goSaved = () => {
     try {
@@ -1629,7 +1629,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <Image source={require('../../../assets/icons/paper_icon.webp')} style={styles.toolIconSm} resizeMode="contain" />
         <Text style={[styles.toolBtnWideText, isWide && styles.toolBtnWideTextBig]} numberOfLines={1}>{t('saved')}</Text>
       </TouchableOpacity>
-      {/* A-P1-7: tombol Custom disembunyikan bila flag posCustomItems OFF. Vertical Shell: FASHION/GROCERY/PULSA/SERVICE (customItems=false) tak boleh item bebas — SKU/nominal/jadwal kanonis. */}
+      {/* A-P1-7: tombol Custom disembunyikan bila flag posCustomItems OFF. Vertical Shell: FASHION/GROCERY/PULSA/SERVICE (customItems=false) tak boleh item bebas - SKU/nominal/jadwal kanonis. */}
       {customItemsEnabled && (() => { try { const vv = VERTICALS[getCachedVerticalId()]; return vv?.flags?.customItems !== false; } catch { return true; } })() && (
       <TouchableOpacity
         style={[styles.toolBtnWide, !isWide && styles.toolBtnWidePhone, isWide && styles.toolBtnWideBig]}
@@ -2088,7 +2088,7 @@ export default function CashierScreen({ navigation, route }: Props) {
     </View>
   );
 
-  /** Jaring pengaman grant terminal E00045: cermin shiftBlocked — grant
+  /** Jaring pengaman grant terminal E00045: cermin shiftBlocked - grant
    *  kedaluwarsa/tak cocok → layar blokir + Masuk Ulang (re-auth online),
    *  bukan grid kasir. Tanpa grant (pra-grant) lolos ke shiftBlocked biasa. */
   if (grantDenied) {

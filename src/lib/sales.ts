@@ -29,8 +29,8 @@ const r = (n: number) => Math.round(n);
 
 function uid(_prefix: string): string {
   // UUIDv7 (Q7): semua id baris anak (sm/se/sp/dep/sv/si/kitchen/payment)
-  // merge-safe lintas-device. Prefix debug lama dibuang — kolom TEXT muat 36-char.
-  // P14: uuidv7 melempar jujur bila CSPRNG tak tersedia — teruskan (jangan
+  // merge-safe lintas-device. Prefix debug lama dibuang - kolom TEXT muat 36-char.
+  // P14: uuidv7 melempar jujur bila CSPRNG tak tersedia - teruskan (jangan
   // fallback Math.random) agar withTransaction rollback + L1-throw
   // meneruskannya ke pemanggil; baris anak tak boleh lahir tanpa id aman.
   try {
@@ -49,9 +49,9 @@ function uid(_prefix: string): string {
  * kuota). Semantik cermin validateVoucherCodeLocal (apiSource.ts) + totals()
  * (#16): status harus 'available', quota > 0, amount > 0, dalam jendela
  * validFrom/validTo (banding string waktu LOKAL via dbNowLocal), dan
- * gross >= minSpend (base = jumlah kotor per baris SEBELUM diskon item —
+ * gross >= minSpend (base = jumlah kotor per baris SEBELUM diskon item -
  * cermin subtotalGross CashierScreen; tanpa ongkir/pajak/service).
- * ms_voucher TAK punya kolom minSpend (server tak mengirimnya — pull voucher
+ * ms_voucher TAK punya kolom minSpend (server tak mengirimnya - pull voucher
  * di master.ts tanpa minSpend), jadi voucher kuota tak kena gate belanja;
  * gate minSpend hanya berlaku untuk promo. Kode promo tercatat di kolom
  * voucherCode yang sama; UPDATE kuota di bawah no-op untuknya karena baris
@@ -90,7 +90,7 @@ export async function assertVoucherUsable(code: string, base: number): Promise<{
       return { ok: true, amount: amt };
     }
     // Bukan voucher kuota: coba promo reusable (seed HEMAT10/ONGKIR10 hanya
-    // ada di ms_promotion — tanpa fallback, diskonnya nol diam-diam saat simpan).
+    // ada di ms_promotion - tanpa fallback, diskonnya nol diam-diam saat simpan).
     const promo = await queryFirst<{
       promoType: string | null;
       value: number | null;
@@ -132,7 +132,7 @@ import { isTerminalBound, nextDisplayNumber, nextSalesNum, nextSalesNumRetry, no
 export { isTerminalBound, nextDisplayNumber, nextSalesNum, nextSalesNumRetry, normalizeTerminalCode, TERMINAL_CODE_RE } from './salesNum';
 
 // Galat gate unbound privat modul ini (cermin milik salesNum.ts yang juga
-// privat — tak diekspor agar tak ada ketergantungan balik sales ↔ salesNum).
+// privat - tak diekspor agar tak ada ketergantungan balik sales ↔ salesNum).
 function terminalUnboundError(): Error {
   const e = new Error('Terminal belum diklaim - klaim terminal dulu sebelum jualan.');
   (e as { code?: string }).code = 'terminal-unbound';
@@ -213,7 +213,7 @@ export async function getSaleClientId(salesNum: string): Promise<string | null> 
  * yang sama (bukan uuidv7 baru tiap ketukan). Format kunci baru:
  * `payment-{orderId}-{uuidv7}`.
  * Urutan menang: seed params/head (kunci lama uuidv7 mentah TETAP sah untuk
- * rantai ini — stabilitas lebih penting dari format) → simpanan rantai →
+ * rantai ini - stabilitas lebih penting dari format) → simpanan rantai →
  * terbitkan baru + simpan. Tak pernah melempar (fallback uuidv7 mentah).
  */
 const LS_PAY_CHAIN = 'genfity.paychain.';
@@ -308,11 +308,11 @@ export function queueNoOf(salesNum: string): string | null {
 }
 
 /**
- * A5: arsip jejak void-penuh lokal (tr_voidtrail, LOCAL-ONLY — SENGAJA tanpa
+ * A5: arsip jejak void-penuh lokal (tr_voidtrail, LOCAL-ONLY - SENGAJA tanpa
  * enqueueOutbox/sync: audit kasir bertahan walau head dinolkan; server
  * menerima pembatalan lewat jalur void/sync yang sudah ada).
  * Snapshot diambil SEBELUM head di-UPDATE 'void'/grandTotal=0. Tak pernah
- * melempar (best-effort; idempoten per salesNum — void ganda menimpa baris
+ * melempar (best-effort; idempoten per salesNum - void ganda menimpa baris
  * yang sama via INSERT OR REPLACE).
  */
 export type VoidTrailSnapshot = {
@@ -368,7 +368,7 @@ export async function archiveVoidTrail(s: VoidTrailSnapshot): Promise<void> {
  * Stasiun kerja satu menu untuk kolom tr_salesmenu.stationId (L17, read-only):
  * cermin pola baca routing print (StockManagementScreen: SELECT qty, stationId
  * FROM ms_branchmenu WHERE branchId = ? AND menuId = ?) lalu fallback
- * ms_menu.stationId. Null bila tak ketemu — penjualan tetap sah, tiket dapur
+ * ms_menu.stationId. Null bila tak ketemu - penjualan tetap sah, tiket dapur
  * memakai rute default sisi layar dapur.
  */
 async function lookupMenuStation(menuId: string, branch: string): Promise<string | null> {
@@ -402,7 +402,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   const salesNum = s.salesNum ?? (await nextSalesNumRetry());
   // client_id UUIDv7 (Q7): diterbitkan sekali per sale, kunci rekonsiliasi
   // server (upsert by client_id) + payload QR + Idempotency-Key push.
-  // P14: kegagalan CSPRNG melempar jujur (tanpa id bisu) — pra-tulis sehingga
+  // P14: kegagalan CSPRNG melempar jujur (tanpa id bisu) - pra-tulis sehingga
   // aman: belum ada baris yang ditulis saat ini melempar.
   let clientId: string;
   try {
@@ -414,7 +414,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   }
   const now = new Date().toISOString();
   // SALESDATE-LOCAL (2026-10-28): salesDate dipakai dashboard/7-day dengan
-  // substr(...,1,10) vs hari LOKAL — ISO UTC menggeser omzet ke hari kemarin
+  // substr(...,1,10) vs hari LOKAL - ISO UTC menggeser omzet ke hari kemarin
   // untuk transaksi dini hari WIB. createdAt/updatedAt tetap ISO.
   const salesDateLocal = dbNowLocal();
   const t = getTerminal();
@@ -438,7 +438,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   // gabungan keduanya di discountTotal; tanpa pemisah, nominal voucher di head
   // + usage ter-overstate sebesar diskon item (bug G5).
   const itemDiscSum = r(items.reduce((a, it) => a + r(it.discount ?? 0), 0));
-  // Basis minSpend (#16b): gross cermin totals()/CashierScreen subtotalGross —
+  // Basis minSpend (#16b): gross cermin totals()/CashierScreen subtotalGross -
   // jumlah kotor per baris SEBELUM diskon item/voucher, tanpa ongkir/pajak/
   // service. Dihitung dari items (bukan s.subtotal pemanggil) agar seragam.
   const grossBase = r(
@@ -456,7 +456,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   }
   // Representasi voucher (L7/L8): kolom head `discount` = SEMUA potongan
   // belanja (diskon order + voucher); `voucherAmount` = SUBSET porsi voucher
-  // saja untuk pelaporan — pembaca JANGAN menjumlahkan keduanya. Bila
+  // saja untuk pelaporan - pembaca JANGAN menjumlahkan keduanya. Bila
   // pemanggil mengirim voucherAmount eksplisit + kode voucher (jalur Pay
   // pasca-split yang memisah keduanya), pakai nilai eksplisit itu; selainnya
   // turunkan dari discountTotal − diskon item (cermin bug G5).
@@ -563,7 +563,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   );
   // Opt global pelacakan perangkat (LS_OPTS layar Stok): bila kasir
   // mematikan pelacakan, penjualan tak menurunkan qty (flag Habis ikut tak
-  // diturunkan) — cermin Derivasi kanonis stockWrite.
+  // diturunkan) - cermin Derivasi kanonis stockWrite.
   let deviceTrack = true;
   try {
     const o = await getJSON<{ trackStock?: boolean }>('genfity.stock.opts', {});
@@ -689,7 +689,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       .filter((p) => /deposit/i.test(p.method ?? ''))
       .reduce((a, p) => a + r(p.amount), 0),
   );
-  // L4: kaki deposit tanpa member = melempar (paritas appendGroupPayment) —
+  // L4: kaki deposit tanpa member = melempar (paritas appendGroupPayment) -
   // di dalam transaksi sehingga rollback; jangan diam-diam lewati debit.
   if (depUsed > 0 && !saleLedgerKey) throw new Error('Deposit butuh member');
   if (depUsed > 0 && saleLedgerKey) {
@@ -787,7 +787,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
       [uid('sv'), salesNum, clientId, c],
     );
   }
-  // A12: burn voucher di server terminal — pasca-commit (postCommit di-flush
+  // A12: burn voucher di server terminal - pasca-commit (postCommit di-flush
   // hanya bila COMMIT berhasil; best-effort, kuota lokal di atas tetap sah).
   // IdempotencyKey per-voucher-per-transaksi milik helper (persist pra-kirim).
   if (headVoucherOk && s.voucherCode) {
@@ -816,7 +816,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
   }
   // Tiket dapur lahir dari penjualan nyata: satu baris per order dengan status
   // awal 'Baru'. Id deterministik agar retry penyimpanan tak bikin ganda.
-  // Q7: kanonis-menang untuk identitas — baris cermin push (client_id NULL /
+  // Q7: kanonis-menang untuk identitas - baris cermin push (client_id NULL /
   // sementara) dikoreksi ke client_id sale nyata; status tak disentuh agar
   // advance dapur (Diproses) tak regresi ke 'Baru'.
   await run(
@@ -859,7 +859,7 @@ export async function saveSale(s: SaleInput): Promise<string> {
     // Realtime lane (APP-PRINTER-SALES, audit row 12-parsial/SPEC §8): siarkan
     // live-cart kasir→display via publishDisplayOrder (bus lokal + WS
     // best-effort; SSE primer + polling fallback milik sisi view). Tak pernah
-    // melempar — penjualan tetap sah bila display belum siap.
+    // melempar - penjualan tetap sah bila display belum siap.
     try {
       DisplayBus.publishDisplayOrder(
         salesNum,
@@ -960,13 +960,13 @@ export async function getGroupPaid(salesNum: string): Promise<GroupPaid> {
  * mutasi dalam SATU transaksi + head update atomik (paidAmount + delta);
  * antrean ringan + display disiarkan pasca-commit. Melempar bila gate
  * gagal (unbound/salesNum kosong/nominal kosong/head tak ada/deposit tanpa
- * member) — pemanggil UI wajib try/catch.
+ * member) - pemanggil UI wajib try/catch.
  */
 /**
  * Satu kaki bayar kunjungan grup (L12: kontrak antar-agen). `customerId` GO
  * per-leg diteruskan defensif oleh PayScreen (fallback ke customerId
  * top-level); `memberId` per-leg = legacy pointer ledger (fallback ke
- * memberId top-level) — wire body tak pernah membawa alias (ronde-3 Q1).
+ * memberId top-level) - wire body tak pernah membawa alias (ronde-3 Q1).
  * `voucherCode` per-leg memicu backstop burn di bawah (kunjungan 2+).
  */
 export interface GroupPayLeg {
@@ -1019,7 +1019,7 @@ export async function appendGroupPayment(
   // A12: kode voucher kaki yang terbakar (di-flush pasca-commit di bawah).
   let outBurnedCodes: string[] = [];
   // L3: SELURUH mutasi (kaki + head + deposit + voucher) dalam SATU transaksi
-  // — kill di tengah tak menyisakan kaki tanpa head / head tanpa debit.
+  // - kill di tengah tak menyisakan kaki tanpa head / head tanpa debit.
   await withTransaction(async () => {
     const head = await queryFirst<{
       grandTotal: number | null; paidAmount: number | null; changeAmount: number | null;
@@ -1038,7 +1038,7 @@ export async function appendGroupPayment(
     const grand = r(head.grandTotal ?? 0);
     outGrand = grand;
     // Backstop voucher kaki (L12, cermin saveSale): kode tender per-leg yang
-    // BEDA dari kode head (sudah dibakar saat create) divalidasi — valid =
+    // BEDA dari kode head (sudah dibakar saat create) divalidasi - valid =
     // burn + kuota turun; tak-valid = usage 'rejected' + kode dicoret dari
     // refNo. Basis minSpend ≈ subtotal + discount (aproksimasi gross head).
     const headCodeU = String(head.voucherCode ?? '').trim().toUpperCase();
@@ -1106,9 +1106,9 @@ export async function appendGroupPayment(
     // Konvensi tendered/change kaki-vs-head (L13, paritas saveSale): tiap kaki
     // mencatat tendered = nominal kaki + change 0 (kembalian menempel di head,
     // bukan kaki); head mengakumulasi paidAmount + changeAmount. Struk per-kaki
-    // membaca kolom kaki, rekap membaca head — pembaca JANGAN menjumlahkan
+    // membaca kolom kaki, rekap membaca head - pembaca JANGAN menjumlahkan
     // change kaki × N. (Catatan: bila display struk-per-kaki butuh kembalian
-    // per kaki di masa depan, itu kerja pemilik layar Receipt — dilaporkan.)
+    // per kaki di masa depan, itu kerja pemilik layar Receipt - dilaporkan.)
     const add = legs.reduce((a, x) => a + x.amount, 0);
     outAdd = add;
     for (const leg of legs) {
@@ -1121,7 +1121,7 @@ export async function appendGroupPayment(
         [uid('sp'), no, groupClientId, leg.method, r(leg.amount), r(leg.amount), 0, leg.approvalCode ?? legVKept, now],
       );
     }
-    // L3: head update ATOMIK — paidAmount bertambah via SET paidAmount =
+    // L3: head update ATOMIK - paidAmount bertambah via SET paidAmount =
     // paidAmount + delta (tanpa read-modify-write; aman dari balapan dua
     // kunjungan). L14: grand 0 = lunas trivial (paritas saveSale).
     const changeAdd = Math.max(0, Math.round(Number(p.change) || 0));
@@ -1164,7 +1164,7 @@ export async function appendGroupPayment(
       );
     }
     // Potong saldo + ledger withdraw (paritas saveSale): di DALAM transaksi
-    // (sebelumnya best-effort di luar — kaki bisa sah tanpa debit).
+    // (sebelumnya best-effort di luar - kaki bisa sah tanpa debit).
     if (depTake > 0 && memberId) {
       const after = Math.max(0, depBefore - depTake);
       await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, memberId]);
@@ -1224,13 +1224,13 @@ export async function appendGroupPayment(
   }
   // A6: kunjungan grup yang MELUNASI bill (visit 2+) = antre GO_OP_SETTLE
   // SEKALI agar drain memfinalisasi order BE. Drain-only (layar tak
-  // immediate-POST untuk grup — paritas keputusan A4, hindari settle ganda
+  // immediate-POST untuk grup - paritas keputusan A4, hindari settle ganda
   // antar-kunjungan yang balapan). IdemKey = clientId rantai bersama (satu
   // rantai per salesNum via getOrCreatePayChainId) → replay BE = 'terkirim'.
-  // Syarat: grand > 0, serverId tertaut (tanpa itu drain BLOCKED — kasus
+  // Syarat: grand > 0, serverId tertaut (tanpa itu drain BLOCKED - kasus
   // create-belum-push ditutup link-block A1), SEMUA kaki punya padanan enum
   // BE (deposit/member = skip total, paritas gate A4; transfer MANUAL kini
-  // mapped — APP-9; campuran ber-transfer dilewati di bawah), dan belum ada
+  // mapped - APP-9; campuran ber-transfer dilewati di bawah), dan belum ada
   // settle antre/gagal untuk salesNum ini (twin S6 + cek outbox).
   if (outFullyPaid && outGrand > 0 && outGroupClientId) {
     try {
@@ -1290,7 +1290,7 @@ export async function appendGroupPayment(
       /* abaikan: settle grup best-effort, ledger lokal tetap sah */
     }
   }
-  // D5: siarkan display setelah COMMIT (tanpa import cycle — display.ts tak
+  // D5: siarkan display setelah COMMIT (tanpa import cycle - display.ts tak
   // mengimpor sales.ts). Best-effort; pembayaran tetap sah bila display gagal.
   try {
     const its = await query<{ menuName: string | null; qty: number | null; price: number | null }>(
@@ -1378,7 +1378,7 @@ interface HeadLite extends HeadTotals {
   shiftId: string | null;
   salesMode: string | null;
   memberId: string | null;
-  /** Ronde-3 Q1: ref member GO — diwarisi asal→tujuan saat pindah/pisah bill. */
+  /** Ronde-3 Q1: ref member GO - diwarisi asal→tujuan saat pindah/pisah bill. */
   customerId: number | null;
   customerName: string | null;
   cashierName: string | null;
@@ -1591,7 +1591,7 @@ export async function moveSaleItems(args: {
         /* abaikan */
       }
       for (const ex of extras) {
-        // L6 single-unit: pindahkan min(qty, prorata) — JANGAN paksa minimal 1
+        // L6 single-unit: pindahkan min(qty, prorata) - JANGAN paksa minimal 1
         // (extras satuan yang hanya tersentuh sebagian tetap di asal; porsi
         // yang pindah = pembulatan prorata, dibatasi qty baris).
         const moveQty = Math.min(n(ex.qty), Math.max(0, Math.round(n(ex.qty) * ratio)));
@@ -1639,7 +1639,7 @@ export async function moveSaleItems(args: {
 
   // Hitung ulang kedua head: subtotal/diskon dari baris; pajak/service/fee/
   // rounding diprorata porsi pindahan (pengurang tepat agar total konservasi).
-  // L16: basis nol (diskon 100% / bill kosong) = share 0 — tanpa ini
+  // L16: basis nol (diskon 100% / bill kosong) = share 0 - tanpa ini
   // movedSubtotal / max(1, 0) menggelembungkan pajak/service tujuan dari basis
   // nol (inflasi dari ketiadaan).
   const srcBase = n(src.subtotal);
@@ -1654,10 +1654,10 @@ export async function moveSaleItems(args: {
   const srcFee = r(n(src.platformFee) - dFee);
   const srcRound = r(n(src.rounding) - dRound);
   // Ongkir menempel pada bill (bukan item): pindah item tak memindahkan
-  // ongkir — bill asal mempertahankannya, bill tujuan memakai ongkirnya
+  // ongkir - bill asal mempertahankannya, bill tujuan memakai ongkirnya
   // sendiri (0 untuk bill baru). Sebelumnya grand dihitung tanpa ongkir.
   // Tip/gratuity (fitur tip v1) menempel pada bill dengan aturan yang sama:
-  // gratifikasi atas kunjungan, bukan per item — pindah item tak memindahkan
+  // gratifikasi atas kunjungan, bukan per item - pindah item tak memindahkan
   // tip; grand kedua bill wajib membawa tip masing-masing agar tip yang sudah
   // diputuskan di Pay tak hilang diam-diam saat baris dipindah.
   // Kemasan (A2) sama: menempel pada bill cermin ongkir/tip.
@@ -1734,7 +1734,7 @@ export async function moveSaleItems(args: {
   }
   // S6 immediate-first: coba live apiFetch DULU (kunci dest sama:
   // toSalesNum + client_id agar server korelasikan tanpa push); antrean
-  // ringan (twin) HANYA bila live gagal — sebelumnya urutan terbalik
+  // ringan (twin) HANYA bila live gagal - sebelumnya urutan terbalik
   // sehingga server menerima ganda (live + push) untuk satu move.
   const moveBody = {
     fromSalesNum, toSalesNum: destNum, toTableNo,
@@ -1746,7 +1746,7 @@ export async function moveSaleItems(args: {
     /* offline - twin via antrean ringan di bawah */
     try {
       // M11: payload move-items membawa client_id head TUJUAN (kunci upsert
-      // server untuk baris pindahan) — tanpa ini pushLightItem mengisi id
+      // server untuk baris pindahan) - tanpa ini pushLightItem mengisi id
       // antrean sebagai clientId dan server tak bisa mengkorelasikan move
       // dengan sale-nya. Baris DB pindahan sendiri sudah memakai destCid
       // (UPDATE/INSERT client_id di atas).
@@ -1756,7 +1756,7 @@ export async function moveSaleItems(args: {
     }
   }
   // D5: siarkan display untuk bill tujuan setelah sukses (tanpa import
-  // cycle — display.ts tak mengimpor sales.ts). Best-effort.
+  // cycle - display.ts tak mengimpor sales.ts). Best-effort.
   try {
     const dHead = await queryFirst<{ grandTotal: number | null; status: string | null }>(
       'SELECT grandTotal, status FROM tr_saleshead WHERE salesNum = ? LIMIT 1',

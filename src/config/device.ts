@@ -4,7 +4,7 @@
  * R1: blok station DIHAPUS dari modul ini. Alasannya tiga:
  * 1. modul ini pakai `localStorage` (web-only) sehingga station tak persist
  *    di native murni;
- * 2. tak ada pemanggil (list/add/remove/setDefaultStation nol konsumen —
+ * 2. tak ada pemanggil (list/add/remove/setDefaultStation nol konsumen -
  *    PrintersScreen punya state + ms_station sendiri);
  * 3. duplikat `genfity.printer.stations` yang dipakai layar Printer.
  * Satu-satunya konsumen modul ini (getNotif/setNotif): SettingsScreen,

@@ -1,14 +1,14 @@
 /**
  * A5: gerbang notifikasi verifikasi terminal (default-ON).
  *
- * BE-BELUM-ADA: belum ada server wiring — tidak ada pemanggil/enqueue/POST
+ * BE-BELUM-ADA: belum ada server wiring - tidak ada pemanggil/enqueue/POST
  * di versi ini. Flag ini disiapkan agar saat endpoint BE verifikasi terminal
  * tersedia, situs emisi cukup memeriksa isTerminalVerifyNotifyEnabled()
- * sebelum memanggil notifyTerminalVerification (apiSource) — tanpa mengubah
+ * sebelum memanggil notifyTerminalVerification (apiSource) - tanpa mengubah
  * perilaku default (ON) di instalasi lama.
  *
  * Penyimpanan: ms_setting ('Notify','TerminalVerify', '1'/'0'). Baris absen
- * (instalasi lama / belum diatur) = ON — perilaku default yang diinginkan.
+ * (instalasi lama / belum diatur) = ON - perilaku default yang diinginkan.
  */
 import { initDb, queryFirst, run } from './db';
 

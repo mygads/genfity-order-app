@@ -1,9 +1,9 @@
 /**
- * Adaptive Vertical Shell — 1 codebase + 7 preset vertikal (PRD multi-merchant).
+ * Adaptive Vertical Shell - 1 codebase + 7 preset vertikal (PRD multi-merchant).
  *
- * Layer1 BE (kanonis): RESTAURANT | PRODUCT | SERVICE — gate orderType POS-create.
+ * Layer1 BE (kanonis): RESTAURANT | PRODUCT | SERVICE - gate orderType POS-create.
  * Layer2 FE (preset UX): COFFEE | WARUNG_QSR | RESTO_FULL | FASHION | GROCERY |
- *   PULSA_DIGITAL | SERVICE — mengatur kategori, drawer, field checkout, pay policy.
+ *   PULSA_DIGITAL | SERVICE - mengatur kategori, drawer, field checkout, pay policy.
  *
  * Best practice yang ditiru: Square (Retail vs Restaurants vs Appointments =
  * 1 engine, N preset vertikal), Toast (QSR vs full-service dipisah), Clover

@@ -1,5 +1,5 @@
 /**
- * R4-4 — snapshot metode bayar merchant dari GET pos-config (agen BE paralel;
+ * R4-4 - snapshot metode bayar merchant dari GET pos-config (agen BE paralel;
  * kontrak: key `pos.paymentMethods{payAtCashierEnabled,manualTransferEnabled,
  * qrisEnabled,codEnabled,gpayEnabled}`, absen = semua true = tampil semua).
  *
@@ -15,11 +15,11 @@
  *
  * R4-4 PETA FLAG→UI APP POS (permukaan yang tak disebut = selalu tampil):
  * - qrisEnabled=false → kartu QRIS di tab online PayScreen disembunyikan.
- *   [JELAS — nama sama, elemen sama — DITERAPKAN via filterOnlineWallets]
+ *   [JELAS - nama sama, elemen sama - DITERAPKAN via filterOnlineWallets]
  * - codEnabled → TANPA permukaan UI di APP POS (tak ada alur COD di PayScreen
- *   / ExtraPaySection — grep COD nihil) → no-op. [PARKED: BE mungkin untuk FE]
+ *   / ExtraPaySection - grep COD nihil) → no-op. [PARKED: BE mungkin untuk FE]
  *
- * Q4 (putusan owner 25-Okt — satukan ke key efektif): bila respons memuat
+ * Q4 (putusan owner 25-Okt - satukan ke key efektif): bila respons memuat
  * BOTH `paymentSettings` (EFEKTIF kanonis BE: qris dinormalisasi ID+IDR +
  * requirePaymentProof) dan `paymentMethods` (MENTAH R4-4, deprecated) →
  * efektif menang PER KUNCI; mentah hanya mengisi kunci yang absen di efektif
@@ -28,15 +28,15 @@
  * jalan (legacy tampil, kasir tak terkunci).
  * - manualTransferEnabled → kandidat kartu Transfer ExtraPay, TAPI setting ini
  *   milik checkout customer (FE storefront) bukan tender kasir → TAMPIL.
- *   [PARKED/AMBIGU — butuh putusan owner sebelum digerbang]
+ *   [PARKED/AMBIGU - butuh putusan owner sebelum digerbang]
  * - payAtCashierEnabled → kandidat tab tunai, TAPI seluruh POS = di kasir
  *   (pemetaan 1:1 tak bermakna) → TAMPIL. [PARKED/AMBIGU]
  * - gpayEnabled → kandidat kartu GoPay, TAPI "gpay" ambigu (GoPay vs Google Pay
- *   vs Genfity Pay — BE memakai istilah Genfity Pay untuk proxy Duitku) →
+ *   vs Genfity Pay - BE memakai istilah Genfity Pay untuk proxy Duitku) →
  *   TAMPIL. [PARKED/AMBIGU]
  * - Tab tunai + member (deposit) → tak digerbang snapshot R4-4 ini (selalu
  *   tampil dari sisi paymentMethods; gate tab S-F1/S-F1b terpisah tak diubah
- *   R4-4 — kasir tak boleh terkunci; cermin fallback visibleTabs PayScreen
+ *   R4-4 - kasir tak boleh terkunci; cermin fallback visibleTabs PayScreen
  *   yang kembali ke daftar currency bila semua tab mati).
  */
 
@@ -84,7 +84,7 @@ const CONTAINER_KEYS = [
   'settings',
 ];
 
-/** Q4: blok EFEKTIF kanonis BE — dipindai DULU, menang per kunci atas mentah. */
+/** Q4: blok EFEKTIF kanonis BE - dipindai DULU, menang per kunci atas mentah. */
 const EFFECTIVE_KEYS = ['paymentSettings', 'payment_settings'];
 
 /** Kunci objek snapshot di dalam tiap kontainer. */
@@ -135,14 +135,14 @@ export function parsePaymentMethods(raw: unknown): PaymentMethods {
     scanFlat(o);
   };
 
-  // Q4: FASE E DULU — blok efektif kanonis (kanonis BE) menang per kunci.
+  // Q4: FASE E DULU - blok efektif kanonis (kanonis BE) menang per kunci.
   // Guard di scanFlat (kunci terisi tak ditimpa) membuat fase mentah di bawah
   // hanya mengisi sisa (mis. gpayEnabled yang tak ada di blok efektif).
   for (const ek of EFFECTIVE_KEYS) {
     const e = root[ek];
     if (e && typeof e === 'object') scanFlat(e as Record<string, unknown>);
   }
-  // FASE R — fallback snapshot mentah R4-4 + flat root (BE lama / gap-fill).
+  // FASE R - fallback snapshot mentah R4-4 + flat root (BE lama / gap-fill).
   scanContainer(root);
   for (const ck of CONTAINER_KEYS) {
     const c = root[ck];

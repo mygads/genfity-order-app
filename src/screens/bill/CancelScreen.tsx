@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { ApiPath } from '../../config/server';import { enqueueOutbox, enqueueSync, postImmediate } from '../../lib/sync';import SupervisorApprovalDialog from '../../components/SupervisorApprovalDialog';import { initDb, markClean, query, queryFirst, run } from '../../lib/db';import { archiveVoidTrail } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';import { useLang } from '../../lib/i18n';import { resolveCancelReasonPresets } from '../../lib/cancelReasons';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';import { postTableTransition } from '../../lib/terminalTable';import { releaseVoucherAtTerminal } from '../../lib/terminalVoucher';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav; route?: { params?: { orderId?: string; table?: string; cashier?: string; total?: number } } };/** Baris live tr_salesmenu dipakai langsung; tanpa data contoh. */type CancelItem = { id: string; name: string; price: number; qty: number };interface SaleMenuRow { id: string; menuId: string | null; menuName: string | null; qty: number | null; price: number | null; note: string | null; }/** Item live dari tr_salesmenu bila orderId cocok; [] bila DB kosong agar empty-state dipakai. Split fisik antar salesNum bukan urusan layar ini (milik penulis sales.ts). */async function loadSaleItems(salesNum: string): Promise<CancelItem[]> { try { await initDb(); const rows = await query<SaleMenuRow>( 'SELECT id, menuId, menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ? ORDER BY rowid', [salesNum], ); const seen = new Map<string, CancelItem>(); for (const r of rows) { const qty = Math.round(Number(r.qty) || 0); if (qty <= 0) continue; const id = String(r.menuId || r.id); const cur = seen.get(id); if (cur) { cur.qty += qty; } else { seen.set(id, { id, name: r.menuName ?? '-', price: Math.round(Number(r.price) || 0), qty }); } } return [...seen.values()]; } catch { return []; }} /** Penyesuaian head (diskon/service/tax) untuk sisa NET U7; nol bila DB kosong.
- * Tip SENGAJA tak ikut: order-level, menempel pada bill seperti ongkir —
+ * Tip SENGAJA tak ikut: order-level, menempel pada bill seperti ongkir -
  * void sebagian melestarikan tip (grand baru = grand lama − gross void). */
 async function loadHeadAdj(salesNum: string): Promise<{ discount: number; service: number; tax: number }> {
   try {
@@ -34,7 +34,7 @@ async function applyVoidLocal(
   const userId = approver || getSession()?.userId || getSession()?.username || '';
   await initDb();
   // Head asal (grand/voucher/member/cabang): void sebagian = grand dikurangi
-  // nilai item yang dibatalkan (diskon/fee/pajak TETAP seperti semula — tanpa
+  // nilai item yang dibatalkan (diskon/fee/pajak TETAP seperti semula - tanpa
   // hitung ulang dari subtotal yang menghapus diskon tercatat).
   let head: { branchId: string | null; grandTotal: number | null; voucherCode: string | null; memberId: string | null; status: string | null; tableNo: string | null } | null = null;
   try {
@@ -107,7 +107,7 @@ async function applyVoidLocal(
         /* abaikan */
       }
       voidedGross += oldSub - newSub;
-      // Stok kembali per qty yang dibatalkan (parsial maupun penuh seragam) —
+      // Stok kembali per qty yang dibatalkan (parsial maupun penuh seragam) -
       // hanya bila bill pernah bayar (saveSale memotong stok; bill open tanpa
       // kaki bayar tak memotong). Buka flag habis bila pulih. Best-effort.
       if (wasPaid) try {
@@ -166,7 +166,7 @@ async function applyVoidLocal(
   const fullVoid = restGross <= 0 || newGrand <= 0;
   if (fullVoid) {
     // A5: arsip jejak lokal SEBELUM head dinolkan (audit kasir; LOCAL-ONLY,
-    // tanpa sync). Jalur History (persistVoidDb, milik W2) belum mengarsip —
+    // tanpa sync). Jalur History (persistVoidDb, milik W2) belum mengarsip -
     // W2 cukup memanggil archiveVoidTrail yang sama sebelum UPDATE-nya.
     try {
       const snap = await queryFirst<{
@@ -358,13 +358,13 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   // S6 immediate-first: coba POST langsung (timeout singkat) dengan client_id
   // twin; twin ringan (id SAMA) hanya bila immediate gagal.
   // GAP-15 (2026-10-17, terverifikasi): approvedBy (userId approver eskalasi)
-  // dibawa di KEDUA jalur sync — body POST immediate
+  // dibawa di KEDUA jalur sync - body POST immediate
   // {action:'void', ..., approvedBy} di bawah DAN payload antrean
-  // enqueueSync('order', {action:'void', ..., approvedBy}) — pushLightItem
+  // enqueueSync('order', {action:'void', ..., approvedBy}) - pushLightItem
   // (lib/sync.ts) menyebar ...rawPayload apa adanya ke body ESB (payload void
   // tanpa `op`/items tak tersentuh terjemahan Go-POS), jadi field ini tiba di
   // server. Kolom approvedBy sisi server (Go backend, repo terpisah) tak bisa
-  // dipastikan dari repo app ini — payload best-effort + jujur; daya tahan
+  // dipastikan dari repo app ini - payload best-effort + jujur; daya tahan
   // lokal dijamin via tr_cancelmenu.userId (applyVoidLocal memakai approver
   // bila ada, bukan sesi kasir).
   const twinId = uuidv7();
@@ -415,7 +415,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
     })().then(({ names }) => {
       if (!alive || names.length === 0) return;
       setServerReasons(names);
-      // Ganti default awal dengan preset server pertama — TAPI hormati
+      // Ganti default awal dengan preset server pertama - TAPI hormati
       // pilihan kasir bila sudah diubah manual sebelum fetch tiba.
       setReason((prev) => (prev === FALLBACK_REASONS[0] && !names.includes(prev) ? (names[0] ?? '') : prev));
     }).catch(() => { /* offline: fallback hardcoded */ });
@@ -444,7 +444,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
   /** Total live (jumlah item) bila pemanggil tak mengirim total; tanpa mock. */
   const liveTotal = items.reduce((s, i) => s + i.price * i.qty, 0);
   const orderTotal = paramTotal > 0 ? paramTotal : liveTotal;
-  // U7: sisa NET proporsional — porsi diskon/service/tax milik baris void =
+  // U7: sisa NET proporsional - porsi diskon/service/tax milik baris void =
   // voidSubtotal/orderSubtotal × (discount+service+tax).
   const adjTotal = headAdj.discount + headAdj.service + headAdj.tax;
   const voidShare = liveTotal > 0 && voidTotal > 0 ? (voidTotal / liveTotal) * adjTotal : 0;
@@ -454,7 +454,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
 
   // PIN eskalasi 4-6 digit: seed uji 4 digit (1111/2222/1234) lolos ke
   // authorizeSupervisor (server tetap menuntut 6) + fallback lokal.
-  const canConfirm = picked.length > 0; /** Fase 3 retur 7 hari: kedaluwarsa tak hard-block — wajib lewat dialog supervisor (approveVoid). Warning merah di bawah tetap tampil. */ /** S7: tombol ini hanya gate RBAC +
+  const canConfirm = picked.length > 0; /** Fase 3 retur 7 hari: kedaluwarsa tak hard-block - wajib lewat dialog supervisor (approveVoid). Warning merah di bawah tetap tampil. */ /** S7: tombol ini hanya gate RBAC +
    * buka dialog persetujuan supervisor V1 (kontrak BE baru, legacy NOL);
    * persistVoid jalan di approveVoid (dipanggil dialog saat disetujui). */
   const confirm = () => {
@@ -463,7 +463,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         // hard block); fail-open (allow/db-unready) lanjut tanpa catatan.
         if (!gate.ok) setAuthMsg(t('void_need_pin').replace('{r}', gate.reason));
         setApproveOpen(true); }).catch(() => {
-        // Gate-throw: dialog tetap dibuka (pola guardVoidOpen) — persetujuan
+        // Gate-throw: dialog tetap dibuka (pola guardVoidOpen) - persetujuan
         // server otoritatif, fallback lokal dialog fail-closed sendiri.
         setApproveOpen(true); }); };
   /** Persetujuan V1 ok (approvalId server / userId lokal) → simpan void via
@@ -473,7 +473,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
    const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason, res.supervisorUserId || undefined).finally(() => { setDone(true);
  }); };
 
-  /** Empty-state: DB nol-baris / tanpa orderId — tanpa ITEMS/SPLITS/TRX-047 mock.
+  /** Empty-state: DB nol-baris / tanpa orderId - tanpa ITEMS/SPLITS/TRX-047 mock.
    * Teks netral ID/EN (tanpa kunci i18n baru), gaya teks empty yang sudah ada. */
   if (!loaded || isEmptyOrder) { return (
     <View style={styles.root}><ScreenHeader title={t('cx_title')} sub={orderId ? `Order ${orderId}` : undefined} onBack={() => navigation?.goBack?.()} /><ScrollView contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
@@ -511,7 +511,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         <Text style={styles.hint}>{t('cx_server_empty')}</Text>
       ) : null}
       {returnExpired ? (
-        <Text style={[styles.hint, { color: colors.red }]}>Retur melebihi 7 hari (umur {orderAgeDays} hari) — butuh persetujuan supervisor.</Text>
+        <Text style={[styles.hint, { color: colors.red }]}>Retur melebihi 7 hari (umur {orderAgeDays} hari) - butuh persetujuan supervisor.</Text>
       ) : isFashionReturn && orderAgeDays != null ? (
         <Text style={styles.hint}>Umur struk {orderAgeDays} hari (batas retur 7 hari).</Text>
       ) : null}
@@ -540,7 +540,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
         visible={approveOpen}
         action="cancel"
         refId={orderId}
-        reasonPreset={note ? `${reason} — ${note}` : reason}
+        reasonPreset={note ? `${reason} - ${note}` : reason}
         fallbackAccessKey="order.cancel"
         onApproved={(r) => approveVoid(r)}
         onCancel={() => setApproveOpen(false)}

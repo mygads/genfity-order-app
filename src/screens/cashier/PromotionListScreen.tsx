@@ -241,6 +241,20 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   const callerTable = route?.params?.table;
   const callerCustomer = route?.params?.customer;
   const callerMemberId = route?.params?.memberId;
+  // Member GO untuk binding kode loyalti di preview: kunci lokal MC{id}
+  // atau id numerik langsung; tak dikenal = preview tanpa member (fail-closed BE).
+  const promoCustomerId = (() => {
+    const raw = String(callerMemberId ?? '').trim();
+    if (!raw) return null;
+    if (/^[0-9]+$/.test(raw)) {
+      const n = parseInt(raw, 10);
+      return Number.isSafeInteger(n) && n > 0 ? n : null;
+    }
+    const m = /^MC([0-9]+)$/.exec(raw);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  })();
   const callerSalesNum = route?.params?.salesNum;
   const [warn, setWarn] = useState('');
 
@@ -317,7 +331,8 @@ export default function PromotionListScreen({ navigation, route }: Props) {
       const previewItems = mapSaleItemsToPreviewItems(callerItems);
       if (previewItems && subtotal !== undefined && subtotal > 0) {
         const pv = await validatePosVoucherPreview(
-          p.code, subtotal, previewItems, mapAppModeToGoOrderType(callerMode));
+          p.code, subtotal, previewItems, mapAppModeToGoOrderType(callerMode),
+          undefined, promoCustomerId ?? undefined);
         if (pv.ok) {
           go(pv.amount);
           return;

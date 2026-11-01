@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   stock: number;
   online: boolean;
   track: boolean;}const LS_STOCK = 'genfity.stock.cache';const LS_OPTS = 'genfity.stock.opts';/** Sanitasi qty: bulatkan, tolak NaN/negatif (default 0). */function cleanQty(v: unknown, fallback = 0): number { const n = Number(v); if (!Number.isFinite(n)) return fallback; return Math.max(0, Math.round(n)); }interface StockOpts { trackStock: boolean; lowWarn: boolean; lowLimit: string; allowSellEmpty: boolean; onlineSync: boolean;}const DEFAULT_OPTS: StockOpts = { trackStock: true, lowWarn: true, lowLimit: '5', allowSellEmpty: false, onlineSync: true,};/** Lembar hitung opname + pengaturan global/toggle per-item (TIDAK menulis stok
- * absolut — stok absolut + tandai habis hanya via StockManagementScreen).
+ * absolut - stok absolut + tandai habis hanya via StockManagementScreen).
  * Stepper di tiap kartu = entri hitung fisik lokal, dikirim sekaligus via
  * "Kirim hasil opname" ke draf server (finalisasi owner). Toggle tampil-online
  * & lacak per item local-only (cache genfity.stock.cache, dibaca juga oleh
@@ -58,7 +58,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
           <Switch value={opts.lowWarn} onValueChange={(v) => setOpt('lowWarn', v)} trackColor={{ true: colors.green, false: colors.stroke }} />
         </View>
         <AppInput label={t('stock.lowLimit')} value={opts.lowLimit} onChangeText={(v) => setOpt('lowLimit', v.replace(/\D/g, '').slice(0, 4))} keyboardType="numeric" placeholder="5" />
-        {/* R1: server-wins tiap sync login (posConfigSync S-F5, sengaja) —
+        {/* R1: server-wins tiap sync login (posConfigSync S-F5, sengaja) -
             kasir diberi tahu agar tak bingung bila kustomnya tertimpa. */}
         <Text style={styles.cardSub}>{t('stock.lowLimitManaged')}</Text>
         <View style={styles.rowBetween}>

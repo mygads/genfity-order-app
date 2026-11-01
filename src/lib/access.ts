@@ -5,7 +5,7 @@
  * 0. grant terminal (Q6, paket app-model): grant tersimpan tapi user/terminal
  *    tak cocok atau kedaluwarsa = DENY fail-closed; grant valid/absen = lanjut;
  * Jalur eskalasi PIN Owner (requireEscalationAccess, D3-05): gerbang BINDING
- * fail-closed + hirarki 1-4 untuk userId APPROVER — TANPA gerbang grant sesi
+ * fail-closed + hirarki 1-4 untuk userId APPROVER - TANPA gerbang grant sesi
  * kasir (approver tak wajib memegang sesi login kasir).
  * 1. baris eksak (userId, accessKey) - menang mutlak;
  * 2. baris wildcard (userId, '*') - allow-all (dipakai admin seed u-admin);
@@ -14,27 +14,27 @@
  *    (role, '*') - mis. template 'Merchant Staff' berisi deny eksplisit untuk
  *    aksi sensitif, template 'Merchant Owner' berisi allow-all wildcard;
  * 4. tanpa baris apa pun = fail-open allow (kompatibilitas kasir offline),
- *    KECUALI ada deny eksplisit di tingkat di atas — DAN kecuali 4 kunci
+ *    KECUALI ada deny eksplisit di tingkat di atas - DAN kecuali 4 kunci
  *    sensitif C5 (order.void/order.cancel/sale.refund/settings.edit) yang
  *    fail-CLOSED (default-deny).
  *
  * Model peran hanya ada 2: Merchant Owner (akses penuh) dan Merchant Staff
  * (dibatasi: deny order.void/order.cancel/sale.refund/settings.edit, lalu
  * eskalasi PIN Owner). PENGECUALIAN Q18 (STAFF-BISA-APPROVE-PETTY):
- * 'petty.approve' SENGAJA tanpa deny Staff — PIN Staff valid lolos (fail-open
+ * 'petty.approve' SENGAJA tanpa deny Staff - PIN Staff valid lolos (fail-open
  * default-allow), sedangkan void/cancel/kompliment (order.void/order.cancel/
  * sale.refund) TETAP owner-only. Nilai peran legacy (admin/supervisor/kasir/...) dari
  * server dipetakan ke kanonis via normalizeRole agar template terbaca.
  *
  * Fail-open juga berlaku saat DB belum siap (catch -> allow, reason
- * 'db-unready') — KECUALI 4 kunci sensitif C5 (catch -> deny fail-closed).
+ * 'db-unready') - KECUALI 4 kunci sensitif C5 (catch -> deny fail-closed).
  * Tiap jalur fail-open memancarkan console.warn sekali
  * (warn-once) agar tidak diam. Fungsi ini TIDAK PERNAH melempar. Alur PIN
  * supervisor (lib/pin.ts) tidak disentuh - modul ini hanya membaca tabel akses.
  *
- * PEMBAGIAN DUA LAPIS #9 (audit trisisi — BUKAN duplikasi, sengaja):
+ * PEMBAGIAN DUA LAPIS #9 (audit trisisi - BUKAN duplikasi, sengaja):
  * - RBAC lokal di sini = gating UX offline: menyembunyikan/memblokir tombol
- *   sensitif di perangkat. Ini BUKAN otorisasi — penyerang dengan akses DB
+ *   sensitif di perangkat. Ini BUKAN otorisasi - penyerang dengan akses DB
  *   lokal bisa melewatinya.
  * - PIN server (`requirePinFor*` + `pos_supervisor_approvals`, diverifikasi
  *   BE per aksi void/refund/cancel via posPinGate transport) = otorisasi
@@ -95,7 +95,7 @@ export const ACCESS_KEYS = [
   'order.cancel',
   'sale.refund',
   'settings.edit',
-  // Q18 STAFF-BISA-APPROVE-PETTY: kunci khusus approve petty/kasbon — Staff
+  // Q18 STAFF-BISA-APPROVE-PETTY: kunci khusus approve petty/kasbon - Staff
   // dan Owner lolos (tanpa deny Staff di seed; fail-open default-allow).
   // Void/cancel/kompliment TETAP lewat 4 kunci owner-only di atas.
   'petty.approve',
@@ -110,7 +110,7 @@ export type AccessKey = (typeof ACCESS_KEYS)[number] | string;
  * (PIN owner, 295-311) tetap fail-closed dan jadi rujukan pola.
  * Seed menjamin peran kanonis tak terdampak: 'Merchant Owner' membawa
  * wildcard-allow, 'Merchant Staff' membawa deny eksplisit per kunci
- * (seed.ts:545-568) — cabang ini hanya menjerat user tanpa baris/seed.
+ * (seed.ts:545-568) - cabang ini hanya menjerat user tanpa baris/seed.
  */
 export const SENSITIVE_KEYS: ReadonlySet<string> = new Set([
   'order.void',
@@ -157,7 +157,7 @@ export function listAccessKeys(): string[] {
 /**
  * Validasi grant sesi saat ini (await hydrate agar tak menilai memori dingin
  * pasca-restart). 'absent' = tak ada grant (biarkan hierarki lama); 'ok' =
- * grant valid (lanjut hierarki — grant memeriksa IKATAN, bukan menggantikan
+ * grant valid (lanjut hierarki - grant memeriksa IKATAN, bukan menggantikan
  * RBAC); 'denied' = fail-closed.
  */
 async function checkTerminalGrant(userId: string): Promise<
@@ -169,7 +169,7 @@ async function checkTerminalGrant(userId: string): Promise<
   if (!getGrant()) {
     // Fail-closed untuk grant HILANG bila device sudah ter-bound (grant
     // SEHARUSNYA ada: login pertama wajib online menerbitkannya, Q6).
-    // Legacy fail-open lestari HANYA pra-bind (binding tanpa terminalId —
+    // Legacy fail-open lestari HANYA pra-bind (binding tanpa terminalId -
     // grant belum BISA ada) + warn-once, kompatibilitas kasir offline.
     const terminalId = (getBinding()?.terminalId ?? '').trim();
     if (!terminalId) return { state: 'absent' };
@@ -251,13 +251,13 @@ async function decideHierarchy(userId: string, accessKey: string): Promise<Acces
   }
 
   // 4. Fail-open TERBATAS: tanpa baris = allow HANYA karena (a) pra-bind
-  // (grant belum BISA ada — lihat checkTerminalGrant) atau (b) grant valid
+  // (grant belum BISA ada - lihat checkTerminalGrant) atau (b) grant valid
   // tapi peran/user tanpa baris (kompatibilitas RBAC lama; grant sudah
   // memverifikasi ikatan). Bound + grant HILANG tak pernah sampai sini
   // (ditolak 'no-grant' di gerbang 0 di atas).
-  // C5: kunci sensitif TIDAK ikut fail-open — tanpa baris = DENY eksplisit
+  // C5: kunci sensitif TIDAK ikut fail-open - tanpa baris = DENY eksplisit
   // (default-deny). Peran seed tak terdampak (owner wildcard-allow, staff
-  // deny eksplisit — keduanya kembali SEBELUM titik ini).
+  // deny eksplisit - keduanya kembali SEBELUM titik ini).
   if (SENSITIVE_KEYS.has(accessKey)) {
     return { ok: false, reason: 'default-deny' };
   }
@@ -316,20 +316,20 @@ export async function requireAccess(
 
 /**
  * Gerbang eskalasi persetujuan (void/cancel/kompliment butuh PIN Owner,
- * SPEC Q-kunci + D3-05; PENGECUALIAN Q18: 'petty.approve' boleh PIN Staff —
+ * SPEC Q-kunci + D3-05; PENGECUALIAN Q18: 'petty.approve' boleh PIN Staff -
  * kunci itu tanpa deny Staff sehingga hirarki di bawah meloloskan Staff via
  * default-allow, Owner via role-wildcard-allow): BINDING-gated, approver-aware, TANPA gerbang grant
  * sesi kasir. Alasan: PIN Owner dimasukkan approver yang BELUM tentu memegang
- * sesi/grant login kasir — menuntut grant milik approver menolak eskalasi sah
+ * sesi/grant login kasir - menuntut grant milik approver menolak eskalasi sah
  * (deny arah-1), sedangkan melewatkan grant kasir meloloskan sesi basi (allow
  * arah-2). Yang diverifikasi:
- * 1. device TERIKAT terminal dikenal (getBinding) — fail-closed
+ * 1. device TERIKAT terminal dikenal (getBinding) - fail-closed
  *    'terminal-unbound' bila belum bind;
- * 2. hirarki RBAC (decideHierarchy) untuk userId APPROVER — PIN-nya sudah
+ * 2. hirarki RBAC (decideHierarchy) untuk userId APPROVER - PIN-nya sudah
  *    diverifikasi pemanggil (supervisor.verifyLocalEscalation) SEBELUM fungsi
  *    ini dipanggil.
  * Tidak pernah melempar: store belum siap -> deny fail-closed 'db-unready'
- * (SENGAJA berlawanan dengan requireAccess yang fail-open — persetujuan tak
+ * (SENGAJA berlawanan dengan requireAccess yang fail-open - persetujuan tak
  * boleh fail-open).
  */
 export async function requireEscalationAccess(
@@ -359,7 +359,7 @@ export async function requireEscalationAccess(
 // E01 terminal-login single-stage LIVE (2026-10-17): satu-satunya otoritas
 // kini adalah grant cache (dibuat saat auth online sukses; lihat buildGrant/saveGrant di
 // session.ts). Alasan deny dipetakan ke status UI eksplisit ("needs BE /
-// mode lokal") — dipakai alur L1, bukan bypass diam:
+// mode lokal") - dipakai alur L1, bukan bypass diam:
 // - 'no-grant'         → login pertama wajib online (butuh BE).
 // - 'grant-expired'    → grant kedaluwarsa; re-auth online (butuh BE).
 // - 'grant-mismatch'   → triple (user, terminal, device) tak cocok;

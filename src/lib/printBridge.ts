@@ -33,7 +33,7 @@ export interface ServerPrintJob {
   /**
    * KONTRAK FINAL AUTO (BE menulis, APP merender): metadata JSON
    * {orderId, paymentId?, templateType:'customer'|'kitchen'}.
-   * payload_base64 job AUTO = '' (kosong) — JANGAN dicetak buta
+   * payload_base64 job AUTO = '' (kosong) - JANGAN dicetak buta
    * (lihat isAutoPrintJob + printAutoServerJob di bawah).
    */
   metadata: AutoJobMetadata | null;
@@ -186,7 +186,7 @@ export async function postPrintFanout(
 /**
  * Tugas G: fan-out OTOMATIS struk pasca-bayar (source AUTO).
  * Dipanggil fire-and-forget dari ReceiptScreen.doPrint saat autoPrint
- * pasca-Success (bukan cetak manual — manual tak membuat server jobs).
+ * pasca-Success (bukan cetak manual - manual tak membuat server jobs).
  * - idempotencyKey = client_id rantai bayar (stabil per sale; BE dedup
  *   per station `{base}:station-{destinationId}`, replay ganda aman).
  * - orderId = id order server numerik bila tertaut (BE menolak non-numerik;
@@ -196,14 +196,14 @@ export async function postPrintFanout(
  * - Gagal/offline = fallback antrean lokal persisten (kind 'receipt',
  *   target null → drain kind-aware; tak pernah melempar). Anti-ganda:
  *   pemanggil meneruskan `alreadyQueued` dari outcome lokal (jalur lokal
- *   print.ts SUDAH mengantre per-station saat kirim gagal) — fallback di
+ *   print.ts SUDAH mengantre per-station saat kirim gagal) - fallback di
  *   sini hanya jalan bila lokal BELUM mengantre.
  */
 export async function fanoutReceiptAuto(input: {
   orderNo: string;
   clientId: string;
   payloadBase64: string;
-  /** true = jalur lokal SUDAH mengantre byte ini (outcome `queued`) —
+  /** true = jalur lokal SUDAH mengantre byte ini (outcome `queued`) -
    * fallback lokal dilewati agar drain tak mencetak ganda. */
   alreadyQueued?: boolean;
 }): Promise<FanoutOutcome> {
@@ -213,7 +213,7 @@ export async function fanoutReceiptAuto(input: {
   const orderNo = String(input?.orderNo ?? '').trim();
   if (!payloadBase64 || !clientId) return fail('payload + clientId required');
   try {
-    // Lazy-require: terminalApi mengimpor session (lazy) — impor statis di
+    // Lazy-require: terminalApi mengimpor session (lazy) - impor statis di
     // sini berisiko siklus modul saat app boot (pola sama session.ts).
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getTerminal } = require('../config/server') as typeof import('../config/server');
@@ -281,7 +281,7 @@ export function claimTerminalAutoPrint(key: unknown, windowMs: number = TERMINAL
   }
   return true;
 }
-/** Hanya untuk uji — produksi tak memanggil. */
+/** Hanya untuk uji - produksi tak memanggil. */
 export function __resetTerminalAutoPrintClaimsForTests(): void {
   terminalAutoPrintClaims.clear();
 }
@@ -298,16 +298,16 @@ export function isAutoPrintJob(job: ServerPrintJob): boolean {
 
 export type AutoPrintOutcome =
   // `printed` = kertas keluar ATAU byte aman di antrean lokal persisten
-  // (via='queue'; drain kind-aware mengurasnya — tak hangus, retry bounded).
+  // (via='queue'; drain kind-aware mengurasnya - tak hangus, retry bounded).
   | { state: 'printed'; via: 'stations' | 'queue'; detail: string }
   | { state: 'failed'; errorCode: string; lastError: string }
   // `unavailable` = order/template tak tersedia (offline): pemanggil ack
-  // FAILED ORDER_UNAVAILABLE agar BE me-retry via backoff — tanpa spam.
+  // FAILED ORDER_UNAVAILABLE agar BE me-retry via backoff - tanpa spam.
   | { state: 'unavailable'; reason: 'offline' | 'not-found' };
 
 /**
  * Cari order server untuk job AUTO via API yang sudah ada
- * (pullServerHistory — satu-satunya snapshot ber-items; active tak membawa
+ * (pullServerHistory - satu-satunya snapshot ber-items; active tak membawa
  * items sehingga tak bisa dirender). Cocok id ATAU nomor display.
  */
 async function findAutoOrder(
@@ -332,7 +332,7 @@ async function findAutoOrder(
 /**
  * Tiket dapur dari DETAIL penuh BE (sumber utama AUTO kitchen): items +
  * addons (dilipat ke baris note `+ addon`) + notes + meja/mode/waktu.
- * templateType kitchen HANYA ke station dapur (printKitchenTicket) — tak
+ * templateType kitchen HANYA ke station dapur (printKitchenTicket) - tak
  * pernah ke station kasir (tiket dapur tanpa harga).
  */
 async function printDetailKitchenTicket(
@@ -378,7 +378,7 @@ async function printDetailKitchenTicket(
 
 /**
  * Struk pelanggan dari DETAIL penuh BE (sumber utama AUTO customer): cermin
- * ReceiptScreen.doPrint — subtotal, discount, service (+serviceLabel sadar
+ * ReceiptScreen.doPrint - subtotal, discount, service (+serviceLabel sadar
  * server via totals.ts), tip, tax info-only, packaging, voucherCode,
  * delivery (ongkir), total, method, paid/change (tunai + toggle template),
  * cashier (paidBy BE) + meja/pelanggan, datetime, thanks/footer/branding
@@ -437,7 +437,7 @@ async function printDetailReceipt(
     .map((s) => String(s ?? '').trim()).filter((s) => s).join(' · ');
   const method = String(detail.paymentMethod ?? '');
   const isCash = /cash|tunai/i.test(method);
-  // Logo thermal mono (pull-time cache; print-time baca — offline tetap jalan).
+  // Logo thermal mono (pull-time cache; print-time baca - offline tetap jalan).
   let tplLogo: EscReceipt['logo'];
   try {
     tplLogo = await tplLib.getEffectiveReceiptLogo(tp?.showLogo);
@@ -521,18 +521,18 @@ async function printDetailReceipt(
 
 /**
  * Render + cetak job AUTO (KONTRAK FINAL): ambil DETAIL PENUH order via
- * fetchMerchantOrderDetail (posWire → MerchantOrderDetailGet) — 1:1 website:
+ * fetchMerchantOrderDetail (posWire → MerchantOrderDetailGet) - 1:1 website:
  * orderItems (+addons, notes), subtotal, discount, tax, service,
- * packaging, delivery, tip, total, paid, change, payment method, cashier —
+ * packaging, delivery, tip, total, paid, change, payment method, cashier -
  * lalu rakit ESC/POS memakai cache template BE (receiptTemplate.ts; tanpa
  * template = perilaku legacy byte-identik) + currency cabang → cetak ke
  * stations non-dapur (templateType customer, broadcast per cols/cut) atau
  * station dapur (templateType kitchen). Snapshot pullServerHistory HANYA
- * fallback bila detail gagal (blocked non-numerik / 404 / parse) — baris
+ * fallback bila detail gagal (blocked non-numerik / 404 / parse) - baris
  * yang tak dibawa riwayat (service/packaging/delivery/tip/paid/change)
  * dihilangkan jujur di jalur fallback. Gagal kirim/printer absen = byte
  * MASUK antrean offline printqueue via print.ts (kind receipt/kitchen;
- * drain kind-aware, retry bounded) — bukan hangus, bukan spam retry.
+ * drain kind-aware, retry bounded) - bukan hangus, bukan spam retry.
  * Tak pernah melempar; ack tetap milik pemanggil.
  */
 export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrintOutcome> {
@@ -542,7 +542,7 @@ export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrint
   }
   const tplType = String(job.metadata?.templateType ?? '').trim().toLowerCase();
   const isKitchen = tplType === 'kitchen' || tplType === 'dapur' || tplType === 'tiket_dapur';
-  // Lazy-require ala fanoutReceiptAuto: print.ts menarik native/printer —
+  // Lazy-require ala fanoutReceiptAuto: print.ts menarik native/printer -
   // impor statis berisiko siklus modul saat app boot.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const printLib = require('./print') as typeof import('./print');
@@ -590,7 +590,7 @@ export async function printAutoServerJob(job: ServerPrintJob): Promise<AutoPrint
     }
     // Struk pelanggan: gerbang template cermin ReceiptScreen.doPrint
     // (tplOn + tp; tanpa TemplateJSON = legacy). Riwayat server tak membawa
-    // service/packaging/tip/feeESB/paid/change — baris itu dihilangkan jujur
+    // service/packaging/tip/feeESB/paid/change - baris itu dihilangkan jujur
     // (bukan dikarang), method + tendered tak ditampilkan tanpa data.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const tplLib = require('./receiptTemplate') as typeof import('./receiptTemplate');
@@ -685,7 +685,7 @@ export interface EnqueueOutcome {
   error?: string;
 }
 
-/** Enqueue byte ESC-POS (sudah base64) ke terminal — jalur kasir yang jujur. */
+/** Enqueue byte ESC-POS (sudah base64) ke terminal - jalur kasir yang jujur. */
 export async function enqueueTerminalPrintJob(
   terminalIdBe: string | number,
   input: { idempotencyKey: string; payloadBase64: string; source?: string; maxAttempts?: number },
@@ -771,11 +771,11 @@ export async function pollServerPrintJobs(
     return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
   }
   // KONTRAK FINAL AUTO (lubang cetak-buta): fromBase64('') = byte kosong TANPA
-  // throw — tanpa penjaga ini payload kosong lolos ke printFn lalu bisa di-ack
+  // throw - tanpa penjaga ini payload kosong lolos ke printFn lalu bisa di-ack
   // PRINTED palsu. Byte kosong TAK PERNAH dicetak; ack FAILED INVALID_PAYLOAD
   // agar BE habiskan attempt lalu FAILED final (racun tak muter selamanya).
   if (bytes.length === 0) {
-    const ack = await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong — tak dicetak buta (bukan job AUTO sah)');
+    const ack = await ackTerminalPrintJob(terminalIdBe, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong - tak dicetak buta (bukan job AUTO sah)');
     return { state: 'failed', jobId: job.id, serverStatus: ack.status ?? 'QUEUED' };
   }
   let sent: PrintResult;
@@ -801,7 +801,7 @@ export async function pollServerPrintJobs(
 
 // ---------------------------------------------------------------------------
 // Auto-poll job terminal (tugas B): interval 20 detik, SATU loop global
-// (idempoten — start ganda = no-op, anti double dengan poller bridge lain).
+// (idempoten - start ganda = no-op, anti double dengan poller bridge lain).
 // Tiap tick: AppState active + sesi login + terminal ter-bind (branchId +
 // terminalCode klaim) + mode online + id BE terminal via daftar cabang →
 // SATU siklus pollServerPrintJobs (claim → cetak/ack). Job AUTO tak butuh
@@ -812,7 +812,7 @@ export async function pollServerPrintJobs(
 // App) + AppState listener dilepas. Tak pernah melempar; diam saat
 // prasyarat tak terpenuhi (tanpa spam status).
 // Tombol tarik manual (PrintersScreen.pullServerJobs) tetap ada dan tak
-// berubah — loop ini hanya otomatisasi siklus yang sama.
+// berubah - loop ini hanya otomatisasi siklus yang sama.
 // ---------------------------------------------------------------------------
 export const TERMINAL_AUTO_PRINT_POLL_MS = 20000;
 
@@ -820,7 +820,7 @@ let terminalAutoPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalAutoPollBusy = false;
 let terminalAutoPollAppSub: { remove: () => void } | null = null;
 /**
- * printFn disuntik pemanggil (App menyuntik printBytes native/printer) —
+ * printFn disuntik pemanggil (App menyuntik printBytes native/printer) -
  * modul ini TETAP tanpa impor nilai native/printer (tripwire PB-4; poll
  * semua runtime, diuji tanpa RN). Tanpa suntikan = tick diam (tak klaim).
  */

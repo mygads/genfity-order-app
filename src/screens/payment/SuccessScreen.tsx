@@ -219,7 +219,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Meja dibebaskan saat penjualan lunas: draft menandai 'terisi' sejak
-  // disimpan (LoadOrderScreen) — sukses bayar = meja kosong kembali + sync.
+  // disimpan (LoadOrderScreen) - sukses bayar = meja kosong kembali + sync.
   // Grup split: cicilan (belum lunas penuh di DB) = meja tetap terisi; bebas
   // hanya saat genap. Tanpa head (alur lama) = bebaskan seperti biasa.
   useEffect(() => {

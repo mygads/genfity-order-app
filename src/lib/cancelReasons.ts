@@ -2,7 +2,7 @@
  * Preset alasan cancel/void/refund dari server (audit trisisi #5).
  *
  * Sumber kebenaran urutan: GET api/merchant/cancel-reasons (grup
- * /api/merchant, MerchantAuth — kasir/staff boleh baca) → baris lokal
+ * /api/merchant, MerchantAuth - kasir/staff boleh baca) → baris lokal
  * ms_setting(Master, CancelReasons) → NOL preset server (pemanggil pakai
  * fallback hardcoded i18n).
  *
@@ -15,7 +15,7 @@
  * - Modul TAK pernah melempar; tanpa markDirty (baris ini milik server).
  *
  * R4-DOCS(b) SoT CANCEL PRESET = ADVISORY: daftar di atas HANYA saran tombol
- * kasir — server menyimpan FREE-TEXT (CancelScreen menulis string `reason`
+ * kasir - server menyimpan FREE-TEXT (CancelScreen menulis string `reason`
  * apa adanya + catatan opsional ke tr_cancelmenu.reasonId/reasonNote dan
  * POST order/finish void {reason}; tak divalidasi cocok preset). Preset boleh
  * usang/berbeda tanpa merusak void; JANGAN jadikan enum lateral
@@ -109,7 +109,7 @@ async function persistCancelReasonNames(names: string[]): Promise<void> {
 }
 
 /**
- * Ambil preset dari server SAJA (null bila offline/gagal — pemanggil lalu
+ * Ambil preset dari server SAJA (null bila offline/gagal - pemanggil lalu
  * baca cache). Sukses (termasuk []) dipersist + dikembalikan.
  */
 export async function fetchServerCancelReasonNames(): Promise<string[] | null> {

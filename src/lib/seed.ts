@@ -2,7 +2,7 @@
  * Seed lokal sekali-jalan untuk fondasi offline (tanpa server).
  *
  * ensureSeeded(): initDb dulu, cek flag ms_setting(key1='seed',
- * key2='local', value1) — bila sudah '1' langsung return. Bila belum,
+ * key2='local', value1) - bila sudah '1' langsung return. Bila belum,
  * isi master minimal + user admin lokal (PIN 1234 via savePinHash),
  * lalu set flag seed=1. Idempoten dan aman jalan ulang: semua INSERT OR
  * IGNORE, plus blok sapu-dummy di awal (ID eksak untuk ID dummy murni;
@@ -12,8 +12,8 @@
  * Data uji offline-first (cabang/resto, admin+kasir, member, voucher/promo,
  * shift terbuka, 4 order contoh via saveSale/direct-insert - 1 dimundurkan
  * ke kemarin agar
- * History/Dashboard/Rekap ada baseline) disisip TANPA gate flag — sama
- * seperti CoA/RBAC/admin — agar DB lama ikut dapat; idempoten via
+ * History/Dashboard/Rekap ada baseline) disisip TANPA gate flag - sama
+ * seperti CoA/RBAC/admin - agar DB lama ikut dapat; idempoten via
  * INSERT OR IGNORE + cek keberadaan.
  *
  * API: seedIfEmpty() = pengisian + lapor {seeded}; ensureSeeded() = titik
@@ -40,7 +40,7 @@ import { setCachedTimezone } from './timezone';
 import { randomHex, uuidv7 } from './uuidv7';
 import { trimTestUsers } from './seedUsers';
 
-// S2-C311: gate kesiapan seed — App.tsx menjalankan seedIfEmpty fire-and-forget
+// S2-C311: gate kesiapan seed - App.tsx menjalankan seedIfEmpty fire-and-forget
 // sehingga login bisa jalan sebelum ms_posuser ter-seed. Pelacakan modul ini
 // menandai 'upaya seed selesai' (berhasil maupun gagal) agar pemanggil bisa
 // menunggu tanpa menggantung selamanya (fail-open ke jalur error normal).
@@ -109,7 +109,7 @@ const SEED_PAYMENTS: Array<{ id: string; name: string; type: string; order: numb
   { id: 'pm-edc', name: 'EDC', type: 'edc', order: 4 },
 ];
 
-/** Spesifikasi order contoh — angka final SELALU dihitung via totals() (L25). */
+/** Spesifikasi order contoh - angka final SELALU dihitung via totals() (L25). */
 interface SeedOrderSpec {
   salesNum: string;
   method: string;
@@ -148,7 +148,7 @@ const SEED_SPECS: SeedOrderSpec[] = [
     ],
   },
   // SEED-003: promo nominal reusable (HEMAT10 hanya ada di ms_promotion,
-  // minSpend 50000) — membuktikan jalur fallback promo di backstop saveSale:
+  // minSpend 50000) - membuktikan jalur fallback promo di backstop saveSale:
   // usage 'burn' tercatat, kuota tak tersentuh (promo tanpa kuota).
   {
     salesNum: 'SEED-003', method: 'qris', mode: 'TAKE AWAY', customer: 'Dewi',
@@ -158,7 +158,7 @@ const SEED_SPECS: SeedOrderSpec[] = [
       { id: 'm-nasi-goreng', name: 'Nasi Goreng', basePrice: 15000, qty: 1 },
     ],
   },
-  // SEED-004: promo ongkir (ONGKIR10 hanya di ms_promotion) — ongkir bruto
+  // SEED-004: promo ongkir (ONGKIR10 hanya di ms_promotion) - ongkir bruto
   // 8000 dipotong penuh (ongkirCut 8000), neto tersimpan 0.
   {
     salesNum: 'SEED-004', method: 'cash', mode: 'GOFOOD', customer: 'Agus',
@@ -221,7 +221,7 @@ function seedSaleInput(spec: SeedOrderSpec, canon: TotalsResult): SaleInput {
 
 /**
  * Sisip baris order contoh LANGSUNG (L9): dipakai saat device unbound
- * (saveSale melempar terminal-unbound — fail-closed) sehingga order contoh
+ * (saveSale melempar terminal-unbound - fail-closed) sehingga order contoh
  * tetap lahir di instalasi segar. Cermin tulisan saveSale (head + item +
  * payment + usage/kuota via backstop yang sama + tiket dapur + info ongkirCut
  * + platformFee) dengan syncDate NULL (= kotor, ikut push). Idempoten via
@@ -235,7 +235,7 @@ async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed:
   try {
     clientId = uuidv7();
   } catch (e) {
-    // P14: tanpa CSPRNG tak ada client_id merge-safe — fallback jujur ke
+    // P14: tanpa CSPRNG tak ada client_id merge-safe - fallback jujur ke
     // salesNum (bukan Math.random) + catat, agar seed tak menggugurkan Q7 diam-diam.
     console.warn(`[seed] CSPRNG gagal untuk ${no}, client_id = salesNum: ${e instanceof Error ? e.message : e}`);
     clientId = no;
@@ -350,9 +350,9 @@ async function seedSaleDirect(spec: SeedOrderSpec, canon: TotalsResult, nowSeed:
  * Per baris dengan pinHash/password NOT NULL: simpan savePinHash(id,
  * pinHash ?? password) DULU (kolom legacy berisi PIN pembanding plaintext);
  * HANYA setelah SecureStore sukses, NULL-kan kedua kolom. Bila tulis
- * SecureStore gagal untuk suatu baris, baris itu DIPERTAHANKAN (fail-open —
+ * SecureStore gagal untuk suatu baris, baris itu DIPERTAHANKAN (fail-open -
  * login lama tetap jalan) dan flag TIDAK diset sehingga startup berikut
- * mencoba lagi. Kolom DB dibiarkan ada (deprecated, tak pernah dibaca lagi —
+ * mencoba lagi. Kolom DB dibiarkan ada (deprecated, tak pernah dibaca lagi -
  * lihat komentar skema di lib/dbSchema.ts oleh pemiliknya).
  */
 async function migrateLegacyPinColumns(): Promise<void> {
@@ -367,7 +367,7 @@ async function migrateLegacyPinColumns(): Promise<void> {
         `SELECT id, pinHash, password FROM ms_posuser WHERE pinHash IS NOT NULL OR password IS NOT NULL`,
       );
     } catch {
-      // Tabel/kolom belum ada — coba lagi saat startup berikut.
+      // Tabel/kolom belum ada - coba lagi saat startup berikut.
       return;
     }
     let failed = 0;
@@ -410,7 +410,7 @@ export async function ensureSeeded(): Promise<void> {
   // ber-ID SAMA dengan seed (M001/M002, V001/V002) membuat INSERT OR IGNORE
   // kalah, dan shift OPEN dummy S20261016P membuat cek "belum ada shift
   // terbuka" selalu menemukan shift sehingga shift seed tak pernah dibuat.
-  // Sapu HANYA ID eksak di bawah — tanpa pola/wildcard — sehingga data buatan
+  // Sapu HANYA ID eksak di bawah - tanpa pola/wildcard - sehingga data buatan
   // user aman (terverifikasi di layar pemilik):
   //   - member buatan user = `M` + 6 digit Date.now() (MemberScreen:456),
   //     takkan sama dengan 'M003' (4 char);
@@ -453,7 +453,7 @@ export async function ensureSeeded(): Promise<void> {
     // inert tapi mengotori ms_posuseraccess bila dihitung).
     ['DELETE FROM ms_posuseraccess WHERE userId IN (?, ?, ?)', ['U07', 'U08', 'U01']],
     // Sapu bersidik-jari (ID + nama fixture dummy): ID generik (P001, ST-*,
-    // COA001-005) bisa dipakai ulang server asli suatu hari — hapus HANYA
+    // COA001-005) bisa dipakai ulang server asli suatu hari - hapus HANYA
     // bila namanya cocok fixture dummy. Paparan nyata terverifikasi via
     // pembaca: PromotionList (ms_promotion flagActive=1), ExpenseScreen
     // (ms_coa flagActive=1), PrintersScreen/station-pull (ms_station).
@@ -493,7 +493,7 @@ export async function ensureSeeded(): Promise<void> {
     try {
       await run(sql, params);
     } catch {
-      /* baris tak ada / tabel lama belum ada — idempoten, dilengkapi jalan ulang */
+      /* baris tak ada / tabel lama belum ada - idempoten, dilengkapi jalan ulang */
     }
   }
   // Rekam PIN milik user dummy ikut dibersihkan dari SecureStore/AsyncStorage
@@ -587,7 +587,7 @@ export async function ensureSeeded(): Promise<void> {
   // Admin lokal dijamin ADA + punya PIN, SENGAJA tanpa gate flag seed
   // (seperti CoA dan RBAC di atas): instalasi lama yang flag seed-nya sudah
   // '1' sebelum baris admin ada tidak akan pernah dapat user admin bila ikut
-  // gate — itulah penyebab login admin/1234 gagal total di instalasi lama
+  // gate - itulah penyebab login admin/1234 gagal total di instalasi lama
   // maupun saat record PIN hilang (mis. storage dibersihkan) sementara baris
   // user tetap ada. INSERT OR IGNORE + seed PIN hanya bila record belum ada
   // (PIN yang diganti belakangan via Lupa PIN dihormati, tidak ditimpa).
@@ -602,7 +602,7 @@ export async function ensureSeeded(): Promise<void> {
     const rec = await loadPinRecord('u-admin');
     if (!rec) {
       // A-P0-1: TANPA PIN default '1234'. Seed = PIN acak 6-digit sekali-pakai
-      // (tak ditampilkan di mana pun — tak bisa dipakai siapa pun) + flag
+      // (tak ditampilkan di mana pun - tak bisa dipakai siapa pun) + flag
       // wajib-ganti; verifyLocalEscalation menolak u-admin selama flag
       // menyala (fail-closed bila flag tak terbaca). Alur Install/CreatePin
       // atau Lupa PIN mengganti + membersihkan flag.
@@ -611,11 +611,11 @@ export async function ensureSeeded(): Promise<void> {
       try {
         await markPinChangeRequired('u-admin');
       } catch {
-        /* flag gagal — eskalasi tetap fail-closed via isPinChangeRequired */
+        /* flag gagal - eskalasi tetap fail-closed via isPinChangeRequired */
       }
     }
   } catch {
-    /* seed PIN gagal — migrasi/startup berikut mencoba lagi */
+    /* seed PIN gagal - migrasi/startup berikut mencoba lagi */
   }
 
   // --- Data uji offline-first (tanpa server): identitas cabang/resto,
@@ -663,7 +663,7 @@ export async function ensureSeeded(): Promise<void> {
   // 1 user uji cabang B001: kasir (PIN 2222, peran Staff dengan deny kunci
   // sensitif). PIN hanya diisi bila record belum ada (PIN yang diganti
   // belakangan dihormati, tidak ditimpa). u-owner/owner DIBUANG (keputusan
-  // "2 user saja": admin + kasir) — sisa baris lama dibersihkan trimTestUsers
+  // "2 user saja": admin + kasir) - sisa baris lama dibersihkan trimTestUsers
   // di bawah (jaring pengaman DB lama).
   const testUsers: Array<[string, string, string]> = [
     ['u-kasir', 'kasir', 'Merchant Staff'],
@@ -679,7 +679,7 @@ export async function ensureSeeded(): Promise<void> {
       const rec = await loadPinRecord(id);
       if (!rec) await savePinHash(id, testPins[id]);
     } catch {
-      /* abaikan — verifikasi hanya via hash SecureStore (R34) */
+      /* abaikan - verifikasi hanya via hash SecureStore (R34) */
     }
   }
   // Kasir uji SENGAJA tanpa baris per user agar jatuh ke template peran
@@ -740,7 +740,7 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  // Shift pagi TERBUKA milik kasir uji — hanya bila belum ada shift terbuka
+  // Shift pagi TERBUKA milik kasir uji - hanya bila belum ada shift terbuka
   // (kasir nyata yang sudah buka shift tidak diganggu). Baris absensi
   // (status 'absen') dikecualikan: clock-in kehadiran BUKAN shift kasir,
   // order uji tak boleh ditempel ke baris absen.
@@ -759,7 +759,7 @@ export async function ensureSeeded(): Promise<void> {
 
   // 4 order contoh (L9/L25): jalur utama = saveSale nyata (head + item +
   // payment + tiket dapur 'Baru') bila device bound; bila UNBOUND (instalasi
-  // segar belum klaim terminal — saveSale fail-closed melempar
+  // segar belum klaim terminal - saveSale fail-closed melempar
   // terminal-unbound) = sisip baris langsung via seedSaleDirect dengan
   // matematika kanonis totals() yang sama + penomoran SEED-xxx. Masing-masing
   // hanya bila nomornya belum ada; SEED-001 dimundurkan ke kemarin agar
@@ -789,7 +789,7 @@ export async function ensureSeeded(): Promise<void> {
       // aktif yang saat seed pertama kali masih kosong; jalur direct memakai
       // identitas uji sejak lahir sehingga UPDATE ini no-op untuknya). Kolom
       // shiftId memang tidak ditulis saveSale (konsisten dengan penjualan
-      // kasir nyata yang direkap per rentang waktu) — seed menautkannya agar
+      // kasir nyata yang direkap per rentang waktu) - seed menautkannya agar
       // alur Shift/Rekap langsung bisa diuji.
       await run(
         `UPDATE tr_saleshead SET branchId = 'B001', terminalId = 'T001', userId = 'u-kasir',
@@ -797,7 +797,7 @@ export async function ensureSeeded(): Promise<void> {
         [orderShiftId, spec.salesNum],
       );
     } catch (e) {
-      // Satu order gagal total — catat jujur lalu lanjut (kasir tetap jalan).
+      // Satu order gagal total - catat jujur lalu lanjut (kasir tetap jalan).
       console.warn(`[seed] order ${spec.salesNum} dilewati: ${e instanceof Error ? e.message : e}`);
     }
   }
@@ -833,7 +833,7 @@ export async function ensureSeeded(): Promise<void> {
       'SELECT COUNT(*) AS n FROM tr_branchexpense',
     );
     // Sisip-sekali (anti-rebirth): hanya saat seed pertama (flag belum '1').
-    // COUNT==0 saja tak cukup — merchant yang menghapus SEMUA pengeluaran
+    // COUNT==0 saja tak cukup - merchant yang menghapus SEMUA pengeluaran
     // akan melihat demo EX-SEED-001 bangkit tiap restart.
     const seedFlag = await queryFirst<{ value1: string | null }>(
       `SELECT value1 FROM ms_setting WHERE key1 = 'seed' AND key2 = 'local' LIMIT 1`,
@@ -860,7 +860,7 @@ export async function ensureSeeded(): Promise<void> {
   // Jaring pengaman u-owner (DB lama): buang user uji owner + alihkan
   // jejaknya ke u-admin. Idempoten, tak melempar. SENGAJA sebelum gate flag
   // seed di bawah: DB lama yang flag-nya sudah '1' (early-return) ikut bersih
-  // — di ujung fungsi panggilan ini takkan tercapai untuk mereka.
+  // - di ujung fungsi panggilan ini takkan tercapai untuk mereka.
   await trimTestUsers();
 
   const flag = await queryFirst<{ value1: string | null }>(
@@ -908,7 +908,7 @@ export async function ensureSeeded(): Promise<void> {
   }
 
   // Stok awal + relasi cabang B002 (Ciputat), B003 (Bintaro), dan B004 (cabang
-  // uji AUD — lihat AUD_TEST_BRANCH + switchSeedBranchForTest di bawah) agar
+  // uji AUD - lihat AUD_TEST_BRANCH + switchSeedBranchForTest di bawah) agar
   // kasir di cabang mana pun langsung punya menu. Jus Alpukat sengaja 3 =
   // demo peringatan restock di Dashboard. Syarat stationId KOSONG memastikan
   // isi-ulang hanya untuk baris segar seed (INSERT di atas tak mengisi qty /
@@ -916,7 +916,7 @@ export async function ensureSeeded(): Promise<void> {
   // merchant/kasir (stationId terisi, atau ditandai habis) TIDAK disentuh.
   // Tanpa gate station ini, kombinasi qty=0 + flagSoldOut=0 yang sah
   // (allowSellEmpty / online=true di layar Stok, atau buka-kembali item habis)
-  // akan bangkit ke stok seed tiap restart — juga menimpa stationId pilihan
+  // akan bangkit ke stok seed tiap restart - juga menimpa stationId pilihan
   // merchant. Setelah terisi sekali, stationId terkunci dari seed selamanya.
   const seedStock: Record<string, number> = {
     'm-nasi-goreng': 40,
@@ -997,7 +997,7 @@ export async function ensureSeeded(): Promise<void> {
  * Cabang uji AUD (B004) untuk pengujian dual-currency lokal.
  *
  * DB lokal hanya memegang SATU cabang aktif (ms_setting Branch Name/Currency
- * + Tax PPN global) — tak ada tabel ms_branch — sehingga "cabang kedua" di
+ * + Tax PPN global) - tak ada tabel ms_branch - sehingga "cabang kedua" di
  * sini = (a) relasi ms_branchmenu B004 yang di-seed otomatis di ensureSeeded
  * (aditif, INSERT OR IGNORE, tak mengubah seed IDR), + (b) helper eksplisit
  * switchSeedBranchForTest() di bawah untuk mengaktifkan cabang uji.
@@ -1005,7 +1005,7 @@ export async function ensureSeeded(): Promise<void> {
  * SENGAJA tak jalan otomatis di ensureSeeded: default instalasi segar tetap
  * IDR (Cabang Poris, PPN 11). Pajak per-cabang didukung via baris
  * ms_setting('Tax', 'PPN_<branchId>') (getTaxRate() memilih per cabang aktif;
- * baris global Tax/PPN tetap cermin cabang aktif) — helper menulis kedua
+ * baris global Tax/PPN tetap cermin cabang aktif) - helper menulis kedua
  * tarif (B001=11, B004=10) sehingga keduanya hidup berdampingan; timezone
  * cabang ikut ditulis (Branch/Timezone) + cache diset tanpa perlu restart;
  * lihat docs/DUAL-CURRENCY-STATUS.md.
@@ -1030,7 +1030,7 @@ const SEED_BRANCH_ROWS: Record<'IDR' | 'AUD', [string, string, string, string][]
 
 /**
  * Order contoh cabang AUD (DUAL-CURRENCY §4f): baseline History/Dashboard
- * cabang uji — GST 10 + langkah sen (1), harga dolar utuh (totals() integer).
+ * cabang uji - GST 10 + langkah sen (1), harga dolar utuh (totals() integer).
  * Hanya di-seed dari switchSeedBranchForTest('AUD'), BUKAN ensureSeeded,
  * agar instalasi segar tetap IDR murni. Idempoten via cek salesNum.
  */
@@ -1062,7 +1062,7 @@ async function seedAudSampleOrder(nowSeed: string): Promise<void> {
 }
 
 /**
- * Alihkan cabang aktif seed untuk pengujian (HANYA instalasi dev/uji — fungsi
+ * Alihkan cabang aktif seed untuk pengujian (HANYA instalasi dev/uji - fungsi
  * ini SENGAJA menimpa baris ms_setting, termasuk nama cabang yang mungkin
  * sudah diganti merchant). Idempoten, aman jalan ulang. Tak melempar yang
  * fatal (gagal tulis = catat + lanjut). Kembalikan ke IDR dengan
@@ -1108,7 +1108,7 @@ export async function switchSeedBranchForTest(which: 'IDR' | 'AUD'): Promise<voi
     }
   }
   // Sinkronkan cache in-memory agar layar langsung memakai cabang baru tanpa
-  // restart (restart tetap valid — baris lokal dibaca ulang saat boot/login).
+  // restart (restart tetap valid - baris lokal dibaca ulang saat boot/login).
   const active = SEED_BRANCH_ROWS[which] ?? SEED_BRANCH_ROWS.IDR;
   const cur = active.find(([k1, k2]) => k1 === 'Branch' && k2 === 'Currency');
   const tz = active.find(([k1, k2]) => k1 === 'Branch' && k2 === 'Timezone');

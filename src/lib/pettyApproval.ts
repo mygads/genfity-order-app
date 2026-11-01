@@ -54,7 +54,7 @@ export async function getApprovalDetail(id: string): Promise<ApprovalDetail | nu
 }
 
 /** Tandai disetujui: tulis kanonis + rincian audit + outbox, lalu siarkan.
- * R28 (audit 2026-10-17): approvedBy pemanggil DIABAIKAN — approver WAJIB
+ * R28 (audit 2026-10-17): approvedBy pemanggil DIABAIKAN - approver WAJIB
  * userId sesi terverifikasi (getSession userId, fallback username). Tanpa
  * sesi = GAGAL-KERAS (throw) agar tak ada jalur approve boolean-tanpa-
  * identitas yang lolos diam-diam. Param kedua dipertahankan (opsional) agar
@@ -64,12 +64,12 @@ export async function getApprovalDetail(id: string): Promise<ApprovalDetail | nu
  * 'other' (op expense-approve) agar identitas approver ikut terkirim. */
 export async function markApproved(id: string, _approvedBy?: string): Promise<void> {
   const cleanId = String(id ?? '').trim();
-  void _approvedBy; // R28: identitas pemanggil tak dipercaya — selalu dari sesi.
+  void _approvedBy; // R28: identitas pemanggil tak dipercaya - selalu dari sesi.
   const sess = getSession();
   const approver = String(sess?.userId ?? sess?.username ?? '').trim();
   if (!cleanId || !approver) {
     throw new Error(
-      '[pettyApproval] markApproved butuh id + sesi login terverifikasi — approve tanpa identitas sesi ditolak.',
+      '[pettyApproval] markApproved butuh id + sesi login terverifikasi - approve tanpa identitas sesi ditolak.',
     );
   }
   const at = new Date().toISOString();

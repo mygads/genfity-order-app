@@ -30,7 +30,7 @@ function emit(): void {
     try {
       fn(current);
     } catch {
-      /* abaikan — satu pelanggan gagal tak boleh mematikan yang lain */
+      /* abaikan - satu pelanggan gagal tak boleh mematikan yang lain */
     }
   });
 }

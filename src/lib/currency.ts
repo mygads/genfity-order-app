@@ -1,5 +1,5 @@
 /**
- * Fondasi dual-currency POS (IDR + AUD) — cache in-memory + persist ms_setting.
+ * Fondasi dual-currency POS (IDR + AUD) - cache in-memory + persist ms_setting.
  *
  * - Tanpa ubah perilaku IDR bila currency tak diketahui: fallback selalu
  *   { code:'IDR', locale:'id-ID' } (perilaku lama).

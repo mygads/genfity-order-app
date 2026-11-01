@@ -87,11 +87,11 @@ if (ENV_URL) {
  *   tanpa dial network, tanpa JSON dummy).
  *
  * HP-E2E-FIX-5 (2026-10-24, E2E HP Xiaomi): SEBELUM fix ini, klausa runtime
- * TAK ADA — build dev tanpa EXPO_PUBLIC_API_BASE_URL SELALU 'local' walau
+ * TAK ADA - build dev tanpa EXPO_PUBLIC_API_BASE_URL SELALU 'local' walau
  * user sudah set server custom di Tools. Akibat: callStaffLogin short-circuit
  * {reached:false} TANPA dial (curl device→BE 8095 terbukti 200), login mati
  * dengan need_be "(7-day grant)" padahal grant + server.valid. Hanya env
- * 'custom' yang dihitung (prod/dev/staging warisan ESB TIDAK — dilarang
+ * 'custom' yang dihitung (prod/dev/staging warisan ESB TIDAK - dilarang
  * dial server pihak ketiga diam-diam); dummy eksplisit tetap menang.
  */
 export function getApiMode(): ApiMode {
@@ -100,7 +100,7 @@ export function getApiMode(): ApiMode {
   try {
     if (getServerEnv() === 'custom' && getCustomBaseUrl().trim()) return 'real';
   } catch {
-    /* abaikan — jatuh ke local */
+    /* abaikan - jatuh ke local */
   }
   return 'local';
 }
@@ -121,9 +121,9 @@ export interface FetchOpts {
   idempotencyKey?: string;
   token?: string;
   /** S4-APP-313/GAP-1/5: sinyal abort pemanggil (timeout per-attempt /
-   * pembatalan user) — diteruskan ke apiGet/apiPost/apiDelete/apiPatch/apiPut. */
+   * pembatalan user) - diteruskan ke apiGet/apiPost/apiDelete/apiPatch/apiPut. */
   signal?: AbortSignal;
-  /** T-AUTH-REFRESH (internal): request ini SUDAH hasil retry pasca-refresh —
+  /** T-AUTH-REFRESH (internal): request ini SUDAH hasil retry pasca-refresh -
    * jangan refresh lagi (anti loop 401→refresh→401). Tak di-set pemanggil. */
   __refreshed?: boolean;
 }
@@ -220,7 +220,7 @@ function dummyResponse(path: string): { found: boolean; body: unknown } {
   // ber-{id} yang tak bisa dikatalog statis per terminal. Tanpa ini, dialog
   // supervisor di Dummy Mode selalu DENIED + bakar attempt (E422 tak dikenal
   // → fail('denied')). Kembalikan envelope sukses BE-shaped agar demo/
-  // screenshot bisa approve — cermin perilaku fixture legacy
+  // screenshot bisa approve - cermin perilaku fixture legacy
   // auth/supervisor-approve → approved:true. Real-mode offline TAK tersentuh:
   // pemanggil V1 memfail-closed-kan fromDummy+real → offline SEBELUM unwrap
   // (lib/supervisor.ts), dan Local Mode tak sampai sini (early-return).
@@ -300,7 +300,7 @@ export function setUnauthorizedHandler(fn: UnauthorizedHandler): void {
   unauthorizedHandler = fn;
 }
 /** Kode error faktor-PIN: 401-nya = PIN salah/belum enroll, bukan sesi mati.
- * AUDIT-V2 (kill): SUPERVISOR_PIN_* milik endpoint supervisor-approve V1 —
+ * AUDIT-V2 (kill): SUPERVISOR_PIN_* milik endpoint supervisor-approve V1 -
  * PIN supervisor salah = 401 SUPERVISOR_PIN_INVALID (supervisor_approve.go:
  * 231-232), BUKAN sesi kasir mati. Tanpa prefix ini, satu PIN supervisor
  * salah di Real mode memicu unauthorizedHandler → logout() kasir. */
@@ -325,7 +325,7 @@ function errorCodeOf(body: unknown): string {
 // Single-flight: N request 401 bersamaan = 1 POST refresh (hemat kuota
 // rate-limit 30/8 + anti race ROTASI: refresh kedua dengan token lama yang
 // sama = REPLAY → sesi di-REVOKE server!). Refresh endpoint dipanggil via
-// apiPost LANGSUNG (bukan apiFetch — anti rekursi 401).
+// apiPost LANGSUNG (bukan apiFetch - anti rekursi 401).
 // ---------------------------------------------------------------------------
 let refreshInflight: Promise<boolean> | null = null;
 
@@ -455,7 +455,7 @@ export async function apiFetch<T = unknown>(
             try {
               unauthorizedHandler({ path, status: res.status, errorCode: code });
             } catch {
-              /* abaikan — pemanggil tetap terima {ok:false} */
+              /* abaikan - pemanggil tetap terima {ok:false} */
             }
           }
         }
@@ -498,7 +498,7 @@ export async function getDeviceId(): Promise<string> {
   try {
     const cur = await getItem(LS_DEVICE);
     if (cur && /^[0-9a-f]{16}$/.test(cur)) return cur;
-    // CSPRNG (Q7): identitas device mengikat triple-bind grant Q6 — tak boleh
+    // CSPRNG (Q7): identitas device mengikat triple-bind grant Q6 - tak boleh
     // dari Math.random, dan tak boleh konstanta sama untuk semua device gagal.
     const id = randomHexCsprng(16);
     await setItem(LS_DEVICE, id);
@@ -633,10 +633,10 @@ interface LocalPromoRow {
 
 /**
  * Validasi voucher ke ms_voucher lokal (seed/pull): kode cocok (case-insensitive),
- * status 'available', kuota > 0, dan dalam jendela validitas — lalu fallback
+ * status 'available', kuota > 0, dan dalam jendela validitas - lalu fallback
  * ke ms_promotion (flagActive=1 + jendela + value>0; persen = sebesar cap,
  * selaras PromotionList). Dipakai bila server tak menjawab (local mode /
- * offline / fallback dummy) agar voucher tetap bisa dipakai offline-first —
+ * offline / fallback dummy) agar voucher tetap bisa dipakai offline-first -
  * bukan fixture dummy.
  */
 async function validateVoucherCodeLocal(
@@ -746,17 +746,17 @@ export async function validateVoucherCode(
 
 // ---------------------------------------------------------------------------
 // P1-2: preview voucher merchant-Go order-less (BE df15781).
-// Estimasi fail-closed untuk keranjang POS sebelum order ada — memakai engine
+// Estimasi fail-closed untuk keranjang POS sebelum order ada - memakai engine
 // yang SAMA dengan settle (AudiencePOS, fail-closed), bukan adapter ke
 // endpoint order-bound. Server menang penuh:
 //  - ok:true → pakai discountAmount/label/eligibleSubtotal apa adanya.
 //  - Server menjawab tak-valid (ok:false, bukan dummy) → teruskan pesan
 //    server; TANPA fallback lintas-engine (SQLite/ESB tak mengenal kode
-//    order_voucher_codes — fallback akan menampilkan nominal bohong).
+//    order_voucher_codes - fallback akan menampilkan nominal bohong).
 //  - Offline/dummy/jaringan gagal → {ok:false, offline:true} agar pemanggil
 //    lanjut ke alur ESB/lokal yang memang mengenal kode itu.
 // Keranjang KOSONG tak pernah dikirim (engine menghitung eligible dari items;
-// items kosong selalu tak-valid — fakta lane E2E :18097): pemanggil wajib
+// items kosong selalu tak-valid - fakta lane E2E :18097): pemanggil wajib
 // memetakan cart-nya dulu via mapSaleItemsToPreviewItems (null = jangan call).
 // ---------------------------------------------------------------------------
 
@@ -773,9 +773,9 @@ export interface PosVoucherPreview {
   minSpend: number;
   code: string;
   message: string;
-  /** Kode error server (mis. VOUCHER_NOT_FOUND) — pemanggil boleh lanjut ESB hanya bila ini. */
+  /** Kode error server (mis. VOUCHER_NOT_FOUND) - pemanggil boleh lanjut ESB hanya bila ini. */
   error: string;
-  /** true bila tanpa jawaban server (offline/dummy) — pemanggil boleh lanjut ESB. */
+  /** true bila tanpa jawaban server (offline/dummy) - pemanggil boleh lanjut ESB. */
   offline: boolean;
   status: number;
 }
@@ -835,6 +835,7 @@ export async function validatePosVoucherPreview(
   items: PosVoucherPreviewItem[],
   orderType: string,
   tillCustomerEmail?: string,
+  customerId?: number,
 ): Promise<PosVoucherPreview> {
   const clean = (code ?? '').trim().toUpperCase();
   if (!clean || !(subtotal > 0) || !Array.isArray(items) || items.length === 0) {
@@ -845,6 +846,7 @@ export async function validatePosVoucherPreview(
     r = await apiFetch(ApiPath.merchantPosVoucherPreview, {
       body: {
         voucherCode: clean,
+        ...(Number.isInteger(customerId) && (customerId as number) > 0 ? { customerId } : {}),
         subtotal: Math.round(subtotal),
         items: items.map((it) => ({
           menuId: Math.max(0, Math.round(Number(it.menuId) || 0)),
@@ -914,7 +916,7 @@ interface LocalPosUserRow {
 
 /**
  * Cek kredensial ke SQLite lokal (ms_posuser by username COLLATE NOCASE +
- * hash PIN via lib/pin — R34: kolom legacy pinHash/password selalu NULL dan
+ * hash PIN via lib/pin - R34: kolom legacy pinHash/password selalu NULL dan
  * TIDAK dibaca lagi).
  * - Cocok → EmployeeSession ok:true (bentuk SAMA seperti jalur online).
  * - Username ada tapi PIN salah → EmployeeSession ok:false (JANGAN throw:
@@ -1063,7 +1065,7 @@ export async function loginByQrCode(p: QrLoginPayload): Promise<EmployeeSession>
   const r = await apiFetch(ApiPath.cashierLogin, {
     body: { username: p.username, pin: p.pin, ...(p.terminalId ? { terminalId: p.terminalId } : {}) },
   });
-  // F5: disiplin fail-closed ala validateEmployee — dummy/offline tak pernah
+  // F5: disiplin fail-closed ala validateEmployee - dummy/offline tak pernah
   // sukses; tolak SEBELUM unwrap (unwrap(null) lokal / fixture dummy bukan identitas nyata).
   if (!r.ok || r.fromDummy) {
     return { ok: false, userId: '', nama: '', authKey: '', role: '', fromDummy: r.fromDummy };

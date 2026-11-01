@@ -14,14 +14,14 @@ import { isSseConfigured, subscribeQueueEvents } from '../../lib/sse';
 /**
  * Layar antrean terkunci untuk tag view_queue (SPEC-TERMINAL-SESSION §8/§10).
  * Terikat ke BRANCH (bukan ke kasir): daftar branch-scoped + indikator
- * call/ready saja — tanpa cart/QR/payment, tanpa kontrol operator, tanpa
+ * call/ready saja - tanpa cart/QR/payment, tanpa kontrol operator, tanpa
  * drawer/header/back. Fullscreen terkunci seperti CustomerDisplayScreen.
  *
  * Transport (§11.4): primer SSE E27 (feed antrean per branch) + API load
  * awal/resync; fallback poll SQLite BERPENANDA stale; aksi sensitif
  * (call/ready) hanya indikator di sini (operator melakukannya di kasir).
  *
- * REGISTRASI RUTE (milik task pemilik App.tsx — file ini TIDAK menyentuh
+ * REGISTRASI RUTE (milik task pemilik App.tsx - file ini TIDAK menyentuh
  * App.tsx / navigation/types.ts):
  *   App.tsx:  <Stack.Screen name="QueueView" component={QueueViewScreen}
  *               options={{ title: t('queue_title'), headerShown: false }} />
@@ -33,7 +33,7 @@ export const QUEUE_VIEW_ROUTE = 'QueueView';
 
 type QueueTicket = { ticket: string; done: boolean };
 
-/** Bentuk event SSE E27 — KONTRAK IMPLEMENTED
+/** Bentuk event SSE E27 - KONTRAK IMPLEMENTED
  * (backend `terminal_branch_queue_events.go`, GET
  * `/api/v1/branches/{branchId}/queue-events?token=`):
  * - Snapshot (event `queue-update`, tanpa ticket):
@@ -59,7 +59,7 @@ function str(v: unknown): string {
 
 /**
  * APP-FIXUP (fix-sse2 M5): langganan SSE E27 kini STATIS via lib/sse
- * (subscribeQueueEvents, lihat efek primer di bawah) — helper require()
+ * (subscribeQueueEvents, lihat efek primer di bawah) - helper require()
  * dinamis dihapus; modul sse selalu ada di repo sehingga Metro me-resolve
  * statis dengan aman. Kegagalan/kontrak absen = fallback poll SQLite
  * berpenanda di bawah. Tak pernah melempar.
@@ -90,14 +90,14 @@ export default function QueueViewScreen() {
   // SSE E27 primer bila kontrak tersedia; fallback poll berpenanda (§11.4).
   const [sseLive, setSseLive] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
-  /** D4: jam poll fallback (tak dipakai label umur — label dari jam live). */
+  /** D4: jam poll fallback (tak dipakai label umur - label dari jam live). */
   const [, setLastPollAt] = useState<number | null>(null);
   const [branchName, setBranchName] = useState(() => currentBranch().name);
   const [uiTick, setUiTick] = useState(0);
 
   useEffect(() => subscribeSession(() => setUiTick((x) => x + 1)), []);
   /** D10: transport display di-refresh saat sesi berubah (no-op bila bus tak
-   * aktif di layar ini — refreshDisplayTransport idempoten). */
+   * aktif di layar ini - refreshDisplayTransport idempoten). */
   useEffect(() => {
     try {
       refreshDisplayTransport();
@@ -106,14 +106,14 @@ export default function QueueViewScreen() {
     }
   }, [uiTick]);
   // EFF-09: tick render label umur-data 30 dtk (selaras DISPLAY_STALE_MS),
-  // bukan 10 dtk — event live datang via SSE E27 primer (event-driven);
+  // bukan 10 dtk - event live datang via SSE E27 primer (event-driven);
   // poll SQLite fallback di bawah tetap ber-gate SSE + berpenanda stale.
   useEffect(() => {
     const id = setInterval(() => setUiTick((x) => x + 1), 30000);
     return () => clearInterval(id);
   }, []);
 
-  /** Progres sekuens hub terakhir (max saja — seq reset saat BE restart,
+  /** Progres sekuens hub terakhir (max saja - seq reset saat BE restart,
    * jadi tak dipakai untuk drop; dedupe id: milik SseClient). */
   const lastVersion = useRef(-1);
 
@@ -140,7 +140,7 @@ export default function QueueViewScreen() {
     setLastDataAt(Date.now());
   };
 
-  /** APP-FIXUP (fix-sse2 M5): SSE E27 PRIMER — langganan statis feed antrean
+  /** APP-FIXUP (fix-sse2 M5): SSE E27 PRIMER - langganan statis feed antrean
    * per branch saat backend terkonfigurasi (isSseConfigured); tipe event
    * diteruskan sebagai status fallback agar event tunggal 'ready'/'call'
    * tanpa status tetap menandai tiket selesai. */
@@ -178,7 +178,7 @@ export default function QueueViewScreen() {
     if (name !== branchName) setBranchName(name);
   });
 
-  /** APP-FIXUP (fix-sse2 M5): poll SQLite FALLBACK — hanya bila SSE primer tak
+  /** APP-FIXUP (fix-sse2 M5): poll SQLite FALLBACK - hanya bila SSE primer tak
    * terkonfigurasi/gagal/offline (TRANSPORT); berpenanda stale via banner. */
   useEffect(() => {
     if (sseConfigured && sseLive) return undefined;
@@ -206,12 +206,12 @@ export default function QueueViewScreen() {
         setReady(heads.filter((h) => (h.status ?? '') === 'paid').map(tag).filter((s) => s).slice(0, 12));
         setLastPollAt(Date.now());
       } catch {
-        /* DB belum siap — biarkan kosong jujur */
+        /* DB belum siap - biarkan kosong jujur */
       }
     };
     void poll();
     // C11 EFF-09: fallback poll 10 dtk → 60 dtk (efek ini HANYA jalan saat SSE
-    // mati — return-awal di atas; banner basi D3 menandai staleness).
+    // mati - return-awal di atas; banner basi D3 menandai staleness).
     const timer = setInterval(() => {
       void poll();
     }, 60000);
@@ -221,7 +221,7 @@ export default function QueueViewScreen() {
     };
     // D15: sseConfigured + branchId eksplisit di deps. branchName SENGAJA
     // dikecualikan (tulis-terjaga di dalam efek; memasukkannya memicu poll
-    // ulang tiap render nama) — eslint-disable dipertahankan (DECISION).
+    // ulang tiap render nama) - eslint-disable dipertahankan (DECISION).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sseLive, sseConfigured, branchId]);
 

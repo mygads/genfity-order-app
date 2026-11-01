@@ -99,17 +99,17 @@ function previewText(s: Station, hint: string | null, L: { test: string; role: s
     bar,
     `${L.total} ${rp(64050)}`,
     ...(hint ? [hint] : []),
-  ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. R57: nullable — alamat tak
+  ].join('\n');}/** Bangun target kirim dari konfigurasi stasiun. R57: nullable - alamat tak
  * bisa kirim (LAN tanpa host, Star tanpa VID/PID, BT/BLE kosong) = null agar
  * pemanggil menolak eksplisit, bukan mengirim target buta ke native. */function stationTarget(s: Station): PrinterTarget | null { if (s.conn === 'LAN') { const [host, portRaw] = s.address.split(':'); const h = (host ?? '').trim(); if (!h) return null; return { transport: 'lan', host: h, port: Number(portRaw ?? 9100) || 9100 };
 }
 
 if (s.conn === 'Star') { const m = s.address.match(/(\d+)\s*\/\s*(\d+)/); if (!m) return null; return { transport: 'usb', vendorId: Number(m[1]), productId: Number(m[2]) }; } const addr = s.address.trim(); if (!addr) return null; if (addr.toUpperCase().startsWith('BLE:')) { const mac = addr.slice(4).trim(); if (!mac) return null; return { transport: 'ble', address: mac }; } return { transport: 'bt', address: addr };}/** Simpan station ke ms_station (local-only M9-3: tanpa push master;
- * alamat/MAC per-terminal justru milik perangkat ini — pull hanya menyentuh
+ * alamat/MAC per-terminal justru milik perangkat ini - pull hanya menyentuh
  * kolom milik server, lihat upsert parsial 'station' di lib/master.ts).
  * M14: peran dipetakan via roleToPrinterType + UPSERT kolom-terkelola (kolom
  * server lain lestari; binding terminalCode/branchId tetap di cache JSON). */async function persistStation(s: Station): Promise<void> {
-  // R53: tanpa branch klaim, tulis DB/outbox ditahan — cache JSON tetap menyimpan.
+  // R53: tanpa branch klaim, tulis DB/outbox ditahan - cache JSON tetap menyimpan.
   try {
     if (!String(getBranchId() ?? '').trim()) return;
   } catch {
@@ -158,7 +158,7 @@ function backupBindings(ss: Station[]): void {
   const [statusMsg, setStatusMsg] = useState('');
   const [serverPulling, setServerPulling] = useState(false);
   /** S-F12/S-F13: destinasi cetak server (hibrida: tampil bila ada; cetak
-   * tetap memakai station lokal — tanpa secret di kontrak BE). */
+   * tetap memakai station lokal - tanpa secret di kontrak BE). */
   const [srvDests, setSrvDests] = useState<PrintDestination[]>([]);
   useEffect(() => {
     let alive = true;
@@ -343,7 +343,7 @@ function backupBindings(ss: Station[]): void {
              ORDER BY flagDefault DESC LIMIT 20`,
         );
         if (!alive) return;
-        // M14: MERGE — binding (terminalCode/branchId, tanpa kolom DB) + station
+        // M14: MERGE - binding (terminalCode/branchId, tanpa kolom DB) + station
         // cache-only ditempel ke baris DB; menimpa mentah membunuh keduanya.
         const bindOf = new Map(cached.filter((c) => c.id).map((c) => [c.id, c] as const));
         const mapped = rows.filter((r) => r.id).map(rowToStation).map((m) => {
@@ -363,7 +363,7 @@ function backupBindings(ss: Station[]): void {
         });
         for (const rest of bindOf.values()) mapped.push(rest);
         // R55: restore binding dari ms_setting untuk station yang belum
-        // terikat (cache JSON hilang) — tak menimpa binding cache yang ada.
+        // terikat (cache JSON hilang) - tak menimpa binding cache yang ada.
         try {
           const brows = await query<{ value1: string | null }>(
             "SELECT value1 FROM ms_setting WHERE key1 = 'printerBind' AND key2 = 'bindings' LIMIT 1",
@@ -384,7 +384,7 @@ function backupBindings(ss: Station[]): void {
           if (alive) setStations(mapped);
           return;
         }
-      } catch { /* DB belum siap — fallback cache di bawah */ }
+      } catch { /* DB belum siap - fallback cache di bawah */ }
       if (alive) setStations(cached);
     })();
     return () => { alive = false; };
@@ -489,7 +489,7 @@ function backupBindings(ss: Station[]): void {
   const startBleScan = async () => {
     setBleScanning(true);
     try {
-      // E2E-HP (2026-10-26, APP-4): sama seperti bonded — izin dulu, pesan jujur.
+      // E2E-HP (2026-10-26, APP-4): sama seperti bonded - izin dulu, pesan jujur.
       if (!(await ensureBtPermission())) {
         setStatusMsg(t('printers.btDenied'));
         return;
@@ -512,7 +512,7 @@ function backupBindings(ss: Station[]): void {
   };
 
   /** Pakai perangkat hasil pindai (BLE/USB) ke printer utama. R56: tanpa
-   * station, patch ke default diam-diam tak ke mana-mana — tolak eksplisit
+   * station, patch ke default diam-diam tak ke mana-mana - tolak eksplisit
    * (kunci noPrinterSub yang sudah ada). */
   const useOnPrimary = (patch: Partial<Station>, msg: string) => {
     if (stations.length === 0) {
@@ -548,7 +548,7 @@ function backupBindings(ss: Station[]): void {
   const useUsbDevice = (v: UsbDeviceInfo) =>
     useOnPrimary({ conn: 'Star', address: `${v.vendorId}/${v.productId}` }, t('printers.usbApplied').replace('{x}', v.name));
 
-  // R56: flip lokal saja (bukan pairing OS sungguhan) — statusMsg jujur via
+  // R56: flip lokal saja (bukan pairing OS sungguhan) - statusMsg jujur via
   // btSub yang sudah ada (kirim nyata butuh dev-client), bukan klaim sukses.
   const togglePair = (id: string) => {
     setBonded((bb) => bb.map((b) => (b.id === id ? { ...b, paired: !b.paired } : b)));
@@ -699,9 +699,9 @@ function backupBindings(ss: Station[]): void {
         return;
       }
       // KONTRAK FINAL AUTO: byte kosong TAK PERNAH disiarkan ke station
-      // (fromBase64('') tak melempar) — ack FAILED INVALID_PAYLOAD, bukan PRINTED palsu.
+      // (fromBase64('') tak melempar) - ack FAILED INVALID_PAYLOAD, bukan PRINTED palsu.
       if (bytes.length === 0) {
-        await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong — tak dicetak buta (bukan job AUTO sah)');
+        await ackTerminalPrintJob(beId, job.id, job.leaseToken, false, 'INVALID_PAYLOAD', 'Payload kosong - tak dicetak buta (bukan job AUTO sah)');
         setStatusMsg(
           t('printers.serverFailed').replace('{x}', String(job.id)).replace('{e}', 'INVALID_PAYLOAD'),
         );
@@ -738,7 +738,7 @@ function backupBindings(ss: Station[]): void {
 
   /** Test print per station: pratinjau + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
-    // R57: alamat tak bisa kirim = null — tolak eksplisit (kunci noPrinter
+    // R57: alamat tak bisa kirim = null - tolak eksplisit (kunci noPrinter
     // yang sudah ada), jangan kirim target buta.
     const target = stationTarget(s);
     if (!target) {
@@ -899,7 +899,7 @@ function backupBindings(ss: Station[]): void {
           <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.bluetoothPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
           <Text style={styles.stMeta}>{NATIVE_PREF_KEYS.usbPrinter} - {nativeReady ? t('printers.connected') : t('printers.disconnected')}</Text>
         </View>
-        {/* S-F12/S-F13: hibrida — daftar server tampil bila ada (read-only),
+        {/* S-F12/S-F13: hibrida - daftar server tampil bila ada (read-only),
             station lokal di bawah tetap acuan cetak. */}
         {srvDests.length > 0 ? (
           <View style={styles.stCard}>
@@ -912,7 +912,7 @@ function backupBindings(ss: Station[]): void {
             <Text style={styles.stMeta}>{t('printers.serverHint')}</Text>
           </View>
         ) : null}
-        {/* Tugas A/B: fleet server per terminal — kind + template per destinasi.
+        {/* Tugas A/B: fleet server per terminal - kind + template per destinasi.
             Baca cache offline-first; tulis via Sinkron / picker template. */}
         {fleetShown.length > 0 ? (
           <View style={styles.stCard}>
@@ -970,7 +970,7 @@ function backupBindings(ss: Station[]): void {
               <Text style={styles.stMeta}>
                 {s.conn}{s.address ? ` - ${s.address}` : ''} - {s.connected ? t('printers.connected') : t('printers.disconnected')}
               </Text>
-              {/* Tugas D: liveness nyata — Bedakan "terakhir OK" vs "dicek
+              {/* Tugas D: liveness nyata - Bedakan "terakhir OK" vs "dicek
                   (gagal)" vs "belum pernah diuji". `connected` hanya true
                   pasca uji kirim nyata sukses (lihat testPrintStation). */}
               <Text style={styles.stMeta}>
@@ -997,7 +997,7 @@ function backupBindings(ss: Station[]): void {
               </Pressable>
             ))}
           </View>
-          {/* Tugas A: kind server per station — 'dapur' dikecualikan dari
+          {/* Tugas A: kind server per station - 'dapur' dikecualikan dari
               broadcast struk kasir (lihat effectiveKind lib/print). */}
           <Text style={styles.stMeta}>{t('printers.kindTitle')}</Text>
           <View style={styles.chipRow}>
@@ -1045,7 +1045,7 @@ function backupBindings(ss: Station[]): void {
             <AppButton size="md" title={t('printers_use_here')} onPress={() => bindStation(s.id)} style={styles.greenBlock} />
           )}
           {/* Tugas A: tulis terminalId+kind station ini ke BE (cocok nama;
-              gagal jujur via statusMsg — lihat syncOneStation). */}
+              gagal jujur via statusMsg - lihat syncOneStation). */}
           <AppButton size="md" title={t('printers.syncStation')} onPress={() => { void syncOneStation(s); }} variant="secondary" style={styles.blockGap} />
         </View>
       ))}

@@ -95,9 +95,9 @@ export default function EdcScreen({ navigation, route }: Props) {
         if (r.cardNo) setCardNo(r.cardNo.replace(/\D/g, '').slice(-4));
         setPhase('approval');
       }
-    // P16: rantai bare promise dijaga — APOS tak tersedia = tetap di fase
+    // P16: rantai bare promise dijaga - APOS tak tersedia = tetap di fase
     // waiting, kasir input approval manual (fail-soft, tanpa tombol mati).
-    }).catch(() => { /* modul APOS/native absen — abaikan, jalur manual hidup */ });
+    }).catch(() => { /* modul APOS/native absen - abaikan, jalur manual hidup */ });
   }, []);
 
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function EdcScreen({ navigation, route }: Props) {
       return;
     }
     // P7/P15: kaki terusan boleh membawa approvalCode/memberId/customerId
-    // defensif dari Pay (tipe nav params belum diperluas) — dipertahankan ke
+    // defensif dari Pay (tipe nav params belum diperluas) - dipertahankan ke
     // visitPay agar atribusi deposit + kode otorisasi kunjungan lalu tak hilang
     // di EDC. Ronde-3 Q1: customerId GO diteruskan; alias memberId hanya
     // pointer ledger lokal.
@@ -245,14 +245,14 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
           };
           // C7/L1 save-then-record (cermin PayScreen:553-554): tulis DB dulu,
-          // antre HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+          // antre HANYA bila sukses - gagal = nol twin yatim, TANPA Success palsu.
           try {
             await saveSale(gInput);
             recordSale(gInput);
           } catch (e) {
             // Gate bound (D3-03): unbound → pesan klaim-terminal, TANPA Success palsu.
             // APP-R3: guard di-reset agar retry hidup setelah klaim terminal
-            // (cermin outer catch + non-group path — sebelumnya macet-true di sini).
+            // (cermin outer catch + non-group path - sebelumnya macet-true di sini).
             if ((e as { code?: string })?.code === 'terminal-unbound') {
               appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
                 { text: t('c_cancel'), style: 'cancel' },
@@ -269,7 +269,7 @@ export default function EdcScreen({ navigation, route }: Props) {
         }
       } catch (e) {
         // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
-        // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
+        // saveSale): jangan telan menjadi Success palsu - beri jalan klaim.
         if ((e as { code?: string })?.code === 'terminal-unbound') {
           appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
             { text: t('c_cancel'), style: 'cancel' },
@@ -348,7 +348,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}),
     };
     // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
-    // HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+    // HANYA bila sukses - gagal = nol twin yatim, TANPA Success palsu.
     try {
       await saveSale(input);
       recordSale(input);
@@ -517,9 +517,9 @@ export default function EdcScreen({ navigation, route }: Props) {
         <TouchableOpacity style={styles.linkBtn} onPress={() => void (async () => {
           // Kembali ganti metode dengan konteks penuh agar tidak hilang di Pay:
           // nomor + client_id + kaki split + grup ikut pulang (ganti metode
-          // bukan sale baru — rantai Q7 lestari).
+          // bukan sale baru - rantai Q7 lestari).
           const p = route?.params ?? {};
-          // P1: blok issuance dijaga (cermin Qris-guard) — getOrCreate gagal
+          // P1: blok issuance dijaga (cermin Qris-guard) - getOrCreate gagal
           // (CSPRNG absen) = Alert + tetap di EDC, bukan pulang tanpa client_id.
           let backSalesNum = '';
           let backClientId = '';

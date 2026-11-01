@@ -18,7 +18,7 @@
  * Kanonik default = BE newDefaultReceiptSettings() / FE
  * DEFAULT_RECEIPT_SETTINGS (paper 80mm, lang en, showPhone true,
  * showItemNotes true, showAddonPrices false, packaging/delivery false,
- * thanks false, branding true). JANGAN ubah sepihak — ubah BE+FE+APP
+ * thanks false, branding true). JANGAN ubah sepihak - ubah BE+FE+APP
  * bersamaan.
  *
  * Pola = kemasan A2/posSyncReceipt: hanya tulis bila server mengirim
@@ -333,7 +333,7 @@ export function receiptOrderNumberLabel(no: string, lang: 'id' | 'en', merchantC
  * Baris tipe order + meja 1:1 BE ("Dine In - Table 5" / "Makan di Tempat -
  * Meja 5"). Meja hanya bila showTableNumber && tableNumber non-kosong
  * (cermin bridge/PDF; HTML menyembunyikan meja untuk PRODUCT/SERVICE tapi
- * bridge/PDF menampilkannya — HP ikut bridge). Kosong = baris disembunyikan.
+ * bridge/PDF menampilkannya - HP ikut bridge). Kosong = baris disembunyikan.
  * merchantType opsional diteruskan ke receiptOrderTypeLabel (cabang retail).
  */
 export function buildReceiptOrderTypeLine(
@@ -399,7 +399,7 @@ export async function fetchReceiptTemplates(): Promise<ReceiptTemplateRef[]> {
 
 /**
  * Ambil template struk pelanggan default merchant. Kembali null bila offline,
- * 404 (BE lama), 401 (sesi basi — pemanggil yang menangani), atau kosong.
+ * 404 (BE lama), 401 (sesi basi - pemanggil yang menangani), atau kosong.
  * Tak pernah melempar untuk 404/jaringan (pola branchsettings-skip).
  */
 export async function fetchDefaultReceiptTemplate(): Promise<ReceiptTemplateRef | null> {
@@ -455,7 +455,7 @@ export async function persistKitchenTemplate(
   );
 }
 
-/** Ada baris TemplateJSON (pernah pull template) — bedakan mode template vs
+/** Ada baris TemplateJSON (pernah pull template) - bedakan mode template vs
  * legacy tanpa menebak dari isi toggle. Tak pernah melempar. */
 export async function hasReceiptTemplate(): Promise<boolean> {
   try {
@@ -563,7 +563,7 @@ export async function getKitchenTemplateToggles(): Promise<ReceiptTemplateToggle
  * offline-first: hanya ditulis oleh syncMerchantLogoRaster (pull-time,
  * best-effort); ketidakhadiran/gagal decode = jangan sentuh cache lama,
  * baca tak pernah melempar. Praktik umum thermal: raster tengah, 1 bit/
- * piksel MSB-dulu, batas 384 dot (58mm)/576 dot (80mm) — buildRasterImageBytes
+ * piksel MSB-dulu, batas 384 dot (58mm)/576 dot (80mm) - buildRasterImageBytes
  * memotong kelebihan, sehingga cache disimpan pada 576 dot dan di-clip per
  * station. Tinggi dibatasi 256px (~18KB) agar muat memori printer. */
 export type CachedMerchantLogoRaster = {
@@ -571,7 +571,7 @@ export type CachedMerchantLogoRaster = {
   heightPx: number;
   /** Byte bitmap MSB-dulu, panjang ceil(widthPx/8)*heightPx, base64. */
   base64: string;
-  /** URL sumber saat raster dibuat — untuk invalidasi bila merchant ganti logo. */
+  /** URL sumber saat raster dibuat - untuk invalidasi bila merchant ganti logo. */
   sourceUrl: string;
   /** Waktu cache (ISO). */
   updatedAt: string;
@@ -616,7 +616,7 @@ export async function cacheMerchantLogoRaster(r: CachedMerchantLogoRaster): Prom
       [raw],
     );
   } catch {
-    /* abaikan — pratinjau URL tetap jalan */
+    /* abaikan - pratinjau URL tetap jalan */
   }
 }
 

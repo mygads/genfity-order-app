@@ -117,7 +117,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   const metaTable = p.table ?? '-';
   const metaGuest = p.customer ?? p.memberId ?? '-';
   // APP-R3: identitas cabang live (cermin AboutScreen); '-' jujur bila
-  // unbound — tanpa contoh seed Poris. Override params pemanggil tetap menang.
+  // unbound - tanpa contoh seed Poris. Override params pemanggil tetap menang.
   let liveBranchName = '';
   let liveBranchId = '';
   try { liveBranchId = getBranchId(); } catch { /* '-' jujur */ }

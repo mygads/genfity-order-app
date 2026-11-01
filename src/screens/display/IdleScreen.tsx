@@ -18,7 +18,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t, isLocked } = useLang(); const [idx, setIdx] = useState(0);
-  /** APP-EVENTS (§11.4): sadar konektivitas — banner offline + penanda stale. */
+  /** APP-EVENTS (§11.4): sadar konektivitas - banner offline + penanda stale. */
   const { online } = useConnectivity();
   // Display-lock SPEC §10: kedua tag view terkunci = tanpa entri kasir.
   // CTA kembali-order hanya untuk profil full (kasir/dapur/full_access).
@@ -40,7 +40,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
   })();
   const activeTag = boundTag ?? normalizeTag(getDeviceRole());
   const isViewLocked = activeTag !== null && (VIEW_TAGS as string[]).includes(activeTag);
-  /** M9: '' = unbound (tanpa fallback B001) — banner jujur + hitungan dilewati. */
+  /** M9: '' = unbound (tanpa fallback B001) - banner jujur + hitungan dilewati. */
   const branchUnbound = (() => {
     try {
       return !getBranchId();
@@ -82,7 +82,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
             .filter((r) => ((r.promoName ?? r.promoCode ?? '') as string).trim())
             .map((r) => ({ id: String(r.promoCode ?? r.promoName), title: String(r.promoCode ?? ''), desc: String(r.promoName ?? '') })),
         );
-      } catch { /* tanpa promo — slide netral toko dipakai */ }
+      } catch { /* tanpa promo - slide netral toko dipakai */ }
       // D12: hitungan antrean pindah ke efek interval 30 dtk di bawah
       // (efek ini hanya muat awal: promo + wifi).
       try {
@@ -90,7 +90,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
           `SELECT value1 FROM ms_setting WHERE key1 = 'Network' AND key2 = 'WifiSsid' LIMIT 1`,
         );
         if (live) setWifiSsid((ws[0]?.value1 ?? '').trim());
-      } catch { /* tanpa SSID — kotak disembunyikan */ }
+      } catch { /* tanpa SSID - kotak disembunyikan */ }
     })();
     return () => { live = false; };
   }, []);
@@ -118,7 +118,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
     };
     void loadCount();
     // C11 EFF-09: skip tick saat background (hemat SQLite wakeups; layar
-    // display selalu foreground saat dipakai — AppState gate best-effort).
+    // display selalu foreground saat dipakai - AppState gate best-effort).
     const timer = setInterval(() => { try { if (AppState.currentState !== 'active') return; } catch { /* lanjut */ } void loadCount(); }, 30000);
     return () => { live = false; clearInterval(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,7 +128,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
 
   const goCashier = () => {
     void (async () => {
-      // GAP-10: kunci view di handler (bukan hanya CTA disembunyikan) — hanya
+      // GAP-10: kunci view di handler (bukan hanya CTA disembunyikan) - hanya
       // tag fitur-penuh (FULL_FEATURE_TAGS kanonis) lolos ke kasir; view/asing
       // ditolak via notice, tanpa silent fail.
       if (isViewLocked || activeTag === null || !(FULL_FEATURE_TAGS as string[]).includes(activeTag)) { setGateNotice(t('disp_locked_op')); return; }
@@ -138,7 +138,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
     })();
   };
 
-  // EFF-09 dievaluasi: rotasi slide 5 dtk DIPERTAHANKAN — animasi UI lokal
+  // EFF-09 dievaluasi: rotasi slide 5 dtk DIPERTAHANKAN - animasi UI lokal
   // murni (tanpa network/DB), bukan poll data; bukan bagian anggaran interval.
   const promos = dbPromos.length > 0 ? dbPromos : [{ id: 'shop', title: shopName, desc: t('idle_welcome') }]; useEffect(() => {
     const timer = setInterval(() => setIdx((i) => (i + 1) % promos.length), 5000);

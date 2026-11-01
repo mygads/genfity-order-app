@@ -1,6 +1,6 @@
 /**
  * A12: burn/release voucher via endpoint terminal
- * (POST /api/v1/terminals/{id}/vouchers/burn|release) — siap-kontrak.
+ * (POST /api/v1/terminals/{id}/vouchers/burn|release) - siap-kontrak.
  *
  * Kontrak BE (final 2026-10-25):
  * - POST .../vouchers/burn {code,orderClientId,idempotencyKey} → {ok,redemptionId};

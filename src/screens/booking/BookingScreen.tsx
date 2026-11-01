@@ -46,7 +46,7 @@ const NEXT: Record<Status, Status | null> = { Terjadwal: 'Datang', Datang: 'Sele
 /** Daftar reservasi tersimpan di perangkat PER CABANG agar bertahan saat dibuka
  * ulang; kosong = empty-state (tanpa contoh). Kunci dicabang supaya reservasi
  * cabang A tak bocor ke cabang B. */
-/** M9: '' = unbound — segmen kunci 'unbound' (tanpa fallback B001 agar reservasi
+/** M9: '' = unbound - segmen kunci 'unbound' (tanpa fallback B001 agar reservasi
  * cabang A tak bocor/terbaca sebagai cabang lain). */
 const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || '').trim() || 'unbound'}`;
 
@@ -77,7 +77,7 @@ function tableLabel(tb: { no: string; section: string; kap: number }): string {
   return `${tb.no} · ${tb.section} (${tb.kap} kursi)`;
 }
 
-/** A12: smallest-fit — meja kapasitas terkecil yang muat pax. Status hunian
+/** A12: smallest-fit - meja kapasitas terkecil yang muat pax. Status hunian
  *  slot-waktu tak diketahui lokal (ms_table = snapshot kini) → saring hanya
  *  kapasitas; validasi akhir tetap di save() + fallback manual via chip. */
 export function smallestFit(src: LiveTable[], pax: number): LiveTable | null {

@@ -8,7 +8,7 @@
  * + `getSettleMemberView(orderNo)` untuk tampilan minimal Q3.
  *
  * Persist storage best-effort: mirror memakai setTimeout fire-and-forget,
- * response bisa datang SETELAH Success mount — in-memory saja hilang bila
+ * response bisa datang SETELAH Success mount - in-memory saja hilang bila
  * proses restart, storage menutup celah itu. Kunci dibatasi 50 terakhir.
  */
 import { parseSettleMemberBlock } from './memberRef';
@@ -38,7 +38,7 @@ export async function markMemberChanged(salesNum: string): Promise<void> {
 }
 
 /** Simpan tampilan minimal Q3 dari block response (nama samar + poin +
- *  voucher). Dipanggil mirror bersamaan dengan mark (berubah atau tidak —
+ *  voucher). Dipanggil mirror bersamaan dengan mark (berubah atau tidak -
  *  Success selalu bisa menampilkan kondisi pasca-settle bila diketahui). */
 export async function saveSettleMemberView(
   salesNum: string,

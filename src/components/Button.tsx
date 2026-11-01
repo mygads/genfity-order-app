@@ -3,7 +3,7 @@ import { colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
- * Nonaktif CTA primer — PAR-01 parity (2026-10-27): #FFB399 paritas FE
+ * Nonaktif CTA primer - PAR-01 parity (2026-10-27): #FFB399 paritas FE
  * --color-primary-disabled (dulu PEACH #F6C28B utk orange lama #F5820D).
  * LoginScreen masih literal #F6C28B; migrasi ke token ini butuh acc owner
  * (lihat decision-packet), tak disentuh di sini.
@@ -29,7 +29,7 @@ interface ButtonProps {
 }
 
 /**
- * Tombol bersama — PAR-01 parity (2026-10-27): radius via radius.cta = 12
+ * Tombol bersama - PAR-01 parity (2026-10-27): radius via radius.cta = 12
  * (paritas FE rounded-lg; dulu stadium tinggi/2 = 28), h56, teks bold 16 putih.
  *
  * - `primary`: oranye solid ala Login (`colors.orange`).

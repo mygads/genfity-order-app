@@ -48,7 +48,7 @@ function RealQr({ payload }: { payload: string }) {
   const pollRef = useRef(0); /** Kode referensi mock - di app nyata dari backend saat generate QR. */
   /** Guard settle-ganda: poll otomatis + tombol manual bisa panggil berbarengan. */
   const settledRef = useRef(false);
-  /** C2: QR kadaluarsa = terminal — poll in-flight yang pulang telat dilarang
+  /** C2: QR kadaluarsa = terminal - poll in-flight yang pulang telat dilarang
    *  settle (tanpa ini respons telat menimpa status expired → Success palsu
    *  atas QR basi). Direset hanya oleh tombol Buat-kode-baru. */
   const expiredRef = useRef(false);
@@ -60,7 +60,7 @@ function RealQr({ payload }: { payload: string }) {
   // riwayat; baru diterbitkan bila belum ada). Diselesaikan sekali agar QR yang
   // tampil = kunci yang dipakai settlePaid (QR tak basi).
   const [qrChainId, setQrChainId] = useState((route?.params?.clientId ?? '').trim());
-  // P2: resolusi rantai client_id dijaga — gagal = status error + Alert,
+  // P2: resolusi rantai client_id dijaga - gagal = status error + Alert,
   // QR tidak dirender (P9) agar tak ada QR basi/acak.
   const [chainErr, setChainErr] = useState(false);
   useEffect(() => {
@@ -83,7 +83,7 @@ function RealQr({ payload }: { payload: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // M15: QR MEMBAWA payload nyata (client_id rantai + salesNum + total) via
-  // buildSaleQrPayload — bukan pola dekoratif dari nominal. salesNum kosong =
+  // buildSaleQrPayload - bukan pola dekoratif dari nominal. salesNum kosong =
   // nomor baru diterbitkan saat settle; korelasi tetap via client_id yang sama
   // dengan yang dibawa Success/Receipt.
   const qrSalesNum = (route?.params?.salesNum ?? '').trim();
@@ -142,7 +142,7 @@ function RealQr({ payload }: { payload: string }) {
    * Nomor + kaki split terusan dari Pay dipakai ulang (sisa QRIS = kaki
    * terakhir SATU bill utuh); hanya bila tak ada terusan baru terbitkan nomor.
    * APP-PRINTER-SALES (Q7): client_id dipakai ulang dari rantai Pay/head,
-   * baru terbitkan bila belum ada — QR tak basi. FauxQr tampil tetap
+   * baru terbitkan bila belum ada - QR tak basi. FauxQr tampil tetap
    * dekoratif; payload QR nyata (buildSaleQrPayload) ikut clientId ini. */
   const settlePaid = async () => {
     if (settledRef.current || expiredRef.current) return;
@@ -189,7 +189,7 @@ function RealQr({ payload }: { payload: string }) {
       return;
     }
     // P7/P15: kaki terusan boleh membawa approvalCode/memberId/customerId
-    // defensif dari Pay (tipe nav params belum diperluas) — dipertahankan ke
+    // defensif dari Pay (tipe nav params belum diperluas) - dipertahankan ke
     // visitPay agar atribusi deposit + kode otorisasi EDC tak hilang di
     // kunjungan QRIS. Ronde-3 Q1: customerId GO diteruskan; alias memberId
     // hanya pointer ledger lokal.
@@ -223,7 +223,7 @@ function RealQr({ payload }: { payload: string }) {
         } else {
           const gInput: SaleInput = { method: 'qris', salesNum: groupNo, clientId: saleClientId, grandTotal: orderTotalFull, discountTotal: discount, ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}), ...(taxParam > 0 ? { vatTotal: taxParam } : {}), ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}), ...(roundingParam !== 0 ? { rounding: roundingParam } : {}), ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}), items, payments: visitPay, ...(voucherCode ? { voucherCode } : {}), ...(effMemberId ? { memberId: effMemberId } : {}), ...(effCustomerId != null ? { customerId: effCustomerId } : {}), ...(tableNo ? { tableId: tableNo } : {}), ...(orderMode ? { mode: orderMode } : {}), ...(ongkir > 0 ? { ongkir } : {}), ...(ongkirCut > 0 ? { ongkirCut } : {}), ...(customerName ? { customer: customerName } : {}), ...(serviceDateParam ? { serviceDate: serviceDateParam } : {}), ...(serviceTimeParam ? { serviceTime: serviceTimeParam } : {}), ...(technicianParam ? { technician: technicianParam } : {}), ...(dpPercentParam > 0 ? { dpPercent: dpPercentParam } : {}), ...(deliveryAddressParam ? { deliveryAddress: deliveryAddressParam } : {}), ...(deliveryFeeParam > 0 ? { deliveryFee: deliveryFeeParam } : {}), };
           // C7/L1 save-then-record (cermin PayScreen:553-554): tulis DB dulu,
-          // antre HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+          // antre HANYA bila sukses - gagal = nol twin yatim, TANPA Success palsu.
           try {
             await saveSale(gInput);
             recordSale(gInput);
@@ -246,7 +246,7 @@ function RealQr({ payload }: { payload: string }) {
         }
       } catch (e) {
         // appendGroupPayment kini melempar 'terminal-unbound' (gate bound, cermin
-        // saveSale): jangan telan menjadi Success palsu — beri jalan klaim.
+        // saveSale): jangan telan menjadi Success palsu - beri jalan klaim.
         if ((e as { code?: string })?.code === 'terminal-unbound') {
           appAlert(t('terminal_unbound_title'), t('terminal_unbound_hint'), [
             { text: t('c_cancel'), style: 'cancel' },
@@ -277,7 +277,7 @@ function RealQr({ payload }: { payload: string }) {
       ...(tipParam > 0 ? { tipTotal: tipParam } : {}),
     };
     // C7/L1 save-then-record (cermin PayScreen:633-650): tulis DB dulu, antre
-    // HANYA bila sukses — gagal = nol twin yatim, TANPA Success palsu.
+    // HANYA bila sukses - gagal = nol twin yatim, TANPA Success palsu.
     try {
       await saveSale(input);
       recordSale(input);
@@ -350,7 +350,7 @@ function RealQr({ payload }: { payload: string }) {
   const statusChip =
     status === 'paid' ? t('qris_paid') : status === 'expired' ? t('qris_expired') : status === 'checking' ? t('qris_checking') : t('qris_wait');
 
-  // Nominal wajib dari Pay (route.params.total) — tanpa params tampilkan
+  // Nominal wajib dari Pay (route.params.total) - tanpa params tampilkan
   // empty-state jujur, bukan Rp101,2rb + QR fiktif.
   if (!hasTotal) {
     return (
@@ -402,7 +402,7 @@ function RealQr({ payload }: { payload: string }) {
               resizeMode="contain"
             />
             <View style={[styles.qrPlaceholder, isTablet && styles.qrPlaceholderTablet]}>
-              {/* APP-R3: FauxQr di atas pola dekoratif saja (bukan QRIS asli) —
+              {/* APP-R3: FauxQr di atas pola dekoratif saja (bukan QRIS asli) -
                   payload scannable yang jujur = teks qrPayload di bawah ini
                   sampai dep renderer QR tersedia. */}
               {/* P9: QR tidak dirender sebelum client_id rantai siap (tanpa QR
@@ -420,8 +420,8 @@ function RealQr({ payload }: { payload: string }) {
                 <>
                   <FauxQr seed={total} />
                   {/* Fail-safe: pola dekoratif, bukan QRIS bisa-bayar. Wajib label CONTOH. */}
-                  <Text style={[styles.qrSub, { fontWeight: '700', color: '#b45309' }]}>CONTOH — TIDAK BISA DIBAYAR</Text>
-                  {/* M15: payload QR nyata (client_id rantai + salesNum + total) —
+                  <Text style={[styles.qrSub, { fontWeight: '700', color: '#b45309' }]}>CONTOH - TIDAK BISA DIBAYAR</Text>
+                  {/* M15: payload QR nyata (client_id rantai + salesNum + total) -
                       bukan nominal-dekoratif; teks sampai charge dinamis tersedia. */}
                   <Text style={styles.qrPayload} selectable>{qrPayload}</Text>
                   <Text style={styles.qrSub}>{t('qris_scan')}</Text>

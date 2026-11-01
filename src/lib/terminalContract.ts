@@ -1,7 +1,7 @@
 /**
  * Klien kontrak terminal backend Go + binding device & grant offline sisi app.
  *
- * KONTRAK LIVE (koreksi 2026-10-17 atas arah 2-tahap yang SALAH — RoE
+ * KONTRAK LIVE (koreksi 2026-10-17 atas arah 2-tahap yang SALAH - RoE
  * single-stage, bukan credentialOk/requiresPin lalu +staffPin):
  * - POST /api/v1/auth/terminal-login {username,password,terminalCode,deviceId}
  *   → LANGSUNG sesi penuh (session + JWT pair + terminal tag + branches +
@@ -10,11 +10,11 @@
  *   gate PIN staff = VERIFIKASI LOKAL (passesLocalWorkforcePin di LoginScreen
  *   vs workforce-PIN record), bukan panggilan server kedua.
  * - Kick (kebenaran BE terverifikasi 2026-10-17): TAK ADA frame
- *   SESSION_KICKED push sisi server — kick = last-writer-wins: login baru
+ *   SESSION_KICKED push sisi server - kick = last-writer-wins: login baru
  *   menerima `tookOver` di respons terminal-login + event `takeover`
  *   di-fan-out pada feed SSE terminal; grant lama direvoke server-side
  *   (tak ditegakkan pada panggilan API device lama, jadi device lama TIDAK
- *   menerima 401 — 401 = gagal auth final → re-login, BUKAN bukti kick).
+ *   menerima 401 - 401 = gagal auth final → re-login, BUKAN bukti kick).
  *   Device lama deteksi via event `takeover` SSE terminal (user/device event
  *   ≠ sesi/binding sendiri → notice kicked_msg + logout; watcher sesi di
  *   App.tsx) + pencocokan pola kick/takeover sisi-klien pada pesan WS
@@ -44,9 +44,9 @@
  *   (SQLite lokal / pesan offline). Hanya backend yang memutuskan; app
  *   tak pernah mengarang keberhasilan (pelajaran CONFIRMED-3 ForgotPin).
  *
- * Tiga PIN terpisah (audit row 5): PIN terminal (binding, tak disimpan —
+ * Tiga PIN terpisah (audit row 5): PIN terminal (binding, tak disimpan -
  * diverifikasi per-bind via validate-pin/bind) ≠ PIN staff (login/absensi/
- * shift — hash lokal via lib/pin.ts; server TAK PERNAH memverifikasi PIN
+ * shift - hash lokal via lib/pin.ts; server TAK PERNAH memverifikasi PIN
  * staff saat login, gate-nya passesLocalWorkforcePin di LoginScreen) ≠
  * PIN owner (eskalasi, supervisor.ts).
  *
@@ -134,13 +134,13 @@ export interface TerminalGrant {
  * APP-FIXUP (fix-app-contract E3): konstanta warisan, dipertahankan untuk
  * kompatibilitas tipe; otoritas TTL kini policy sesi
  * (getMaxOfflineGrantDays, default 7 hari, server-wins).
- * @deprecated Nol pembaca (audit 2026-10-17) — jangan pakai untuk logika baru;
+ * @deprecated Nol pembaca (audit 2026-10-17) - jangan pakai untuk logika baru;
  * hapus setelah satu siklus rilis bila tetap tanpa pemanggil. */
 export const GRANT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const LS_BINDING = 'genfity.terminal.binding.v1';
 // APP-FIXUP (fix-app-contract E3): kunci store ganda warisan
-// ('genfity.terminal.grant.v1') DIHAPUS — baca/tulis grant kini milik
+// ('genfity.terminal.grant.v1') DIHAPUS - baca/tulis grant kini milik
 // session.ts. Sisa byte yatim di perangkat disapu best-effort di readGrant.
 const LEGACY_LS_GRANT = 'genfity.terminal.grant.v1';
 /** Kunci deviceId SAMA dengan lib/apiSource.ts agar satu identitas device. */
@@ -206,7 +206,7 @@ async function postJson<T>(
         const token = String(s?.authToken ?? s?.authKey ?? '').trim();
         if (token) headers.Authorization = `Bearer ${token}`;
       } catch {
-        /* sesi tak terbaca — biarkan server yang menolak */
+        /* sesi tak terbaca - biarkan server yang menolak */
       }
     }
     const res = await fetch(`${base}${path}`, {
@@ -274,7 +274,7 @@ function unwrapData<T>(body: unknown): T {
 /** Ambil atau buat deviceID 16-hex persisten (CSPRNG, Q7).
  * G9 best-effort (audit 2026-10-17): persist dicoba; bila tulis/gagal-baca
  * storage, fallback ke id ephemeral in-memory yang STABIL selama proses
- * (bukan acak tiap panggil) + console.warn jujur — tanpa silent loss. */
+ * (bukan acak tiap panggil) + console.warn jujur - tanpa silent loss. */
 let ephemeralDeviceId: string | null = null;
 
 export async function getContractDeviceId(): Promise<string> {
@@ -288,14 +288,14 @@ export async function getContractDeviceId(): Promise<string> {
     } catch {
       ephemeralDeviceId = id;
       console.warn(
-        '[terminalContract] getContractDeviceId: persist gagal — fallback ephemeral in-memory (best-effort, stabil selama proses).',
+        '[terminalContract] getContractDeviceId: persist gagal - fallback ephemeral in-memory (best-effort, stabil selama proses).',
       );
     }
     return id;
   } catch {
     if (!ephemeralDeviceId) ephemeralDeviceId = randomHexCsprng(16);
     console.warn(
-      '[terminalContract] getContractDeviceId: storage tak terbaca — fallback ephemeral in-memory (best-effort).',
+      '[terminalContract] getContractDeviceId: storage tak terbaca - fallback ephemeral in-memory (best-effort).',
     );
     return ephemeralDeviceId;
   }
@@ -305,11 +305,11 @@ export async function getContractDeviceId(): Promise<string> {
 // Endpoint kontrak.
 // ---------------------------------------------------------------------------
 
-/** Hasil terminal-login STAGED fase-1a (DEAD CODE 2026-10-17: nol pemanggil —
+/** Hasil terminal-login STAGED fase-1a (DEAD CODE 2026-10-17: nol pemanggil -
  * jalur hidup = callStaffLogin di LoginScreen; dipertahankan sebagai acuan
  * bentuk + diperbaiki ke RoE live: langkah 1+2 (password + PIN terminal) →
  * materi sesi penuh + tookOver; langkah 3 (PIN user) SELALU via E29
- * pin-verify — pinRequired:true sampai lolos). */
+ * pin-verify - pinRequired:true sampai lolos). */
 export interface TerminalLoginSuccess {
   userId: string;
   role: string;
@@ -430,7 +430,7 @@ export async function fetchTerminals(branchId: string): Promise<{
   };
 }
 
-/** Validasi PIN terminal (binding) — PIN tak disimpan di device. */
+/** Validasi PIN terminal (binding) - PIN tak disimpan di device. */
 export async function validateTerminalPin(
   terminalId: string,
   pin: string,
@@ -444,7 +444,7 @@ export async function validateTerminalPin(
 
 /**
  * Bind device↔terminal. Q13: login baru menang; bila server mengusir sesi
- * lama, {bound:true, kickedUserId} — layar WAJIB memberitahu perangkat baru.
+ * lama, {bound:true, kickedUserId} - layar WAJIB memberitahu perangkat baru.
  */
 export async function bindTerminal(
   terminalId: string,
@@ -466,7 +466,7 @@ export async function bindTerminal(
 }
 
 /** Claim terminal: usir sesi sebelumnya (evict previous). Fase-1a: server
- * WAJIBkan PIN terminal (faktor 2) — pin opsional agar pemanggil lama tak
+ * WAJIBkan PIN terminal (faktor 2) - pin opsional agar pemanggil lama tak
  * pecah; tanpa pin server menolak PIN_REQUIRED (pemanggil wajib isi). */
 export async function claimTerminal(
   terminalId: string,
@@ -490,14 +490,14 @@ export async function claimTerminal(
 /**
  * Minta reset PIN staff (audit row 16, fix CONFIRMED-3: call nyata, bukan
  * setSent palsu). Kontrak fix-be D1: POST /api/v1/staff/{id}/pin-reset
- * (owner-only) — {id} path boleh id ATAU username (server yang resolve),
+ * (owner-only) - {id} path boleh id ATAU username (server yang resolve),
  * body PERSIS {merchantId, pin, username?/userId?} tanpa terminalCode/
  * deviceId (otorisasi milik server via binding/owner). Jujur offline:
  * kontrak tak terjangkau → {ok:false, offline:true}; server menolak →
  * {ok:false, offline:false} (BUKAN sukses palsu).
  *
  * APP-FIXUP (fix-app-contract D1): kunci identifier dipilih dari bentuk
- * nilai — pola id (`u-*` seed, UUID, numerik murni) → `userId`, selainnya
+ * nilai - pola id (`u-*` seed, UUID, numerik murni) → `userId`, selainnya
  * → `username` (layar Forgot PIN selalu mengirim username staff).
  */
 export async function requestPinReset(input: {
@@ -532,7 +532,7 @@ function isUserIdLike(v: string): boolean {
 
 /**
  * URL SSE event terminal (kontrak GET .../events, tag-filtered). Hanya
- * pembentuk URL — konsumsi EventSource milik paket event/Fase 4 (row 8).
+ * pembentuk URL - konsumsi EventSource milik paket event/Fase 4 (row 8).
  */
 export function terminalEventsUrl(terminalId: string): string {
   const base = contractBase();
@@ -563,15 +563,15 @@ export async function clearBinding(): Promise<void> {
 // dibaca gate). Semantik lestari: triple-bound + 7-hari sliding (Q6 CLOSED).
 // Bentuk TerminalGrant dipertahankan sebagai PROYEKSI baca (username/role/
 // tag/authKey diambil dari sesi+binding); penulisan grant hash-PIN hanya via
-// session buildGrant/saveGrant pasca-auth online — shim tulis di bawah
+// session buildGrant/saveGrant pasca-auth online - shim tulis di bawah
 // sengaja gagal-keras (fail-closed) daripada sukses palsu.
 // ---------------------------------------------------------------------------
 
 /** Proyeksi baca grant kanonis sesi ke bentuk kontrak (null bila tanpa grant).
  * F21: terminalCode/tag TAK diproyeksikan dari binding aktif bila grant milik
- * terminal lain — dipakai terminal milik grant apa adanya; tak cocok →
+ * terminal lain - dipakai terminal milik grant apa adanya; tak cocok →
  * dikembalikan tanpa tambal, mismatch ditangani gerbang grant (fail-closed).
- * @deprecated Nol pemanggil produksi (audit 2026-10-17) — gate memakai
+ * @deprecated Nol pemanggil produksi (audit 2026-10-17) - gate memakai
  * session.ts langsung (getGrant/isGrantValid/describeGrantProblem). Proyeksi
  * '' saat sesi/binding absen by design (fail-closed); jangan andalkan untuk
  * logika baru. */
@@ -589,7 +589,7 @@ export async function readGrant(): Promise<TerminalGrant | null> {
     const b = getSessionBinding();
     // F21: cocok = terminalId grant sama dengan binding sesi (fallback warisan:
     // terminalCode grant bila grant tak membawa terminalId). Selain itu grant
-    // dikembalikan apa adanya — binding aktif tak boleh menambal terminalCode.
+    // dikembalikan apa adanya - binding aktif tak boleh menambal terminalCode.
     const gRec = g as unknown as Record<string, unknown>;
     const grantTerminalId = str(gRec['terminalId']);
     const grantTerminalCode = str(gRec['terminalCode']);
@@ -620,18 +620,18 @@ export async function readGrant(): Promise<TerminalGrant | null> {
 
 /**
  * DEPRECATED (E3): grant hash-PIN tak bisa dicetak dari TerminalGrant
- * (tanpa staffPin plaintext — mencetak hash tanpa PIN = mengarang grant).
+ * (tanpa staffPin plaintext - mencetak hash tanpa PIN = mengarang grant).
  * Pakai session buildGrant/saveGrant pasca-auth online. Gagal-keras agar
  * penyalahgunaan ketahuan, bukan sukses palsu.
  */
 export async function saveGrant(_g: TerminalGrant): Promise<void> {
   throw new Error(
-    '[terminalContract] saveGrant dipindah ke session.ts — pakai buildGrant/saveGrant',
+    '[terminalContract] saveGrant dipindah ke session.ts - pakai buildGrant/saveGrant',
   );
 }
 
 /**
- * DEPRECATED (E3): lihat saveGrant — TTL kini policy sesi
+ * DEPRECATED (E3): lihat saveGrant - TTL kini policy sesi
  * (getMaxOfflineGrantDays, server-wins), bukan konstanta modul ini.
  */
 export async function saveGrantFromLogin(
@@ -641,18 +641,18 @@ export async function saveGrantFromLogin(
   _deviceId: string,
 ): Promise<TerminalGrant> {
   throw new Error(
-    '[terminalContract] saveGrantFromLogin dipindah ke session.ts — pakai buildGrant/saveGrant',
+    '[terminalContract] saveGrantFromLogin dipindah ke session.ts - pakai buildGrant/saveGrant',
   );
 }
 
 /**
  * Grant valid bila: cocok rangkap-tiga (userId ATAU username + terminalCode
- * + device) DAN belum kedaluwarsa — dinilai pada store sesi kanonis.
+ * + device) DAN belum kedaluwarsa - dinilai pada store sesi kanonis.
  * terminalCode kontrak dipetakan ke terminalId sesi via binding sesi
  * (SPEC §2); username diselesaikan via sesi aktif; yang tak terpeta →
  * false (fail-closed). Login PERTAMA wajib online (tanpa grant valid →
  * tolak jujur). Tak pernah melempar.
- * @deprecated Nol pemanggil produksi (audit 2026-10-17) — gate memakai
+ * @deprecated Nol pemanggil produksi (audit 2026-10-17) - gate memakai
  * access.requireTerminalAccess atas store sesi. Username-tanpa-sesi = false
  * by design (fail-closed); jangan pakai untuk logika baru.
  */
@@ -687,9 +687,9 @@ export async function grantValidFor(input: {
 }
 
 /**
- * Geser TTL (sliding) tiap login sukses — didelegasikan ke store sesi
+ * Geser TTL (sliding) tiap login sukses - didelegasikan ke store sesi
  * kanonis (sebelumnya menggeser store ganda yang tak dibaca gate access.ts).
- * Best-effort: G7 fail-closed — touchSessionGrant mengembalikan null bila
+ * Best-effort: G7 fail-closed - touchSessionGrant mengembalikan null bila
  * prasyarat grant gagal (tak ada mint); di sini dicatat warn jujur, bukan
  * sukses palsu. Tanda tangan Promise<void> dipertahankan agar pemanggil
  * lama tetap kompil.
@@ -700,7 +700,7 @@ export async function touchGrant(): Promise<void> {
     const g = touchSessionGrant();
     if (!g) {
       console.warn(
-        '[terminalContract] touchGrant: prasyarat grant gagal — sliding dilewati (fail-closed, tanpa mint).',
+        '[terminalContract] touchGrant: prasyarat grant gagal - sliding dilewati (fail-closed, tanpa mint).',
       );
     }
   } catch {

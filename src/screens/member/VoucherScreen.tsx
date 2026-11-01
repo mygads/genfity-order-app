@@ -35,7 +35,7 @@ type Voucher = {
   jenis: string;
   nilai: number;
   minBelanja: number;
-  /** U1: cermin TotalsVoucher — diteruskan ke kasir agar totals.ts
+  /** U1: cermin TotalsVoucher - diteruskan ke kasir agar totals.ts
    * (satu-satunya pemilik rumus) bisa pakai. */
   rate?: number;
   maxAmount?: number;
@@ -75,7 +75,7 @@ async function loadVouchersFromSqlite(lang: Lang): Promise<Voucher[]> {
       : st === 'used' || st === 'burned' ? 'terpakai'
       : 'kadaluwarsa';
     const nilai = Math.max(0, Math.round(Number(r.amount) || 0));
-    // Cermin kanonis: status 'available' saja tak cukup — kuota habis /
+    // Cermin kanonis: status 'available' saja tak cukup - kuota habis /
     // nominal 0 / di luar jendela = tak bisa dipakai kasir, jadi daftar
     // menampilkannya apa adanya (bukan 'tersedia' yang menipu).
     if (status === 'tersedia') {
@@ -129,7 +129,7 @@ async function persistVoucherOp(
         : op === 'burn'
           ? ApiPath.voucherBurn
           : ApiPath.voucherValidate;
-  // FetchOpts tak punya timeout — batas 8 dtk via Promise.race.
+  // FetchOpts tak punya timeout - batas 8 dtk via Promise.race.
   const clientId = uuidv7();
   const body =
     op === 'validate'
@@ -169,7 +169,7 @@ export default function VoucherScreen({ navigation }: Props) {
   const [cancelVisible, setCancelVisible] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   // U10: bakar voucher = gerbang PIN eskalasi (fail-closed). Kunci (lock)
-  // tetap ungated — deliberate.
+  // tetap ungated - deliberate.
   const [burnPinVisible, setBurnPinVisible] = useState(false);
   const [burnPin, setBurnPin] = useState('');
   const [burnPinErr, setBurnPinErr] = useState('');
@@ -347,7 +347,7 @@ export default function VoucherScreen({ navigation }: Props) {
   /** Satu action row untuk result, driven by result.source:
    * local → kunci voucher lokal; online → klaim (REA-7); external → burn (REA-6).
    * Klaim/burn yang sukses WAJIB menempel ke kasir (gap audit: sebelumnya hanya
-   * pesan — kuota server terbakar tapi kode tak bisa dipakai kasir karena
+   * pesan - kuota server terbakar tapi kode tak bisa dipakai kasir karena
    * backstop saveSale hanya kenal ms_voucher/ms_promotion). Karena itu kode
    * online/eksternal dipersist sebagai baris sekali-pakai (kuota 1) agar rantai
    * totals → backstop → burn → void-restore berjalan seragam; TANPA baris ini
@@ -385,7 +385,7 @@ export default function VoucherScreen({ navigation }: Props) {
     }
     navigation?.navigate('Cashier', {
       // U1: teruskan minSpend/rate/maxAmount agar totals.ts bisa pakai.
-      // S4: label jenis ikut currency cabang — totals.ts hanya baca
+      // S4: label jenis ikut currency cabang - totals.ts hanya baca
       // 'Ongkir'/'%', jadi kind di sini inert, tapi label IDR salah di AUD.
       voucher: {
         code: kode,
@@ -623,7 +623,7 @@ export default function VoucherScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Filter status — satu baris wrap, ikut batas lebar konten. */}
+      {/* Filter status - satu baris wrap, ikut batas lebar konten. */}
       <View style={[s.filters, isTablet && wideCenterLg]}>
         {(['semua', 'tersedia', 'terkunci', 'terpakai', 'kadaluwarsa', 'belum_berlaku'] as const).map((f) => (
           <TouchableOpacity
@@ -637,7 +637,7 @@ export default function VoucherScreen({ navigation }: Props) {
         ))}
       </View>
 
-      {/* Judul daftar + jumlah — teks beda dan jelas dari panel cek di atas. */}
+      {/* Judul daftar + jumlah - teks beda dan jelas dari panel cek di atas. */}
       <View style={[s.titleRow, isTablet && wideCenterLg]}>
         <Text style={s.sectionTitle}>{t('vou_promo_list')}</Text>
         <Text style={s.sectionCount}>{countTxt}</Text>

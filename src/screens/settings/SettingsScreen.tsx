@@ -35,7 +35,7 @@ const AUTOCUT_KEY = 'genfity.settings.autocut';
 // (help_faq5_a) merujuk ke "Cetakan Menu". Route tanpa entry = yatim.
 const MENU_PRINTING_VISIBLE = true;
 // PUTUSAN OWNER 2026-10-26: baris "Scan QR" di Pengaturan disembunyikan dulu
-// (layar QrScan tetap ada — dipakai Member + Login). Ubah ke true untuk
+// (layar QrScan tetap ada - dipakai Member + Login). Ubah ke true untuk
 // menampilkan kembali tanpa menghapus layar.
 const MENU_SCAN_VISIBLE = false;
 
@@ -56,7 +56,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const toggleAutoCut = (v: boolean) => { setAutoCut(v); void setJSON(AUTOCUT_KEY, v); };
   const [serverEnv, setServerEnvState] = useState<ServerEnv>(() => getServerEnv());
   const [customUrl, setCustomUrl] = useState(() => getCustomBaseUrl());
-  // Audit-5d80: panel server disembunyikan dari staf — preset + editor custom
+  // Audit-5d80: panel server disembunyikan dari staf - preset + editor custom
   // hanya muncul setelah tap 5x pada label versi (dengan gate settings.edit).
   // Alasan: preset 'Prod' menunjuk ke server pihak ketiga (ESB), dan selektor
   // server di tangan kasir = risiko salah arah + desync klaim terminal.
@@ -71,7 +71,7 @@ export default function SettingsScreen({ navigation }: Props) {
   void verticalTick;
   const [versionTaps, setVersionTaps] = useState(0);
   // F4 readout klaim: ditulis HANYA oleh alur bind terverifikasi PIN via
-  // BranchPicker (tanpa input manual di layar ini); dibaca ulang tiap fokus —
+  // BranchPicker (tanpa input manual di layar ini); dibaca ulang tiap fokus -
   // back-navigate setelah re-bind tak remount sehingga getTerminal() per
   // render bisa basi tanpa render ulang.
   const [terminal, setTerminal] = useState(() => getTerminal());
@@ -82,7 +82,7 @@ export default function SettingsScreen({ navigation }: Props) {
   // Display-lock SPEC §10: tag view terkunci = switch peran perangkat +
   // klaim terminal disembunyikan TOTAL (tanpa Settings/role-switch di profil
   // view). Membuka kembali wajib lewat aksi owner terautentikasi (Q14
-  // TERBUKA) — bukan sekadar un-hide di sini.
+  // TERBUKA) - bukan sekadar un-hide di sini.
   const [, setBindTick] = useState(0);
   useEffect(() => subscribeSession(() => setBindTick((x) => x + 1)), []);
   const boundTag = (() => {
@@ -95,7 +95,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const activeTag = boundTag ?? normalizeTag(deviceRole) ?? 'full_access';
   const isViewLocked = (VIEW_TAGS as string[]).includes(activeTag);
   // Audit 2026-10-26: panel sync manual (push/pull + terminal-check) dihapus
-  // dari Pengaturan — push/pull + status ada di layar Sync; validitas terminal
+  // dari Pengaturan - push/pull + status ada di layar Sync; validitas terminal
   // dicek otomatis server di setiap apiFetch/pull (401 → logout).
 
   const go = (route: string) => navigation?.navigate(route);
@@ -109,7 +109,7 @@ export default function SettingsScreen({ navigation }: Props) {
   /**
    * Gate RBAC settings.edit: deny = Alert + block (tanpa eskalasi).
    * Fail-CLOSED (R1): DB belum siap / throw = DENY. Gate ini menjaga server
-   * env + re-bind terminal — fail-open akan membiarkan kasir mengganti
+   * env + re-bind terminal - fail-open akan membiarkan kasir mengganti
    * endpoint server saat DB rusak/belum hydrate.
    */
   const guardSettingsEdit = async (): Promise<boolean> => {
@@ -163,7 +163,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   /** Tugas F ("Ganti terminal" tanpa logout): masuk alur pilih cabang +
-   * terminal DI DALAM sesi (rute BranchPicker stack authed) — tanpa logout
+   * terminal DI DALAM sesi (rute BranchPicker stack authed) - tanpa logout
    * manual. Catatan jujur: bind terminal BARU yang terverifikasi PIN tetap
    * mengakhiri sesi staff via adoptTerminalBinding (okupansi tunggal per
    * device, by design) sehingga login ulang diperlukan SETELAH klaim baru;
@@ -232,7 +232,7 @@ export default function SettingsScreen({ navigation }: Props) {
         ) : null}
       </View>
 
-      {/* Audit 2026-10-26: panel sync manual dihapus — push/pull + status ada
+      {/* Audit 2026-10-26: panel sync manual dihapus - push/pull + status ada
         di layar Sync (MenuRow Data & Bantuan di bawah); identitas terminal
         terlihat di baris klaim + panel server di atas. */}
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.printerPrint')}</Text>
@@ -252,7 +252,7 @@ export default function SettingsScreen({ navigation }: Props) {
       <MenuRow title={t('settings.stock')} sub={t('settings.stockSub')} onPress={() => go('Stock')} />
       <MenuRow
         title={t('settings.vertical')}
-        sub={(() => { try { const v = VERTICALS[getCachedVerticalId()]; return v ? `${v.label} — ${v.example}` : t('settings.verticalSub'); } catch { return t('settings.verticalSub'); } })()}
+        sub={(() => { try { const v = VERTICALS[getCachedVerticalId()]; return v ? `${v.label} - ${v.example}` : t('settings.verticalSub'); } catch { return t('settings.verticalSub'); } })()}
         onPress={() => setVerticalPinOpen(true)}
       />
       <MenuRow
@@ -286,7 +286,7 @@ export default function SettingsScreen({ navigation }: Props) {
       ) : null}
 
       <Text style={[styles.groupLabel, isTablet && styles.groupLabelBig]}>{t('settings.dataHelp')}</Text>
-      {/* SESI-FINAL-APP K5 PARKED needs-dep: backup codec murni, tanpa expo-clipboard/share/file — baris disabled jujur */}
+      {/* SESI-FINAL-APP K5 PARKED needs-dep: backup codec murni, tanpa expo-clipboard/share/file - baris disabled jujur */}
       <MenuRow title={t('settings.backup')} sub={t('settings.backupSub')} />
       <MenuRow title={t('settings.sync')} sub={t('settings.syncSub')} onPress={() => go('Sync')} />
       <MenuRow title={t('settings.log')} sub={t('settings.logSub')} onPress={() => go('Log')} />
@@ -339,7 +339,7 @@ export default function SettingsScreen({ navigation }: Props) {
                 );
               } catch { /* abaikan */ }
               // Selaraskan ke server dulu (PUT verticalId); HANYA re-pull bila
-              // server terima — bila offline/ditolak, pilihan lokal WAJIB
+              // server terima - bila offline/ditolak, pilihan lokal WAJIB
               // dipertahankan (jangan re-pull yang menimpa balik ke nilai lama).
               try {
                 const { pushVerticalIdToServer } = await import('../../lib/posModes');
@@ -400,7 +400,7 @@ export default function SettingsScreen({ navigation }: Props) {
         variant="danger"
         onPress={() => {
           // E31 fase-1a: terminal-logout best-effort (fire-and-forget; device
-          // tetap bound) — gagal jaringan = abaikan, logout lokal tetap jalan.
+          // tetap bound) - gagal jaringan = abaikan, logout lokal tetap jalan.
           try {
             const dev = (getSession()?.deviceId || '').trim();
             if (dev) void terminalLogout(dev).catch(() => {});

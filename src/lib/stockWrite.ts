@@ -157,7 +157,7 @@ export async function persistBranchQty(
     }
   }
   // P0-02 optimistic-lock: tangkap baseQty SEBELUM tulis (untuk 409 STOCK_CONFLICT).
-  // Tanpa base = BE perlakukan legacy (tanpa cek) — jangan pernah kirim baseQty == qty baru.
+  // Tanpa base = BE perlakukan legacy (tanpa cek) - jangan pernah kirim baseQty == qty baru.
   let baseQty: number | null = null;
   try {
     const prev = await queryFirst<{ qty: number | null }>(

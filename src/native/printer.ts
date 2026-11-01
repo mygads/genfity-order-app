@@ -56,7 +56,7 @@ export function hasNativePrinter(): boolean {
  * Jurnal loopback S10/PP-015 (fixture + mock cetak tanpa hardware).
  * Satu entri = satu pemanggilan `printBytes` bertarget loopback.
  * `bytes` disalin saat tulis DAN saat baca (pemanggil tak bisa merusak jurnal).
- * Memori saja — hilang saat reload; bukan antrean persisten (itu `printqueue`).
+ * Memori saja - hilang saat reload; bukan antrean persisten (itu `printqueue`).
  */
 export interface LoopbackPrint {
   at: string;
@@ -138,7 +138,7 @@ export async function listUsbDevices(): Promise<UsbDeviceInfo[]> {
 }
 
 /** Minta izin BT bila perlu (Android 12+: SCAN+CONNECT; Android lama: lokasi).
- * Dipakai pindai BLE, daftar bonded klasik, DAN kirim BT/BLE — tanpa
+ * Dipakai pindai BLE, daftar bonded klasik, DAN kirim BT/BLE - tanpa
  * BLUETOOTH_CONNECT, getBondedDevices() kosong + RFCOMM melempar
  * SecurityException (temuan E2E-HP 2026-10-26: granted=false permanen
  * karena izin tak pernah diminta; pemindaian selalu "tidak ditemukan").
@@ -200,7 +200,7 @@ export async function listBlePrinters(): Promise<Array<{ name: string; mac: stri
 export async function printBytes(target: PrinterTarget, data: Uint8Array): Promise<PrintResult> {
   // S10/PP-015 loopback: tangkap byte ke jurnal memori agar byte ESC/POS bisa
   // diverifikasi tanpa hardware (fixture + uji drain). Cabang ini SENGAJA di
-  // paling atas — jalan identik di Expo Go/web/dev-client (tanpa modul native).
+  // paling atas - jalan identik di Expo Go/web/dev-client (tanpa modul native).
   // SUKSES DI SINI BUKAN BUKTI KERTAS KELUAR: klaim cetak fisik butuh perangkat
   // + dev-client/APK (daftar colok-akhir: docs/PRINTER-PLUGLAST.md).
   if (target.transport === 'loopback') {

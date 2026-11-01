@@ -19,7 +19,7 @@ import {
  * POST /api/v1/terminals/{id}/supervisor-approve {supervisorUserId,
  * supervisorPin, action, refId, reason}.
  *
- * Beda vs modal PIN lama: identitas supervisor EKSPLISIT (ID numerik BE —
+ * Beda vs modal PIN lama: identitas supervisor EKSPLISIT (ID numerik BE -
  * APP tak punya roster staf, E18 MISSING-BE, jadi input manual; follow-up
  * owner: endpoint roster) + aksi/refId preset dari pemanggil + alasan WAJIB
  * (tercatat append-only di pos_supervisor_approvals).
@@ -33,7 +33,7 @@ export interface SupervisorApprovalResult {
   /** ID baris pos_supervisor_approvals; undefined = disetujui jalur lokal. */
   approvalId?: string;
   approvedAt?: string;
-  /** ID numerik BE supervisor (string angka) — untuk jejak audit pemanggil. */
+  /** ID numerik BE supervisor (string angka) - untuk jejak audit pemanggil. */
   supervisorUserId: string;
   action: string;
   refId: string;
@@ -41,15 +41,15 @@ export interface SupervisorApprovalResult {
 
 interface SupervisorApprovalDialogProps {
   visible: boolean;
-  /** Preset aksi 1..64 char — void/refund WAJIB konstanta kanonis
+  /** Preset aksi 1..64 char - void/refund WAJIB konstanta kanonis
    * (SUPERVISOR_ACTION_ORDER_VOID/REFUND, bukan literal lowercase; compliment =
-   * SUPERVISOR_ACTION_COMPLIMENT_SETTLE via ExtraPaySection) — tampil statis. */
+   * SUPERVISOR_ACTION_COMPLIMENT_SETTLE via ExtraPaySection) - tampil statis. */
   action: string;
   /** Ref default (order/item id); pemanggil boleh biarkan pemohon ubah. */
   refId?: string;
   /**
    * COND-2: kunci refId (tampil statis, tak bisa diubah pemohon). WAJIB true
-   * bila refId = id-desimal order untuk approval COMPLIMENT_SETTLE — satu
+   * bila refId = id-desimal order untuk approval COMPLIMENT_SETTLE - satu
    * digit diubah = approval tak cocok = settle 403. Untuk aksi bebas lain
    * (void/cancel/refund) biarkan false (default).
    */
@@ -102,7 +102,7 @@ export default function SupervisorApprovalDialog({
   const terminalId = (boundTerminal || terminalManual).trim();
   const userIdNum = Number((userId || '').replace(/[^0-9]/g, ''));
   // OFFLINE-RULE: compliment = aksi kanonis; refId wajib id-desimal (tombol
-  // tak bisa submit selama kosong — pesan petunjuk tampil di bawah field).
+  // tak bisa submit selama kosong - pesan petunjuk tampil di bawah field).
   const isCompliment = action === SUPERVISOR_ACTION_COMPLIMENT_SETTLE;
   const canSubmit =
     !busy &&
@@ -127,7 +127,7 @@ export default function SupervisorApprovalDialog({
       reason: reason.trim(),
     });
     // Offline-first: cocokkan PIN lokal milik pemegang hak (fail-closed).
-    // OFFLINE-RULE: compliment DILARANG lewat fallback lokal — approval lokal
+    // OFFLINE-RULE: compliment DILARANG lewat fallback lokal - approval lokal
     // tak punya approvalId dan settle BE pasti 403. Tampilkan syarat online.
     if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
       setBusy(false);
@@ -188,7 +188,7 @@ export default function SupervisorApprovalDialog({
           />
           <Text style={styles.fieldLabel}>{t('sup_v1_refid')}</Text>
           {lockRefId ? (
-            <Text style={styles.staticVal}>{refId || '—'}</Text>
+            <Text style={styles.staticVal}>{refId || '-'}</Text>
           ) : (
           <AppInput
             placeholder={t('sup_v1_refid_ph')}

@@ -4,7 +4,7 @@ import { TABLET_BP, colors, fonts } from '../../theme';
 import { modeDisplayLabel } from '../../lib/posModes';
 
 /**
- * ModeBar — pemilih kanal order per vertikal (reusable, konsisten tema).
+ * ModeBar - pemilih kanal order per vertikal (reusable, konsisten tema).
  * Daftar mode berasal dari posModesForVertical (kanon BE), bukan hardcode.
  * Target sentuh ≥44dp; tablet 48dp. Dipakai CashierScreen (wide + phone).
  */

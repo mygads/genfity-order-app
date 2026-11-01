@@ -1,7 +1,7 @@
 /**
  * Sesi kasir di memori + persistensi AsyncStorage (lib/storage.ts) agar
  * sesi bertahan restart di web + native. API tetap sinkron seperti semula.
- * C4 (SESI-C): authToken JWT E01 TAK PERNAH ke AsyncStorage — salinan
+ * C4 (SESI-C): authToken JWT E01 TAK PERNAH ke AsyncStorage - salinan
  * persistennya milik expo-secure-store (lihat blok C4 di bawah); memori
  * Session.authToken tetap sumber sinkron pembaca bearer.
  */
@@ -41,11 +41,11 @@ export interface Session {
   /** Id device sesi (1 device = 1 terminal, SPEC-TERMINAL-SESSION §7.1). */
   deviceId?: string;
   /** Token sesi server dari E01 terminal-login single-stage (live 2026-10-17).
-   * C4 (SESI-C, CLOSED): HANYA di memori + SecureStore (saveAuthTokenStore) —
+   * C4 (SESI-C, CLOSED): HANYA di memori + SecureStore (saveAuthTokenStore) -
    * persist() di bawah men-strip-nya dari JSON AsyncStorage. */
   authToken?: string;
   /** Refresh token sesi server (E01 + rotasi terminal-refresh T-AUTH-REFRESH).
-   * C4-extended: HANYA di memori + SecureStore (saveRefreshTokenStore) —
+   * C4-extended: HANYA di memori + SecureStore (saveRefreshTokenStore) -
    * persist() men-strip-nya dari JSON AsyncStorage, disejajarkan dengan
    * authToken agar tak bocor lintas-user/sesi. */
   refreshToken?: string;
@@ -73,16 +73,16 @@ export interface Binding {
   terminalCode: string;
   branchId: string;
   branchName: string;
-  /** Q1 (2026-10-17): branch IS merchant — nama merchant hanya cermin display.
+  /** Q1 (2026-10-17): branch IS merchant - nama merchant hanya cermin display.
    * Opsional; diderivasi dari branchName saat disimpan (saveBinding/adopt).
    * Jangan dipakai sebagai kunci/otorisasi. */
   merchantName?: string;
   /** C2 (SESI-C): tipe merchant untuk daftar mode kasir (RESTAURANT default
-   * bila tak diketahui — [ASUMSI] koordinator; penolakan BE ditandai BLOCKED
+   * bila tak diketahui - [ASUMSI] koordinator; penolakan BE ditandai BLOCKED
    * jujur). Diderivasi dari body E01 bila BE mengirim merchantType
    * (readMerchantTypeFromLoginBody; FAKTA 2026-10-20: BE belum mengirim →
    * default), dipertahankan lintas re-bind terminal yang sama. BUKAN
-   * otorisasi — gate izin tetap milik access.ts + server. */
+   * otorisasi - gate izin tetap milik access.ts + server. */
   merchantType?: string;
   /** Vertical UX preset (Adaptive Vertical Shell): COFFEE/WARUNG_QSR/RESTO_FULL/
    * FASHION/GROCERY/PULSA_DIGITAL/SERVICE. Diderivasi dari body E01
@@ -104,11 +104,11 @@ export interface Binding {
  * Grant cache otorisasi offline (SPEC-TERMINAL-SESSION §2 + Q6 CLOSED):
  * dibuat saat auth online sukses (E01 staff-login), terikat triple
  * (user, terminal, device), TTL 7 hari sliding via max_offline_grant_days
- * (server-wins). staffPinHash adalah PinRecord — TIDAK PERNAH plaintext.
+ * (server-wins). staffPinHash adalah PinRecord - TIDAK PERNAH plaintext.
  * pinVersion = versi PIN hybrid dari E29 pin-verify (0 = belum diketahui):
  * cache PIN lokal diinvalidasi saat sync bila versi server berbeda.
  * Satu user boleh memegang N terminal (kasir+dapur+N view, kapasitas per-tag
- * di server) — store menyimpan SATU grant per triple (grant-map F1).
+ * di server) - store menyimpan SATU grant per triple (grant-map F1).
  */
 export interface Grant {
   userId: string;
@@ -146,7 +146,7 @@ export interface PendingRevoke {
 export type GrantProblem = 'no-grant' | 'grant-mismatch' | 'grant-expired';
 
 /**
- * Basis sesi netral — BUKAN identitas fiktif. Nama/username selalu ditimpa
+ * Basis sesi netral - BUKAN identitas fiktif. Nama/username selalu ditimpa
  * hasil validateEmployee saat login nyata (loginEmployee di bawah); outlet +
  * shift mengikuti identitas cabang seed (B001 'Genfity Cabang Poris').
  * clockIn/cash mulai kosong sampai shift nyata dibaca Dashboard.
@@ -197,7 +197,7 @@ function emit() {
 
 function persist(): void {
   if (current) {
-    // C4: authToken TAK PERNAH ke AsyncStorage plaintext — strip sebelum
+    // C4: authToken TAK PERNAH ke AsyncStorage plaintext - strip sebelum
     // stringify; salinan persistennya milik SecureStore (saveAuthTokenStore,
     // dicerminkan saveSession). Pembaca bearer sinkron (server.ts/sse.ts/
     // terminalContract.ts) tetap memakai Session.authToken di memori.
@@ -220,7 +220,7 @@ function restore(): void {
       if (!parsed.role) parsed.role = 'Merchant Staff';
       current = parsed;
       emit();
-      // C4: migrasi-scrub sesi lama — token plaintext warisan (pra-C4) pindah
+      // C4: migrasi-scrub sesi lama - token plaintext warisan (pra-C4) pindah
       // ke SecureStore sekali, lalu re-persist menimpa simpanan plaintext.
       // Guard identitas (current === parsed): login yang menyusul restore
       // tak boleh tokennya ditimpa salinan basi user lain.
@@ -238,7 +238,7 @@ function restore(): void {
       if (legacyRefresh && current === parsed) {
         void saveRefreshTokenStore(legacyRefresh).catch(() => {});
       }
-      // C4: hidrasi malas — salinan SecureStore kembali ke memori. Guard ganda:
+      // C4: hidrasi malas - salinan SecureStore kembali ke memori. Guard ganda:
       // sesi hasil restore ini + BUKAN sesi offline (offline tak memegang token
       // server; lihat saveSession yang membersihkan salinan saat tanpa token).
       void loadAuthTokenStore()
@@ -265,7 +265,7 @@ function restore(): void {
 // ---------------------------------------------------------------------------
 // C4 (SESI-C): salinan persisten authToken di SecureStore (pola lib/pin.ts).
 // AsyncStorage HANYA fallback bertanda-TODO bila SecureStore tak tersedia
-// (web) — build produksi wajib dev-client agar OS-level terenkripsi.
+// (web) - build produksi wajib dev-client agar OS-level terenkripsi.
 // Semua fungsi tak pernah melempar (fire-and-forget aman via void).
 // ---------------------------------------------------------------------------
 
@@ -327,7 +327,7 @@ export async function clearAuthTokenStore(): Promise<void> {
 // ---------------------------------------------------------------------------
 // T-AUTH-REFRESH: salinan persisten refreshToken di SecureStore (pola sama
 // dengan authToken di atas). Refresh token TIDAK PERNAH di AsyncStorage
-// plaintext — SecureStore dulu, fallback AsyncStorage hanya bila SecureStore
+// plaintext - SecureStore dulu, fallback AsyncStorage hanya bila SecureStore
 // tak tersedia (web). Semua fungsi tak pernah melempar.
 // ---------------------------------------------------------------------------
 
@@ -465,7 +465,7 @@ function isBindingLike(v: unknown): v is Binding {
   );
 }
 
-/** Baca store ke memori (hanya mengisi bila memori kosong — tak pernah
+/** Baca store ke memori (hanya mengisi bila memori kosong - tak pernah
  *  menimpa binding yang lebih baru hasil saveBinding). */
 async function loadBindingStore(): Promise<Binding | null> {
   bindingRestored = true;
@@ -505,13 +505,13 @@ export function saveBinding(b: Binding): Binding {
     terminalCode: b.terminalCode.trim(),
     branchId: b.branchId.trim(),
     branchName: b.branchName,
-    // Q1: materialisasi cermin display — simpanan selalu ada string.
+    // Q1: materialisasi cermin display - simpanan selalu ada string.
     merchantName: (b.merchantName ?? b.branchName ?? '').trim(),
     // C2: materialisasi tipe (default RESTAURANT = [ASUMSI] koordinator).
     merchantType: normalizeMerchantType(b.merchantType),
     // Vertical Shell: input > simpanan lama > default tipe (WARUNG_QSR aman legacy).
     verticalId: normalizeVerticalId((b as { verticalId?: unknown }).verticalId) || defaultVerticalForMerchantType(normalizeMerchantType(b.merchantType)),
-    // Kanon SPEC §11.1: tag simpanan SELALU satu dari 5 nilai —
+    // Kanon SPEC §11.1: tag simpanan SELALU satu dari 5 nilai -
     // resolveTerminalTag memaksa explicit default 'full_access' untuk
     // string asing/kosong (tanpa '' diam-diam yang merusak DrawerMenu dkk).
     tag: resolveTerminalTag(b.tag),
@@ -527,7 +527,7 @@ export function saveBinding(b: Binding): Binding {
 
 /**
  * Cabut binding lokal (unbind/re-bind, SPEC R1). R1 lengkap juga memanggil
- * clearGrant() + logout() — orkestrasi itu milik tugas R1, bukan fungsi ini.
+ * clearGrant() + logout() - orkestrasi itu milik tugas R1, bukan fungsi ini.
  */
 export function clearBinding(): void {
   binding = null;
@@ -551,14 +551,14 @@ export interface AdoptTerminalBindingInput {
 }
 
 /**
- * Adopsi binding terminal baru — UNIFIKASI TULIS 3 store (F6+F22):
+ * Adopsi binding terminal baru - UNIFIKASI TULIS 3 store (F6+F22):
  * logout + clearGrant, lalu tulis binding ke SEMUA store: sesi (LS_BINDING
  * via saveBinding), kontrak terminalContract v1, dan server store
  * (config/server setTerminal). Tag asing → throw (fail-closed, tanpa default
  * diam-diam). setPinOpen BUKAN urusan modul ini (milik layar PIN, paket lain).
  *
  * Anti-siklus: terminalContract mengimpor statis modul ini, begitu pula
- * pemakaian lazy-require di config/server — maka kedua store luar ditulis via
+ * pemakaian lazy-require di config/server - maka kedua store luar ditulis via
  * lazy-require searah (pola sama dengan logout→realtime di bawah). terminalApi
  * SENGAJA tak diimpor (jalur network milik paket lain).
  */
@@ -578,7 +578,7 @@ export function adoptTerminalBinding(
     throw new Error('[session] adoptTerminalBinding: tag terminal tak dikenal');
   }
   const prev = binding;
-  // Q1: merchantName hanya cermin — input > binding lama > branchName (selalu
+  // Q1: merchantName hanya cermin - input > binding lama > branchName (selalu
   // non-kosong di titik ini, lolos validasi di atas).
   const merchantName =
     String(input?.merchantName ?? '').trim() || prev?.merchantName || branchName;
@@ -595,7 +595,7 @@ export function adoptTerminalBinding(
     branchName,
     merchantName,
     // C2: input E01 > binding lama > default RESTAURANT (di saveBinding).
-    // BUKAN otorisasi — hanya daftar mode kasir.
+    // BUKAN otorisasi - hanya daftar mode kasir.
     merchantType: normalizeMerchantType(input?.merchantType ?? prev?.merchantType),
     verticalId:
       normalizeVerticalId((input as { verticalId?: unknown })?.verticalId ?? (prev as { verticalId?: unknown })?.verticalId) ||
@@ -611,7 +611,7 @@ export function adoptTerminalBinding(
     deviceId,
     boundAt,
   });
-  // Cermin ke kontrak v1 (async, fire-and-forget — store sesi kanonis sudah
+  // Cermin ke kontrak v1 (async, fire-and-forget - store sesi kanonis sudah
   // tertulis di atas sehingga kegagalan cermin tak membatalkan bind).
   try {
     const tc = require('./lib/terminalContract') as typeof import('./lib/terminalContract');
@@ -706,7 +706,7 @@ function emitReclaim(): void {
 
 /**
  * Lepas binding terminal TAPI pertahankan sesi + token auth (memori +
- * SecureStore tak disentuh — tanpa logout, tanpa clearAuthTokenStore).
+ * SecureStore tak disentuh - tanpa logout, tanpa clearAuthTokenStore).
  * - Binding dihapus di SEMUA store (sesi, kontrak v1, server store).
  * - Grant HANYA triple device ini yang dicabut (pola grant-map F1).
  * - Field terminal sesi digunduli (terminalId/Code/Tag dikosongkan;
@@ -841,7 +841,7 @@ function persistGrantMap(): void {
   }
 }
 
-/** Baca store ke memori (hanya mengisi bila memori kosong — tak pernah
+/** Baca store ke memori (hanya mengisi bila memori kosong - tak pernah
  *  menimpa grant yang lebih baru hasil saveGrant/touchGrant). Legacy
  *  single-grant JSON otomatis dimigrasi menjadi satu entri grant-map. */
 async function loadGrantStore(): Promise<Grant | null> {
@@ -920,7 +920,7 @@ export function saveGrant(g: Grant): Grant {
     typeof raw['password'] === 'string'
   ) {
     throw new Error(
-      '[session] saveGrant menolak plaintext PIN/password — pakai buildGrant',
+      '[session] saveGrant menolak plaintext PIN/password - pakai buildGrant',
     );
   }
   if (!isGrantLike(g)) {
@@ -937,7 +937,7 @@ export function saveGrant(g: Grant): Grant {
 }
 
 /**
- * Hapus grant cache. Tanpa triple: hapus SEMUA (semantik lama — dipakai
+ * Hapus grant cache. Tanpa triple: hapus SEMUA (semantik lama - dipakai
  * re-bind/ganti cabang/exitBranchAll). Dengan triple: hapus hanya entri itu
  * (dipakai revokeKickedSession agar terminal lain user yang sama tak ikut
  * tercabut). SPEC §7.
@@ -1046,7 +1046,7 @@ export function getGrantPinVersion(triple: GrantTriple): number | null {
 
 /**
  * Bangun grant dari PIN staff plaintext SEKALI (di memori pemanggil saja);
- * yang disimpan hanya PinRecord hash. Login pertama wajib online — tidak
+ * yang disimpan hanya PinRecord hash. Login pertama wajib online - tidak
  * ada grant bawaan (Q6 CLOSED).
  */
 export function buildGrant(args: {
@@ -1107,7 +1107,7 @@ export function verifyGrantPin(pin: string, triple?: GrantTriple): boolean {
  * grantedAt=sekarang, expiresAt=sekarang+policy. G7 fail-closed (audit
  * 2026-10-17): prasyarat validitas (grant ada + triple cocok + belum
  * kedaluwarsa) dicek DULU; prasyarat gagal → null TANPA mencetak ulang
- * (no mint). null = jalur offline ditolak (deny offline path) — pemanggil
+ * (no mint). null = jalur offline ditolak (deny offline path) - pemanggil
  * non-LoginScreen WAJIB menangani null; LoginScreen dimiliki paket lain.
  */
 export function touchGrant(): Grant | null {
@@ -1123,7 +1123,7 @@ export function touchGrant(): Grant | null {
     problem = describeGrantProblem(u, t, d || undefined);
   } else {
     // Tanpa identitas referensi (tak ada sesi/binding): hanya prasyarat
-    // kedaluwarsa yang bisa dinilai — triple-mismatch tak terputus di sini.
+    // kedaluwarsa yang bisa dinilai - triple-mismatch tak terputus di sini.
     const now = Date.now();
     const exp = Date.parse(grant.expiresAt);
     const grantedMs = Date.parse(grant.grantedAt);
@@ -1222,7 +1222,7 @@ export function describeGrantProblem(
   ).trim();
   if (!dev) return 'grant-mismatch';
   // Grant-map F1: cari entri triple EKSAK (tanpa fallback grant aktif milik
-  // triple lain — user multi-terminal tak boleh lolos memakai grant terminal
+  // triple lain - user multi-terminal tak boleh lolos memakai grant terminal
   // lain).
   const g = grantMap[grantKeyOf({ userId: u, terminalId: t, deviceId: dev })];
   if (!g) return 'no-grant';
@@ -1372,7 +1372,7 @@ export function getSession(): Session | null {
     }
     // Backfill konteks terminal dari binding bila sesi belum membawanya
     // (mis. sesi lama tersimpan sebelum Fase 1, atau sesudah re-bind).
-    // Hanya mengisi yang kosong — cermin paket app-model tak ditimpa.
+    // Hanya mengisi yang kosong - cermin paket app-model tak ditimpa.
     if (binding) {
       if (!current.branchId && binding.branchId) {
         current.branchId = binding.branchId;
@@ -1411,7 +1411,7 @@ export function isLoggedIn(): boolean {
 
 /**
  * T-AUTH-REFRESH: baca refresh token sesi aktif (memori dulu, lalu
- * SecureStore bila memori kosong — mis. sesaat sesudah restart sebelum
+ * SecureStore bila memori kosong - mis. sesaat sesudah restart sebelum
  * hidrasi malas selesai). '' = tak ada (sesi offline/lokal/legacy) → silent
  * refresh dilarang, panggil mesti gagal fail-closed (paksa login ulang).
  * Sinkron-sampai-memori + async-hidrasi agar tak memblokir hot path 401.
@@ -1473,7 +1473,7 @@ export function saveSession(s: Session): Session {
   if (!current.role) current.role = 'Merchant Staff';
   if (!current.loginAt) current.loginAt = new Date().toISOString();
   persist();
-  // C4: cermin SecureStore mengikuti sesi resmi — ada token = simpan, tanpa
+  // C4: cermin SecureStore mengikuti sesi resmi - ada token = simpan, tanpa
   // token (login lokal/offline) = buang salinan lama agar token user
   // sebelumnya tak bocor ke sesi/token user lain (anti token basi lintas-user).
   if (current.authToken) void saveAuthTokenStore(current.authToken);
@@ -1499,7 +1499,7 @@ export function clearSession(): void {
  * sendiri); user berbeda selalu mulai dari basis netral agar identitas,
  * shift, dan kas user sebelumnya tak bocor ke sesi baru.
  *
- * Konteks terminal (branch/terminal/device) milik binding — F20: binding
+ * Konteks terminal (branch/terminal/device) milik binding - F20: binding
  * SEGAR menang di atas sesi sebelumnya (binding?.x ?? prev?.x) agar take-over
  * kick (SPEC §7/Q13) tetap di terminal yang sama. ctx terminal opsional
  * (F17, dari hasil E01 staff-login paket app-login) menang di atas keduanya;
@@ -1537,7 +1537,7 @@ export function loginEmployee(
   const keepTerminalCode = binding?.terminalCode ?? prev?.terminalCode;
   const keepTag = binding?.tag ?? prev?.terminalTag;
   const keepDevice = binding?.deviceId ?? prev?.deviceId;
-  // Q1 (temuan review Trek 1): merchantName murni cermin display — trim, dan
+  // Q1 (temuan review Trek 1): merchantName murni cermin display - trim, dan
   // JANGAN warisi prev lintas-cabang. Urutan: cermin binding sendiri >
   // branchName binding sendiri > prev HANYA bila cabang tak berganti.
   const keepMerchant =
@@ -1567,7 +1567,7 @@ export function loginEmployee(
   delete current.offline;
   current.loginAt = new Date().toISOString();
   persist();
-  // C4: login lokal tanpa token server — salinan SecureStore basi (milik sesi
+  // C4: login lokal tanpa token server - salinan SecureStore basi (milik sesi
   // online user sebelumnya) WAJIB dibuang di sini; kalau tidak, restart di
   // bawah sesi lokal ini menghidrasi token user lain (bocor lintas-user).
   // T-AUTH-REFRESH: refresh token ikut dibuang (sesi lokal tak memegang sesi
@@ -1581,7 +1581,7 @@ export function loginEmployee(
 export function logout(): void {
   if (current) {
     // E06 revoke = POST /auth/terminal-logout (kanonis; /auth/logout memang
-    // tak ada — BUKAN 404/zombie): catat utang revoke agar di-flush worker
+    // tak ada - BUKAN 404/zombie): catat utang revoke agar di-flush worker
     // sync (milik lane sync). Binding + grant cache SENGAJA dipertahankan
     // agar login ulang offline masih bisa (SPEC §2).
     const who = current.userId ?? current.username;
@@ -1599,7 +1599,7 @@ export function logout(): void {
   persist();
   // C4: logout membuang salinan SecureStore (memori sudah null di atas;
   // tanpa ini salinan bertahan dan bisa terhidrasi ke sesi berikutnya).
-  // T-AUTH-REFRESH: refresh ikut dibuang — sesi berakhir, silent refresh
+  // T-AUTH-REFRESH: refresh ikut dibuang - sesi berakhir, silent refresh
   // pasca-logout dilarang (fail-closed).
   void clearAuthTokenStore();
   void clearRefreshTokenStore();
@@ -1620,7 +1620,7 @@ export function logout(): void {
 }
 
 /**
- * C4 (SESI-C): jalur token-hilang — authToken yang SEHARUSNYA ada ternyata
+ * C4 (SESI-C): jalur token-hilang - authToken yang SEHARUSNYA ada ternyata
  * tak ada = sesi tak lagi tepercaya: buang salinan SecureStore, hapus grant
  * (akses offline berbasis grant tak boleh bertahan tanpa token server yang
  * sah), lalu logout penuh. Jejak revoke E06 memakai alasan token-loss agar
@@ -1631,7 +1631,7 @@ export function logout(): void {
  */
 export function forceLogoutOnTokenLoss(reason?: string): void {
   const who = current?.userId ?? current?.username;
-  // T-AUTH-REFRESH: refresh ikut dibuang — sesi tak tepercaya = tak ada
+  // T-AUTH-REFRESH: refresh ikut dibuang - sesi tak tepercaya = tak ada
   // silent refresh (kalau tidak, token basi bisa diperpanjang diam-diam).
   void clearAuthTokenStore();
   void clearRefreshTokenStore();
@@ -1705,7 +1705,7 @@ export function subscribeKickNotice(fn: Listener): () => void {
  * Cabut sesi + grant lokal perangkat yang ditendang. kickedUserId opsional:
  * bila diisi dan tak cocok dengan sesi aktif (userId/username) → abaikan
  * (false; bukan sesi kami). Tanpa argumen = cabut apa pun yang aktif.
- * Grant-map F1: HANYA entri triple sesi ini yang dicabut — grant user yang
+ * Grant-map F1: HANYA entri triple sesi ini yang dicabut - grant user yang
  * sama di terminal lain tetap berlaku.
  * Selalu menandai pendingRevoke (reason 'kicked') agar revoke server-side
  * menyusul saat E06/E07 mendarat. Tak pernah melempar; true = sesi dicabut.
@@ -1725,7 +1725,7 @@ export function revokeKickedSession(kickedUserId?: string): boolean {
       /* abaikan */
     }
     try {
-      // Grant-map F1: HANYA entri triple sesi ini yang dicabut — grant user
+      // Grant-map F1: HANYA entri triple sesi ini yang dicabut - grant user
       // yang sama di terminal lain (kasir/dapur/view lain) tetap berlaku.
       const tu = String(current?.userId ?? '').trim();
       const tt = String(binding?.terminalId ?? current?.terminalId ?? '').trim();

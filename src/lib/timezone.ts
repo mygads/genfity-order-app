@@ -5,7 +5,7 @@
  *   field `timezone`) → fallback per currency (AUD → `Australia/Perth`,
  *   selain itu → `Asia/Jakarta`) → `UTC` bila Intl menolak.
  * - Perth untuk AU mengikuti dashboard FE (`Australia/Perth` utk AU,
- *   admin_dashboard.go:163) + seed/tests BE — BUKAN Sydney (default
+ *   admin_dashboard.go:163) + seed/tests BE - BUKAN Sydney (default
  *   merchantCountryDefaultTimezone untuk negara non-ID).
  * - Cache sinkron agar bisa dipakai formatter (pola lib/currency.ts);
  *   sync dipanggil setelah login/syncCurrencyFromProfile.
@@ -33,7 +33,7 @@ function normalizeTz(raw: unknown): string | null {
   const v = String(raw ?? '').trim();
   if (!v) return null;
   try {
-    // Validasi via Intl — lempar bila zona tak dikenal.
+    // Validasi via Intl - lempar bila zona tak dikenal.
     new Intl.DateTimeFormat('en-US', { timeZone: v });
     return v;
   } catch {
@@ -47,16 +47,16 @@ export function getCachedTimezone(): string {
 }
 
 /**
- * Singkatan zona untuk label jam operasional (DUAL-CURRENCY §4c — pengganti
+ * Singkatan zona untuk label jam operasional (DUAL-CURRENCY §4c - pengganti
  * 'WIB' hardcode di idle_hours_val/help.contact). Peta eksplisit agar
  * deterministik di semua engine; zona tak dikenal = tampil nama zonanya
  * sendiri (jujur, bukan WIB yang salah).
  *
  * R4-DOCS(a) SoT JAM OPERASIONAL = DISPLAY-ONLY: label '08.00 - 22.00 {tz}'
  * (i18n idle_hours_val, render IdleScreen infoRow) adalah teks STATIS, BUKAN
- * jadwal yang dienforce server — server tak menolak order di luar jam ini.
+ * jadwal yang dienforce server - server tak menolak order di luar jam ini.
  * Jangan jadikan gerbang (mis. blokir kasir / kunci PayScreen) tanpa kontrak
- * + endpoint BE. (Catatan ditaruh di sini — bukan di IdleScreen — karena
+ * + endpoint BE. (Catatan ditaruh di sini - bukan di IdleScreen - karena
  * tripwire-shiftcash W1-05 mengunci status Idle* sebagai aset lane W1.)
  */
 const TZ_SHORT: Record<string, string> = {

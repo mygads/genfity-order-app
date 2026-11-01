@@ -1,7 +1,7 @@
 /**
  * Mode kasir per merchant-type (C2, SESI-C APP).
  *
- * Matriks POS-create BE — orders_pos_create.go (gate umum + gate per tipe):
+ * Matriks POS-create BE - orders_pos_create.go (gate umum + gate per tipe):
  *   RESTAURANT: DINE_IN | TAKEAWAY
  *   PRODUCT:    IN_STORE_ORDER | IN_STORE_PICKUP (BOPIS distinct Fase 3) | TAKEAWAY
  *   SERVICE:    IN_STORE_SERVICE | HOME_SERVICE (Fase 3, alamat ≤500 char)
@@ -64,17 +64,17 @@ export function isPosModeOffered(rawType: unknown, mode?: unknown): boolean {
  * Fakta 2026-10-20: BE E01 BELUM mengirim merchantType di tahap mana pun
  * (API-TERMINAL-CONTRACT.md tanpa merchantType; NormBranch/NormTerminal di
  * LoginScreen tanpa kunci tipe) → hasil '' = tak diketahui; pemanggil
- * mempertahankan prev/default (jangan mengarang RESTAURANT di sini —
+ * mempertahankan prev/default (jangan mengarang RESTAURANT di sini -
  * defaulting milik normalizeMerchantType di titik baca). Hanya kunci
- * merchant* eksplisit yang diterima ('type' generik milik entitas lain —
- * tipe terminal/grant/dokumen — dan tak boleh dibaca sebagai tipe merchant).
+ * merchant* eksplisit yang diterima ('type' generik milik entitas lain -
+ * tipe terminal/grant/dokumen - dan tak boleh dibaca sebagai tipe merchant).
  * Bila BE kelak mengirimnya (owner-need C2), binding mempelajarinya tanpa
  * perubahan kode.
  */
 /**
- * Rantai server-profile (R2 SC-QA3 rekonsiliasi — port SATU hal dari
+ * Rantai server-profile (R2 SC-QA3 rekonsiliasi - port SATU hal dari
  * merchantType.ts sc yang dihapus; TANPA daftar mode sc, TANPA normalisasi
- * sc — normalisasi = milik main di atas).
+ * sc - normalisasi = milik main di atas).
  *
  * Urutan sumber tipe merchant: profil server → binding E01 (dibaca via
  * readMerchantTypeFromLoginBody di titik login) → RESTAURANT (default di
@@ -89,14 +89,14 @@ export function getCachedMerchantType(): PosMerchantType {
   return cachedMerchantType;
 }
 
-/** Tulis cache eksplisit (normalisasi milik main — gabung alias). */
+/** Tulis cache eksplisit (normalisasi milik main - gabung alias). */
 export function setCachedMerchantType(raw: unknown): PosMerchantType {
   cachedMerchantType = normalizeMerchantType(raw);
   return cachedMerchantType;
 }
 
 /**
- * KOREKSI-FLAG (putusan owner 21-Okt — menggantikan gate sync 7b829a3 yang
+ * KOREKSI-FLAG (putusan owner 21-Okt - menggantikan gate sync 7b829a3 yang
  * TERBALIK): flag delivery = OFFER-TIME only. Flag menentukan apa yang BOLEH
  * DIPESAN saat itu (kasir sembunyikan delivery bila OFF). Pesanan LAMA tak
  * pernah berubah: flag-OFF tak mem-BLOCKED sync (collapse legacy di
@@ -116,7 +116,7 @@ const deliveryFlagListeners = new Set<DeliveryFlagListener>();
 
 /**
  * Langganan perubahan flag delivery (layar daftar-mode me-render ulang saat
- * profil tersinkron SESUDAH layar dibuka — reaktivitas wajib putusan).
+ * profil tersinkron SESUDAH layar dibuka - reaktivitas wajib putusan).
  */
 export function subscribeDeliveryFlag(fn: DeliveryFlagListener): () => void {
   deliveryFlagListeners.add(fn);
@@ -147,14 +147,14 @@ function notifyDeliveryFlag(on: boolean): void {
  *   Flag mengatur storefront-delivery/pricing/zona (delivery_pricing.go,
  *   customer_reservations.go:604 `if !isDeliveryEnabled`), BUKAN
  *   penerimaan POS-create.
- * - APP TAK membaca flag ini (grep src NOL isDelivery/is_delivery) — rantai
+ * - APP TAK membaca flag ini (grep src NOL isDelivery/is_delivery) - rantai
  *   profil di bawah (api/merchant/profile, dipakai syncMerchantTypeFromProfile)
  *   hanya mengupas merchantType.
  * GATE (KOREKSI-FLAG owner 21-Okt, offer-time only): flag menggerbang DAFTAR
  * UI (CashierScreen + DineInScreen sembunyikan kanal delivery bila OFF,
- * reaktif via subscribeDeliveryFlag) — BUKAN sync-mapping. goPosOrderType
+ * reaktif via subscribeDeliveryFlag) - BUKAN sync-mapping. goPosOrderType
  * runtuh legacy UNCONDITIONAL agar pesanan lama tetap mengalir. Daftar
- * POS_MODES_BY_TYPE TAK berubah (tanpa label DELIVERY — ikut main).
+ * POS_MODES_BY_TYPE TAK berubah (tanpa label DELIVERY - ikut main).
  * Default true = perilaku lama lestari bila flag belum pernah tersinkron
  * (offline/BE lama): hanya opt-out eksplisit merchant yang menyembunyikan
  * ([ASUMSI] R1, didokumentasi di sini, bukan dikarang diam-diam).
@@ -220,7 +220,7 @@ function readDeliveryEnabledFromProfile(data: Record<string, unknown>): unknown 
  * Cermin FE defensive gate (POSPaymentModal: `merchant?.tipEnabled === true`,
  * customer payment page: `tipEnabled === true`, keduanya default-closed).
  * BEDA dengan flag delivery (default true = legacy lestari): tip default
- * CLOSED (false) bila tak diketahui — menawarkan tip ke merchant tip-OFF =
+ * CLOSED (false) bila tak diketahui - menawarkan tip ke merchant tip-OFF =
  * pelanggan kena BE 400 INVALID_TIP. Gate = offer-time only di PayScreen
  * (sembunyikan kotak tip + paksa tipAmount 0); payload/sync tak berubah
  * (tipAmount 0 → spread `...(tipAmount > 0 ...)` menghilangkan tip).
@@ -231,7 +231,7 @@ const tipFlagListeners = new Set<TipFlagListener>();
 
 /**
  * Langganan perubahan flag tip (PayScreen me-render ulang saat profil
- * tersinkron SESUDAH layar dibuka — cermin subscribeDeliveryFlag).
+ * tersinkron SESUDAH layar dibuka - cermin subscribeDeliveryFlag).
  */
 export function subscribeTipFlag(fn: TipFlagListener): () => void {
   tipFlagListeners.add(fn);
@@ -458,7 +458,7 @@ export function readMerchantTypeFromLoginBody(body: unknown): string {
   return '';
 }
 
-/* ── Adaptive Vertical Shell compat (Fase 1, additive — API lama tak berubah) ── */
+/* ── Adaptive Vertical Shell compat (Fase 1, additive - API lama tak berubah) ── */
 
 let cachedVerticalId: VerticalId = 'WARUNG_QSR';
 

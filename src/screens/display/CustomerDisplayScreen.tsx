@@ -4,10 +4,10 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { lang, setLang, t, isLocked } = useLang(); const [mode, setMode] = useState<ViewMode>('queue');
-  /** APP-EVENTS: kunci satu halaman per tag view (SPEC §10) —
+  /** APP-EVENTS: kunci satu halaman per tag view (SPEC §10) -
    * view_pelanggan = cart + QR live; view_queue = papan antrean saja.
    * Tab mode, tombol call-next, dan simulasi bayar adalah pratinjau operator
-   * — hanya untuk tag non-view. */
+   * - hanya untuk tag non-view. */
   const boundTag = (() => {
     try {
       return normalizeTag(getBinding()?.tag);
@@ -33,7 +33,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
    * sekunder; poll SQLite fallback WAJIB berpenanda stale (D3/D4);
    * QR/bayar diblokir offline. */
   const { online } = useConnectivity();
-  /** D16: status feed SSE milik view ini (per-feed, bukan agregat modul) —
+  /** D16: status feed SSE milik view ini (per-feed, bukan agregat modul) -
    * langganan dipasang di efek [uiTick] di bawah agar ikut re-bind. */
   const [sseOk, setSseOk] = useState(false);
   /** EFF-09: idle realtime pasca-MAX_RETRY dimunculkan ke UI (jangan diam). */
@@ -43,13 +43,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   /** GAP-19: cermin jam live untuk poll fallback (ref agar closure interval tak basi). */
   const liveAtRef = useRef<number | null>(null);
   useEffect(() => { liveAtRef.current = lastDataAt; }, [lastDataAt]);
-  /** D4: jam poll fallback (tak dipakai label umur — label dari jam live). */
+  /** D4: jam poll fallback (tak dipakai label umur - label dari jam live). */
   const [, setLastPollAt] = useState<number | null>(null);
-  /** D3-06: true bila device belum ter-bound — daftar dikosongkan + prompt ikat. */
+  /** D3-06: true bila device belum ter-bound - daftar dikosongkan + prompt ikat. */
   const [needBind, setNeedBind] = useState(false);
   const [uiTick, setUiTick] = useState(0);
   // EFF-09: tick render label umur-data 30 dtk (selaras DISPLAY_STALE_MS),
-  // bukan 10 dtk — event live datang via SSE/WS/bus lokal (event-driven);
+  // bukan 10 dtk - event live datang via SSE/WS/bus lokal (event-driven);
   // poll SQLite fallback di bawah tetap ber-gate SSE + berpenanda stale.
   useEffect(() => {
     const id = setInterval(() => setUiTick((x) => x + 1), 30000);
@@ -69,7 +69,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       return undefined;
     }
   }, [uiTick]);
-  /** D10: transport ulang saat sesi/peran/terminal berubah (idempoten — tanpa
+  /** D10: transport ulang saat sesi/peran/terminal berubah (idempoten - tanpa
    * teardown bila feed sama, anti reconnect storm). */
   useEffect(() => {
     try {
@@ -80,7 +80,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   }, [uiTick]);
   const staleAgeSec = lastDataAt === null ? null : Math.max(0, Math.round((Date.now() - lastDataAt) / 1000));
   const staleAgeLabel = staleAgeSec === null ? null : staleAgeSec < 120 ? t('disp_age_s').replace('{n}', String(staleAgeSec)) : t('disp_age_m').replace('{n}', String(Math.floor(staleAgeSec / 60)));
-  /** D3: banner basi bila feed primer tak live ATAU jam live basi — kaki WS
+  /** D3: banner basi bila feed primer tak live ATAU jam live basi - kaki WS
    * tak menyembunyikan staleness poll. D4: jam live hanya dari kaki live. */
   const liveAgeMs = lastDataAt === null ? -1 : Math.max(0, Date.now() - lastDataAt);
   const showStaleBanner = !sseOk || liveAgeMs < 0 || liveAgeMs > DISPLAY_STALE_MS;
@@ -103,7 +103,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   const [liveClientId, setLiveClientId] = useState('');
   const runningTotal = liveItems.reduce((s, it) => s + it.qty * it.price, 0);
   /** Payload QR live dari sesi (client_id + branch + terminal + total),
-   * bukan aset statis — diblokir offline oleh cabang render di bawah. */
+   * bukan aset statis - diblokir offline oleh cabang render di bawah. */
   const qrPayload = (() => {
     try {
       const term = getTerminal();
@@ -117,7 +117,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   })();
 
   useEffect(() => subscribeDisplay((e) => {
-    // D2: view_pelanggan tanpa pasangan tak terikat ke apa pun — abaikan
+    // D2: view_pelanggan tanpa pasangan tak terikat ke apa pun - abaikan
     // event (fail-closed: kosong, tanpa fallback branch-wide).
     try {
       const b = getBinding();
@@ -152,7 +152,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
    * primer tak live. Bus lokal notifySaleSavedLocal tetap kaki offline
    * same-device. */
 
-  /** APP-EVENTS: sale lokal same-device (kasir→display satu device) —
+  /** APP-EVENTS: sale lokal same-device (kasir→display satu device) -
    * tampil instan tanpa roundtrip server (audit row 12, offline). */
   useEffect(() => subscribeLocalSale((s) => {
     // D2: gerbang yang sama dengan bus display (lihat di atas).
@@ -174,11 +174,11 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     }
   }), []);
 
-  /** APP-FIXUP (fix-sse2 M5): WS SEKUNDER — fallback hanya bila SSE primer tak
+  /** APP-FIXUP (fix-sse2 M5): WS SEKUNDER - fallback hanya bila SSE primer tak
    * terkonfigurasi/gagal/offline (TRANSPORT); saat SSE live, feed E26 primer
    * di atas + bus lokal yang memasok layar. Kosong jujur bila tak ada event. */
   useEffect(() => {
-    // D2: tanpa pasangan = tak terikat ke apa pun — tanpa fallback WS branch-wide.
+    // D2: tanpa pasangan = tak terikat ke apa pun - tanpa fallback WS branch-wide.
     try {
       const b = getBinding();
       if (normalizeTag(b?.tag) === 'view_pelanggan' && !String(b?.pairedKasirId ?? '').trim()) return undefined;
@@ -186,15 +186,15 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       return undefined;
     }
     // Fallback hanya bila primer tak live (SATU keputusan TRANSPORT via
-    // isBackendConfigured — jangan cek isSseConfigured saja: basis URL-nya
+    // isBackendConfigured - jangan cek isSseConfigured saja: basis URL-nya
     // beda dan bus bisa fail-closed sementara layar tetap dial).
     try {
       if (sseOk && isBackendConfigured(resolveDisplaySseTerminalId())) return undefined;
-    } catch { /* abaikan — lanjut fallback WS */ }
+    } catch { /* abaikan - lanjut fallback WS */ }
     try { startRealtime(); } catch { /* abaikan */ }
     const off = onWsMessage((msg) => {
       setLastDataAt(Date.now());
-      // D17: hanya topik display (alternatif kitchen|ticket mati — gerbang
+      // D17: hanya topik display (alternatif kitchen|ticket mati - gerbang
       // tag realtime juga tak mengantarnya ke view; pratinjau operator
       // mencerminkan apa yang dilihat pelanggan).
       if (!/display|order|call|ready/i.test(msg.type)) return;
@@ -222,12 +222,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
       }
     });
     // D8: lepas handler milik layar ini; channel WS global milik sesi
-    // (start saat login, stop saat logout) — stopRealtime di sini akan
+    // (start saat login, stop saat logout) - stopRealtime di sini akan
     // memutus feed layar lain (dapur/kasir) yang masih mount.
     return off;
   }, [sseOk]);
 
-  /** Promo lokal ms_promotion (flagActive=1) — data lokal SQLite, dibaca selalu
+  /** Promo lokal ms_promotion (flagActive=1) - data lokal SQLite, dibaca selalu
    * (bukan feed realtime, jadi bukan bagian fallback TRANSPORT). */
   useEffect(() => {
     let alive = true;
@@ -252,13 +252,13 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     return () => { alive = false; };
   }, []);
 
-  /** APP-FIXUP (fix-sse2 M5): poll SQLite FALLBACK — antrean + item/total
+  /** APP-FIXUP (fix-sse2 M5): poll SQLite FALLBACK - antrean + item/total
    * berjalan ikut kasir tiap 60 detik hanya bila SSE primer tak
    * terkonfigurasi/gagal/offline (TRANSPORT); berpenanda stale via banner. */
   useEffect(() => {
     try {
       if (sseOk && isBackendConfigured(resolveDisplaySseTerminalId())) return undefined;
-    } catch { /* abaikan — lanjut fallback poll */ }
+    } catch { /* abaikan - lanjut fallback poll */ }
     let alive = true;
     const poll = async () => {
       try {
@@ -276,7 +276,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
         // A WAJIB hanya membaca cart kasir A. Branch-wide di sini bisa
         // menampilkan cart + QR client_id/total milik kasir B (salah bayar).
         // Papan antrean (view_queue/lainnya) tetap branch-wide by design.
-        // D2: tanpa pairedKasirId = tak terikat ke apa pun — berhenti di sini
+        // D2: tanpa pairedKasirId = tak terikat ke apa pun - berhenti di sini
         // (daftar kosong + prompt ikat), TANPA query branch-wide.
         let scopeTid = '';
         let isViewCustomer = false;
@@ -284,18 +284,18 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
           const b = getBinding();
           isViewCustomer = normalizeTag(b?.tag) === 'view_pelanggan';
           if (isViewCustomer) scopeTid = String(b?.pairedKasirId ?? '').trim();
-        } catch { /* getBinding tak melempar nyata — pola bertahan di bawah */ }
+        } catch { /* getBinding tak melempar nyata - pola bertahan di bawah */ }
         if (isViewCustomer && !scopeTid) {
           if (alive) setNeedBind(true);
           return;
         }
-        // GAP-19: poll SQLite HANYA fallback offline — bila data live
+        // GAP-19: poll SQLite HANYA fallback offline - bila data live
         // (SSE/WS/bus lokal) segar, jangan timpa state live dengan snapshot
         // lokal; penanda stale + banner eksisting tetap dari jam live.
         try {
           const la = liveAtRef.current;
           if (la !== null && Date.now() - la <= DISPLAY_STALE_MS) return;
-        } catch { /* abaikan — lanjut fallback poll */ }
+        } catch { /* abaikan - lanjut fallback poll */ }
         if (isViewCustomer && scopeTid) {
           // D1: samakan namespace (kolom = terminalCode, id = id BE) via E09;
           // gagal = id mentah = kosong jujur (fail-closed).
@@ -343,7 +343,7 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
   /** Notice penolakan aksi operator di peran view (tanpa silent fail). */
   const [opNotice, setOpNotice] = useState('');
   const callNext = () => {
-    // GAP-10: gerbang peran yang sama dengan goCashier IdleScreen — hanya tag
+    // GAP-10: gerbang peran yang sama dengan goCashier IdleScreen - hanya tag
     // fitur-penuh (FULL_FEATURE_TAGS kanonis) boleh memanggil; view/asing
     // ditolak via notice, tanpa silent fail.
     if (isLockedView || activeTag === null || !(FULL_FEATURE_TAGS as string[]).includes(activeTag)) { setOpNotice(t('disp_locked_op')); return; }
@@ -352,9 +352,9 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
     const [next, ...rest] = prep;
     setPrep(rest);
     setReady((r) => [next, ...r].slice(0, 6));
-    // S8 (PW-3): LOKAL-ONLY by design — tak ada endpoint BE call-ticket
+    // S8 (PW-3): LOKAL-ONLY by design - tak ada endpoint BE call-ticket
     // (BE nyatakan event `call` reserved dan aksi panggil server BELUM ADA).
-    // JANGAN invent POST di sini (ubah kontrak BE dari sisi APP = DILARANG) —
+    // JANGAN invent POST di sini (ubah kontrak BE dari sisi APP = DILARANG) -
     // server-ack/marking butuh endpoint owner-BE; hingga itu ada, siaran call
     // hanya ke bus lokal (+WS fallback).
     publishDisplay({ type: 'call', ticket: next });

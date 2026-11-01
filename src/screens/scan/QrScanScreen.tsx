@@ -55,7 +55,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   };
 
   /** Cek kode ke SQLite lokal: voucher/member harus dikenal (status aktif,
-   * kuota > 0 / flag aktif). claim/esb hanya format — validasi final tetap
+   * kuota > 0 / flag aktif). claim/esb hanya format - validasi final tetap
    * di layar Install/EsbOrder. */
   const check = async () => {
     const clean = code.trim();
@@ -151,8 +151,8 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
       return code.trim() || '-';
     }
     // esb/claim tanpa hasil validasi lokal: kode asli, bukan contoh fiksi. P1-07: status perlu-online eksplisit.
-    if (tab === 'esb') return `${code.trim() || '-'} · perlu online — cek server`;
-    if (tab === 'claim') return `${code.trim() || '-'} · perlu online — cek server`;
+    if (tab === 'esb') return `${code.trim() || '-'} · perlu online - cek server`;
+    if (tab === 'claim') return `${code.trim() || '-'} · perlu online - cek server`;
     return code.trim() || '-';
   };
 

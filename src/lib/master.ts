@@ -49,7 +49,7 @@ const DOMAINS: Domain[] = [
     requireFirst: true,
     // Field soldOut kontrak §4 JANGAN dibuang: cerminkan ke flagSoldOut
     // ms_branchmenu. qty tidak disentuh (domain branchmenu yang mengisinya).
-    // L20: hook ikut menyegarkan flagActive (dulu hanya flagSoldOut —
+    // L20: hook ikut menyegarkan flagActive (dulu hanya flagSoldOut -
     // menu yang dinonaktifkan server tetap tampil aktif selamanya).
     after: async (r, now) => {
       const menuId = str(r.menuId) ?? '';
@@ -87,7 +87,7 @@ const DOMAINS: Domain[] = [
     requireFirst: true,
     // Upsert parsial: JANGAN timpa authKey lokal. R34: kolom legacy
     // pinHash/password sengaja di-NULL-kan tiap pull (belt-and-suspenders
-    // bila server kelak menggemakan nilai lama) — verifikasi PIN murni via
+    // bila server kelak menggemakan nilai lama) - verifikasi PIN murni via
     // hash SecureStore (lib/pin.ts).
     upsert: 'ON CONFLICT(id) DO UPDATE SET username = excluded.username, branchId = excluded.branchId, role = excluded.role, pinHash = NULL, password = NULL, syncDate = excluded.syncDate',
   },
@@ -137,11 +137,11 @@ const DOMAINS: Domain[] = [
     table: 'ms_member',
     cols: ['id', 'memberName', 'phone', 'depositBalance'],
     map: (r) => [str(r.memberId) ?? '', str(r.name), str(r.phoneMasked ?? r.phone), num(r.balance ?? r.depositBalance)],
-    // L21: server menang KECUALI dua lindung lokal —
+    // L21: server menang KECUALI dua lindung lokal -
     // (a) saldo: baris lokal syncDate NULL (topup/burn belum push) MEMPERTAHANKAN
     //     depositBalance + tetap kotor (syncDate NULL) agar push berikutnya
     //     mengirimnya; saldo server hanya menang untuk baris bersih;
-    // (b) telepon: nomor masuk yang tampak termask (karakter mask *, x, • —
+    // (b) telepon: nomor masuk yang tampak termask (karakter mask *, x, • -
     //     format phoneMasked server; dummy "0812-3456-7890" bertanda strip
     //     TAPI berdigit penuh sehingga lolos sebagai nomor nyata) atau yang
     //     digitnya LEBIH SEDIKIT dari lokal tak menimpa nomor lokal yang
@@ -172,7 +172,7 @@ const DOMAINS: Domain[] = [
     // (syncDate NULL = kuota lokal sudah turun via saveSale/append dan wajib
     // ikut push dulu). Bila burn lokal menggantung: deskriptif (nama/amount/
     // jendela) ikut server, TAPI quota + status + syncDate lokal dipertahankan
-    // (tetap kotor) dan konflik dicatat jujur di log — pull berikutnya setelah
+    // (tetap kotor) dan konflik dicatat jujur di log - pull berikutnya setelah
     // push akan menyelaraskan. Tanpa ini pull menimpa kuota yang sudah
     // terbakar offline sehingga voucher bisa dipakai ulang tanpa batas.
     upsert: `ON CONFLICT(id) DO UPDATE SET
@@ -181,7 +181,7 @@ const DOMAINS: Domain[] = [
       quota = CASE WHEN ms_voucher.syncDate IS NULL THEN ms_voucher.quota ELSE excluded.quota END,
       status = CASE WHEN ms_voucher.syncDate IS NULL THEN ms_voucher.status ELSE excluded.status END,
       syncDate = CASE WHEN ms_voucher.syncDate IS NULL THEN NULL ELSE excluded.syncDate END`,
-    // L10 (lanjutan): catat konflik secara jujur — baris yang tetap kotor
+    // L10 (lanjutan): catat konflik secara jujur - baris yang tetap kotor
     // setelah upsert = burn lokal belum push yang dipertahankan.
     after: async (r) => {
       try {
@@ -208,7 +208,7 @@ const DOMAINS: Domain[] = [
       'ongkir', 'status', 'memberId', 'shiftId', 'queueNumber'],
     map: (r) => {
       // client_id kosong dari server (riwayat lama/terminal lain/BE yang belum
-      // upsert-by-client) dinormalisasi ke salesNum — cermin backfill lokal di
+      // upsert-by-client) dinormalisasi ke salesNum - cermin backfill lokal di
       // dbSchema. Tanpa ini semua baris tanpa client_id memetakan ke '' dan
       // baris ke-2 dst lenyap diam-diam oleh UNIQUE(client_id)+OR IGNORE.
       const no = str(r.salesNum) ?? '';
@@ -233,7 +233,7 @@ const DOMAINS: Domain[] = [
     // tertimpa riwayat pull. client_id ikut tersimpan (Q7, upsert-by-client
     // sisi server); kontrak konflik: duplikat client_id kembali 200 "Order
     // already synced" (jalur 2xx → terkirim), 409 HANYA SALE_DISPLAY_CONFLICT
-    // (display_no dipakai order lain — server tak punya baris kita; re-issue
+    // (display_no dipakai order lain - server tak punya baris kita; re-issue
     // + kirim ulang di sync.ts, tak pernah terkirim diam-diam). Sampai BE
     // final, mode transisi terima-dua-format.
     ignoreExisting: true,
@@ -387,7 +387,7 @@ function rowsOf(body: unknown): Row[] {
 export interface PullResult {
   total: number;
   per: Record<string, number>;
-  /** Domain ESB-legacy yang 404 di backend Go (kontrak tak ada) — dilewati
+  /** Domain ESB-legacy yang 404 di backend Go (kontrak tak ada) - dilewati
    * eksplisit, bukan gagal. Diisi hanya bila katalog Go terbukti (goOk). */
   skipped: string[];
   at: string;
@@ -423,7 +423,7 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
     ? DOMAINS
     : DOMAINS.filter((d) => only.includes(d.key));
   const goTargets = targets.filter((d) => d.key === 'menu' || d.key === 'branchmenu');
-  // E2E-HP (2026-10-26): bukti backend adalah Go (katalog Go sukses) —
+  // E2E-HP (2026-10-26): bukti backend adalah Go (katalog Go sukses) -
   // prasyarat melewati domain ESB-legacy yang 404 (kontrak tak ada).
   let goOk = false;
   if (goTargets.length > 0) {
@@ -434,7 +434,7 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
       targets = targets.filter((d) => d.key !== 'menu' && d.key !== 'branchmenu' && d.key !== 'branchsettings');
     } catch (e) {
       if (!(e instanceof GoCatalogUnavailable)) throw e;
-      // Bukan backend Go — lanjut jalur ESB seperti semula.
+      // Bukan backend Go - lanjut jalur ESB seperti semula.
     }
   }
   const beKeys = BE_PULL_KEYS as readonly string[];
@@ -508,7 +508,7 @@ export async function pullMaster(only?: string[]): Promise<PullResult> {
   const total = Object.values(per).reduce((a, b) => a + b, 0);
   const at = new Date().toISOString();
   // W-FULL §14: stempel pull-otomatis (boot/reconnect/manual) agar layar Sync
-  // tak lagi "Last pull: Never" walau pull sukses — pull manual doPull tetap
+  // tak lagi "Last pull: Never" walau pull sukses - pull manual doPull tetap
   // menimpa labelnya sendiri seperti semula.
   void setItem(LS_LAST_PULL_OK, at).catch(() => {});
   return { total, per, skipped, at };

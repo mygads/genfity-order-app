@@ -14,7 +14,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS ms_posuser (
     id TEXT PRIMARY KEY, username TEXT, pinHash TEXT, password TEXT, authKey TEXT,
     branchId TEXT, role TEXT, syncDate TEXT)`,
-  // R34 DEPRECATED: pinHash/password always NULL — PIN verification is SecureStore-only (lib/pin.ts).
+  // R34 DEPRECATED: pinHash/password always NULL - PIN verification is SecureStore-only (lib/pin.ts).
   `CREATE TABLE IF NOT EXISTS ms_terminalsetting (
     terminalId TEXT NOT NULL, settingKey TEXT NOT NULL, settingValue TEXT,
     flag INTEGER DEFAULT 0, syncDate TEXT,
@@ -227,7 +227,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   // Antrean cetak persisten (Fase 3 printer lane): HEADER TABEL SAJA di sini;
   // logika drain diimplementasikan lane printer belakangan (jangan drain di
   // lane ini). status: 'antre' | 'cetak' | 'gagal' (kosakata = outbox).
-  // C9: 'cetak' warisan — drain kini DELETE saat sukses + menyapu 'cetak' lama;
+  // C9: 'cetak' warisan - drain kini DELETE saat sukses + menyapu 'cetak' lama;
   // baris hidup hanya antre/gagal. Skema TAK diubah (kompatibel mundur).
   `CREATE TABLE IF NOT EXISTS tr_printqueue (
     id TEXT PRIMARY KEY, payload TEXT, target TEXT,
@@ -242,7 +242,7 @@ export const SCHEMA_STATEMENTS: string[] = [
 export const MIGRATION_STATEMENTS: string[] = [
   'ALTER TABLE tr_saleshead ADD COLUMN ongkir REAL DEFAULT 0',
   // Kemasan per bill (A2): aditif untuk instalasi lama (gagal = sudah ada).
-  // Menempel pada bill cermin ongkir/tip — pindah item tak memindahkannya.
+  // Menempel pada bill cermin ongkir/tip - pindah item tak memindahkannya.
   'ALTER TABLE tr_saleshead ADD COLUMN packaging REAL DEFAULT 0',
   'ALTER TABLE tr_salesvoucherusage ADD COLUMN voucherAmount REAL DEFAULT 0',
   'ALTER TABLE tr_shiftlog ADD COLUMN cashActual REAL DEFAULT 0',
@@ -275,7 +275,7 @@ export const MIGRATION_STATEMENTS: string[] = [
   // stabil lintas-retry). Baris baru selalu UUIDv7 dari saveSale.
   'UPDATE tr_saleshead SET client_id = salesNum WHERE client_id IS NULL',
   // Indeks client_id untuk upsert/pull-by-client: di MIGRASI (best-effort),
-  // bukan skema — loop skema initDb tanpa try/catch, sehingga CREATE INDEX
+  // bukan skema - loop skema initDb tanpa try/catch, sehingga CREATE INDEX
   // atas kolom yang belum ada di instalasi lama melempar dan mem-brick
   // seluruh initDb. Di sini kolom sudah ADD + backfill; UNIQUE aman karena
   // backfill menyalin salesNum (PK, unik). Gagal = sudah ada.
@@ -284,7 +284,7 @@ export const MIGRATION_STATEMENTS: string[] = [
   // Ronde-3 trisisi Q1: ref member GO untuk instalasi lama (gagal = sudah ada).
   'ALTER TABLE tr_saleshead ADD COLUMN customerId INTEGER',
   // A-P2-10: segmen device pada seq display untuk instalasi lama
-  // (gagal = sudah ada). Counter tetap per (terminalCode, ymd) — DB lokal
+  // (gagal = sudah ada). Counter tetap per (terminalCode, ymd) - DB lokal
   // per-device; tag device dicetak di nomor display agar dua device di
   // terminal yang sama tak kembar saat sync (BE displayNo = string unik).
   'ALTER TABLE tr_sales_seq ADD COLUMN deviceTag TEXT NOT NULL DEFAULT \'\'',

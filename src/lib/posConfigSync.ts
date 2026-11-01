@@ -1,13 +1,13 @@
 /**
  * Sinkronisasi konfigurasi POS merchant → seed lokal APP (audit-5d80).
  * Dipanggil fire-and-forget pasca-login (cermin syncCurrencyFromProfile):
- * best-effort, fail-silent — login tak diblokir bila gagal.
+ * best-effort, fail-silent - login tak diblokir bila gagal.
  *
- * KEBIJAKAN SYNC TRISISI (audit #4 — satu paragraf acuan):
+ * KEBIJAKAN SYNC TRISISI (audit #4 - satu paragraf acuan):
  * - merchant-truth = server-wins-on-sync: lookup member, threshold stok,
  *   tax, fee/service, packaging, receipt prefs. Nilai server menimpa lokal
  *   tiap sync sukses (pengecualian TERDOKUMENTASI: threshold stok seed-hanya-
- *   bila-default, lihat bawah — terminal tak bisa baca endpoint owner-gated
+ *   bila-default, lihat bawah - terminal tak bisa baca endpoint owner-gated
  *   /menu/stock/settings, jadi kasir yang sudah mengkustom tak ditimpa).
  * - fisik-perangkat = local-wins SELALU: port/MAC printer, paper-size/autocut
  *   per-station, mapping station, preferensi acquirer EDC/QRIS. Server tak
@@ -61,10 +61,10 @@ const REQUIRE_PROOF_KEY = 'genfity.pos.requireProof';
 /** R4-4: cache snapshot metode bayar server (absen = semua tampil). */
 const PAYMENT_METHODS_KEY = 'genfity.pos.paymentMethods';
 
-/** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 — posPayImmediately,
+/** A-P1-7: flag perilaku POS (BE merchant_pos_menu.go:85-89 - posPayImmediately,
  * requireTableNumberForDineIn, posCustomItems, posEditOrder). Konsumsi toleran:
  * endpoint merchant-auth /menu hanya bisa dibaca JWT merchant, terminal APP tak
- * bisa fetch langsung — cache ditulis DI SINI saat BE kelak mengekspos flag via
+ * bisa fetch langsung - cache ditulis DI SINI saat BE kelak mengekspos flag via
  * terminal pos-config (kunci flat ATAU nested posBehavior). Absen = default
  * legacy (perilaku hari ini), sehingga NOL-regresi sampai BE menambahkannya.
  * customItems/editOrder default TRUE (fitur sudah hidup); payImmediately/
@@ -243,12 +243,12 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     await setJSON(REQUIRE_PROOF_KEY, { required: parseRequireProof(r.data) });
   } catch { /* abaikan */ }
   try {
-    // R4-4: snapshot metode bayar — server-wins tiap sync sukses (tulis TANPA
+    // R4-4: snapshot metode bayar - server-wins tiap sync sukses (tulis TANPA
     // SYARAT, bukan seed-once: nilai server selalu menimpa cache). BE lama
     // tanpa kunci → parse = semua-true = tampil semua (NOL-regresi).
     // P1-FIX: simpan RAW r.data (bukan hasil parse). parsePaymentMethods
     // selalu mengisi 5 flag boolean sehingga sinyal "absen" hilang bila yang
-    // disimpan hasil parse — hasExplicitPaymentSnapshot lalu selalu true dan
+    // disimpan hasil parse - hasExplicitPaymentSnapshot lalu selalu true dan
     // banner fail-closed + parsePaymentMethodsStrict tak pernah aktif.
     // Kedua pembaca (getPaymentMethods legacy + strict) mem-parse sendiri,
     // jadi menyimpan raw aman untuk keduanya.
@@ -373,10 +373,10 @@ export async function getServerRoundStep(): Promise<number | null> {
 
 /** S-F6: gerbang workforce (absen/error = keduanya OFF = perilaku lama).
  * Peta 3 sistem PIN (jangan dicampur):
- * (1) PIN binding terminal — klaim/pair perangkat (TerminalBind/Claim);
- * (2) PIN staff/workforce pasca-login — buka shift (ShiftScreen +
+ * (1) PIN binding terminal - klaim/pair perangkat (TerminalBind/Claim);
+ * (2) PIN staff/workforce pasca-login - buka shift (ShiftScreen +
  *     verifyAttendancePin, lib/pin.ts);
- * (3) PIN supervisor/manager per-aksi — otorisasi manajer (ManagerPinPrompt
+ * (3) PIN supervisor/manager per-aksi - otorisasi manajer (ManagerPinPrompt
  *     + authorizeSupervisor + posPinGate).
  * requirePinForPos = kebijakan server: jalur (2) wajib sebelum kasir jalan. */
 export interface WorkforceGates {
@@ -521,9 +521,9 @@ export async function getAutoPrintEnabled(): Promise<boolean> {
 }
 
 /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
- * Parser toleran lokal (tanpa impor terminalApi — nol-risiko siklus):
+ * Parser toleran lokal (tanpa impor terminalApi - nol-risiko siklus):
  * top-level ATAU nested posBehaviorSettings/posBehavior/pb/paymentSettings/
- * payment_settings — varian snake_case ikut dibaca. Absen/error = false. */
+ * payment_settings - varian snake_case ikut dibaca. Absen/error = false. */
 function parseRequireProof(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object') return false;
   const o = raw as Record<string, unknown>;

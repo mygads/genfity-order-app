@@ -1,12 +1,12 @@
 /**
- * UUIDv7 (RFC 9562) + heks CSPRNG — tanpa dependensi baru.
+ * UUIDv7 (RFC 9562) + heks CSPRNG - tanpa dependensi baru.
  *
  * Keputusan Q7: PK sale/expense/outbox/doc = UUIDv7 (time-ordered, merge-safe
  * antar-device offline). Sumber acak UTAMA = CSPRNG
  * (`crypto.getRandomValues`).
  *
  * HP-E2E-FIX (2026-10-24, E2E HP Xiaomi): crypto.getRandomValues TAK ADA di
- * WebView/dev-client perangkat ini (probe: typeof === 'undefined') — THROW
+ * WebView/dev-client perangkat ini (probe: typeof === 'undefined') - THROW
  * Q7 mematikan SELURUH alur kasir (contract deviceId → LS_device, salt PIN,
  * UUID order/outbox). Fallback Math.random + console.warn (BUKAN diam-diam):
  * ID tetap time-ordered + 74-bit acak sehingga risiko tabrakan praktis nihil
@@ -20,9 +20,9 @@ function randomBytes(n: number): Uint8Array {
   };
   const fn = g.crypto?.getRandomValues?.bind(g.crypto);
   if (!fn) {
-    // Fallback non-CSPRNG — lihat catatan Q7 di header (warn, tak diam-diam).
+    // Fallback non-CSPRNG - lihat catatan Q7 di header (warn, tak diam-diam).
     // eslint-disable-next-line no-console
-    console.warn('[uuidv7] crypto.getRandomValues tak tersedia — fallback Math.random (non-CSPRNG)');
+    console.warn('[uuidv7] crypto.getRandomValues tak tersedia - fallback Math.random (non-CSPRNG)');
     const buf = new Uint8Array(n);
     for (let i = 0; i < n; i += 1) buf[i] = Math.floor(Math.random() * 256);
     return buf;

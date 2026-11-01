@@ -55,20 +55,20 @@ export interface SaleInput {
   /** Nomor struk pemanggil (TRX-…) - dipakai saveSale + push agar satu nomor. */
   salesNum?: string;
   /** client_id UUIDv7 (Q7): diterbitkan sekali per sale (PayScreen), dipakai
-   * ulang apa adanya oleh Qris/settlePaid — JANGAN generate ulang agar QR
+   * ulang apa adanya oleh Qris/settlePaid - JANGAN generate ulang agar QR
    * yang tampil tak basi. Kunci rekonsiliasi server (upsert by client_id). */
   clientId?: string;
   subtotal?: number;
   discountTotal?: number;
   vatTotal?: number;
   serviceTotal?: number;
-  /** Tip/gratuity pelanggan (nominal Rp utuh) — opsional; 0/absen = tanpa tip.
+  /** Tip/gratuity pelanggan (nominal Rp utuh) - opsional; 0/absen = tanpa tip.
    * Diputuskan saat bayar (PayScreen), dibawa ke BE sebagai `tipAmount`
    * (kolom orders.tip_amount; cap = subtotal, ditegakkan server). */
   tipTotal?: number;
   /** Fee platform order ESB/marketplace → payload kontrak §5: platformFee. */
   feeESB?: number;
-  /** Biaya kemasan nominal (Rp utuh) — LEDGER LOKAL SAJA. SENGAJA tak
+  /** Biaya kemasan nominal (Rp utuh) - LEDGER LOKAL SAJA. SENGAJA tak
    * dikirim ke BE: kontrak pos/payment tak punya field kemasan; nilainya
    * tetap terbawa di dalam grandTotal (finalTotal). Cermin aturan ongkir
    * yang menempel pada bill. */
@@ -79,7 +79,7 @@ export interface SaleInput {
   payments?: SalePaymentIn[];
   voucherCode?: string;
   approvalCode?: string;
-  /** Id user ms_posuser penyetuju eskalasi (kompliment/non-penjualan) — audit. */
+  /** Id user ms_posuser penyetuju eskalasi (kompliment/non-penjualan) - audit. */
   approvedBy?: string;
   /** Ronde-3 Q1: ref member OTORITATIF = customerId GO (int, dari hasil
    *  searchServerCustomers yang ditempel). HANYA ini yang disimpan di
@@ -88,7 +88,7 @@ export interface SaleInput {
   /** Pointer ledger deposit lokal (legacy, format `MC{id}` / `M…`).
    *  DEPRECATED sebagai ref transaksi: saveSale menurunkan ulang dari
    *  customerId bila ada; kolom ini hanya fallback bila customerId absen
-   *  (data lama). JANGAN kirim ke BE — buildSalePayload tak lagi memakainya. */
+   *  (data lama). JANGAN kirim ke BE - buildSalePayload tak lagi memakainya. */
   memberId?: string;
   tableId?: string;
   /** Konteks order dari kasir (dine-in/bawa-pulang/delivery, dst). */
@@ -103,7 +103,7 @@ export interface SaleInput {
   customer?: string;
   /** Adaptive Vertical Shell Fase 3 (SERVICE/HOME_SERVICE via POS):
    * jadwal wajib BE (YYYY-MM-DD + HH:MM) + teknisi + DP% + alamat.
-   * Best-effort optional — payload lama tanpa field ini tetap jalan. */
+   * Best-effort optional - payload lama tanpa field ini tetap jalan. */
   serviceDate?: string;
   serviceTime?: string;
   technician?: string;
@@ -143,7 +143,7 @@ export function lineSubtotal(it: SaleItemIn): number {
 /**
  * Normalisasi mode kasir → enum BE-kanonis §5 (DINE_IN / TAKEAWAY / DELIVERY).
  * TAKE_AWAY (underscore) TAK PERNAH di-emit: POS create Go menolaknya
- * (orders_pos_create.go:196 — hanya DINE_IN/TAKEAWAY/IN_STORE_ORDER/
+ * (orders_pos_create.go:196 - hanya DINE_IN/TAKEAWAY/IN_STORE_ORDER/
  * IN_STORE_SERVICE). Mode agregator (GOFOOD/GRABFOOD/SHOPEEFOOD/online)
  * diteruskan apa adanya di payload; kanonisasi POS-create terjadi di
  * sync.ts goPosOrderType (agregator/DELIVERY → TAKEAWAY).
@@ -196,10 +196,10 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     // displayNo = nomor struk manusiawi untuk kolom backend display_no
     // (orders_pos_create.go parsePOSSaleIdentity: butuh clientId saudaranya;
     // tanpa displayNo, backend tak mengisi display_no). salesNum adalah
-    // sumber tunggalnya — satu nomor untuk saveSale + push + QR.
+    // sumber tunggalnya - satu nomor untuk saveSale + push + QR.
     ...(s.salesNum ? { displayNo: s.salesNum } : {}),
     // Kunci stabil QR + rekonsiliasi (Q7). Bentuk camelCase menyamai
-    // clientId outbox fisik (sync.ts drainPhysicalQueue) — satu kunci di
+    // clientId outbox fisik (sync.ts drainPhysicalQueue) - satu kunci di
     // semua payload; BE terima-dua-format selama transisi. Bentuk snake_case
     // client_id dikirim juga (APP-PRINTER-SALES): server upsert by client_id.
     ...(s.clientId ? { clientId: s.clientId, client_id: s.clientId } : {}),
@@ -209,7 +209,7 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.vatTotal !== undefined ? { vatTotal: r(s.vatTotal) } : {}),
     ...(s.serviceTotal !== undefined ? { serviceTotal: r(s.serviceTotal) } : {}),
     // Tip diteruskan apa adanya (server memvalidasi: cap subtotal, kunci usai
-    // lunas). Nol/absen = tanpa tip — payload lama tak berubah.
+    // lunas). Nol/absen = tanpa tip - payload lama tak berubah.
     ...(s.tipTotal !== undefined && r(s.tipTotal) > 0 ? { tipAmount: r(s.tipTotal) } : {}),
     ...(s.feeESB !== undefined && s.feeESB > 0 ? { platformFee: r(s.feeESB) } : {}),
     ...(s.rounding !== undefined && s.rounding !== 0 ? { rounding: r(s.rounding) } : {}),
@@ -222,7 +222,7 @@ export function buildSalePayload(s: SaleInput): Record<string, unknown> {
     ...(s.approvalCode ? { approvalCode: s.approvalCode } : {}),
     ...(s.approvedBy ? { approvedBy: s.approvedBy } : {}),
     // Ronde-3 Q1: HANYA customerId (int GO) yang naik ke BE. memberId
-    // (alias lokal M/MC) SENGAJA tak dikirim — bukan data tersimpan transaksi.
+    // (alias lokal M/MC) SENGAJA tak dikirim - bukan data tersimpan transaksi.
     ...(parseCustomerId(s.customerId) != null ? { customerId: parseCustomerId(s.customerId) } : {}),
     ...(s.tableId ? { tableId: s.tableId } : {}),
     ...(s.mode ? { mode: normalizeSalesMode(s.mode), salesMode: normalizeSalesMode(s.mode) } : {}),

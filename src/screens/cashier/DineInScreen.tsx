@@ -26,7 +26,7 @@ type Props = {
       packaging?: number;
       customer?: string;
       memberId?: string;
-      /** Ronde-3 Q1: customerId GO (int) — diteruskan rantai ke Pay. */
+      /** Ronde-3 Q1: customerId GO (int) - diteruskan rantai ke Pay. */
       customerId?: number;
       voucher?: Voucher;
     };

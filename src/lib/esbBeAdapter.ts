@@ -25,15 +25,15 @@ export const MASTER_NEEDS_BRIDGE: Record<string, BeRoute> = {
   'main/get-member': 'api/merchant/* member (cek) / erp/member (legacy)',
   'main/get-voucher': 'api/v1/terminals/{id}/vouchers/burn|release + pos voucher-templates',
   'main/get-user': 'api/v1/terminals/{id}/access',
-  'v1/pull/expense-chart-of-accounts': 'merchant CoA (cek) — pullExpenseCoa FAKTA APK',
-  'esb_api/pull/pull-station-data': 'BE station? (cek) — fallback konstanta POS',
+  'v1/pull/expense-chart-of-accounts': 'merchant CoA (cek) - pullExpenseCoa FAKTA APK',
+  'esb_api/pull/pull-station-data': 'BE station? (cek) - fallback konstanta POS',
   'main/get-sales': 'api/merchant/orders/* + pos-wire riwayat (fallback jujur)',
 };
 
 export const LOCAL_ONLY: string[] = [
-  'SQLite ms_* (menu, table, outbox) — Local Mode by-design',
-  'backupCodec — PARKED needs-dep (tanpa clipboard/share)',
-  'takeover SSE realtime — butuh dua user/devices live (log E2E terpisah)',
+  'SQLite ms_* (menu, table, outbox) - Local Mode by-design',
+  'backupCodec - PARKED needs-dep (tanpa clipboard/share)',
+  'takeover SSE realtime - butuh dua user/devices live (log E2E terpisah)',
 ];
 
 export function bePath(template: BeRoute, params: Record<string, string | number>): string {

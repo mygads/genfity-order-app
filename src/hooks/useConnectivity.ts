@@ -92,7 +92,7 @@ export function useConnectivity(): Connectivity {
         if (alive) setSseLive(live);
       });
     } catch {
-      /* SSE belum siap — tetap false */
+      /* SSE belum siap - tetap false */
     }
     return () => {
       alive = false;

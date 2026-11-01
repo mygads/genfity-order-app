@@ -10,7 +10,7 @@ import Button from './Button';
 import { TABLET_BP } from '../theme';
 
 /**
- * Ukuran tombol bersama — samakan di semua layar agar konsisten:
+ * Ukuran tombol bersama - samakan di semua layar agar konsisten:
  * - `sm`: di dalam card/baris padat (h36, radius 10, font 13).
  * - `md`: aksi di dalam card/container (h46, radius 12, font 14).
  * - `lg`: CTA bar bawah/full-width (h56, radius 12 PAR-01 parity FE, font 16,

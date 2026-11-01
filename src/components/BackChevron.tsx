@@ -4,12 +4,12 @@ import { View } from 'react-native';
 interface Props {
   /** Warna chevron. */
   color?: string;
-  /** Ukuran kotak luar — selalu 1:1. */
+  /** Ukuran kotak luar - selalu 1:1. */
   size?: number;
 }
 
 /**
- * Chevron kiri digambar dari dua batang (bukan glyph font) — proporsinya
+ * Chevron kiri digambar dari dua batang (bukan glyph font) - proporsinya
  * selalu 1:1 di semua font/OS, tidak ketarik seperti '‹'/'←' teks.
  */
 export default function BackChevron({ color = '#FFFFFF', size = 24 }: Props) {

@@ -1,6 +1,6 @@
 /**
  * SC-QA3 P5 (konvergen f52cfe2 kita + 7235cb0 sibling C11 EFF-08): satu-satunya
- * pintu resize foto bukti sebelum simpan/upload (kamera + galeri) — menutup
+ * pintu resize foto bukti sebelum simpan/upload (kamera + galeri) - menutup
  * `unbounded-photo-growth` (foto 12MP+ membengkakkan SQLite + payload sync).
  *
  * Bentuk lengkap: resize maks-1280px sisi-terpanjang + JPEG 0.7, tanpa
@@ -11,11 +11,11 @@
  * dimensi picker; Display/Idle/Queue/Attendance/Tables tak memakai foto).
  *
  * DELTA vs sibling (dipilih sadar, bukan salin buta):
- * - Nama preparePhoto dipertahankan (bukan shrinkReceiptPhoto) — call-site +
+ * - Nama preparePhoto dipertahankan (bukan shrinkReceiptPhoto) - call-site +
  *   tripwire-eff-battery sudah menguncinya; signature (uri, width?, height?)
  *   superset sibling (uri, maxWidth) karena butuh dimensi untuk no-upscale.
  * - require() malas + feature-detect dua API (legacy manipulateAsync +
- *   builder manipulate) — sibling import statis builder-only; bentuk kita
+ *   builder manipulate) - sibling import statis builder-only; bentuk kita
  *   tetap jalan bila modul belum ter-link di dev-client lama.
  * - No-upscale dipertahankan (sibling selalu resize ke 1280 = upscale foto
  *   kecil); dimensi tak diketahui = lewati, bukan tebak.
@@ -39,10 +39,10 @@ export const PHOTO_JPEG_QUALITY = 0.7;
  * Orientasi: output adalah JPEG yang di-encode ulang dari bitmap hasil
  * decode platform (decoder menerapkan tag orientasi EXIF saat decode),
  * sehingga foto portrait/landscape tersimpan tegak dan tag orientasi sumber
- * tak terbawa — tanpa opsi EXIF eksplisit (API manipulator tak menyediakannya;
+ * tak terbawa - tanpa opsi EXIF eksplisit (API manipulator tak menyediakannya;
  * JANGAN invent field di sini).
  *
- * Batas byte: SENGAJA tanpa cek ukuran file eksplisit — modul file-size
+ * Batas byte: SENGAJA tanpa cek ukuran file eksplisit - modul file-size
  * (expo-file-system) bukan dependensi repo; batas dimensi + JPEG 0.7 sudah
  * membatasi output pada orde ratusan KB. Tambah modul = keputusan owner +
  * rebuild native, di luar scope slice ini.
@@ -59,9 +59,9 @@ export async function preparePhoto(uri: string, width?: number, height?: number)
     const h = Math.round(Number(height) || 0);
     if (w > 0 && h > 0 && Math.max(w, h) <= MAX_SIDE) return src;
     // Dimensi tak diketahui tapi file besar tetap coba resize aman (lebar
-    // 1280 bisa upscale portrait — jadi tanpa dimensi = lewati, bukan tebak).
+    // 1280 bisa upscale portrait - jadi tanpa dimensi = lewati, bukan tebak).
     if (!(w > 0 && h > 0)) {
-      console.warn('[photo] dimensi tak diketahui — lewati resize, pakai URI asli');
+      console.warn('[photo] dimensi tak diketahui - lewati resize, pakai URI asli');
       return src;
     }
     const action =
@@ -82,7 +82,7 @@ export async function preparePhoto(uri: string, width?: number, height?: number)
         format: M.SaveFormat?.JPEG ?? 'jpeg',
       });
       const next = String(out?.uri ?? '').trim();
-      if (!next) console.warn('[photo] resize legacy hasil kosong — pakai URI asli');
+      if (!next) console.warn('[photo] resize legacy hasil kosong - pakai URI asli');
       return next || src;
     }
     // API builder baru (bila legacy dihapus di SDK mendatang): feature-detect.
@@ -97,13 +97,13 @@ export async function preparePhoto(uri: string, width?: number, height?: number)
           : (ctx?.resize?.({ height: MAX_SIDE }) as typeof ctx);
       const out = await sized?.renderAsync?.();
       const next = String(out?.uri ?? '').trim();
-      if (!next) console.warn('[photo] resize builder hasil kosong — pakai URI asli');
+      if (!next) console.warn('[photo] resize builder hasil kosong - pakai URI asli');
       return next || src;
     }
-    console.warn('[photo] expo-image-manipulator tak tersedia — pakai URI asli');
+    console.warn('[photo] expo-image-manipulator tak tersedia - pakai URI asli');
   } catch (e) {
     // Fallback + log jujur di bawah (return src); alur simpan tak putus.
-    console.warn('[photo] resize gagal — pakai URI asli:', e instanceof Error ? e.message : e);
+    console.warn('[photo] resize gagal - pakai URI asli:', e instanceof Error ? e.message : e);
   }
   return src;
 }

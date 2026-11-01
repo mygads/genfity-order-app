@@ -6,20 +6,20 @@
  *   drain-nya. `initDb()` dipanggil di setiap entry agar instalasi lama ikut
  *   dapat tabelnya tanpa migrasi khusus.
  * - Kosakata status = outbox (`'antre' | 'gagal'` untuk baris hidup; `'cetak'`
- *   warisan pra-C9 dibersihkan drain — lihat RETENSI di bawah), drain FIFO
+ *   warisan pra-C9 dibersihkan drain - lihat RETENSI di bawah), drain FIFO
  *   `ORDER BY createdAt ASC` (meniru `sync.ts`: baris gagal tidak menghentikan
  *   drain, dicoba lagi di drain berikut).
  * - RETENSI (C9, SESI-C): baris SUKSES langsung DELETE (bukan UPDATE 'cetak')
- *   + sapu warisan 'cetak' tiap drain — tabel cetak tak boleh tumbuh tanpa
+ *   + sapu warisan 'cetak' tiap drain - tabel cetak tak boleh tumbuh tanpa
  *   batas; yang hidup hanya antre/gagal (sumber `pendingPrintCount`, tampil di
  *   SyncScreen). Retensi 'lokal' esoprocessqueue milik `pruneLocalOnly`
  *   (lib/sync.ts); purge server `pos_offline_order_sync` milik BE
- *   (migration 00045 — catatan owner-need, bukan kode APP).
+ *   (migration 00045 - catatan owner-need, bukan kode APP).
  * - `payload` = byte ESC/POS dalam base64 (via `escpos.toBase64/fromBase64`
  *   agar jalan di semua runtime); `target` = envelope JSON
- *   `{target, name, kind, label, retries}` — retry count tinggal di envelope
+ *   `{target, name, kind, label, retries}` - retry count tinggal di envelope
  *   karena skema Wave1 tidak punya kolom retry (tanpa ubah skema).
- * - ID = UUIDv7 (Q7, sama seperti outbox sync) — unik lintas-device.
+ * - ID = UUIDv7 (Q7, sama seperti outbox sync) - unik lintas-device.
  * - Politik: modul ini TIDAK mengimpor `lib/print.ts` (menghindari siklus
  *   import): target pengganti saat antrean butuh resolusi ulang (mis. antrean
  *   dibuat saat `no-printer`) disuntik pemanggil via `DrainDeps.resolveTarget`.
@@ -154,7 +154,7 @@ function envelopeOf(raw: string): PrintTargetEnvelope {
 /**
  * Dekode kolom payload: format baru = base64 byte ESC/POS langsung; format
  * lawas (sebelum unifikasi) = JSON `{kind, bytesB64}`.
- * null = baris rusak — lewati tanpa menghentikan drain.
+ * null = baris rusak - lewati tanpa menghentikan drain.
  */
 function bytesOfPayload(raw: string): Uint8Array | null {
   if (!raw) return null;
@@ -180,7 +180,7 @@ function bytesOfPayload(raw: string): Uint8Array | null {
 }
 
 /**
- * Masukkan byte ESC/POS ke antrean persisten. Tak pernah menampilkan UI —
+ * Masukkan byte ESC/POS ke antrean persisten. Tak pernah menampilkan UI -
  * pemanggil (`lib/print.ts`) yang mengembalikan status pending ke layar.
  * Melempar bila SQLite gagal (pemanggil fallback ke Alert jujur).
  *
@@ -222,14 +222,14 @@ export async function pendingPrintCount(): Promise<number> {
 }
 
 /**
- * Kuras antrean FIFO (`createdAt ASC`, maks 50 baris per drain — meniru batas
+ * Kuras antrean FIFO (`createdAt ASC`, maks 50 baris per drain - meniru batas
  * 200 baris `sync.ts` dengan nilai lebih kecil karena byte cetak berat).
  * Wiring drain (C10, terverifikasi): piggyback tiap cetak sukses
  * (`lib/print.ts`:393,:443,:488) + sukses test-print
- * (`PrintersScreen.testPrintStation` — jalur terbukti hidup) + reconnect
- * realtime (`lib/realtime.ts` onopen, hanya retry>0 — connect pertama tidak,
+ * (`PrintersScreen.testPrintStation` - jalur terbukti hidup) + reconnect
+ * realtime (`lib/realtime.ts` onopen, hanya retry>0 - connect pertama tidak,
  * master sudah ditarik login/boot). `pendingPrintCount` sudah diekspor dan
- * DITAMPILKAN di `SyncScreen` (baris `tr_printqueue`) — backlog cetak terlihat.
+ * DITAMPILKAN di `SyncScreen` (baris `tr_printqueue`) - backlog cetak terlihat.
  * Baris gagal ditandai 'gagal' + retry count naik, drain lanjut (tidak
  * berhenti). Tak melempar.
  */
@@ -240,7 +240,7 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
   } catch {
     return out;
   }
-  // C9: sapu warisan 'cetak' pra-C9 (sukses dulu di-UPDATE-bukan-DELETE) —
+  // C9: sapu warisan 'cetak' pra-C9 (sukses dulu di-UPDATE-bukan-DELETE) -
   // best-effort, gagal = abaikan (drain tetap jalan).
   try {
     await run(`DELETE FROM tr_printqueue WHERE status = 'cetak'`);
@@ -260,7 +260,7 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
   for (const row of rows) {
     const bytes = bytesOfPayload(row.payload ?? '');
     if (!bytes) {
-      // Baris rusak (payload tak bisa didekode dua format) — lewati tanpa
+      // Baris rusak (payload tak bisa didekode dua format) - lewati tanpa
       // menghentikan drain; dicoba lagi di drain berikut bila sembuh.
       continue;
     }
@@ -275,12 +275,12 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
           if (!name) name = alt.name;
         }
       } catch {
-        /* abaikan — baris tetap antre */
+        /* abaikan - baris tetap antre */
       }
     }
     if (!target) {
       // Tanpa target (dibuat saat no-printer, printer belum dipair):
-      // bukan gagal kirim — biarkan antre untuk drain berikut.
+      // bukan gagal kirim - biarkan antre untuk drain berikut.
       continue;
     }
     out.attempted += 1;
@@ -292,7 +292,7 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
     }
     try {
       if (ok) {
-        // C9: sukses = DELETE langsung (retensi device) — 'cetak' tak lagi
+        // C9: sukses = DELETE langsung (retensi device) - 'cetak' tak lagi
         // ditulis; baris hidup hanya antre/gagal (pendingPrintCount lestari).
         await run(`DELETE FROM tr_printqueue WHERE id = ?`, [row.id]);
         out.sent += 1;
@@ -308,7 +308,7 @@ export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
         out.failed += 1;
       }
     } catch {
-      /* abaikan — hitungan attempted/sent/failed tetap jujur */
+      /* abaikan - hitungan attempted/sent/failed tetap jujur */
     }
   }
   out.remaining = await pendingPrintCount();

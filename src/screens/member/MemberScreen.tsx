@@ -55,9 +55,9 @@ type OrderCtx = {
   tax?: number;
   rounding?: number;
   feeESB?: number;
-  /** Biaya kemasan order — teruskan apa adanya agar tak hilang pulang-pergi. */
+  /** Biaya kemasan order - teruskan apa adanya agar tak hilang pulang-pergi. */
   packaging?: number;
-  /** Tip/gratuity pelanggan — teruskan apa adanya agar tak hilang pulang-pergi. */
+  /** Tip/gratuity pelanggan - teruskan apa adanya agar tak hilang pulang-pergi. */
   tip?: number;
 };
 type Props = {
@@ -80,7 +80,7 @@ type Member = {
 type Riwayat = { id: string; tanggal: string; keterangan: string; nominal?: number; poin?: number };
 
 /** Baris ms_member SQLite (skema db.ts): id, memberName, phone, email (M1),
- * depositBalance. Tanpa kolom tier — tipe default Regular. */
+ * depositBalance. Tanpa kolom tier - tipe default Regular. */
 type MemberRow = {
   id: string | null;
   memberName: string | null;
@@ -92,7 +92,7 @@ type MemberRow = {
 /** Cache baca poin SERVER per member (AsyncStorage): ditulis HANYA dari data
  * server (/customers/search, inquiry, pull) agar offline tetap tampil angka
  * terakhir yang sah. M1: overlay lokal TAK mencetak poin (earn 1pt/Rp1000
- * DIHAPUS — poin milik loyalty server, server-wins). */
+ * DIHAPUS - poin milik loyalty server, server-wins). */
 const POINTS_KEY = 'genfity.member.points';
 async function loadPoints(): Promise<Record<string, number>> {
   try {
@@ -261,7 +261,7 @@ async function persistMember(id: string, nama: string, noHp: string, email?: str
  *
  * SINGLE-POST (satu-satunya jalur tulis deposit layar ini): satu tap = SATU
  * kunci `dep-…` bersama untuk ledger + fisik + light + direct
- * (direct-or-one-light). Light 'member-deposit' terpisah DIHAPUS — yang hidup
+ * (direct-or-one-light). Light 'member-deposit' terpisah DIHAPUS - yang hidup
  * hanya light kind 'deposit-topup' (routing pathFor tak diubah agar antrean
  * warisan tetap terkuras).
  *
@@ -276,7 +276,7 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
   const paymentMethod = via === 'cepat' ? 'Tunai' : via;
   // SATU kunci idempotensi untuk semua kanal tap ini.
   const key = newDepositKey();
-  // Direct dulu — bump lokal Ditunda hingga posted.
+  // Direct dulu - bump lokal Ditunda hingga posted.
   let posted = false;
   try {
     posted = (await postDepositOnce({ key, memberId, amount, method: paymentMethod, note: 'Deposit cepat Member' })).posted;
@@ -305,7 +305,7 @@ async function persistDeposit(memberId: string, amount: number, via: string): Pr
       );
       after = Math.max(0, Math.round(Number(cur?.depositBalance) || 0));
     } catch {
-      /* balanceAfter boleh null — saldo ms_member tetap naik */
+      /* balanceAfter boleh null - saldo ms_member tetap naik */
     }
     const nowIso = new Date().toISOString();
     // WIRE-APPROVAL: baris ledger wajib membawa branchId sesi/binding
@@ -495,7 +495,7 @@ export default function MemberScreen({ navigation, route }: Props) {
             const rPhone = String(r.phone ?? '').trim();
             const rEmail = String(r.email ?? '').trim();
             // Ronde-3 Q1: kunci lokal = turunan deterministik customerId GO
-            // (satu-satunya produsen format MC — JANGAN inline `MC${}`).
+            // (satu-satunya produsen format MC - JANGAN inline `MC${}`).
             const mcId = localMemberKeyForCustomer(r.id);
             const hit =
               (mcId ? byId.get(mcId) : undefined) ??
@@ -685,7 +685,7 @@ export default function MemberScreen({ navigation, route }: Props) {
     if (!mid || typeof baru !== 'number') return;
     setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, saldo: baru } : m)));
     setSelected((sb) => (sb && sb.id === mid ? { ...sb, saldo: baru } : sb));
-    // M1: tanpa earn poin lokal — poin milik loyalty server (muncul via pull /
+    // M1: tanpa earn poin lokal - poin milik loyalty server (muncul via pull /
     // search / inquiry berikutnya). Param topupNominal warisan diabaikan.
     setRiwayat((rw) => ({
       ...rw,
@@ -799,9 +799,9 @@ export default function MemberScreen({ navigation, route }: Props) {
       const mid = selected.id;
       // A-P1-3: SATU jalur tulis (persistDeposit) server-dulu. Bump daftar/UI +
       // riwayat + tutup modal HANYA bila posted; bila antre/offline, modal tetap
-      // terbuka dengan banner pending (tanpa saldo optimistis) — kredit server
+      // terbuka dengan banner pending (tanpa saldo optimistis) - kredit server
       // dijamin light twin berkunci-sama, flag pending terlihat di SyncScreen.
-      // M1: tanpa earn poin lokal — poin milik loyalty server.
+      // M1: tanpa earn poin lokal - poin milik loyalty server.
       const res = await persistDeposit(mid, n, 'cepat');
       if (!res.posted) {
         setDepositErr(t('mem_topup_pending').replace('{n}', rp(n)));

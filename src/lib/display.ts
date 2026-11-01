@@ -5,7 +5,7 @@
  * layar; dorong WS dicoba bila URL WS terkonfigurasi, gagal diam-diam.
  *
  * APP-EVENTS (TRANSPORT CLOSED 2026-10-17, audit row 8/12-partial):
- * - Primer SSE per-terminal (E26, tag-filtered server-side) via lib/sse.ts —
+ * - Primer SSE per-terminal (E26, tag-filtered server-side) via lib/sse.ts -
  *   satu arah untuk view; view_pelanggan memakai scope kasir pasangan
  *   (pairedKasirId) bila ada.
  * - Sekunder WS dua-arah (socket eksisting di bawah) untuk kasir/dapur.
@@ -17,7 +17,7 @@
 import { apiUrl, getTerminal, getWsUrl } from '../config/server';
 import { getApiMode } from './apiSource';
 import { normalizeTag } from './deviceRole';
-// APP-R3 touchup: impor statis aman — sse.ts hanya bergantung pada
+// APP-R3 touchup: impor statis aman - sse.ts hanya bergantung pada
 // config/server + apiSource (tak mengimpor display, tanpa siklus).
 import { isSseConfigured, subscribeSseFeed, subscribeTerminalEvents, terminalFeedId } from './sse';
 
@@ -38,7 +38,7 @@ let retry = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let beat: ReturnType<typeof setInterval> | null = null;
 
-/** Waktu event display terakhir (ms epoch) — dasar banner umur-data layar. */
+/** Waktu event display terakhir (ms epoch) - dasar banner umur-data layar. */
 let lastDisplayAt = 0;
 
 /** Heartbeat + backoff ala realtime.ts agar bridge tak putus diam-diam. */
@@ -101,7 +101,7 @@ function emitLocal(e: DisplayEvent): void {
   try {
     lastDisplayAt = Date.now();
   } catch {
-    /* jam tak tersedia — event tetap disebar */
+    /* jam tak tersedia - event tetap disebar */
   }
   listeners.forEach((l) => {
     try {
@@ -245,7 +245,7 @@ export function getLastDisplayAt(): number {
 // ---------------------------------------------------------------------------
 // Umur data (SPEC §8: poll fallback "berpenanda stale" + banner umur data).
 // D13+M1: dataAgeLabel + OFFLINE_STALE_KEY DIHAPUS (nol pemanggil; kunci
-// 'offline_stale' tak ada di kamus) — layar memakai t('disp_stale').
+// 'offline_stale' tak ada di kamus) - layar memakai t('disp_stale').
 // dataAgeMs dipertahankan sebagai util murni tanpa kunci i18n.
 // ---------------------------------------------------------------------------
 
@@ -335,7 +335,7 @@ export function resolveDisplaySseTerminalId(): string {
     const tid = String(b?.terminalId ?? b?.terminalCode ?? '').trim();
     if (tid) return tid;
   } catch {
-    /* abaikan — fallback klaim lama di bawah */
+    /* abaikan - fallback klaim lama di bawah */
   }
   try {
     return String(getTerminal().terminalCode ?? '').trim();
@@ -350,7 +350,7 @@ export function resolveDisplaySseTerminalId(): string {
 // menulis t.terminalCode, mis. "K01"); pairedKasirId berisi id BE dari
 // bind/E09 (mis. "T01", fixture branch-terminals.json). Predikat
 // `terminalId = pairedKasirId` tak pernah cocok lintas namespace.
-// PILIHAN: samakan di sisi BACA — resolve kode kasir pasangan via daftar
+// PILIHAN: samakan di sisi BACA - resolve kode kasir pasangan via daftar
 // terminal E09 (cache per branch+id). Kabel SSE tak disentuh (URL tetap id
 // BE) dan tulisan kolom tak diubah (milik lane lain + butuh backfill).
 // Gagal resolve (offline/BE absen) = id mentah = kosong jujur (fail-closed).
@@ -381,7 +381,7 @@ export async function resolvePairedKasirCode(branchId: string, pairedKasirId: st
       }
     }
   } catch {
-    /* offline/BE absen — fallback id mentah di bawah */
+    /* offline/BE absen - fallback id mentah di bawah */
   }
   return pid;
 }
@@ -397,7 +397,7 @@ function strList(v: unknown): string[] {
 }
 
 /**
- * JB-4: parser snapshot/tunggal antrean TUNGGAL — dipakai mapSseToDisplay
+ * JB-4: parser snapshot/tunggal antrean TUNGGAL - dipakai mapSseToDisplay
  * (E26 bus) + QueueViewScreen.applyEvent (E27) agar duplikasi logika hilang
  * (satu kebenaran). Perilaku disalin persis dari kedua sisi: daftar memakai
  * `preparing ?? tickets` / `ready`; done = status ready|done|call.
@@ -434,7 +434,7 @@ export function parseQueuePayload(
 function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
   // Backend membingkai SETIAP frame sebagai `event: message` dengan JSON
   // envelope {type, data} (terminal.go:958 snapshot terminal.state, :980
-  // live fan-out + hub terminalEventEnvelope terminal.event) — tipe semantik
+  // live fan-out + hub terminalEventEnvelope terminal.event) - tipe semantik
   // ada di data.type BERSARANG, bukan nama event SSE luar. Kupas envelope
   // dulu; bila tanpa envelope (frame semantik langsung), pakai nama luar.
   let t = String(type ?? '').toLowerCase();
@@ -444,7 +444,7 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
     d = ((d.data ?? {}) as Record<string, unknown>);
   }
   const ticket = String(d.ticket ?? d.code ?? d.no ?? d.salesNum ?? '').trim();
-  // D6: wired, activates when BE includes client_id — payload E26/E27
+  // D6: wired, activates when BE includes client_id - payload E26/E27
   // (kontrak API-TERMINAL-CONTRACT §4.2 + fixture queue-events.json) kini
   // dipetakan ke event order (clientId) di sini lalu diteruskan ke
   // openTag/liveClientId layar bila hadir; aman no-op bila absen (QR live
@@ -468,7 +468,7 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
   const items = toOrderItems(d.items);
   if (ticket && (/display|order|cart|payment|qr/.test(t) || items.length > 0)) {
     if (items.length === 0 && !/display|order|cart|payment|qr/.test(t)) return [];
-    // D6: client_id SSE (snake_case BE maupun camelCase) — wired, aktif
+    // D6: client_id SSE (snake_case BE maupun camelCase) - wired, aktif
     // saat BE menyertakannya; absen = field dilepas (no-op).
     const sseClientId = String(d.client_id ?? d.clientId ?? '').trim();
     return [
@@ -488,7 +488,7 @@ function mapSseToDisplay(type: string, data: unknown): DisplayEvent[] {
 /**
  * APP-FIXUP (fix-sse2 M5): SATU keputusan TRANSPORT backend untuk feed SSE.
  * Menyatukan cek ganda yang dulu tersebar (isSseConfigured ala lib/sse.ts vs
- * terminalEventsUrl ala lib/terminalContract.ts) — kedua modul pemilik BUKAN
+ * terminalEventsUrl ala lib/terminalContract.ts) - kedua modul pemilik BUKAN
  * lane paket ini (sse READ-ONLY, kontrak milik task BE), jadi unifikasi
  * tinggal di sini: Real Mode + env custom + base terisi (SSE) DAN url events
  * kontrak per terminalId non-kosong. Tak pernah melempar.
@@ -661,6 +661,6 @@ export function notifySaleSavedLocal(info: {
       }
     });
   } catch {
-    /* display lane belum siap — penjualan tetap sah */
+    /* display lane belum siap - penjualan tetap sah */
   }
 }

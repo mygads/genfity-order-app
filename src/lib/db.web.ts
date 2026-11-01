@@ -1,13 +1,13 @@
 /**
  * Lapisan SQLite lokal untuk WEB (expo-sqlite 57 build web: SQLite WASM yang
  * persisten di OPFS browser). API dan perilaku SAMA PERSIS dengan db.ts
- * (native) — pemanggil mengimpor './db' dan Metro memilih file ini saat
+ * (native) - pemanggil mengimpor './db' dan Metro memilih file ini saat
  * bundling web.
  *
  * Riwayat jujur: file ini dulu stub no-op (tulis hilang, baca selalu
  * kosong) sehingga login admin/1234 + seluruh alur offline TAK PERNAH bisa
  * jalan di web. Sekarang implementasi penuh dengan skema tunggal dari
- * lib/dbSchema.ts — web dan native tidak akan drift.
+ * lib/dbSchema.ts - web dan native tidak akan drift.
  *
  * Syarat browser: secure context (localhost/https) agar OPFS tersedia;
  * bila OPFS tak tersedia, expo-sqlite web jatuh ke penyimpanan memori
@@ -33,7 +33,7 @@ let openPromise: Promise<SQLiteDatabase> | null = null;
 /**
  * Buka database secara ASYNC (bukan openDatabaseSync). Alasan: jalur sync
  * expo-sqlite web memakai SharedArrayBuffer/Atomics yang menuntut header
- * isolasi COOP+COEP — tidak dijamin ada di semua server web. Jalur async
+ * isolasi COOP+COEP - tidak dijamin ada di semua server web. Jalur async
  * (postMessage worker) bebas dari syarat itu. Semua API publik di bawah
  * tetap ber-tanda-tangan sama persis dengan db.ts.
  */
@@ -50,12 +50,12 @@ async function dbAsync(): Promise<SQLiteDatabase> {
 }
 
 /**
- * Handle sinkron — hanya valid setelah initDb() (atau operasi async apa
+ * Handle sinkron - hanya valid setelah initDb() (atau operasi async apa
  * pun) membuka database. Gagal-cepat dengan pesan jelas bila dipanggil
  * terlalu dini; pemanggil internal selalu lewat dbAsync().
  */
 export function getDb(): SQLiteDatabase {
-  if (!db) throw new Error('[db.web] database belum dibuka — panggil initDb() dulu');
+  if (!db) throw new Error('[db.web] database belum dibuka - panggil initDb() dulu');
   return db;
 }
 

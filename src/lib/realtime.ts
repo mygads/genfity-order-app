@@ -40,11 +40,11 @@ interface Channel {
 
 const handlers = new Set<WsHandler>();
 /** URL WS BE Go untuk Real Mode (custom): path kanonis + tanpa token query
- * (BE hanya baca cookie/HttpOnly atau header Authorization — browser WS tak
+ * (BE hanya baca cookie/HttpOnly atau header Authorization - browser WS tak
  * bisa set header, jadi handshake anonim = 101 lalu pesan error JSON; itu
  * BUKTI routing benar, bukan 404 legacy. Auth penuh butuh cookie sesi /
- * enhanchement BE ?token= — dicatat jujur, badge hijau mengandalkan HTTP
- * /health + SSE, bukan WS semata — W-FULL §14). */
+ * enhanchement BE ?token= - dicatat jujur, badge hijau mengandalkan HTTP
+ * /health + SSE, bukan WS semata - W-FULL §14). */
 function beWsUrl(path: string): string {
   try {
     const base = getBaseUrl().replace(/\/+$/, '').replace(/^http/, 'ws');
@@ -100,7 +100,7 @@ export function subscribeWsStatus(cb: (connected: boolean) => void): () => void 
   };
 }
 
-// EFF-09: idle pasca-MAX_RETRY dimunculkan ke UI (jangan diam) — channel
+// EFF-09: idle pasca-MAX_RETRY dimunculkan ke UI (jangan diam) - channel
 // berhenti dial (hemat baterai); layar menampilkan penanda via langganan ini.
 const idleListeners = new Set<(idle: boolean) => void>();
 
@@ -156,7 +156,7 @@ export function onWsMessage(fn: WsHandler): () => void {
 }
 
 function emit(msg: WsMessage): void {
-  // K1: pola kick/takeover sisi-klien (future-proof — server TAK PERNAH push
+  // K1: pola kick/takeover sisi-klien (future-proof - server TAK PERNAH push
   // frame SESSION_KICKED; deteksi utama = event `takeover` SSE via
   // startTakeoverWatch di App.tsx): tipe cocok pola → cabut sesi lokal +
   // beri tahu kasir (kunci kicked_msg), apa pun tag-nya.
@@ -165,11 +165,11 @@ function emit(msg: WsMessage): void {
       handleSessionKicked();
     }
   } catch {
-    /* abaikan — lanjut dispatch */
+    /* abaikan - lanjut dispatch */
   }
-  // APP-EVENTS: gerbang tag sebelum fan-out — satu device satu tag, jadi
+  // APP-EVENTS: gerbang tag sebelum fan-out - satu device satu tag, jadi
   // filter global sudah tepat (DB/poll lokal tetap jalan per layar).
-  // C1: log-and-drop — tipe tak cocok dicatat lalu dibuang, bukan bypass diam.
+  // C1: log-and-drop - tipe tak cocok dicatat lalu dibuang, bukan bypass diam.
   try {
     const tag = getRealtimeTag();
     if (!shouldDeliverToTag(tag, String(msg?.type ?? ''))) {
@@ -206,7 +206,7 @@ export function getRealtimeTag(): TerminalTag {
 }
 
 /**
- * K1: perangkat lama yang sesinya digantikan login lain — logout lokal
+ * K1: perangkat lama yang sesinya digantikan login lain - logout lokal
  * (menandai pendingRevoke + stopRealtime) + Alert kicked_msg agar kasir tahu
  * mengapa layar kembali ke login. Tak pernah melempar.
  */
@@ -258,7 +258,7 @@ export function classifyWsTopic(rawType: unknown): RealtimeTopic {
   if (/queue/.test(t)) return 'queue';
   if (/online|esb|self-order|self_order|incoming|new_order/.test(t)) return 'online-order';
   // Status order generik (mis. 'order-status', 'order/finish') milik kasir
-  // (alur online-order), bukan dapur — kecuali sudah cocok dapur di atas.
+  // (alur online-order), bukan dapur - kecuali sudah cocok dapur di atas.
   if (/order/.test(t)) return 'online-order';
   return 'generic';
 }
@@ -299,7 +299,7 @@ const MAX_RETRY = 12;
 /** W-FULL §14b: stempel reconnect-pull terakhir (debounce 90 dtk, anti self-DoS). */
 let lastReconnectPullMs = 0;
 
-/** R48: true bila app foreground — tak ada gunanya dial saat background. */
+/** R48: true bila app foreground - tak ada gunanya dial saat background. */
 function appForeground(): boolean {
   try {
     return AppState.currentState === 'active';
@@ -329,14 +329,14 @@ async function netUp(): Promise<boolean> {
 function connect(ch: Channel): void {
   // Hanya ke server milik sendiri (Real Mode) - jangan dial ketiga.
   if (getApiMode() !== 'real') return;
-  // R48: tunda dial saat background — schedule mencoba lagi.
+  // R48: tunda dial saat background - schedule mencoba lagi.
   if (!appForeground()) {
     schedule(ch);
     return;
   }
   const url = ch.url();
   if (!url) return;
-  // R48: tunda dial saat jaringan mati — schedule mencoba lagi.
+  // R48: tunda dial saat jaringan mati - schedule mencoba lagi.
   void netUp().then((up) => {
     if (!up) {
       schedule(ch);
@@ -355,7 +355,7 @@ function openSocket(ch: Channel, url: string): void {
   }
   ch.ws.onopen = () => {
     // S15: reconnect (retry>0) = picu sinkronisasi ulang master via pemilik
-    // realtime — lazy require agar nol tepi statis baru (tak ada siklus
+    // realtime - lazy require agar nol tepi statis baru (tak ada siklus
     // server → master → sync → server). Connect pertama tak memicu pull
     // (master sudah ditarik alur login/boot).
     const reconnected = ch.retry > 0;
@@ -385,7 +385,7 @@ function openSocket(ch: Channel, url: string): void {
           /* gagal reconnect-pull = jadwal sync biasa yang menangani */
         });
       } catch {
-        /* master belum siap — reconnect soket tetap sah */
+        /* master belum siap - reconnect soket tetap sah */
       }
       // C10: reconnect = jaringan kembali hidup → kuras antrean cetak
       // (best-effort piggyback; lazy require ala master di atas agar nol tepi
@@ -396,10 +396,10 @@ function openSocket(ch: Channel, url: string): void {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const pr = require('./print') as typeof import('./print');
         void pq.drainPrintQueue({ resolveTarget: pr.resolveDrainTarget }).catch(() => {
-          /* antrean tetap — piggyback berikut yang menguras */
+          /* antrean tetap - piggyback berikut yang menguras */
         });
       } catch {
-        /* antrean tetap — piggyback berikut yang menguras */
+        /* antrean tetap - piggyback berikut yang menguras */
       }
     }
     ch.beat = setInterval(() => {
@@ -456,7 +456,7 @@ function schedule(ch: Channel): void {
   ch.beat = null;
   ch.ws = null;
   if (ch.timer) return;
-  // R48: idle setelah MAX_RETRY — berhenti dial sampai startRealtime /
+  // R48: idle setelah MAX_RETRY - berhenti dial sampai startRealtime /
   // foreground membangunkan lagi (hemat baterai, bukan retry selamanya).
   if (ch.retry >= MAX_RETRY) {
     emitRealtimeIdle();
@@ -491,7 +491,7 @@ try {
     });
   });
 } catch {
-  /* listener best-effort — tanpa ini channel tetap jalan via startRealtime */
+  /* listener best-effort - tanpa ini channel tetap jalan via startRealtime */
 }
 
 /** Matikan kedua channel (logout). */

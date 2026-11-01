@@ -43,7 +43,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
   const [approveVoidOpen, setApproveVoidOpen] = useState(false);
   const [approveVoidPrint, setApproveVoidPrint] = useState(false);
   const [approvePayOpen, setApprovePayOpen] = useState(false);
-  // P1-1b: prompt PIN manajer transport-only untuk rantai void live — dibuka
+  // P1-1b: prompt PIN manajer transport-only untuk rantai void live - dibuka
   // hanya bila BE menjawab 400 PIN_REQUIRED (via askManagerPin → withManagerPin
   // di history.ts); batal = pakai hasil pertama (lalu antre jujur).
   const [mgrPinOpen, setMgrPinOpen] = useState(false);
@@ -103,7 +103,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
   const selected: Transaction | null =
     list.find((tr) => tr.id === selectedId) ?? list[0] ?? null;
 
-  // S7: otorisasi supervisor via dialog V1 (kontrak BE baru) — helper
+  // S7: otorisasi supervisor via dialog V1 (kontrak BE baru) - helper
   // authedOrLocal legacy DIHAPUS (Real mode 404). Offline-first + fail-closed
   // kini di dalam SupervisorApprovalDialog (server → fallback PIN lokal).
 /** Tandai void di state DB langsung (tanpa overlay demo); persist via persistVoidDb. */ const markVoided = (id: string) => {
@@ -116,7 +116,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
       await requireAccess(s?.userId || s?.username || '', 'order.void');
     } catch { /* abaikan - modal alasan tetap dibuka */ }
     setConfirmVoid(true);
-  }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } appAlert(t('hist_deny_title'), t('hist_deny_change_pay').replace('{r}', gate.reason)); setPayPending(method); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setApprovePayOpen(false); }; /** S7: opsi terpilih → buka dialog persetujuan V1 (PIN pindah ke dialog). */ const openPayApproval = () => { if (!selected || !payPending) return; setApprovePayOpen(true); }; /** S7: simpan ganti metode sesudah dialog V1 disetujui (jejak approver tak dibawa persistPayChangeDb — batas dicatat). */ const confirmPayApproved = () => { const target = selected; const method = payPending; if (!target || !method) return; applyPayChange(target, method); setApprovePayOpen(false); setPayModal(false); setPayPending(null); }; const sendMail = () => {
+  }; const applyPayChange = (target: Transaction, method: string) => { void persistPayChange(target, method).catch(() => undefined); if (dbTxns) { const id = target.id; setDbTxns((prev) => prev ? prev.map((r) => (r.id === id ? { ...r, payment: method } : r)) : prev, ); } else { setPayOver((p) => ({ ...p, [target.id]: method })); } }; /** Gate RBAC sale.refund: allow/fail-open langsung simpan; deny = Alert bilingual + eskalasi PIN supervisor sebelum simpan. */ const changePay = (method: string) => { if (!selected) { setPayModal(false); return; } if (payPending) { setPayPending(method); return; } const target = selected; void requireAccess(getSession()?.userId || getSession()?.username || '', 'sale.refund').then((gate) => { if (gate.ok) { applyPayChange(target, method); setPayModal(false); return; } appAlert(t('hist_deny_title'), t('hist_deny_change_pay').replace('{r}', gate.reason)); setPayPending(method); }); }; const closePayModal = () => { setPayModal(false); setPayPending(null); setApprovePayOpen(false); }; /** S7: opsi terpilih → buka dialog persetujuan V1 (PIN pindah ke dialog). */ const openPayApproval = () => { if (!selected || !payPending) return; setApprovePayOpen(true); }; /** S7: simpan ganti metode sesudah dialog V1 disetujui (jejak approver tak dibawa persistPayChangeDb - batas dicatat). */ const confirmPayApproved = () => { const target = selected; const method = payPending; if (!target || !method) return; applyPayChange(target, method); setApprovePayOpen(false); setPayModal(false); setPayPending(null); }; const sendMail = () => {
     if (!selected) return;
     if (!isValidEmail(mailTo)) {
       setMailMsg(t('hist_mail_bad'));
@@ -149,7 +149,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
         const sel = selected;
         if (!sel) return;
         // R23: clientId untuk QR struk (rantai Q7) + flag void agar Receipt
-        // menampilkan banner VOID / menekan QR (R24). Best-effort — tanpa
+        // menampilkan banner VOID / menekan QR (R24). Best-effort - tanpa
         // clientId pun navigasi tetap jalan (struk tanpa QR).
         void (async () => {
           let cid = '';
@@ -400,7 +400,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';import {
         onCancel={() => setApproveVoidOpen(false)}
       />
 
-      {/* P1-1b: PIN manajer transport-only — hanya bila BE menuntutnya. */}
+      {/* P1-1b: PIN manajer transport-only - hanya bila BE menuntutnya. */}
       <ManagerPinPrompt
         visible={mgrPinOpen}
         onSubmit={(pin) => settleManagerPin(pin)}

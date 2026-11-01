@@ -3,7 +3,7 @@ import { StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } fr
 import { TABLET_BP, colors, fonts } from '../../theme';
 
 /**
- * ScanBar — reusable search + scan kasir (retail/grocery: barcode/SKU/nama).
+ * ScanBar - reusable search + scan kasir (retail/grocery: barcode/SKU/nama).
  * Best practice POS modern: fast product search by name, barcode, or category.
  * Target sentuh ≥44dp; tablet scan dominan.
  */

@@ -22,7 +22,7 @@ type SplitParams = {
   table?: string;
   customer?: string;
   memberId?: string;
-  /** Ronde-3 Q1: customerId GO (int) — diteruskan ke Pay. */
+  /** Ronde-3 Q1: customerId GO (int) - diteruskan ke Pay. */
   customerId?: number;
   ongkir?: number;
   /** Porsi voucher atas ongkir (diteruskan ke Pay → saveSale info audit). */
@@ -178,7 +178,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const table = asText(params.table);
   const customer = asText(params.customer);
   const memberId = asText(params.memberId);
-  /** Ronde-3 Q1: ref GO — dibawa ke Pay tiap kunjungan. */
+  /** Ronde-3 Q1: ref GO - dibawa ke Pay tiap kunjungan. */
   const customerId = parseCustomerId(params.customerId);
   /** Biaya kemasan: params pemanggil menang; tanpa params = info merchant
    * per mode (cermin CartDetail/DineIn). */
@@ -262,9 +262,9 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     serviceFixed: svcCfg.fixed,
     ...(roundStep != null ? { roundStep } : {}),
   });
-  // L8: representasi voucher — `discount` INCLUDES voucher, `voucher.amount`
+  // L8: representasi voucher - `discount` INCLUDES voucher, `voucher.amount`
   // adalah SUBSET porsi voucher untuk pelaporan; pembaca (Pay/saveSale)
-  // JANGAN menjumlahkan keduanya. L7: kirim TERPISAH — voucher {code,
+  // JANGAN menjumlahkan keduanya. L7: kirim TERPISAH - voucher {code,
   // amount: voucherEff} + discount: discountEff (tanpa mencampur voucherEff
   // ke discount).
   const discountEff = Math.min(asAmount(params.discount), Math.max(0, itemSum - canon.voucherAmt));
@@ -286,7 +286,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const voucherEff = canon.voucherAmt + Math.max(0, -(canon.ongkirNet + residual));
   // L24 (display saja; matematika charge di atas tak berubah): residual
   // (selisih total pemanggil vs kanonik, termasuk pembulatan pemanggil)
-  // DITAMPILKAN di baris rounding, BUKAN dilipat ke baris ongkir — baris
+  // DITAMPILKAN di baris rounding, BUKAN dilipat ke baris ongkir - baris
   // ongkir selalu ongkirNet kanonis. Kasus normal residual = 0 sehingga
   // tampilan identik dengan sebelumnya.
   const roundingShown = canon.rounding + residual;
@@ -356,7 +356,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
     // porsi `val` (di `total`), total order di `orderTotal`. Pay paham
     // splitGroup: kunjungan pertama saveSale penuh, berikut append kaki.
     // Voucher selalu bawa kode penuh: kuota terbakar 1x di create (append
-    // abaikan voucher) — tanpa klaim manual yang rapuh.
+    // abaikan voucher) - tanpa klaim manual yang rapuh.
     // Rounding tak diteruskan: tiap bill sudah bulat persis (pembulatan
     // pemanggil sudah dilipat ke ongkirEff via residual).
     navigation?.navigate('Pay', {
@@ -547,7 +547,7 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         )}
 
         <Text style={styles.sec}>{t('sp_perbill')}</Text>
-        {/* L23: tanpa nomor grup = kunjungan tak bisa dicatat — kunci tombol
+        {/* L23: tanpa nomor grup = kunjungan tak bisa dicatat - kunci tombol
           Bayar + pesan (sp_group_wait terverifikasi). */}
         {!groupNum && <Text style={styles.gateMsg}>{t('sp_group_wait')}</Text>}
         {/* Grid 2 kolom di tablet agar kartu tiap bill berdampingan. */}

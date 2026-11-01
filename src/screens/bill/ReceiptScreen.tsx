@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, View , useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg, wideCenterSm } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { useLang } from '../../lib/i18n';import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';import { getCachedCurrency } from '../../lib/currency';import { fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { printForTag, openDefaultDrawer, shareReceipt } from '../../lib/print';import { claimTerminalAutoPrint, fanoutReceiptAuto } from '../../lib/printBridge';import { initDb, run, all } from '../../lib/db';import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';import { getServerOrderIdForSale, isInvoiceEmailEnabled, sendPosReceiptEmail, serverIdForTxnKey } from '../../lib/posWire';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { buildSaleQrPayload } from '../../lib/sales';import { getReceiptPrefs, RECEIPT_PREFS_DEFAULT, type ReceiptPrefs } from '../../lib/posSyncReceipt';
-import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLogo, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, receiptOrderNumberLabel, receiptPresetForVertical, verticalFooterForLang, RECEIPT_TEMPLATE_DEFAULTS, type CachedMerchantInfo, type ReceiptTemplateToggles } from '../../lib/receiptTemplate';import { getCachedVerticalId } from '../../lib/posModes';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; packaging?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; memberLine?: string; serviceDate?: string; serviceTime?: string; technician?: string; dpPercent?: number; deliveryAddress?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; orderNote?: string; deliveryAddr?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; shopPhone?: string; shopEmail?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) — banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
+import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLogo, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, receiptOrderNumberLabel, receiptPresetForVertical, verticalFooterForLang, RECEIPT_TEMPLATE_DEFAULTS, type CachedMerchantInfo, type ReceiptTemplateToggles } from '../../lib/receiptTemplate';import { getCachedVerticalId } from '../../lib/posModes';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type VoidLine = { name: string; qty: number; price: number };type Props = { navigation?: Nav; route?: { params?: { no?: string; total?: number; method?: string; mode?: string; cash?: number; change?: number; items?: SaleItemIn[]; discount?: number; service?: number; tax?: number; rounding?: number; feeESB?: number; packaging?: number; tip?: number; voucherCode?: string; approvalCode?: string; cardLast4?: string; bank?: string; terminal?: string; memberId?: string; memberLine?: string; serviceDate?: string; serviceTime?: string; technician?: string; dpPercent?: number; deliveryAddress?: string; voidLines?: VoidLine[]; reason?: string; table?: string; cashier?: string; customer?: string; orderNote?: string; deliveryAddr?: string; ongkir?: number; ongkirCut?: number; unpaid?: boolean; shopName?: string; shopAddr?: string; shopPhone?: string; shopEmail?: string; footer?: string; autoPrint?: boolean; clientId?: string; splitPaid?: { amount?: number; method?: string }; /** R24: sale void penuh (diteruskan HistoryScreen R23) - banner VOID + tanpa QR + tombol cetak ditolak. */ voided?: boolean; } } };const lineTotal = (it: SaleItemIn): number => it.qty * it.basePrice + (it.modifiers ?? []).reduce((s, m) => s + m.price * it.qty, 0) - (it.discount ?? 0);export default function ReceiptScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const { t, lang } = useLang(); // Tanpa params = nilai kosong yang jujur (bukan TRX/#148/QRIS/Bawa Pulang karangan).
@@ -60,7 +60,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
   const voidLines = route?.params?.voidLines ?? [];
   const voidReason = route?.params?.reason ?? '';
   const hasVoid = voidLines.length > 0;
-  // R24: sale void penuh — banner + QR ditekan + cetak ditolak di doPrint.
+  // R24: sale void penuh - banner + QR ditekan + cetak ditolak di doPrint.
   const isVoidSale = route?.params?.voided === true;
   const voidTotal = voidLines.reduce((s, l) => s + l.qty * l.price, 0);
   // Kode voucher + footer custom cabang bila dioper via params (jangan hardcode).
@@ -99,12 +99,12 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
     : (tplEff.showThankYouMessage
       ? (tplEff.customThankYouMessage || (tplLang === 'en' ? 'Thank you for your order!' : 'Terima kasih atas pesanan Anda!'))
       : '');
-  // 1:1 BE: branding "Powered by <domain>" — domain milik BE (FrontendURL)
+  // 1:1 BE: branding "Powered by <domain>" - domain milik BE (FrontendURL)
   // tak dikenal HP sehingga HP memakai nama brand saja.
   const brandingText = tplOn && tplEff.showGenfityBranding
     ? (tplLang === 'en' ? 'Powered by Genfity' : 'Diberdayakan oleh Genfity')
     : '';
-  // 1:1 BE: kontak HEADER (telpon/email) ala website — center setelah alamat.
+  // 1:1 BE: kontak HEADER (telpon/email) ala website - center setelah alamat.
   // Sumber = params shopPhone/shopEmail bila pemanggil mengoper; kosong =
   // disembunyikan (BE juga sembunyikan bila merchant tak punya nomor/email).
   const shopPhone = (route?.params?.shopPhone ?? mInfo.phone ?? '').trim();
@@ -112,7 +112,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
   const contactText = tplOn
     ? [tplEff.showPhone ? shopPhone : '', tplEff.showEmail ? shopEmail : ''].filter((s) => s).join(' · ')
     : '';
-  // 1:1 BE: telpon footer (showFooterPhone) — nomor yang sama di footer.
+  // 1:1 BE: telpon footer (showFooterPhone) - nomor yang sama di footer.
   const footerPhoneText = tplOn && tplEff.showFooterPhone ? shopPhone : '';
   // 1:1 BE: header hanya meja/pelanggan (ShowTableNumber vs ShowCustomer*);
   // nama kasir pindah ke FOOTER (showCashierName) ala PDF/HTML/bridge.
@@ -131,12 +131,12 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
   // upsert server). Kosong = struk tanpa QR (arsip lama / tanpa rantai).
   // R24: sale void penuh tak membawa QR bayar.
   // APP-11: gerbang QR = showTrackingQRCode bila template aktif (legacy:
-  // rcPrefs.showQris — hasil identik bila tpl mati).
+  // rcPrefs.showQris - hasil identik bila tpl mati).
   const receiptQrBase = !isVoidSale && (route?.params?.clientId ?? '').trim() && no
     ? buildSaleQrPayload((route?.params?.clientId ?? '').trim(), no, Math.round(total))
     : '';
   const receiptQr = (tplOn ? tplEff.showTrackingQRCode : rcPrefs.showQris) ? receiptQrBase : '';
-  // P12: kunjungan split = nominal + metode kunjungan ini (cermin Success —
+  // P12: kunjungan split = nominal + metode kunjungan ini (cermin Success -
   // navigation/types Receipt sudah membawa splitPaid, layar wajib merender).
   const splitPaidAmt = Math.max(0, Math.round(Number(route?.params?.splitPaid?.amount) || 0));
   const splitPaidMethod = typeof route?.params?.splitPaid?.method === 'string' ? route.params.splitPaid.method : '';
@@ -160,7 +160,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
           setTpl(tg);
         }
       } catch {
-        /* abaikan — legacy */
+        /* abaikan - legacy */
       }
     })();
     return () => {
@@ -175,7 +175,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
    * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
    * kas ala POSLite (best-effort). APP-PRINTER-SALES (Q7): QR struk membawa
    * client_id rantai bayar (kunci upsert server), bukan nomor display saja. */
-  const doPrint = async () => { if (printing) return; // R24: struk sale void tak dicetak sebagai aktif — kunci
+  const doPrint = async () => { if (printing) return; // R24: struk sale void tak dicetak sebagai aktif - kunci
     // hist_deny_title + rc_void_title yang sudah ada.
     if (isVoidSale) {
       appAlert(t('hist_deny_title'), t('rc_void_title'));
@@ -204,7 +204,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
       }
     }
     if (res.ok && res.bytes > 0) { try { await initDb(); // R26: tandai tercetak hanya pada cetakan pertama (conditional
-        // UPDATE — tak ada kolom lastPrintAt di skema, skema milik lane
+        // UPDATE - tak ada kolom lastPrintAt di skema, skema milik lane
         // lain sehingga tak ditambah di sini).
         await run( 'UPDATE tr_saleshead SET printedCount = 1, syncDate = NULL WHERE salesNum = ? AND COALESCE(printedCount, 0) = 0', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
   /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
@@ -268,7 +268,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
 
   // Teks bagikan itemized: sama rincinya dengan kertas (item + rincian + total).
   // APP-11: gerbang template yang sama dengan kertas (thanks/branding hanya
-  // di mode template — legacy tak pernah memilikinya di teks bagikan).
+  // di mode template - legacy tak pernah memilikinya di teks bagikan).
   const shareItemLines = hasItems ? cartItems.flatMap((it) => [ `${it.qty}x ${it.name} - ${rp(lineTotal(it))}`, ...((tplOn && tp?.showUnitPrice) ? [`  @ ${rp(Math.round(lineTotal(it) / Math.max(1, it.qty)))}`] : []), ...((!tp || tp.showAddons) ? (it.modifiers ?? []) : []).map((m) => ` + ${m.name}${(!tp || tp.showAddonPrices) ? ` ${rp(m.price * it.qty)}` : ''}`), ...(((tp?.showItemNotes && it.note) || (it.note && /tujuan|pulsa|→/i.test(`${it.name} ${it.note}`))) ? [`★ ${it.note}`] : []), ]) : [];
   const shareHead = tplOn
     ? [tplEff.showMerchantName ? shopName : '', [orderNoLabelTpl, typeLineTpl].filter((s) => s).join(' - ')].filter((s) => s).join(' - ')

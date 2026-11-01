@@ -4,7 +4,7 @@ import { TABLET_BP, colors, fonts } from '../../theme';
 import AppButton from '../AppButton';
 
 /**
- * ServiceScheduleForm — jasa wajib jadwal YYYY-MM-DD + HH:MM (format BE
+ * ServiceScheduleForm - jasa wajib jadwal YYYY-MM-DD + HH:MM (format BE
  * serviceDate/serviceTime) + teknisi + DP/pelunasan. Tanpa jadwal tak bisa
  * ke Pay (mencegah 400 serviceDate/serviceTime).
  */

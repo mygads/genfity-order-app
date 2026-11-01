@@ -36,7 +36,7 @@ interface Props {
 export default function DrawerMenu({ visible, onClose, navigate, outlet, user, shiftOpen: shiftOpenProp }: Props) {
   const { lang, setLang, t, isLocked } = useLang();
   const navigation = useNavigation();
-  // Route aktif untuk highlight menu — baca aman, fallback undefined bila di luar navigator.
+  // Route aktif untuk highlight menu - baca aman, fallback undefined bila di luar navigator.
   // Hook dipanggil tanpa syarat di atas early-return agar urutan hooks stabil.
   let activeRoute: string | undefined;
   try {
@@ -141,7 +141,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
   // CustomerView); view_queue = HANYA QueueView. Tanpa Settings/role-switch
   // untuk kedua tag view; keluar hanya via aksi owner terautentikasi (Q14).
   // Tag tak dikenal = daftar kosong (fail-closed).
-  // (tagTick hooks dipindah ke atas early-return — lih. catatan di shiftOpen.)
+  // (tagTick hooks dipindah ke atas early-return - lih. catatan di shiftOpen.)
   const boundTag = (() => {
     try {
       return normalizeTag(getBinding()?.tag);
@@ -266,13 +266,13 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
               // lokal tetap instan, utang revoke ditandai logout() seperti biasa
               // dan di-flush pushAll berikutnya).
               // E31 fase-1a: terminal-logout best-effort (revoke sesi + grant
-              // triple server, device TETAP bound untuk fast-login) — gagal
+              // triple server, device TETAP bound untuk fast-login) - gagal
               // jaringan = abaikan, logout lokal tetap jalan.
               try {
                 const s = getSession();
                 const dev = (s?.deviceId || '').trim();
                 const who = (s?.userId || s?.username || '').trim();
-                // E (dedupe 2026-10-17): SATU POST ke /auth/terminal-logout —
+                // E (dedupe 2026-10-17): SATU POST ke /auth/terminal-logout -
                 // logoutRevoke + terminalLogout menunjuk endpoint yang sama;
                 // dua panggilan = revoke ganda sia-sia. deviceId eksplisit
                 // dari sesi (logoutRevoke resolve sendiri bila kosong).
@@ -283,7 +283,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
                   }).catch(() => {});
                 }
               } catch {
-                /* abaikan — logout lokal tetap jalan */
+                /* abaikan - logout lokal tetap jalan */
               }
               try {
                 // Reset tumpukan ke Login selagi navigator app masih mount,

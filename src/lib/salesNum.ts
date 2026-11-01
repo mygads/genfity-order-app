@@ -1,11 +1,11 @@
 /**
- * Nomor display tersegmen + gate terminal Q7 (SPEC §12) — pecahan dari
+ * Nomor display tersegmen + gate terminal Q7 (SPEC §12) - pecahan dari
  * sales.ts (S2-C310). sales.ts mengimpor enqueue* dari sync.ts sedangkan
  * sync.ts mengimpor nextSalesNumRetry dari sales.ts (require-cycle dua arah);
  * fungsi nomor-display tinggal di sini agar sync.ts hanya mengimpor modul
  * daun ini. sales.ts mengimpor-ulang + mengekspor-ulang dari sini demi
  * kompatibilitas importir lama (layar kasir/POS, seed).
- * Daun murni: hanya config server + db — JANGAN impor ./sales, ./sync,
+ * Daun murni: hanya config server + db - JANGAN impor ./sales, ./sync,
  * ./payments, atau ./display dari sini.
  */
 import { getTerminal } from '../config/server';
@@ -23,7 +23,7 @@ export function normalizeTerminalCode(raw: unknown): string {
   return String(raw ?? '').trim().toUpperCase();
 }
 
-/** true bila device sudah terikat terminal valid — syarat boleh jualan (Q7). */
+/** true bila device sudah terikat terminal valid - syarat boleh jualan (Q7). */
 export function isTerminalBound(): boolean {
   const t = getTerminal();
   const term = normalizeTerminalCode(t.terminalCode);
@@ -40,7 +40,7 @@ function terminalUnboundError(): Error {
 /**
  * Nomor display tersegmen Q7 (SPEC §12, inti dari nextSalesNum): menerbitkan
  * `TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}-{DEVTAG}` untuk branch+terminal eksplisit.
- * Melempar terminalUnboundError bila salah satunya kosong/invalid — tanpa
+ * Melempar terminalUnboundError bila salah satunya kosong/invalid - tanpa
  * fallback B001. Counter harian per (terminalCode, tanggal) di tr_sales_seq,
  * transaksional, init dari MAX suffix lokal (format baru + adopsi format
  * lama hari ini); NNNN 4-digit zero-padded, overflow lanjut 5 digit alami.
@@ -50,13 +50,13 @@ function terminalUnboundError(): Error {
  * untuk instalasi pra-device-id). DB lokal per-device sehingga counter NNNN
  * tak bisa koordinasi antar-device offline: tanpa DEVTAG, dua device di
  * terminal yang sama mencetak NNNN kembar lalu tabrakan di UNIQUE display_no
- * server (BE displayNo = string unik opaque, tanpa validasi format — aman
+ * server (BE displayNo = string unik opaque, tanpa validasi format - aman
  * diperpanjang; tripwire-history hanya menuntut awalan ^TRX).
  */
 /**
  * Tag device 4-hex kapital untuk segmen DEVTAG nomor display (A-P2-10).
  * Baca read-only kunci milik apiSource ('genfity.device.id', 16-hex stabil
- * per install — dibuat di alur install/login, selalu ada sebelum jualan
+ * per install - dibuat di alur install/login, selalu ada sebelum jualan
  * karena klaim terminal butuh login). Daun murni: tak impor apiSource
  * (hindari require-cycle); absen/invalid = '0000' (jujur, unik-seperti-dulu).
  */
@@ -96,7 +96,7 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
         const heads = await query<{ salesNum: string | null }>('SELECT salesNum FROM tr_saleshead');
         const prefix = `TRX-${branch}-${term}-${ymd}-`;
         // W-FULL §14: NNNN dipakai ulang (0001 ganda) bila cabang berganti
-        // prefix (scan prefix eksak = 0) — padahal counter tr_sales_seq
+        // prefix (scan prefix eksak = 0) - padahal counter tr_sales_seq
         // per (terminal, ymd) tanpa cabang. Perbaikan: adopsi MAX dari
         // format baru APAPUN cabangnya untuk terminal+ymd yang sama, lalu
         // format lama, agar NNNN tak pernah mundur dalam satu hari.
@@ -124,7 +124,7 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
     await run(
       `INSERT INTO tr_sales_seq (terminalCode, ymd, lastN, deviceTag) VALUES (?, ?, ?, ?)
        ON CONFLICT (terminalCode, ymd) DO UPDATE SET lastN = excluded.lastN, deviceTag = excluded.deviceTag`,
-      // Kolom deviceTag belum ada di instalasi lama sebelum migrasi jalan —
+      // Kolom deviceTag belum ada di instalasi lama sebelum migrasi jalan -
       // pernyataan ini dieksekusi SETELAH initDb (migrasi best-effort); bila
       // migrasi gagal total, INSERT 4-kolom melempar → tangkap pemanggil
       // (nextSalesNumRetry hanya retry konflik-unik; galat skema diteruskan
@@ -139,7 +139,7 @@ export async function nextDisplayNumber(branchCode: unknown, terminalCode: unkno
 
 /**
  * Nomor display permanen Q7: TRX-{BRANCH}-{TERM}-{YYYYMMDD}-{NNNN}-{DEVTAG}.
- * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq —
+ * NNNN = counter harian per (terminalCode, tanggal) di SQLite tr_sales_seq -
  * transaksional (ketuk-ganda tak bikin nomor ganda), tahan reinstall
  * (bukan AsyncStorage), init dari MAX suffix lokal yang tahan 4 format lama.
  * DEVTAG (A-P2-10) = 4-hex device agar dua device satu terminal tak kembar.

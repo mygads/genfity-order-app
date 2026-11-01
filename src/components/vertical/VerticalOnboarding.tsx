@@ -6,7 +6,7 @@ import { VERTICALS, VERTICAL_IDS, type VerticalId } from '../../lib/verticals';
 import { useLang } from '../../lib/i18n';
 
 /**
- * VerticalOnboarding — pilih jenis usaha saat pertama kali (7 ikon besar).
+ * VerticalOnboarding - pilih jenis usaha saat pertama kali (7 ikon besar).
  * Aturan emas PRD: onboarding wajib pilih vertikal (tak bisa skip); merchant
  * baru transaksi pertama <5 menit. PIN supervisor untuk ganti di Pengaturan.
  * Grid 2 kolom HP / 3-4 kolom tablet; target sentuh ≥44dp.

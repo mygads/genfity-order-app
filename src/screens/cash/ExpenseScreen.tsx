@@ -77,7 +77,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     // clientExpenseId = uuid di balik prefix EX- (dibangun SEKALI di atas,
     // dipakai ulang saat retry); sukses terminal = LEWATI antrean ESB di
     // bawah (tutup ledger ganda); gagal/BE-BELUM-ADA = fallback ESB lama.
-    // SESI-FINAL-APP: upload-DULU — foto lokal diunggah ke endpoint upload
+    // SESI-FINAL-APP: upload-DULU - foto lokal diunggah ke endpoint upload
     // terminal SEBELUM handoff; sukses = kirim photoUrl; gagal/offline =
     // photoPending (marker storage + banner + retry saat fokus/online).
     let terminalPosted = false;
@@ -112,14 +112,14 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     if (localPhotoOnly) {
       // Upload gagal/offline: expense TETAP tercatat (posted tanpa foto /
       // fallback ESB); tandai menunggu-upload + banner jujur (retry otomatis
-      // saat layar fokus / online kembali — tanpa sukses palsu).
+      // saat layar fokus / online kembali - tanpa sukses palsu).
       try { await markPhotoPending(id, String(photo)); } catch { /* best-effort */ }
     }
     if (!terminalPosted) {
       try { await enqueueOutbox('tr_branchexpense', id, 'insert'); enqueueSync('other', { table: 'tr_branchexpense', rowId: id, op: 'insert', ...(localPhotoOnly ? { photoPending: true } : {}) }); } catch { /* DB belum init: item tetap tampil dari state */ }
     }
     if (localPhotoOnly) {
-      // Banner pending harus TERLIHAT — form tetap terbuka (item sudah
+      // Banner pending harus TERLIHAT - form tetap terbuka (item sudah
       // masuk daftar + DB di atas); kasir tutup manual setelah membaca.
       // Upload sempat dicoba tapi gagal (offline/error) = pesan upload-fail.
       setSaveNotice(t('expense.photoUploadFail'));
@@ -138,7 +138,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     if (!pendingId) return;
     const esc = await verifyLocalEscalation(pin, 'settings.edit');
     if (!esc.ok) { setPinErr(esc.message); return; }
-    // WIRE-APPROVAL: approver wajib userId nyata — tanpa identitas = tolak.
+    // WIRE-APPROVAL: approver wajib userId nyata - tanpa identitas = tolak.
     const approver = (esc.userId ?? '').trim();
     if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
     const id = pendingId;

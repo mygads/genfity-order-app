@@ -3,7 +3,7 @@
  *
  * Repo TIDAK memiliki expo-clipboard / expo-file-system / expo-sharing di
  * package.json, dan aturan sesi melarang install dep baru + melarang
- * Share/file — sehingga jalur kirim/terima backup via clipboard BERSTATUS
+ * Share/file - sehingga jalur kirim/terima backup via clipboard BERSTATUS
  * PARKED jujur (entri Settings dinonaktifkan + berlabel needs-dep).
  *
  * Modul ini adalah fondasi yang sudah bisa diuji SEKARANG: envelope

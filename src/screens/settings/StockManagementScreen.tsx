@@ -22,7 +22,7 @@ type Props = { navigation?: Nav };
 
 type Status = 'untracked' | 'out' | 'low' | 'healthy' | 'inactive';
 
-/** Satu baris stok seragam menu/addon — cermin FE StockItem InventoryPanel. */
+/** Satu baris stok seragam menu/addon - cermin FE StockItem InventoryPanel. */
 interface StockRow {
   kind: StockKind;
   id: string;
@@ -151,7 +151,7 @@ function ItemCard(props: {
             <Text style={styles.stepTextSm}>+10</Text>
           </Pressable>
         </View>
-        {/* FE handleMarkOutOfStock = set stockQty 0 (bukan flag) — konsisten web↔APP. */}
+        {/* FE handleMarkOutOfStock = set stockQty 0 (bukan flag) - konsisten web↔APP. */}
         <Pressable style={[styles.outBtn, busy && styles.btnBusy]} onPress={() => saveQty(0)} disabled={busy}>
           <Text style={styles.outText}>{t('stockMgmt.markOut')}</Text>
         </Pressable>
@@ -301,7 +301,7 @@ export default function StockManagementScreen({ navigation }: Props) {
             });
           }
         } catch {
-          /* abaikan — placeholder tetap tampil */
+          /* abaikan - placeholder tetap tampil */
         }
       } catch {
         if (alive) setRows([]);

@@ -39,7 +39,7 @@ export function modeLabel(salesMode?: string | null): string {
   if (/DINE/.test(k)) return 'Dine In';
   if (/TAKE/.test(k)) return 'Take Away';
   if (/DELIVER/.test(k)) return 'Delivery';
-  // C3: enum BE di luar trio resto — IN_STORE_PICKUP dipakai di alur
+  // C3: enum BE di luar trio resto - IN_STORE_PICKUP dipakai di alur
   // customer/group-order (customer_reservations.go:818, group_order.go:411);
   // IN_STORE_ORDER/IN_STORE_SERVICE = kanal POS (orders_pos_create.go:196).
   // Urutan penting: HOME_SERVICE/IN_STORE_SERVICE dicek sebelum SERVICE
@@ -157,7 +157,7 @@ export async function persistVoidDb(
   getPin?: ManagerPinProvider,
 ): Promise<void> {
   const now = new Date().toISOString();
-  // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
+  // Kolom userId wajib id user (bukan nama tampilan) - selaras saveSale.
   // Utamakan penyetuju eskalasi yang diketahui, bukan sesi kasir.
   const approver = String(approvedBy ?? '').trim();
   const userId = approver || (getSession()?.userId || getSession()?.username || '').trim();
@@ -165,7 +165,7 @@ export async function persistVoidDb(
     await initDb();
     // Idempotensi + gerbang stok: void ganda (mis. CancelScreen lalu History)
     // tak boleh mengembalikan stok/kuota/deposit dua kali; stok hanya kembali
-    // bila saveSale pernah jalan (kaki bayar ada) — bill 'open' tanpa bayar
+    // bila saveSale pernah jalan (kaki bayar ada) - bill 'open' tanpa bayar
     // tak pernah memotong stok.
     let preStatus = '';
     let preTableNo: string | null = null;
@@ -248,7 +248,7 @@ export async function persistVoidDb(
     } catch {
       /* abaikan */
     }
-    // 1) Stok kembali + buka flag habis bila qty pulih — hanya bila saveSale
+    // 1) Stok kembali + buka flag habis bila qty pulih - hanya bila saveSale
     // pernah jalan (stockBack); bill open tanpa kaki bayar tak memotong stok.
     for (const it of (stockBack ? items : [] as typeof items)) {
       try {
@@ -273,7 +273,7 @@ export async function persistVoidDb(
         /* abaikan */
       }
     }
-    // 2) Kuota voucher kembali + status available lagi — HANYA untuk kode
+    // 2) Kuota voucher kembali + status available lagi - HANYA untuk kode
     // yang benar-benar terbakar (usage 'burn'). Yang 'rejected' tak pernah
     // menyentuh kuota sehingga tak boleh +1 (backstop saveSale #1/#2).
     // Ambil dari usage agar kaki tender ikut pulih, bukan cuma head.
@@ -413,7 +413,7 @@ export async function persistVoidDb(
     sent = false;
   }
   if (sent) {
-    // Server sudah punya datanya — head ikut bersih agar badge dirty jujur.
+    // Server sudah punya datanya - head ikut bersih agar badge dirty jujur.
     try {
       await markClean('tr_saleshead', salesNum);
     } catch {
@@ -444,7 +444,7 @@ export async function persistVoidDb(
     if (sid != null) {
       // P1-1b: rantai cancel → void → refund; tiap panggilan live diulang
       // SEKALI dengan PIN manajer bila BE menuntutnya (400 PIN_REQUIRED,
-      // transport-only via withManagerPin — antrean di bawah tetap tanpa PIN).
+      // transport-only via withManagerPin - antrean di bawah tetap tanpa PIN).
       const c = await withManagerPin(
         (pin) => cancelMerchantOrder(sid, reason || undefined, pin),
         isPinRequiredRejection,
@@ -509,7 +509,7 @@ export async function persistVoidDb(
 
 /** Ganti metode bayar: payment + head ikut terupdate + outbox/sync/server. */
 export async function persistPayChangeDb(salesNum: string, method: string): Promise<void> {  // Bill split (multi-baris tr_salespayment): jangan timpa rincian split
-  // menjadi satu metode (bug G6) — cukup head yang ikut metode terakhir.
+  // menjadi satu metode (bug G6) - cukup head yang ikut metode terakhir.
   try {
     await initDb();
     let rows = 0;
@@ -564,7 +564,7 @@ export async function persistPayChangeDb(salesNum: string, method: string): Prom
 // W2 wiring-2: pull riwayat POS server (GET /orders/pos/history) bila online.
 // READ-ONLY: hasil tak pernah ditulis ke SQLite (SQLite tetap cache);
 // penggabungan milik mergeHistoryTxns di bawah (dipakai HistoryScreen).
-// Kosong bila offline/local/dummy — layar memakai daftar lokal + empty-state.
+// Kosong bila offline/local/dummy - layar memakai daftar lokal + empty-state.
 // ---------------------------------------------------------------------------
 function serverPayLabel(raw: string): string {
   const m = raw.trim().toUpperCase();
@@ -629,7 +629,7 @@ export async function pullServerHistoryTxns(limit = 100): Promise<Transaction[]>
 
 /**
  * Gabung daftar lokal + server (read-only mirror): lokal dulu (kebenaran),
- * lalu baris server yang `no`-nya tak ada di lokal (dedupe eksak — lokal
+ * lalu baris server yang `no`-nya tak ada di lokal (dedupe eksak - lokal
  * menang). Tak menyentuh SQLite.
  */
 export function mergeHistoryTxns(local: Transaction[], server: Transaction[]): Transaction[] {

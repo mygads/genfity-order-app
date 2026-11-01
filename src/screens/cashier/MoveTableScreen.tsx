@@ -19,7 +19,7 @@ const SECTION_OF: Record<string, string> = {
   B1: 'Teras', B2: 'Teras', B3: 'Teras',
   C1: 'VIP', C2: 'VIP',
 };
-/** Contoh tamu lama dihapus — daftar terisi & kosong murni dari SQLite (live-only). */
+/** Contoh tamu lama dihapus - daftar terisi & kosong murni dari SQLite (live-only). */
 
 /**
  * Pindah Meja (move_table) - pindah seluruh transaksi ke meja lain.

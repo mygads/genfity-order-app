@@ -28,7 +28,7 @@ export const radius = {
   md: 10,
   /** Kartu standar + CTA Dashboard. */
   lg: 12,
-  /** Input h56 ala Login — PAR-01 parity 12 (dulu 14), paritas FE rounded-lg + border #D0D5DD. */
+  /** Input h56 ala Login - PAR-01 parity 12 (dulu 14), paritas FE rounded-lg + border #D0D5DD. */
   input: 12,
   /** Kartu besar + modal. */
   xl: 16,

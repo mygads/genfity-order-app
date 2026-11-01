@@ -3,7 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'r
 import { TABLET_BP, colors, fonts } from '../../theme';
 
 /**
- * VariantPicker — pilih Size/Warna fashion (S/M/L/XL + Hitam/Putih…).
+ * VariantPicker - pilih Size/Warna fashion (S/M/L/XL + Hitam/Putih…).
  * Standar retail: matrix size-warna + stok per SKU. Chip ≥44dp.
  */
 export default function VariantPicker({

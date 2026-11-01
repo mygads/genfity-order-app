@@ -13,12 +13,12 @@ import {
   GO_OP_STATUS,
 } from '../../lib/posWire';import { printKitchenTicket } from '../../lib/print';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';
 /* APP-EVENTS: impor beda-baris agar edit beda lane tak konflik. */
-import { subscribeLocalSale } from '../../lib/display';import { appAlert } from '../../lib/appAlert';import { getSession } from '../../session';
+import { subscribeLocalSale } from '../../lib/display';import { fmtTimeInTz } from '../../lib/datefmt';import { appAlert } from '../../lib/appAlert';import { getSession } from '../../session';
 import { getSaleClientId } from '../../lib/sales';import { useIsFocused } from '@react-navigation/native';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { getNotif } from '../../config/device';import { useLang } from '../../lib/i18n';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { initDb, query, queryFirst, run } from '../../lib/db';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationFilter = 'Semua' | 'Dapur' | 'Checker';const filters = ['Semua', 'Baru', 'Diproses', 'Selesai'] as const;/** * Harga per baris (R15): utamakan harga bawaan baris (tr_salesmenu.price /
  * harga bawaan payload push), lalu peta live ms_menu. Tanpa harga di mana
- * pun = 0 (jujur Rp 0) — tak ada lagi konstanta MENU_PRICE/FALLBACK_PRICE
+ * pun = 0 (jujur Rp 0) - tak ada lagi konstanta MENU_PRICE/FALLBACK_PRICE
  * yang mengarang harga. Dapur tak pernah menghitung dari harga tebak. */function ticketTotal(t: KitchenTicket, live?: Record<string, number>): number { return t.items.reduce((s, it) => s + priceOf(it, live) * it.qty, 0);}function priceOf(it: KitchenItem, live?: Record<string, number>): number { if (Number.isFinite(it.price) && (it.price ?? 0) > 0) return Math.round(it.price ?? 0); const hit = live?.[it.name]; if (Number.isFinite(hit) && (hit ?? 0) > 0) return Math.round(hit ?? 0); return 0;}/** * Station asal tiket: prioritaskan stationId/station bawaan baris (isi * pullStation → ms_station), heuristik mode/meja hanya fallback offline. */const STATION_NAME: Record<string, 'Dapur' | 'Checker'> = { dapur: 'Dapur', kitchen: 'Dapur', 'st-dapur': 'Dapur', checker: 'Checker', check: 'Checker', 'st-check': 'Checker', 'st-checker': 'Checker',};/** * T9: normalisasi nama station live (isi pullStation → ms_station) ke dua * filter dapur; heuristik mode/meja hanya fallback offline terakhir. */function normStationName(raw: string): 'Dapur' | 'Checker' | null { const v = raw.trim().toLowerCase(); if (!v) return null; if (STATION_NAME[v]) return STATION_NAME[v]; if (v.includes('dapur') || v.includes('kitchen') || v.includes('bar')) return 'Dapur'; if (v.includes('check') || v.includes('kasir')) return 'Checker'; return null;}/** Label station lokal: 'Semua'→kit_station_all, Dapur/Checker→kunci kamus
- * (jangan prefix Inggris mentah — lang=id ikut kena, lang=en bocor 'Dapur'). */
+ * (jangan prefix Inggris mentah - lang=id ikut kena, lang=en bocor 'Dapur'). */
 function stationLabel(s: StationFilter, t: (k: string) => string): string {
   if (s === 'Semua') return t('kit_station_all');
   return s === 'Dapur' ? t('kit_station_dapur') : t('kit_station_checker');
@@ -56,7 +56,7 @@ async function broadcastKitchenBump(id: string, status: string): Promise<void> {
 async function persistKitchenStatus(tk: KitchenTicket, status: KitchenStatus): Promise<void> {
   const now = new Date().toISOString();
   const salesNum = String((tk as { salesNum?: unknown }).salesNum ?? '');
-  // Q7: status menempel pada identitas head (lookup, tak menerbitkan baru —
+  // Q7: status menempel pada identitas head (lookup, tak menerbitkan baru -
   // head pasti ada karena status hanya berubah untuk sale nyata).
   const cid = (salesNum ? await getSaleClientId(salesNum) : null) ?? null;
   try {
@@ -111,7 +111,7 @@ function normalizePushTicket(p: Record<string, unknown>): {
       no: no || salesNum,
       table: String(p.table ?? p.tableNo ?? salesNum).trim(),
       mode: String(p.mode ?? '').trim(),
-      time: String(p.time ?? new Date().toISOString().slice(11, 16)).trim(),
+      time: String(p.time ?? fmtTimeInTz(new Date())).trim(),
       elapsed: '',
       items,
       status,
@@ -134,7 +134,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     await initDb();
     const { ticket, salesNum } = tk;
     // Q7: cermin push memakai client_id head bila sale sudah dikenal lokal;
-    // NULL bila belum (cermin jujur — server pemilik identitas, tak mengarang
+    // NULL bila belum (cermin jujur - server pemilik identitas, tak mengarang
     // uuid baru untuk sale milik server).
     const cid = (salesNum ? await getSaleClientId(salesNum) : null) ?? null;
     await run(
@@ -172,11 +172,11 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   // Kosong = empty-state; mock kitchenTickets sudah dihapus sebagai fallback.
   const [tickets, setTickets] = useState<KitchenTicket[]>([]); const ticketsRef = useRef<KitchenTicket[]>([]); ticketsRef.current = tickets;
   // R17: effect WS di bawah deps-nya [t] sehingga liveStation/menuStation
-  // state basi di dalam handler — refs ini disegarkan tiap render di bawah
+  // state basi di dalam handler - refs ini disegarkan tiap render di bawah
   // (lihat penugasan setelah deklarasi state) untuk routing per-menu.
   const liveStationRef = useRef<Record<string, string>>({});
   const menuStationRef = useRef<Record<string, string>>({});
-  // R18: echo WS persis (id::status sama) — data tetap merge, hanya
+  // R18: echo WS persis (id::status sama) - data tetap merge, hanya
   // side-effect (notif/cetak) yang ditekan. Cap 200, buang terlama.
   const pushSeenRef = useRef<Set<string>>(new Set());
   const [liveNotice, setLiveNotice] = useState('');
@@ -197,7 +197,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
       if (msg.type === 'KITCHEN_TICKET') {
         const tk = normalizePushTicket(msg.payload ?? {});
         if (!tk) return;
-        // R18: echo persis (id::status sudah diproses) — data tetap merge di
+        // R18: echo persis (id::status sudah diproses) - data tetap merge di
         // bawah agar update item tak hilang; hanya side-effect yang ditekan.
         const seenKey = `${tk.ticket.id}::${tk.ticket.status}`;
         const seen = pushSeenRef.current;
@@ -210,7 +210,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
           }
         }
         // R21: push tanpa salesNum nyata (hanya nomor tiket) = in-memory
-        // saja — jangan fabrikasi baris head/menu di DB.
+        // saja - jangan fabrikasi baris head/menu di DB.
         if (tk.hasSalesNum) void cachePushTicket(tk);
         setTickets((prev) => {
           if (!prev.some((x) => x.id === tk.ticket.id)) return [tk.ticket, ...prev];
@@ -252,7 +252,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     return off;
   }, [t]);
   /** APP-EVENTS: sale lokal same-device (kasir→dapur satu device, audit row
-   * 12) — tiket tampil instan tanpa roundtrip server, tetap offline. */
+   * 12) - tiket tampil instan tanpa roundtrip server, tetap offline. */
   useEffect(() => subscribeLocalSale((s) => {
     if (!kitchenTagAllowed(kitchenTag())) return;
     setNow(Date.now());
@@ -264,7 +264,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
         no: s.salesNum,
         table: s.salesNum,
         mode: '',
-        time: new Date().toISOString().slice(11, 16),
+        time: fmtTimeInTz(new Date()),
         elapsed: '',
         items: s.items.map((it) => ({ name: it.name, qty: it.qty, price: it.qty > 0 ? Math.round(it.subtotal / it.qty) : 0 })),
         status: 'Baru',
@@ -275,7 +275,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     setLiveNotice(`${t('kit_title')}: ${s.salesNum}`);
   }), [t]);
   // SESI-FINAL-APP K4 (gambar katalog): fallback ESB pullMenu/pullStation di
-  // bawah SENGAJA dipertahankan — tak ada endpoint menu gambar GO-terminal
+  // bawah SENGAJA dipertahankan - tak ada endpoint menu gambar GO-terminal
   // (hanya pull master ESB yang mengisi ms_menu.imageUrl), jadi fallback ini
   // KANONIS penuh, bukan sementara. Jangan hapus.
   useEffect(() => { let on = true; (async () => { try { await initDb(); let menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); if (menus.length === 0) { const res = await apiFetch(ApiPath.pullMenu, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) && !res.fromDummy ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.menuId ?? it.id ?? '').trim(); if (!id) continue; const price = Number(it.price); await run( `INSERT OR REPLACE INTO ms_menu (id, menuName, categoryId, price, imageUrl, stationId, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [ id, it.name === undefined || it.name === null ? null : String(it.name), it.categoryId === undefined || it.categoryId === null ? null : String(it.categoryId), Number.isFinite(price) ? Math.round(price) : 0, it.imageUrl === undefined || it.imageUrl === null ? null : String(it.imageUrl), it.stationId === undefined || it.stationId === null ? null : String(it.stationId), it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } menus = await query<{ id: string; menuName: string | null; price: number | null; stationId: string | null }>( 'SELECT id, menuName, price, stationId FROM ms_menu WHERE flagActive = 1 LIMIT 500', ); } let stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); if (stations.length === 0) { const res = await apiFetch(ApiPath.pullStation, { method: 'GET' }); const { data } = unwrap<{ items?: Record<string, unknown>[] }>(res.data); const items = Array.isArray(data?.items) && !res.fromDummy ? data.items : []; const at = new Date().toISOString(); for (const it of items) { const id = String(it.stationId ?? it.id ?? '').trim(); if (!id) continue; await run( `INSERT INTO ms_station (id, stationName, printerName, connection, printerType, charPerLine, flagDefault, flagActive, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET stationName = excluded.stationName, printerName = excluded.printerName, printerType = excluded.printerType, charPerLine = excluded.charPerLine, flagDefault = excluded.flagDefault, flagActive = excluded.flagActive, syncDate = excluded.syncDate`, [ id, it.stationName === undefined || it.stationName === null ? null : String(it.stationName), it.printerName === undefined || it.printerName === null ? null : String(it.printerName), it.connection === undefined || it.connection === null ? null : String(it.connection), it.printerType === undefined || it.printerType === null ? null : String(it.printerType), Number.isFinite(Number(it.charPerLine)) ? Number(it.charPerLine) : 32, it.flagDefault === undefined || it.flagDefault === null ? 0 : Number(it.flagDefault) ? 1 : 0, it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0, at, ], ); } stations = await query<{ id: string; stationName: string | null }>( 'SELECT id, stationName FROM ms_station WHERE flagActive = 1 LIMIT 60', ); } let savedStatus: Record<string, KitchenStatus> = {}; try { const rows = await query<{ id: string; status: string | null }>( 'SELECT id, status FROM tr_kitchenticket LIMIT 500', ); for (const r of rows) { const st = (r.status ?? '').trim(); if (r.id && (st === 'Baru' || st === 'Diproses' || st === 'Selesai')) savedStatus[r.id] = st as KitchenStatus; } } catch { /* tabel kosong: daftar tetap kosong → empty-state */ } if (!on) return; if (Object.keys(savedStatus).length > 0) setMoved((m) => ({ ...savedStatus, ...m })); try { const rows = await query<{ id: string; ticketNo: string | null; salesNum: string | null; status: string | null; createdAt: string | null }>( 'SELECT id, ticketNo, salesNum, status, createdAt FROM tr_kitchenticket ORDER BY createdAt DESC LIMIT 200', ); const out: KitchenTicket[] = []; for (const row of rows) { const st = (row.status ?? '').trim(); if (st !== 'Baru' && st !== 'Diproses' && st !== 'Selesai') continue; const salesNum = (row.salesNum ?? '').trim(); let table = salesNum; let mode = ''; let time = (row.createdAt ?? '').slice(11, 16); try { if (salesNum) { const head = await queryFirst<{ tableNo: string | null; salesMode: string | null; createdAt: string | null }>( 'SELECT tableNo, salesMode, createdAt FROM tr_saleshead WHERE salesNum = ? LIMIT 1', [salesNum], ); if (head) { if (head.tableNo) table = head.tableNo; if (head.salesMode) mode = head.salesMode; const ht = (head.createdAt ?? '').slice(11, 16); if (ht) time = ht; } } } catch { /* info head opsional */ } let items: KitchenItem[] = []; try { if (salesNum) { const menuRows = await query<{ menuName: string | null; qty: number | null; price: number | null; note: string | null }>( 'SELECT menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ?', [salesNum], ); items = menuRows.map((mr) => ({ name: mr.menuName ?? '-', qty: Math.round(Number(mr.qty) || 0), ...(Number.isFinite(Number(mr.price)) ? { price: Math.round(Number(mr.price)) } : {}), ...(mr.note ? { note: mr.note } : {}) })); } } catch { /* item opsional */ } out.push({ id: row.id, no: (row.ticketNo ?? '').trim() || salesNum, table, mode, time, elapsed: '', items, status: st as KitchenStatus, priority: false, salesNum } as KitchenTicket); } if (!on) return; setTickets(out); } catch { if (on) setTickets([]); } if (menus.length > 0) { const pm: Record<string, number> = {}; for (const m of menus) { const p = Math.round(Number(m.price) || 0); if (m.menuName) pm[m.menuName] = p; pm[m.id] = p; } setLivePrice(pm); } if (menus.length > 0) { const ms: Record<string, string> = {}; for (const m of menus) { const sid = (m.stationId ?? '').trim(); if (!sid || !m.menuName) continue; ms[m.menuName.trim().toLowerCase()] = sid; } setMenuStation(ms); } if (stations.length > 0) { const sm: Record<string, string> = {}; for (const s of stations) { if (!s.stationName) continue; sm[s.id] = s.stationName; sm[s.id.toLowerCase()] = s.stationName; } setLiveStation(sm); } } catch { /* offline / DB belum siap - fallback konstanta tetap jalan */ } })(); return () => { on = false; }; }, []); const isFocused = useIsFocused(); /** Ambil detail head+item untuk tiket yang baru terlihat di SQLite lokal (id belum ada di state); prepend tanpa menggeser status lokal. Tak pernah melempar. */ const fillNewTickets = useCallback(async (fresh: { id: string; ticketNo: string | null; salesNum: string | null; status: string | null; createdAt: string | null }[]): Promise<void> => { if (fresh.length === 0) return; try { await initDb(); const out: KitchenTicket[] = []; for (const row of fresh) { const salesNum = (row.salesNum ?? '').trim(); let table = salesNum; let mode = ''; let time = (row.createdAt ?? '').slice(11, 16); try { if (salesNum) { const head = await queryFirst<{ tableNo: string | null; salesMode: string | null; createdAt: string | null }>('SELECT tableNo, salesMode, createdAt FROM tr_saleshead WHERE salesNum = ? LIMIT 1', [salesNum]); if (head) { if (head.tableNo) table = head.tableNo; if (head.salesMode) mode = head.salesMode; const ht = (head.createdAt ?? '').slice(11, 16); if (ht) time = ht; } } } catch { /* info head opsional */ } let items: KitchenItem[] = []; try { if (salesNum) { const menuRows = await query<{ menuName: string | null; qty: number | null; price: number | null; note: string | null }>('SELECT menuName, qty, price, note FROM tr_salesmenu WHERE salesNum = ?', [salesNum]); items = menuRows.map((mr) => ({ name: mr.menuName ?? '-', qty: Math.round(Number(mr.qty) || 0), ...(Number.isFinite(Number(mr.price)) ? { price: Math.round(Number(mr.price)) } : {}), ...(mr.note ? { note: mr.note } : {}) })); } } catch { /* item opsional */ } const st = (row.status ?? '').trim(); out.push({ id: row.id, no: (row.ticketNo ?? '').trim() || salesNum, table, mode, time, elapsed: '', items, status: (st === 'Diproses' || st === 'Selesai' ? st : 'Baru') as KitchenStatus, priority: false, salesNum } as KitchenTicket); } if (out.length === 0) return; setTickets((prev) => { const ids = new Set(prev.map((x) => x.id)); const add = out.filter((x) => !ids.has(x.id)); return add.length > 0 ? [...add, ...prev] : prev; }); } catch { /* cache best-effort: state in-memory tetap tampil */ } }, []); /** Refresh ringan tr_kitchenticket lokal (realtime-07): tiket lahir dari saveSale kasir perangkat yang sama tanpa putaran server. Satu SELECT murah; detail head+item hanya untuk id yang benar-benar baru. Tak pernah melempar. */ const refreshLocalTickets = useCallback(async (): Promise<void> => { try { await initDb(); const rows = await query<{ id: string; ticketNo: string | null; salesNum: string | null; status: string | null; createdAt: string | null }>('SELECT id, ticketNo, salesNum, status, createdAt FROM tr_kitchenticket ORDER BY createdAt DESC LIMIT 200'); const valid = rows.filter((r) => r.id && (r.status === 'Baru' || r.status === 'Diproses' || r.status === 'Selesai')); if (valid.length === 0) return; setMoved((m) => { let changed = false; const next: Record<string, KitchenStatus> = { ...m }; for (const r of valid) { if (!(r.id in next)) { next[r.id] = r.status as KitchenStatus; changed = true; } } return changed ? next : m; }); const ids = new Set(ticketsRef.current.map((x) => x.id)); const fresh = valid.filter((r) => !ids.has(r.id)); if (fresh.length > 0) await fillNewTickets(fresh); } catch { /* abaikan: daftar in-memory tetap jalan */ } }, [fillNewTickets]); /** Poll lokal 5 dtk HANYA saat layar fokus (SPEC §8, realtime-07): kasir→dapur satu perangkat bekerja offline. Interval dibuat saat fokus, dibersihkan saat blur/unmount. */ useEffect(() => { if (!isFocused) return; void refreshLocalTickets(); const id = setInterval(() => { void refreshLocalTickets(); }, 5000); return () => clearInterval(id); }, [isFocused, refreshLocalTickets]); const NEXT_LABEL: Record<KitchenStatus, string> = { Baru: t('kit_cook'), Diproses: t('kit_ready'), Selesai: '', }; const list = useMemo(
@@ -423,7 +423,7 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
                       const s = selected;
                       setSelected(null);
                       // R25: cetak ulang dari DB (head+menu), bukan state
-                      // in-memory — harga/item sesuai yang tersimpan. Sale
+                      // in-memory - harga/item sesuai yang tersimpan. Sale
                       // void DITOLAK via Alert (kunci hist_deny_title +
                       // hist_st_void) agar struk void tak tercetak aktif.
                       void (async () => {

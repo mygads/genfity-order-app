@@ -76,7 +76,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
   const [notice, setNotice] = useState('');
-  // Vertical Shell: onboarding 1x — tampil bila ms_setting Merchant/Vertical
+  // Vertical Shell: onboarding 1x - tampil bila ms_setting Merchant/Vertical
   // kosong (install fresh / DB lama pre-vertikal). Bukan blocking login;
   // merchant lama langsung pakai default tipe (WARUNG_QSR/GROCERY/SERVICE).
   const [verticalAsk, setVerticalAsk] = useState(false);
@@ -118,7 +118,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const [yest, setYest] = useState<{ total: number; trx: number } | null>(null);
   const [tables, setTables] = useState<TableMini[]>([]);
   const [lowStock, setLowStock] = useState<StockMini[]>([]);
-  // Kartu shift mulai kosong (tertutup) sampai tr_shiftlog dibaca di bawah —
+  // Kartu shift mulai kosong (tertutup) sampai tr_shiftlog dibaca di bawah -
   // tanpa shift terbuka = ajakan buka shift, bukan 'Shift Pagi 08:57' fiktif.
   const [shift, setShift] = useState(() => ({
     open: false,
@@ -376,7 +376,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const doLogout = () => {
     // E31 fase-1a: terminal-logout best-effort (fire-and-forget; device tetap
-    // bound) — gagal jaringan = abaikan, logout lokal tetap jalan.
+    // bound) - gagal jaringan = abaikan, logout lokal tetap jalan.
     try {
       const dev = (getSession()?.deviceId || '').trim();
       if (dev) void terminalLogout(dev).catch(() => {});

@@ -6,7 +6,7 @@ import type { CartItem } from '../../screens/cashier/CashierScreen';
 export type CartLine = Pick<CartItem, 'id' | 'name' | 'qty' | 'basePrice'>;
 
 /**
- * CartPanel — ringkasan keranjang reusable (tablet kanan / HP bottom-sheet isi).
+ * CartPanel - ringkasan keranjang reusable (tablet kanan / HP bottom-sheet isi).
  * Tanpa logika hitung (total dari pemanggil totals()), hanya tampil + stepper.
  */
 export default function CartPanel({

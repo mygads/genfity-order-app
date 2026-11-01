@@ -19,7 +19,7 @@ const SECTION_OF: Record<string, string> = {
   B1: 'Teras', B2: 'Teras', B3: 'Teras',
   C1: 'VIP', C2: 'VIP',
 };
-/** Contoh katalog lama dihapus — sumber & tujuan murni dari SQLite (live-only). */
+/** Contoh katalog lama dihapus - sumber & tujuan murni dari SQLite (live-only). */
 
 /** Normalisasi kode lama ber-strip ("A-03" → "A3") ke kanonis tanpa strip. */
 function canonTableNo(raw: string): string {

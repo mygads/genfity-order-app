@@ -5,7 +5,7 @@ import { colors, fonts, rp } from '../../theme';
 export type CatalogItem = { id: string; name: string; price: number; category: string; fav?: boolean; soldOut?: boolean; low?: boolean; unitLabel?: string; qty?: number };
 
 /**
- * CatalogGrid — grid katalog reusable (fashion/retail/resto sama).
+ * CatalogGrid - grid katalog reusable (fashion/retail/resto sama).
  * Sentuh ≥44dp, harga grouping rp(), tanpa logika vertikal (murni tampil).
  * Dipakai bertahap untuk pecah CashierScreen god-file (Fase 2).
  */

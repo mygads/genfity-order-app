@@ -77,7 +77,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
   try {
     await initDb();
     const nowIso = new Date().toISOString();
-    // Kolom userId wajib id user (bukan nama tampilan) — selaras saveSale.
+    // Kolom userId wajib id user (bukan nama tampilan) - selaras saveSale.
     const userId = getSession()?.userId || getSession()?.username || null;
     await run(
       `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
@@ -116,13 +116,13 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
   const audTopup = getCachedCurrency().code === 'AUD';
   const QUICK = audTopup ? QUICK_AUD : QUICK_IDR;
   const MIN_TOPUP = audTopup ? MIN_TOPUP_AUD : MIN_TOPUP_IDR;
-  // Tanpa memberId param = layar dibuka di luar alur (deep-link/dev) — JANGAN
+  // Tanpa memberId param = layar dibuka di luar alur (deep-link/dev) - JANGAN
   // tulis ke member contoh. Guard hasMember menonaktifkan submit di bawah.
   const hasMember = !!(route?.params?.memberId && route?.params?.memberId.trim());
   const memberId = route?.params?.memberId ?? '';
   const nama = route?.params?.nama ?? '';
   // Saldo awal dari param route bisa basi (top up cepat dari Member tidak
-  // lewat sini) — segarkan dari ms_member lokal saat mount.
+  // lewat sini) - segarkan dari ms_member lokal saat mount.
   const [saldoAwal, setSaldoAwal] = useState(route?.params?.saldo ?? 0);
   useEffect(() => {
     if (!memberId) return;
@@ -211,7 +211,7 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
       }
     }
     setSaveErr('');
-    // A8: konfirmasi sebelum gerak uang — kasir melihat nominal + metode +
+    // A8: konfirmasi sebelum gerak uang - kasir melihat nominal + metode +
     // penerima + saldo akhir; batal = lepas guard ketuk-ganda tanpa persist.
     appAlert(
       t('top_confirm_title'),

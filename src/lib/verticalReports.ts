@@ -1,6 +1,6 @@
 /**
  * Laporan vertikal offline-first (Fase 3, PRD §11).
- * Hitung dari baris lokal tr_saleshead/menu — tanpa BE baru, jadi kasir
+ * Hitung dari baris lokal tr_saleshead/menu - tanpa BE baru, jadi kasir
  * tetap dapat insight saat offline; angka server (laporan web) tetap kanonik.
  */
 export type SaleHeadLite = {

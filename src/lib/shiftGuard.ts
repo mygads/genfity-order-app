@@ -3,7 +3,7 @@ import { getBranchId } from '../config/server';
 
 /** Status shift terakhir dari DB lokal (tr_shiftlog).
  * A-P1-5 fail-closed: null HANYA berarti instalasi fresh (riwayat kosong
- * total) — dan fresh pun wajib buka shift via hasOpenShift (false).
+ * total) - dan fresh pun wajib buka shift via hasOpenShift (false).
  * DB-error TIDAK lagi null-bebas: dikembalikan sebagai status tutup dengan
  * flag dbError agar pemanggil memblokir + menampilkan pesan DB, bukan pesan
  * shift-tutup yang menyesatkan. Cermin guard navigator di App.tsx TIDAK
@@ -83,7 +83,7 @@ export async function getShiftBlockKind(): Promise<ShiftBlockKind | null> {
 /** Gerbang masuk kasir lintas-layar: bila shift tutup/fresh, sampaikan pesan
  *  lewat onBlocked lalu arahkan ke layar Shift (pola sama seperti CTA Transaksi
  *  Baru di Dashboard). DB-error: sampaikan dbErrorMsg (atau blockedMsg) TANPA
- *  navigasi — layar Shift pun butuh DB, kasir cukup diam + pesan + bisa coba
+ *  navigasi - layar Shift pun butuh DB, kasir cukup diam + pesan + bisa coba
  *  lagi. Kembalikan true bila boleh lanjut ke Cashier. */
 export async function ensureShiftOpen(
   navigation:

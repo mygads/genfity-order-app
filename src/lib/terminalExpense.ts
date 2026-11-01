@@ -1,6 +1,6 @@
 /**
  * A10: handoff expense/petty-cash → endpoint terminal
- * (POST /api/v1/terminals/{id}/expenses) — tutup 2 ledger kas sisi APP.
+ * (POST /api/v1/terminals/{id}/expenses) - tutup 2 ledger kas sisi APP.
  *
  * Kontrak:
  * - clientExpenseId = uuidv7 SEKALI per expense, persist pra-kirim:
@@ -12,7 +12,7 @@
  *   /api/v1/terminals/{id}/uploads multipart → 201 {url}) → alur upload-DULU:
  *   foto lokal diunggah SEBELUM handoff; sukses = kirim photoUrl; gagal/
  *   offline = photoPending (marker storage + banner) + retry ringan saat
- *   online kembali (re-post idempoten clientExpenseId yang SAMA — 409 =
+ *   online kembali (re-post idempoten clientExpenseId yang SAMA - 409 =
  *   sukses, tanpa ledger ganda; pending dihapus HANYA bila server menggema
  *   photoUrl / duplikat sukses).
  * - Offline / dummy-mode = {posted:false} → pemanggil fallback jalur ESB lama
@@ -48,7 +48,7 @@ export async function markPhotoPending(rowId: string, docPath: string): Promise<
 }
 
 /** Hapus marker pending (dipanggil HANYA setelah server menggema photoUrl /
- *  duplikat sukses — bukan saat upload lokal sukses). Tak pernah melempar. */
+ *  duplikat sukses - bukan saat upload lokal sukses). Tak pernah melempar. */
 export async function clearPhotoPending(rowId: string): Promise<void> {
   try {
     const idx = await getJSON<string[]>(PHOTO_PENDING_INDEX, []);
@@ -201,7 +201,7 @@ export interface ExpenseHandoffInput {
   amount: number;
   note: string;
   occurredAt: string;
-  /** URL foto remote (https) — SESI-FINAL-APP: diisi dari uploadExpensePhotoFirst
+  /** URL foto remote (https) - SESI-FINAL-APP: diisi dari uploadExpensePhotoFirst
    *  (upload-dulu) atau foto yang memang sudah remote; lokal = undefined +
    *  pemanggil menandai photoPending + retry saat online kembali. */
   photoUrl?: string;
@@ -250,7 +250,7 @@ export async function postExpenseToTerminal(inp: ExpenseHandoffInput): Promise<E
   if (!cid) return NOT_POSTED;
   // HP-E2E (2026-10-26): ledger lokal menyimpan expense NEGATIF (-jumlahNum;
   // ExpenseScreen + PettyCashFormScreen menulis amount negatif), kontrak
-  // terminal menuntut amount > 0 (BE 400 VALIDATION_ERROR bila <= 0 — expense
+  // terminal menuntut amount > 0 (BE 400 VALIDATION_ERROR bila <= 0 - expense
   // tak pernah sampai server + fallback ESB 404 vs Go). Normalisasi di choke
   // point ini agar semua pemanggil (layar + retry foto + drain sync.ts)
   // otomatis benar. Nol/NaN = NOT_POSTED (form memvalidasi jumlahNum > 0).

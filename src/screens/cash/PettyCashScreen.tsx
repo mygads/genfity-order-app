@@ -25,7 +25,7 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
   );
 
   // WIRE-APPROVAL (row-17 petty, Q18 STAFF-BISA-APPROVE-PETTY): approve =
-  // eskalasi PIN staff/owner (verifyLocalEscalation 'petty.approve' — kunci
+  // eskalasi PIN staff/owner (verifyLocalEscalation 'petty.approve' - kunci
   // khusus tanpa deny Staff; void/cancel/kompliment TETAP owner-only);
   // identitas approver tercatat via
   // markApproved(id, approver) + rincian by/at + sync. Tanpa PIN = tak approve.

@@ -60,7 +60,7 @@ export async function syncTerminalSettings(): Promise<TerminalSyncResult> {
       [t.terminalCode, t.branchId],
     );
     // Tag kanonis menang atas kunci legacy deviceRole bila server mengirim
-    // keduanya — kumpulkan dulu, terapkan SETELAH loop (server menang).
+    // keduanya - kumpulkan dulu, terapkan SETELAH loop (server menang).
     let tagCandidate: string | null = null;
     let tagCandidateKey = 'tag';
     let legacyRoleCandidate: string | null = null;

@@ -1,9 +1,9 @@
 /**
  * P1-1b: prompt PIN manajer transport-only (cermin FE ManagerPinModal +
  * withPosPin). PIN 4–8 digit (kontrak BE manager PIN, Opsi A: slot delete_pin
- * sunset — server hanya baca `pin`), dipegang di
+ * sunset - server hanya baca `pin`), dipegang di
  * state lokal saja: diserahkan ke onSubmit untuk SATU panggilan live, lalu
- * dibersihkan saat tutup — TAK PERNAH dipersist, di-log, atau diantrekan.
+ * dibersihkan saat tutup - TAK PERNAH dipersist, di-log, atau diantrekan.
  */
 import { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';

@@ -1,15 +1,15 @@
 /**
  * Klien bind-flow B1/R1 (SPEC-TERMINAL-SESSION §3 + §5): branch picker,
  * terminal picker, PIN terminal, bind atomik, terminal-login single-stage
- * (koreksi 2026-10-17 — RoE live: sesi penuh langsung, tanpa tahap-2
+ * (koreksi 2026-10-17 - RoE live: sesi penuh langsung, tanpa tahap-2
  * staffPin), revoke logout, okupansi terminal, dan deteksi kick via event
- * `takeover` SSE terminal (koreksi 2026-10-17 — tak ada frame SESSION_KICKED
+ * `takeover` SSE terminal (koreksi 2026-10-17 - tak ada frame SESSION_KICKED
  * push sisi server; 401 = gagal auth final → re-login, BUKAN bukti kick).
  *
  * Semua call mencoba BE Go lewat ApiPath (E01/E02/E03/E06 + E07/E09)
  * memakai apiFetch (Local/Dummy/Real Mode ala lib/apiSource.ts). Bila BE
  * belum ada / tak terjangkau, kembalikan {ok:false, reason:'need_be'|
- * 'offline'} yang jujur — layar menampilkan status eksplisit, bukan bypass
+ * 'offline'} yang jujur - layar menampilkan status eksplisit, bukan bypass
  * diam-diam. Daftar branch/terminal BOLEH memakai fixture dummy lokal
  * (fromDummy:true agar layar melabeli "mode lokal"); verifikasi PIN,
  * bind, dan login WAJIB fail-closed (dummy tak pernah sukses:
@@ -29,7 +29,7 @@ import { parseOpeningHours, type OpeningHour } from './openingHours';
 /** Alasan gagal jujur: BE belum dikonfigurasi vs jaringan putus. */
 export type TerminalApiReason = 'need_be' | 'offline';
 
-/** Varian gagal — kode/pesan server opsional (fase-1b): layar butuh bedakan
+/** Varian gagal - kode/pesan server opsional (fase-1b): layar butuh bedakan
  * 409 okupansi vs offline (bind/claim) tanpa menebak dari status saja. */
 export interface TerminalApiErr {
   ok: false;
@@ -97,7 +97,7 @@ function fail<T>(status: number, fromDummy: boolean): TerminalApiErr {
 }
 
 /** Gagal + bawa kode/pesan server (envelope error tanpa `data`, baca
- * top-level — deklarasi fungsi di-hoist, definisi di bawah). */
+ * top-level - deklarasi fungsi di-hoist, definisi di bawah). */
 function failWith<T>(status: number, fromDummy: boolean, rawBody: unknown): TerminalApiErr {
   return {
     ...fail<T>(status, fromDummy),
@@ -120,7 +120,7 @@ function asBranch(b: Record<string, unknown>): BranchItem {
 }
 
 function asTerminal(t: Record<string, unknown>): TerminalItem {
-  // F10: tag asing → '' (fail-closed; penolakan di layar PIN/F11) — jangan lolos mentah.
+  // F10: tag asing → '' (fail-closed; penolakan di layar PIN/F11) - jangan lolos mentah.
   const rawTag = str(t.tag).trim().toLowerCase();
   return {
     terminalId: str(t.terminalId ?? t.id),
@@ -159,7 +159,7 @@ function parseTerminalList(body: unknown): TerminalItem[] | null {
 // Fallback fixture dummy lokal: HANYA untuk daftar terminal picker (E09),
 // tak pernah untuk PIN/bind/login (ketiganya tetap fail-closed need_be/
 // offline). Pola require() LITERAL-STATIS mengikuti preseden lib/apiSource.ts
-// (aman untuk transform Metro web — yang dilarang hanya require() DINAMIS
+// (aman untuk transform Metro web - yang dilarang hanya require() DINAMIS
 // seperti require(p)). Fixture branch-terminals.json = envelope
 // {request, response:{data:{branchId, terminals}}} khusus B001; branch lain
 // => null (need_be jujur, bukan daftar palsu). Fixture daftar branch (E07)
@@ -172,7 +172,7 @@ function tryFixtureList(
   kind: 'branches' | 'terminals',
   branchId?: string,
 ): Record<string, unknown>[] | null {
-  if (kind === 'branches') return null; // fixture E07 belum ada — need_be jujur
+  if (kind === 'branches') return null; // fixture E07 belum ada - need_be jujur
   try {
     const data = (branchTerminalsFixture as {
       response?: { data?: { branchId?: unknown; terminals?: unknown } };
@@ -377,7 +377,7 @@ export async function updatePrintDestination(
 
 /**
  * E02: cek PIN terminal tanpa efek (UX bind). Fail-closed: dummy/offline
- * tak pernah {valid:true} — hanya jawaban BE asli yang dipercaya.
+ * tak pernah {valid:true} - hanya jawaban BE asli yang dipercaya.
  */
 export async function validateTerminalPin(
   terminalId: string,
@@ -404,7 +404,7 @@ export async function validateTerminalPin(
  * (layar tampilkan bind_failed, tanpa bypass).
  * Fase-1b: kegagalan bawa errorCode/serverMessage (failWith) agar layar bedakan
  * 409 okupansi (TERMINAL_OCCUPIED/DEVICE_CONFLICT/TAG_CONFLICT → tawarkan claim)
- * dari offline/need_be — tanpa menebak dari status saja.
+ * dari offline/need_be - tanpa menebak dari status saja.
  */
 export async function bindTerminal(
   terminalId: string,
@@ -434,7 +434,7 @@ export async function bindTerminal(
 }
 
 /**
- * E32: claim — ambil alih terminal yang terokupansi (satu-satunya jalur
+ * E32: claim - ambil alih terminal yang terokupansi (satu-satunya jalur
  * takeover eksplisit). POST /terminals/{id}/claim {pin,deviceId} → {bound,
  * terminal{tag}, kickedUserId}. PIN terminal WAJIB (fase-1a; tanpa pin →
  * PIN_REQUIRED 401); pindah DEVICE saja (okupansi user lain tak disentuh);
@@ -473,7 +473,7 @@ export async function claimTerminalPin(
 }
 
 /**
- * E01: terminal-login LOGIN-FIRST dua tahap (F1, keputusan 2026-10-17) —
+ * E01: terminal-login LOGIN-FIRST dua tahap (F1, keputusan 2026-10-17) -
  * POST /api/v1/auth/terminal-login {username,password,deviceId,
  * terminalCode?,terminalPin?,merchantId?}:
  *   - Tahap A (picker): tanpa terminalCode di device yang belum bound →
@@ -487,7 +487,7 @@ export async function claimTerminalPin(
  * `staffPin` SENGAJA TAK ADA di body: server mengabaikan field tak dikenal.
  * PIN hybrid: online = verifikasi server (E29, pinVersion disimpan sesi);
  * offline = verifikasi lokal memakai grant triple (khusus device+user+
- * terminal yang sudah bound). Fail-closed — dummy/offline selalu {ok:false}
+ * terminal yang sudah bound). Fail-closed - dummy/offline selalu {ok:false}
  * (login pertama wajib online, tanpa grant bawaan).
  */
 export interface StaffLoginInput {
@@ -497,7 +497,7 @@ export interface StaffLoginInput {
   terminalPin?: string;
   merchantId?: number;
   deviceId?: string;
-  /** Klien pemanggil — APP selalu 'app' (BE menyimpan + claim mengembalikan
+  /** Klien pemanggil - APP selalu 'app' (BE menyimpan + claim mengembalikan
    * tookOver:{kickedUserName,...}). */
   clientType?: string;
 }
@@ -514,7 +514,7 @@ export async function staffLogin(
 }
 
 // ---------------------------------------------------------------------------
-// 401 vs kick (K1; koreksi 2026-10-17 atas arah 401-guard yang SALAH —
+// 401 vs kick (K1; koreksi 2026-10-17 atas arah 401-guard yang SALAH -
 // kebenaran BE terverifikasi: tabel grant terminal TAK PERNAH dibaca
 // middleware auth, kick TAK PERNAH merevoke user_sessions, dan server TAK
 // PERNAH push frame SESSION_KICKED. Perangkat yang ditendang TIDAK menerima
@@ -531,12 +531,12 @@ export async function staffLogin(
 // ---------------------------------------------------------------------------
 
 /**
- * E06/E31: akhiri sesi server-side (O1, SPEC §7) — BE hanya punya
+ * E06/E31: akhiri sesi server-side (O1, SPEC §7) - BE hanya punya
  * POST /api/v1/auth/terminal-logout {deviceId} (deviceId dilampirkan otomatis
  * dari getDeviceId; field sessionId/userId diteruskan apa adanya, server
  * mengabaikannya). Server merevoke sesi + grant triple TAPI mempertahankan
  * bound_device_id (logout tetap bound untuk fast-login). Gagal jaringan →
- * {ok:false}; pemanggil menandai pendingRevoke untuk di-flush saat online —
+ * {ok:false}; pemanggil menandai pendingRevoke untuk di-flush saat online -
  * logout lokal tetap langsung berlaku.
  */
 export async function logoutRevoke(input: {
@@ -562,15 +562,15 @@ export async function logoutRevoke(input: {
 }
 
 /**
- * E29: pin-verify — langkah 3 login staged fase-1a (faktor PIN user /
+ * E29: pin-verify - langkah 3 login staged fase-1a (faktor PIN user /
  * workforce, verifikasi SERVER via staff_pos_pins). POST
- * /terminals/{id}/pin-verify {pin} → {verified:true, pinVersion} —
+ * /terminals/{id}/pin-verify {pin} → {verified:true, pinVersion} -
  * pinVersion = sumber versi PIN hybrid (simpan ke sesi; invalidasi cache
  * PIN lokal saat sync bila versi berbeda). Fail-closed seperti E02, TAPI
  * kode error dipertahankan agar layar bisa bedakan: USER_PIN_NOT_SET (400,
  * belum enroll → fallback lokal), USER_PIN_INVALID (401), USER_PIN_LOCKED
  * (423). INTI HTTP TUNGGAL E29 (LoginScreen.callPinVerify mendelegasikan ke
- * sini — jangan duplikasi fetch E29 di layar). Token opsional: login-first
+ * sini - jangan duplikasi fetch E29 di layar). Token opsional: login-first
  * belum punya sesi tersimpan saat PIN modal (completeOnline jalan SETELAH
  * PIN lolos) sehingga JWT tahap-B diteruskan eksplisit; tanpa ini E29 selalu
  * 401 dan login macet permanen (temuan review Trek 1).
@@ -635,7 +635,7 @@ export async function pinVerifyTerminalPin(
 }
 
 /**
- * E14: set-pin — owner set/rotasi PIN terminal (BE: terminalPinRequest {pin},
+ * E14: set-pin - owner set/rotasi PIN terminal (BE: terminalPinRequest {pin},
  * 4–8 digit; owner-only + UserAuth via bearer sesi/V2 otorisasi server).
  * 200 → {updated:true}. 401/403/422 diteruskan jujur (failWith) untuk copy
  * layar (bukan owner / PIN tak valid / terminal tak ditemukan).
@@ -654,8 +654,8 @@ export async function setTerminalPin(
 }
 
 /**
- * E15: pair — pasangkan display view→kasir. POST /terminals/{viewId}/pair
- * {kasirId} (string numerik OK — BE parseTerminalPairID terima angka/string).
+ * E15: pair - pasangkan display view→kasir. POST /terminals/{viewId}/pair
+ * {kasirId} (string numerik OK - BE parseTerminalPairID terima angka/string).
  * Penolakan BE diteruskan via failWith agar layar jujur: ONLY_DISPLAY_PAIRS
  * (422, pemanggil bukan view_pelanggan), NOT_A_KASIR (422), PAIR_CONFLICT
  * (422 + data.pairedViewId), FORBIDDEN (kasir beda branch), 410 TERMINAL_
@@ -680,7 +680,7 @@ export async function pairTerminalView(
 }
 
 /**
- * E16: unpair — lepas pairing display. DELETE /terminals/{viewId}/pair
+ * E16: unpair - lepas pairing display. DELETE /terminals/{viewId}/pair
  * (tanpa body; owner-only; via apiDelete/apiFetch method DELETE). Idempoten:
  * belum ter-pair tetap 200 {paired:false} → kembalikan apa adanya.
  */
@@ -704,13 +704,13 @@ export async function unpairTerminalView(
 /**
  * qr-consume (Q3 backend, mendarat 2026-10-17): tukar token QR sekali-pakai
  * hasil scan HP. POST /terminals/{id}/qr-consume {qrToken (wajib), deviceId?
- * (≤128 char, diteruskan ke tahap-B, tak disimpan server)} — PUBLIC (HP belum
+ * (≤128 char, diteruskan ke tahap-B, tak disimpan server)} - PUBLIC (HP belum
  * punya sesi; rate-limit bentuk terminal-login) → {terminalId, terminalCode,
  * merchantId, pinVersion ADVISORY (versi PIN pembuat token; E29 pasca-login
- * yang menang — timpa)}. TIDAK mencetak sesi/grant/binding; PIN terminal
+ * yang menang - timpa)}. TIDAK mencetak sesi/grant/binding; PIN terminal
  * tetap WAJIB di tahap-B (langsung lompat ke stage-B tanpa ketik ulang kode).
  * Token mentah JANGAN di-log/persist. Gagal jujur via failWith:
- * QR_TOKEN_MISMATCH (400, token milik terminal lain — TIDAK hangus),
+ * QR_TOKEN_MISMATCH (400, token milik terminal lain - TIDAK hangus),
  * QR_TOKEN_USED (409/410), QR_TOKEN_EXPIRED/INVALID (410 → minta token baru
  * via issueTerminalQr), TERMINAL_NOT_FOUND (404).
  */
@@ -760,7 +760,7 @@ export async function consumeTerminalQr(
  * login sekali-pakai. POST /terminals/{id}/qr-issue (tanpa body; member-only
  * + UserAuth) → {qrToken, expiresAt, ttlSeconds} (TTL 60 dtk BE). Token mentah
  * hanya dikembalikan sekali (server simpan SHA256): JANGAN log/persist mentah
- * — teruskan ke QR display lalu buang. Konsumen (Q3) wajib hitung mundur
+ * - teruskan ke QR display lalu buang. Konsumen (Q3) wajib hitung mundur
  * ttlSeconds dan minta token baru saat kedaluwarsa.
  */
 export interface TerminalQrIssueData {
@@ -797,11 +797,11 @@ export async function issueTerminalQr(
 }
 
 /**
- * E04: unbind — owner lepas binding terminal (force-unbind admin; pengusiran
+ * E04: unbind - owner lepas binding terminal (force-unbind admin; pengusiran
  * penghuni oleh owner). POST /terminals/{id}/unbind (tanpa body; owner-only
  * + UserAuth) → {terminalId, bound:false}. Beda dari E30 release (occupant
  * melepas MILIKNYA sendiri: member-only + {deviceId}). UI exit/keluar-resto +
- * aturan peran Q-E milik lane screens — helper ini hanya transport.
+ * aturan peran Q-E milik lane screens - helper ini hanya transport.
  */
 export async function unbindTerminal(
   terminalId: string,
@@ -851,7 +851,7 @@ export async function createTerminal(
 
 /**
  * E11: owner ubah terminal (parsial). PATCH /terminals/{id} {name?, tag?}
- * → 200 + bentuk terminal. E13 /tag khusus TAK ADA di BE — ganti tag lewat
+ * → 200 + bentuk terminal. E13 /tag khusus TAK ADA di BE - ganti tag lewat
  * sini. 409 TERMINAL_QUEUE_EXISTS bila menjadi view_queue kedua di branch.
  */
 export async function patchTerminal(
@@ -892,7 +892,7 @@ export async function deleteTerminal(
 }
 
 /**
- * E30: release — occupant melepas binding MILIKNYA sendiri (full clear
+ * E30: release - occupant melepas binding MILIKNYA sendiri (full clear
  * device+user + burn grant triple). POST /terminals/{id}/release {deviceId}
  * → {released:true}. Beda dari E04 unbind (owner-only, admin).
  */
@@ -910,7 +910,7 @@ export async function releaseTerminal(
 }
 
 /**
- * E31: terminal-logout — akhiri sesi POS. POST /auth/terminal-logout
+ * E31: terminal-logout - akhiri sesi POS. POST /auth/terminal-logout
  * {deviceId} → {loggedOut, deviceStillBound}. Server merevoke sesi + grant
  * triple TAPI mempertahankan bound_device_id (logout tetap bound untuk
  * fast-login; full release = E30/E04). Gagal jaringan → {ok:false};
@@ -938,7 +938,7 @@ export async function terminalLogout(
     fromDummy: false,
   };
 }
-/** E05: sesi aktif terminal (okupansi tunggal, SPEC §7.1) — MISSING-BE
+/** E05: sesi aktif terminal (okupansi tunggal, SPEC §7.1) - MISSING-BE
  * (GET /terminals/{id}/occupant tanpa rute; 0 pemanggil). DEPRECATED sampai
  * lane BE mendaratkan rute (atau snapshot okupansi via SSE, alternatif yang
  * disetujui swarm): fail-closed, JANGAN dipakai untuk call baru. */
@@ -974,8 +974,8 @@ export async function fetchOccupant(
 /** S-READINESS: kesiapan terminal (SPEC-TERMINAL-SESSION §11 baris S-READINESS).
  * GET /api/v1/terminals/{id}/readiness {deviceId?} → {needsShift, needsCash,
  * shift{open}, cash{open}, grant{valid}, pairing} (BE terminal_readiness.go,
- * member-only; deviceId opsional — tanpanya grant dilaporkan valid:false).
- * Fail-open jujur: {ok:false}/dummy/offline = status TAK DIKETAHUI —
+ * member-only; deviceId opsional - tanpanya grant dilaporkan valid:false).
+ * Fail-open jujur: {ok:false}/dummy/offline = status TAK DIKETAHUI -
  * pemanggil JANGAN blokir (gerbang shift lokal App.tsx tetap berlaku);
  * gate 'Shift' hanya bila server eksplisit menjawab needsShift/needsCash.
  * Pola cermin fetchOccupant (GET + withId + unwrap + fail jujur). */
@@ -1021,10 +1021,10 @@ export async function fetchTerminalReadiness(
  * stock{alertEnabled,defaultLowStockThreshold},
  * timer{defaultLimitMin,warnBeforeMin}} (BE terminal_pos_config.go,
  * member-only; pola cermin fetchTerminalReadiness: GET + withId + unwrap +
- * fail jujur — pemanggil seed best-effort, JANGAN blokir login bila gagal).
+ * fail jujur - pemanggil seed best-effort, JANGAN blokir login bila gagal).
  * Angka disanitasi ke default BE (threshold 5, timer 90/10).
  * S-F: kontrak BE bertambah (deliveryFee, roundingStep, workforce,
- * printDestinations) — semua disanitasi toleran (absen = null/default). */
+ * printDestinations) - semua disanitasi toleran (absen = null/default). */
 export interface TerminalDeliveryFee {
   base: number | null;
   perKm: number | null;
@@ -1107,7 +1107,7 @@ function cleanPrintDestination(r: unknown): TerminalPrintDestination | null {
 /** SESI-FINAL-APP: merchant mewajibkan foto bukti bayar di PayScreen.
  * Kontrak BE paralel: flag `requirePaymentProof` (absen = OFF). Dibaca
  * toleran: top-level ATAU nested posBehaviorSettings/posBehavior/pb ATAU
- * paymentSettings/payment_settings (cache payment-settings) — varian
+ * paymentSettings/payment_settings (cache payment-settings) - varian
  * snake_case ikut dibaca. Absen/error = false (perilaku lama, nol-regresi). */
 export function parseRequirePaymentProof(data: unknown): boolean {
   if (!data || typeof data !== 'object') return false;
@@ -1303,7 +1303,7 @@ export async function submitStockCountItem(
 }
 
 // --------------------------------------------------------------------------
-// TRISISI2 ronde-2 — klien siap-kontrak (BE-BELUM-ADA 2026-10-25 kecuali
+// TRISISI2 ronde-2 - klien siap-kontrak (BE-BELUM-ADA 2026-10-25 kecuali
 // transition): expenses (A10), table-transition (A11), vouchers burn/release
 // (A12). Pola fail jujur sama: {ok:false} = pemanggil fallback, BUKAN sukses.
 // 409-duplicate = sukses idempoten (catat id server).
@@ -1318,7 +1318,7 @@ export interface TerminalExpenseInput {
   note: string;
   occurredAt: string;
   /** A-P1-6: URL foto struk bila SUDAH remote (https). Lokal (file://) JANGAN
-   *  dikirim — BE menolak >2048 char; tanpa endpoint upload terminal, foto
+   *  dikirim - BE menolak >2048 char; tanpa endpoint upload terminal, foto
    *  lokal ditandai photoPending (banner + marker storage, lapor PARKED). */
   photoUrl?: string;
 }
@@ -1389,7 +1389,7 @@ export async function createTerminalExpense(
 }
 
 // --------------------------------------------------------------------------
-// SESI-FINAL-APP: upload berkas terminal (kontrak BE paralel — pakai spec
+// SESI-FINAL-APP: upload berkas terminal (kontrak BE paralel - pakai spec
 // persis): POST /api/v1/terminals/{id}/uploads multipart {file} → 201 {url}
 // (maks 5MB sisi server; klien mengecilkan via preparePhoto JPEG 0.7).
 // Dipakai expense-foto + payment-proof (upload-dulu, bukan photoPending-only).
@@ -1431,7 +1431,7 @@ function readUploadUrl(body: unknown): string {
   return '';
 }
 
-/** Lazy-resolve token sesi (cermin resolveSessionToken config/server — lazy
+/** Lazy-resolve token sesi (cermin resolveSessionToken config/server - lazy
  * require agar nol risiko siklus impor statis). */
 function uploadSessionToken(): string {
   try {

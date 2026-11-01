@@ -68,7 +68,7 @@ export async function exec(source: string): Promise<void> {
 /**
  * Transaksi atomik (#22): semua run/query di dalam fn berjalan dalam satu
  * BEGIN/COMMIT pada koneksi tunggal (getDb singleton). Gagal = ROLLBACK +
- * lempar ulang. TIDAK bersarang (nested BEGIN ditolak SQLite) — hanya untuk
+ * lempar ulang. TIDAK bersarang (nested BEGIN ditolak SQLite) - hanya untuk
  * alur tulis tingkat atas seperti saveSale.
  */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
@@ -95,7 +95,7 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
 const SCHEMA: string[] = SCHEMA_STATEMENTS;
 
 /**
- * Migrasi kolom bertahap untuk database lama — lihat dbSchema.ts.
+ * Migrasi kolom bertahap untuk database lama - lihat dbSchema.ts.
  */
 const MIGRATIONS: string[] = MIGRATION_STATEMENTS;
 

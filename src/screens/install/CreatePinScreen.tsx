@@ -1,6 +1,6 @@
 import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
-import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { clearPinChangeRequired } from '../../lib/supervisor';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** B9: PIN lemah — semua berulang atau berurutan umum. */
+import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { clearPinChangeRequired } from '../../lib/supervisor';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** B9: PIN lemah - semua berulang atau berurutan umum. */
 const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
 const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default function CreatePinScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
@@ -27,7 +27,7 @@ const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default functi
   // online, bukan PIN lokal saja.
   // userId dari params bila pemanggil sudah validate employee, else akun
   // admin perangkat ('u-admin' seed) karena alur install membuat PIN admin
-  // pertama — BUKAN 'U07' (id fiktif fixture dummy yang sudah disapu seed).
+  // pertama - BUKAN 'U07' (id fiktif fixture dummy yang sudah disapu seed).
   const userId = route?.params?.userId ?? 'u-admin';
   // A-P0-1: PIN baru dari manusia membersihkan flag wajib-ganti (seed acak /
   // reset) agar eskalasi supervisor dibuka kembali untuk akun ini.

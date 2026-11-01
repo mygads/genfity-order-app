@@ -3,7 +3,7 @@ import { TABLET_BP, colors, fonts } from '../theme';
 import { radius } from '../theme/radius';
 
 /**
- * Warna border input — PAR-01 parity (2026-10-27): #D0D5DD paritas FE gray-300
+ * Warna border input - PAR-01 parity (2026-10-27): #D0D5DD paritas FE gray-300
  * (dulu #BDBDBD). Token kanonis: colors.inputBorder. LoginScreen masih literal
  * #BDBDBD; migrasi ke token ini butuh acc owner (lihat decision-packet).
  */
@@ -24,7 +24,7 @@ interface InputProps extends TextInputProps {
 }
 
 /**
- * Kolom input bersama — PAR-01 parity (2026-10-27): h56, r12 via radius.input
+ * Kolom input bersama - PAR-01 parity (2026-10-27): h56, r12 via radius.input
  * (dulu r14; paritas FE rounded-lg 12px), border 1 #D0D5DD, padding 16, font 14.
  *
  * Sadar-tema: warna baca dari token `colors.*` (background kartu,

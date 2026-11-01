@@ -19,7 +19,7 @@ function prn(key: string, vars?: Record<string, string | number>): string {
 }
 
 export type PrintOutcome =
-  // `payloadBase64` (tugas G): byte struk yang dirender — pemanggil
+  // `payloadBase64` (tugas G): byte struk yang dirender - pemanggil
   // fan-out AUTO memakainya ulang tanpa render ganda. Hanya diisi jalur
   // struk (bukan tiket/slip; bukan web-OS-print yang tanpa byte).
   | { ok: true; bytes: number; printer: string; payloadBase64?: string }
@@ -35,9 +35,9 @@ interface StoredStation {
   role: string;
   conn: 'Bluetooth' | 'LAN' | 'Star';
   address: string;
-  /** Lebar kertas station (32/48) — diteruskan ke builder ESC/POS. */
+  /** Lebar kertas station (32/48) - diteruskan ke builder ESC/POS. */
   cpl?: 32 | 48;
-  /** Potong kertas otomatis — diteruskan ke builder via `cut` (R10). */
+  /** Potong kertas otomatis - diteruskan ke builder via `cut` (R10). */
   autocut?: boolean;
   isDefault?: boolean;
   connected?: boolean;
@@ -108,7 +108,7 @@ function activeScope(): { branchId: string; terminalCode: string } {
 }
 
 /**
- * R1: ranking per PASANGAN {branchId, terminalCode} — terminalCode cocok
+ * R1: ranking per PASANGAN {branchId, terminalCode} - terminalCode cocok
  * tetapi branchId beda = milik terminal lain (2), bukan binding aktif.
  * 0 = terikat terminal aktif, 1 = warisan tanpa binding, 2 = milik terminal lain.
  */
@@ -126,7 +126,7 @@ function scopeRank(s: StoredStation, scope: { branchId: string; terminalCode: st
 /**
  * Antrekan cetak persisten (APP-PRINTER, audit row 11): gagal kirim = antre
  * di tr_printqueue via `lib/printqueue.ts` (envelope `{target,name,kind,
- * label,retries}` + drain FIFO), BUKAN Alert-and-drop. Tak pernah melempar —
+ * label,retries}` + drain FIFO), BUKAN Alert-and-drop. Tak pernah melempar -
  * null bila SQLite gagal (dialog di atas sudah menjelaskan ke kasir).
  *
  * @returns id antrean (UUIDv7) atau null bila gagal ditulis.
@@ -150,7 +150,7 @@ interface ResolvedStation {
   cols: 32 | 48;
   /** station.autocut (undefined = ikut setelan global autocut). */
   autocut?: boolean;
-  /** Peran station (Kasir/Dapur/…) — dipakai drain kind-aware (R3). */
+  /** Peran station (Kasir/Dapur/…) - dipakai drain kind-aware (R3). */
   role: string;
 }
 
@@ -172,9 +172,9 @@ async function defaultStation(): Promise<ResolvedStation | null> {
     const pool = stations.filter((s) => scopeRank(s, scope) < 2);
     const bound = pool.filter((s) => scopeRank(s, scope) === 0);
     // R8: `connected` = penanda preferensi manual ("favorit"), BUKAN hasil
-    // verifikasi liveness — kirim gagal tetap antre persisten, bukan drop.
+    // verifikasi liveness - kirim gagal tetap antre persisten, bukan drop.
     // S12-guard: posisi fallback buta-role (bound[0]/pool[0]) tidak boleh
-    // mendaratkan struk kasir ke station dapur/checker/label — lebih baik
+    // mendaratkan struk kasir ke station dapur/checker/label - lebih baik
     // tetap antre daripada salah-cetak. isDefault/isDefault+connected/Kasir
     // eksplisit tetap dihormati (niat user); role kosong/unknown = boleh
     // (station legacy tanpa role).
@@ -190,7 +190,7 @@ async function defaultStation(): Promise<ResolvedStation | null> {
       pool.find((s) => s.role === 'Kasir'),
       nonKitchenFallback(pool),
     ];
-    // R7: lewati station tanpa alamat (targetOf null) — coba kandidat
+    // R7: lewati station tanpa alamat (targetOf null) - coba kandidat
     // berikutnya yang bisa dikirimi, bukan gagal karena pilihan pertama buntu.
     const seen = new Set<string>();
     for (const d of cands) {
@@ -364,7 +364,7 @@ export interface TagPrintInput {
 
 /**
  * Dispatcher varian by-tag (R5): tag view (pelanggan/antrean) TIDAK PERNAH
- * menerima struk ber-harga — hanya tiket dapur / slip antrean (tanpa harga);
+ * menerima struk ber-harga - hanya tiket dapur / slip antrean (tanpa harga);
  * bila keduanya absen, TOLAK jujur (Alert + outcome gagal), bukan fallback ke
  * struk. Tag kasir/dapur/full/unknown: dapur → tiket bila ada; selainnya struk
  * bila ada; fallback jujur ke payload yang ada (tak pernah gagal hanya karena
@@ -384,7 +384,7 @@ export async function printForTag(input: TagPrintInput): Promise<PrintOutcome> {
       const { tOf, getLang } = require('./i18n') as typeof import('./i18n');
       appAlert(tOf('hist_deny_title', getLang()), tOf('kit_print_fail', getLang()));
     } catch {
-      /* abaikan — outcome di bawah tetap jujur */
+      /* abaikan - outcome di bawah tetap jujur */
     }
     return { ok: false, reason: 'send-failed', detail: 'printForTag: tag view menolak struk ber-harga' };
   }
@@ -398,7 +398,7 @@ export async function printForTag(input: TagPrintInput): Promise<PrintOutcome> {
       input.station ? { stationId: input.station } : undefined,
     );
   }
-  // Fallback: payload varian tak disediakan — pakai yang ada.
+  // Fallback: payload varian tak disediakan - pakai yang ada.
   if (input.ticket) {
     return printKitchenTicket(input.station ?? input.ticket.station, input.ticket);
   }
@@ -441,7 +441,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   if (targets.length === 1) {
     return printReceiptToSingle(r, targets[0] as ResolvedStation);
   }
-  // Render sekali per (cols,cut) — byte dirakit per grup, bukan per station.
+  // Render sekali per (cols,cut) - byte dirakit per grup, bukan per station.
   const groups = new Map<string, { cols: 32 | 48; cut: boolean; bytes: Uint8Array; stations: ResolvedStation[] }>();
   for (const t of targets) {
     const cols = r.cols ?? t.cols;
@@ -466,7 +466,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
   let lastReason = '';
   let lastDetail: string | undefined;
   let needDevClient = false;
-  // 1:1 BE copies: destinasi server membawa `copies` (PrintBridge) —
+  // 1:1 BE copies: destinasi server membawa `copies` (PrintBridge) -
   // cetakan lokal mengulang kirim per station sesuai salinan itu (maks 3
   // agar tak boros bila salah konfigurasi). Tanpa baris destinasi = 1x.
   let copiesByName: Record<string, number> = {};
@@ -510,7 +510,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
         lastDetail = fr.detail;
         if (fr.reason === 'need-dev-client') needDevClient = true;
         // Gagal per station = antre persisten (target station itu; drain
-        // kind-aware mengurasnya saat jalur hidup) — bukan Alert-and-drop.
+        // kind-aware mengurasnya saat jalur hidup) - bukan Alert-and-drop.
         await enqueuePrintJob(g.bytes, t.target, {
           name: t.name,
           kind: 'receipt',
@@ -555,7 +555,7 @@ export async function printReceiptData(r: EscReceipt, opts?: { stationId?: strin
 
 /**
  * Jalur tunggal (override station eksplisit / fallback legacy): perilaku lama
- * — kirim 1:1, gagal = antre persisten + outcome `queued`.
+ * - kirim 1:1, gagal = antre persisten + outcome `queued`.
  */
 async function printReceiptToSingle(r: EscReceipt, d: ResolvedStation | null): Promise<PrintOutcome> {
   if (!d) {
@@ -564,7 +564,7 @@ async function printReceiptToSingle(r: EscReceipt, d: ResolvedStation | null): P
       prn('prn_no_printer'),
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target): tercetak otomatis
-    // saat printer dipair (drain + resolveDrainTarget) — bukan hilang.
+    // saat printer dipair (drain + resolveDrainTarget) - bukan hilang.
     const bytes = buildReceiptBytes({ ...r, cols: r.cols ?? 32, cut: r.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'receipt',
@@ -604,9 +604,9 @@ async function printReceiptToSingle(r: EscReceipt, d: ResolvedStation | null): P
 
 /**
  * Cetak tiket dapur/checker ke station perannya (bukan printer kasir).
- * `station`: id kanonis ('ST-DAPUR') atau nama peran ('Dapur'/'Checker') —
+ * `station`: id kanonis ('ST-DAPUR') atau nama peran ('Dapur'/'Checker') -
  * override eksplisit dipertahankan. R4: station tak ketemu = antre persisten
- * (kind kitchen; drain kind-aware TIDAK PERNAH ke kasir) + Alert jujur —
+ * (kind kitchen; drain kind-aware TIDAK PERNAH ke kasir) + Alert jujur -
  * TANPA fallback diam-diam ke printer struk. Gagal kirim → antrean + `queued`.
  */
 export async function printKitchenTicket(station: string, t: EscKitchenTicket): Promise<PrintOutcome> {
@@ -641,7 +641,7 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
       prn('prn_kitchen_title'),
       prn('prn_kitchen_no_station', { s: station }),
     );
-    // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
+    // Tanpa target pun byte MASUK antrean (tanpa-target) - bukan hilang.
     const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32, cut: t.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'kitchen',
@@ -688,7 +688,7 @@ export async function printQueueSlip(q: EscQueueSlip): Promise<PrintOutcome> {
       prn('prn_queue_title'),
       prn('prn_no_printer'),
     );
-    // Tanpa target pun byte MASUK antrean (tanpa-target) — bukan hilang.
+    // Tanpa target pun byte MASUK antrean (tanpa-target) - bukan hilang.
     const bytes = buildQueueSlipBytes({ ...q, cols: q.cols ?? 32, cut: q.cut ?? (await globalAutocut()) });
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'queue',

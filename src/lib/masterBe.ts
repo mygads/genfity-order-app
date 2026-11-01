@@ -12,7 +12,7 @@
  *   member     -> api/merchant/loyalty/members     (MerchantLoyaltyMembersList)
  *                + pengayaan telepon POS-side via api/merchant/customers/search
  *                (MerchantCustomerSearch, punya nomor; loyalty tak mengirim nomor;
- *                TANPA ubah BE — murni sisi-POS, best-effort).
+ *                TANPA ubah BE - murni sisi-POS, best-effort).
  *   voucher    -> api/merchant/order-vouchers/templates + .../{id}/codes
  *   expensecoa -> api/merchant/chart-of-accounts   (F-020 live; 404 -> missing-endpoint fallback)
  *
@@ -21,7 +21,7 @@
  * tetap jalan; expensecoa memakai fallback ini bila BE lama tanpa rute);
  * 401 = sesi kedaluwarsa (fail-closed, melempar); 5xx/parse melempar.
  * Tanpa CREATE TABLE / ubah skema.
- * Pengayaan telepon member: preservasi — NULL tak menimpa lokal, nomor lokal
+ * Pengayaan telepon member: preservasi - NULL tak menimpa lokal, nomor lokal
  * yang sudah ada tak ditimpa; telepon hanya diisi bila match yakin 1:1
  * (nama ternormalisasi sama persis + loyaltyMember + nomor valid + tunggal).
  */
@@ -52,7 +52,7 @@ export interface BeDomainResult {
   note?: string;
 }
 
-/** Tripwire: endpoint BE belum ada — tak melempar, tercatat + dilewati. */
+/** Tripwire: endpoint BE belum ada - tak melempar, tercatat + dilewati. */
 export class BeEndpointMissing extends Error {
   readonly key: BePullKey;
   constructor(key: BePullKey) {
@@ -62,7 +62,7 @@ export class BeEndpointMissing extends Error {
   }
 }
 
-/** Tripwire: 403 dari BE (kasir tak punya izin baca domain) — dicatat ke
+/** Tripwire: 403 dari BE (kasir tak punya izin baca domain) - dicatat ke
  * `skipped` seperti missing-endpoint, bukan gagal total. */
 export class BeForbidden extends Error {
   readonly key: BePullKey;
@@ -100,7 +100,7 @@ async function beGet(path: string, key: BePullKey): Promise<Row[] | { nested: un
   const res = await apiGet(path, { limit: 500 });
   if (res.status === 404) throw new BeEndpointMissing(key);
   if (res.status === 401) {
-    throw new Error(`Sesi kedaluwarsa (401) — login ulang sebelum sync ${key}.`);
+    throw new Error(`Sesi kedaluwarsa (401) - login ulang sebelum sync ${key}.`);
   }
   if (res.status === 403) throw new BeForbidden(key);
   if (!res.ok) throw new Error(`Pull-BE ${key}: HTTP ${res.status}`);
@@ -126,7 +126,7 @@ async function beSearchCustomers(q: string, take = 50): Promise<Row[]> {
   });
   if (res.status === 404) throw new BeEndpointMissing('member');
   if (res.status === 401) {
-    throw new Error('Sesi kedaluwarsa (401) — login ulang sebelum sync member.');
+    throw new Error('Sesi kedaluwarsa (401) - login ulang sebelum sync member.');
   }
   if (!res.ok) throw new Error(`Pull-BE member: HTTP ${res.status} (customers/search)`);
   const body = (await res.json()) as unknown;
@@ -327,7 +327,7 @@ export function matchCustomerForMember(
 /**
  * Keputusan preservasi: kembalikan nomor donasi HANYA bila lokal kosong dan
  * donasi valid; selain itu null (= TETAP pakai ms_member.phone, tak timpa).
- * Tak pernah mengembalikan perintah hapus — NULL donasi = preservasi.
+ * Tak pernah mengembalikan perintah hapus - NULL donasi = preservasi.
  * Runtime pullBeMembers memakai SQL CASE untuk sisi lokal-isi (tanpa SELECT
  * tambahan); helper ini dipakai uji + konsumsi UI.
  */
@@ -604,12 +604,12 @@ export async function pullBeDomain(key: BePullKey): Promise<BeDomainResult> {
   } catch (e) {
     if (e instanceof BeEndpointMissing) {
       const at = new Date().toISOString();
-      console.warn(`[pull-be] ${key}: endpoint BE belum ada (404) — dilewati.`);
+      console.warn(`[pull-be] ${key}: endpoint BE belum ada (404) - dilewati.`);
       return { key, status: 'missing-endpoint', count: 0, at, note: 'HTTP 404 dari BE.' };
     }
     if (e instanceof BeForbidden) {
       const at = new Date().toISOString();
-      console.warn(`[pull-be] ${key}: tanpa izin baca (403) — dilewati, catat ke skipped.`);
+      console.warn(`[pull-be] ${key}: tanpa izin baca (403) - dilewati, catat ke skipped.`);
       return { key, status: 'forbidden', count: 0, at, note: 'HTTP 403 dari BE (izin peran tak cukup).' };
     }
     throw e;

@@ -32,7 +32,7 @@ export interface EscReceipt {
   customerName?: string;
   customerPhone?: string;
   datetime?: string;
-  /** Kode currency cabang ('IDR'/'AUD') — S4: struk ikut format cabang
+  /** Kode currency cabang ('IDR'/'AUD') - S4: struk ikut format cabang
    * (default = perilaku IDR lama bila absen). */
   currency?: string;
   items: EscItem[];
@@ -44,13 +44,13 @@ export interface EscReceipt {
   service?: number;
   /** Label baris service untuk struk thermal; absen = 'Service 5%' legacy. */
   serviceLabel?: string;
-  /** Tip/gratuity pelanggan (Rp) — terusan penuh, bukan komponen total berjalan. */
+  /** Tip/gratuity pelanggan (Rp) - terusan penuh, bukan komponen total berjalan. */
   tip?: number;
   /** PPN inklusif 11/111 - info-only, TIDAK menambah total. */
   tax?: number;
   /** Fee platform ESB/marketplace 5% (kontrak §5). */
   feeESB?: number;
-  /** Biaya kemasan nominal (Rp utuh) — komponen bruto cermin ongkir. */
+  /** Biaya kemasan nominal (Rp utuh) - komponen bruto cermin ongkir. */
   packaging?: number;
   voucherCode?: string;
   voucherAmount?: number;
@@ -204,7 +204,7 @@ function row2(out: number[], left: string, right: string, cols = ESC_COLS) {
 }
 
 /** Decode base64 → byte (tanpa atob agar jalan di semua runtime).
- * R14: validasi ketat — karakter di luar alfabet base64 atau panjang yang
+ * R14: validasi ketat - karakter di luar alfabet base64 atau panjang yang
  * mustahil (sisa 1 char modulo 4) melempar, bukan dibersihkan diam-diam.
  * Pemanggil antrean (printqueue.bytesOfPayload) sudah try/catch → baris rusak
  * dilewati; pemanggil lain wajib memastikan input valid. */
@@ -235,7 +235,7 @@ export function fromBase64(b64: string): Uint8Array {
 /**
  * Perintah cetak bitmap `GS v 0` (raster normal), rata tengah.
  * BATASAN (R11): lebar dipotong ke 384 dot (58mm) / 576 dot (80mm) bila
- * kelebihan — piksel di luar batas DIBUANG, bukan diskala; logo > batas harus
+ * kelebihan - piksel di luar batas DIBUANG, bukan diskala; logo > batas harus
  * dikecilkan dulu (scripts/png2mono.cjs). Baris pendek di-pad NOL (putih).
  */
 export function buildRasterImageBytes(img: EscMonoImage, cols: number): Uint8Array {
@@ -261,7 +261,7 @@ export function buildRasterImageBytes(img: EscMonoImage, cols: number): Uint8Arr
 /**
  * Perintah QR Model 2 (`GS ( k`): pilih model → ukuran modul → koreksi
  * error M → simpan data → cetak. Rata tengah.
- * BATASAN (R12): data dipotong ke 512 byte agar muat di memori printer —
+ * BATASAN (R12): data dipotong ke 512 byte agar muat di memori printer -
  * payload lebih panjang (mis. QR verbose) TERCETAK SEBAGIAN tanpa error;
  * pemanggil wajib menjaga payload tetap pendek (QR sale = client_id + no).
  */
@@ -358,7 +358,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   }
   if (r.trx) text(out, r.trx);
   // 1:1 BE: tipe+meja setelah nomor order; pelanggan setelah blok antar.
-  // Legacy hanya memakai cashier (zona digabung) — urutan legacy tak berubah.
+  // Legacy hanya memakai cashier (zona digabung) - urutan legacy tak berubah.
   if (r.typeLine) text(out, r.typeLine);
   if (r.cashier) text(out, r.cashier);
   if (r.datetime) text(out, r.datetime);
@@ -374,7 +374,7 @@ export function buildReceiptBytes(r: EscReceipt): Uint8Array {
   if (r.unpaid) text(out, r.lang === 'en' ? '** UNPAID **' : '** BELUM BAYAR **');
   push(out, ESC, 0x61, 0); // rata kiri
   text(out, '-'.repeat(cols));
-  // S4: semua nominal struk lewat escMoney(currency cabang) — escRp mentah
+  // S4: semua nominal struk lewat escMoney(currency cabang) - escRp mentah
   // IDR-only dilarang di badan struk (residu PW-4).
   const money = (n: number): string => escMoney(n, r.currency);
   // Baris item: template-mode wrap nama panjang ala BE SplitText (harga di
@@ -597,7 +597,7 @@ export function buildKitchenTicketBytes(t: EscKitchenTicket): Uint8Array {
 
 /**
  * Slip antrean pelanggan (APP-PRINTER, audit row 11): nomor antrean + cabang
- * + waktu (+ meja/mode opsional). SENGAJA tanpa harga/total/item — slip ini
+ * + waktu (+ meja/mode opsional). SENGAJA tanpa harga/total/item - slip ini
  * untuk panggilan antrean, bukan struk bayar. Dipakai view_queue + printer
  * kasir saat mode antrean aktif.
  */

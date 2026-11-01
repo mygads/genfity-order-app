@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';import { Image
   applyAutoSyncPrefs, syncWarnLevel, WARN_SYNC_DAYS, SYNC_OPTS_KEY,
 
 type SyncItem, type LocalOnlyRow } from '../../lib/sync';import { pullMaster } from '../../lib/master';import { pendingPrintCount } from '../../lib/printqueue';
-// APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini — tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
+// APP-FIXUP(PRN-DRAIN-VISIBILITY): tampilkan backlog cetak (tr_printqueue) di panel ini - tanpa siklus impor (printqueue hanya → db/escpos/native-printer/uuidv7).
 import { fmtDate, fmtDateInTz, fmtTimeInTz } from '../../lib/datefmt';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface QueueItem {
   id: string;
   kind: string;
   desc: string;
   createdAt: string;
-  /** C8: catatan fail-once mesin sync (S10/C2/C8) — ditampilkan jujur di kartu. */
+  /** C8: catatan fail-once mesin sync (S10/C2/C8) - ditampilkan jujur di kartu. */
   note: string;
   status: 'antre' | 'terkirim' | 'gagal';}/** Ringkasan item antrean nyata untuk daftar UI. Rupiah selalu via rp(). S8:
  * kind deposit/shift/voucher/member memakai kunci kamus + identifier. */function describePayload(o: SyncItem, labels: { sale: string; receipt: string; attendance: string; other: string; dep: string; shift: string; voucher: string; member: string }): string {
@@ -35,7 +35,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   return String(p.table ?? p.rowId ?? labels.other);}function fmtTime(iso: string): string
   { try
   { const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; return `${fmtDateInTz(d, getLang())} ${fmtTimeInTz(d)}`; } catch
-  { return iso; }}/** S7: level umur sync SELALU dari kanonis syncWarnLevel(lib/sync) — layar tak
+  { return iso; }}/** S7: level umur sync SELALU dari kanonis syncWarnLevel(lib/sync) - layar tak
  * mengimplementasikan ambang sendiri. daysAgo hari → ms untuk demo/dev. */export default function SyncScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -49,16 +49,16 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   // otomatis server di setiap apiFetch/pull (401 non-PIN → refresh → logout).
   const [tick, setTick] = useState(0);
   // BACKLOG GABUNGAN (temuan offline-ms-edits-stuck-invisible): antrean ringan
-  // saja tak cukup — tampilkan juga fisik (tr_esoprocessqueue) + baris kotor
+  // saja tak cukup - tampilkan juga fisik (tr_esoprocessqueue) + baris kotor
   // (syncDate NULL) + indikator pendingRevoke (O1) bila ada. Label memakai nama
   // tabel/kolom apa adanya (identifier, tak perlu terjemahan) + key existing.
   const [physPending, setPhysPending] = useState(0);
   const [dirtyRows, setDirtyRows] = useState(0);
   const [pendingRevoke, setPendingRevoke] = useState<string[]>([]);
-  // M9-3: baris master local-only (status 'lokal') — informatif, bukan pending.
+  // M9-3: baris master local-only (status 'lokal') - informatif, bukan pending.
   const [localOnly, setLocalOnly] = useState<LocalOnlyRow[]>([]);
   // APP-FIXUP(PRN-DRAIN-VISIBILITY): backlog cetak persisten (tr_printqueue
-  // status antre/gagal) — identifier tabel apa adanya, label existing.
+  // status antre/gagal) - identifier tabel apa adanya, label existing.
   const [printPending, setPrintPending] = useState(0);
   useEffect(() => {
     let alive = true;
@@ -72,7 +72,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [tick]);
 
   const level = Number.isFinite(daysAgo) ? syncWarnLevel(Date.now() - daysAgo * 86400000) : syncWarnLevel();
-  // Audit 2026-10-26: opsi wifi-only dihapus — sync pakai jaringan apa pun.
+  // Audit 2026-10-26: opsi wifi-only dihapus - sync pakai jaringan apa pun.
   // wifiOnly selalu false; bentuk simpanan dipertahankan agar instalasi lama
   // yang masih menyimpan syncOnWifi=true ikut kembali ke jaringan apa pun.
   useEffect(() => { let alive = true; void getJSON<{ autoSync: boolean; syncOnWifi: boolean }>(SYNC_OPTS_KEY, { autoSync: true, syncOnWifi: false }).then((o) => { if (!alive) return; setAutoSync(o.autoSync); }); return () => { alive = false; }; }, []); useEffect(() => {
@@ -84,13 +84,13 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
   }, [autoSync]);
   // Hitung umur sync nyata dari timestamp sukses terakhir agar banner E00043
   // (>3 hari) dan E00044 (>7 hari) mencerminkan kondisi sebenarnya.
-  // pullMaster TIDAK menyentuh lastSyncMs (hanya pushAll) — umur dihitung
+  // pullMaster TIDAK menyentuh lastSyncMs (hanya pushAll) - umur dihitung
   // ulang dari sumber yang sama agar banner tak berbohong pasca-pull.
   // Belum pernah sync (ms<=0) = umur tak diketahui = block7, cermin
   // syncWarnLevel kanonis di lib/sync (jangan render 'ok' buta).
   const refreshDaysAgo = () => { const ms = getLastSyncMs(); if (ms > 0) setDaysAgo((Date.now() - ms) / 86400000); else setDaysAgo(Infinity); };
   useEffect(() => { refreshDaysAgo(); }, []); // S19: segarkan umur tiap layar
-  // difokuskan; tak ada emit session-restore di sesi (grep) — focus saja.
+  // difokuskan; tak ada emit session-restore di sesi (grep) - focus saja.
   useFocusEffect(useCallback(() => { refreshDaysAgo(); setTick((x) => x + 1);
     // W-FULL §14: tampilkan stempel pull-otomatis terakhir (boot/reconnect)
     // agar "Last pull: Never" hanya muncul bila pull belum pernah sukses.
@@ -103,7 +103,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
           const d = new Date(iso);
           if (!Number.isNaN(d.getTime())) setLastPull(`${fmtDateInTz(d, lang)} ${fmtTimeInTz(d)}`);
         }
-      } catch { /* abaikan — label tetap */ }
+      } catch { /* abaikan - label tetap */ }
     })(); }, [])); /** Antrean NYATA dari mesin sync, bukan mock. */ const queue: QueueItem[] = useMemo( () => listOutbox().map((o) => ({ id: o.id, kind: o.kind === 'order' ? t('sync_kind_sale') : o.kind === 'receipt' ? t('sync_kind_receipt') : o.kind === 'attendance' ? t('sync_kind_att') : t('sync_kind_other'), desc: describePayload(o, {
       sale: t('sync_kind_sale'), receipt: t('hist_email'), attendance: t('sync_att_desc'), other: o.kind, dep: t('sync_kind_deposit'), shift: t('sync_kind_shift'), voucher: t('sync_kind_voucher'), member: t('sync_kind_member') }), createdAt: fmtTime(o.createdAt), note: String(o.note ?? ''), status: o.status, })),
   [tick, lang], );
@@ -174,7 +174,7 @@ const p = o.payload as Record<string, unknown>; if (o.kind === 'order') return `
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       </View>
 
-      {/* Audit 2026-10-26: kartu terminal-check manual dihapus — validitas
+      {/* Audit 2026-10-26: kartu terminal-check manual dihapus - validitas
         terminal dicek otomatis server di setiap pull (401 → logout). */}
       <View style={styles.card}>
         <Text style={[styles.cardTitle, isTablet && { fontSize: 17 }]}>{t('sync.opts')}</Text>

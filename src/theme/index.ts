@@ -85,7 +85,7 @@ export const rpNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 /** Angka grouping ala Australia tanpa prefix - pasangan rpNum utk AUD.
  * INTEGER-only (cermin rpNum): JANGAN dipakai untuk nominal currency AUD
- * (butuh 2 desimal) — pakai formatCurrency()/rp() di bawah. */
+ * (butuh 2 desimal) - pakai formatCurrency()/rp() di bawah. */
 export const audNum = (n: number) =>
   Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 /** Grouping angka input/chip sadar-currency (S4): IDR = titik (rpNum),
@@ -94,7 +94,7 @@ export const numGrouping = (n: number) =>
   getCachedCurrency().code === 'AUD' ? audNum(n) : rpNum(n);
 let warnedCurrencyFallback = false;
 /** Format mata uang cabang: 'AUD' → 'A$' + grouping en-AU + 2 desimal TANPA
- * spasi (paritas dashboard FE `A$10.50`; grouping dipertahankan ala en-AU —
+ * spasi (paritas dashboard FE `A$10.50`; grouping dipertahankan ala en-AU -
  * dashboard kini tanpa grouping, owner putuskan bila dashboard ikut grouping);
  * default/''/tak dikenal → rp(n) (fallback IDR, tak pernah blank).
  * BUG-FIX PW-4: dulu `'A$ ' + audNum(n)` (integer round → desimal hilang,

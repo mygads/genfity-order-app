@@ -5,7 +5,7 @@ import AppButton from '../AppButton';
 import { isValidPhoneNumberID, normalizePhoneNumberID } from '../../lib/verticals';
 
 /**
- * PhoneTopupForm — 3 langkah kaku PULSA_DIGITAL (konter Indonesia):
+ * PhoneTopupForm - 3 langkah kaku PULSA_DIGITAL (konter Indonesia):
  * 1. Nomor tujuan (keypad numeric + auto-deteksi prefix) →
  * 2. Nominal (grid 5k/10k/25k/50k/100k + token PLN) →
  * 3. Bayar lunas (PREPAID mutlak, tanpa tempo).
@@ -49,7 +49,7 @@ export default function PhoneTopupForm({ onSubmit }: { onSubmit: (phone: string,
       </View>
       <Text style={[styles.step, isTablet && styles.stepTablet]}>3 · Bayar lunas</Text>
       <AppButton title={ready ? `Bayar ${nominal}` : 'Lengkapi nomor + nominal'} size="lg" disabled={!ready} onPress={() => { if (ready && nominal !== null) onSubmit(digits, nominal); }} />
-      <Text style={styles.prepaid}>Pulsa/digital wajib bayar di depan — tanpa tempo/hutang. Pastikan online: harga/stok provider dicek server.</Text>
+      <Text style={styles.prepaid}>Pulsa/digital wajib bayar di depan - tanpa tempo/hutang. Pastikan online: harga/stok provider dicek server.</Text>
     </View>
   );
 }

@@ -5,12 +5,12 @@
  *
  * Aturan yang ditegakkan modul ini:
  * - Q1: sale/transaksi menyimpan customerId (int). Alias lokal (prefix M/MC)
- *   hanya pointer ledger deposit turunan: `MC{customerId}` — deterministik dari
+ *   hanya pointer ledger deposit turunan: `MC{customerId}` - deterministik dari
  *   customerId, bukan identitas independen.
  * - Q2: request settle/drain membawa `customerId` (int) bila member ditempel;
  *   response dibaca sebagai member block (toleran: field absen = kompat BE
  *   lama → perilaku lokal seperti hari ini, tanpa crash).
- * - Q4: snapshot tampilan member pra-settle vs block response pasca-settle —
+ * - Q4: snapshot tampilan member pra-settle vs block response pasca-settle -
  *   bila beda (poin/voucher berubah) ATAU ada memberDropped → banner persisten.
  * - Q5: gate UI lookup/search pada `memberLookupEnabled` dari pos-config
  *   (absen = enabled).
@@ -32,7 +32,7 @@ export function parseCustomerId(v: unknown): number | null {
 }
 
 /** Pointer ledger deposit lokal turunan dari customerId (satu-satunya sumber
- *  format `MC{id}` — JANGAN inline `MC${...}` di tempat lain). */
+ *  format `MC{id}` - JANGAN inline `MC${...}` di tempat lain). */
 export function localMemberKeyForCustomer(customerId: number): string | null {
   if (!Number.isInteger(customerId) || customerId <= 0) return null;
   return `${GO_CUSTOMER_ALIAS_PREFIX}${customerId}`;
@@ -46,7 +46,7 @@ export function customerIdFromLocalKey(key: unknown): number | null {
   return parseCustomerId(m[1]);
 }
 
-/** True = token member ALIAS (prefix M/MC/teks lain) — bukan customerId GO.
+/** True = token member ALIAS (prefix M/MC/teks lain) - bukan customerId GO.
  *  Dipakai guard runtime + tripwire: alias TAK BOLEH masuk payload settle. */
 export function isAliasMemberId(v: unknown): boolean {
   if (v == null) return false;
@@ -84,7 +84,7 @@ function strOr(v: unknown, fb = ''): string {
 }
 
 /** Parse toleran block member dari body response settle (sudah/belum unwrap
- *  envelope `{data}` — keduanya diterima). */
+ *  envelope `{data}` - keduanya diterima). */
 export function parseSettleMemberBlock(body: unknown): ParsedSettleMember | null {
   if (!body || typeof body !== 'object') return null;
   const root = body as Record<string, unknown>;

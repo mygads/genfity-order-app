@@ -19,7 +19,7 @@ import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, 
   const photo = p.photo ?? null;
   // WIRE-APPROVAL: default fail-closed (tanpa param = belum disetujui) +
   // approve via eskalasi PIN staff/owner Q18 (verifyLocalEscalation
-  // 'petty.approve' — kunci khusus tanpa deny Staff); identitas approver tercatat via markApproved(id,
+  // 'petty.approve' - kunci khusus tanpa deny Staff); identitas approver tercatat via markApproved(id,
   // approver) + rincian by/at + sync. Tanpa PIN = tak approve.
   const [disetujui, setDisetujui] = useState(p.disetujui ?? false);
   const [pin, setPin] = useState('');

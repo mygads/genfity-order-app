@@ -1,5 +1,5 @@
 /**
- * SESI-FINAL-APP K4: gambar katalog — TANPA dependensi baru.
+ * SESI-FINAL-APP K4: gambar katalog - TANPA dependensi baru.
  *
  * react-native bawaan menyediakan Image.prefetch(url) (cache disk RN) +
  * <Image source={{uri}}> dengan onError → pratinjau lokal graceful.
@@ -135,7 +135,7 @@ export function placeholderColorFor(key: string): string {
   const hex = ((h >>> 0) % 0xffffff).toString(16).padStart(6, '0');
   return `#${hex}`;
 }
-/** P3 AR: kunci scan AR dari catalogImageKey — /menu/ar-scans/* tinggal panggil ini (tanpa ubah skema). */
+/** P3 AR: kunci scan AR dari catalogImageKey - /menu/ar-scans/* tinggal panggil ini (tanpa ubah skema). */
 export function arScanKeyFor(menuId: string, imageHash?: string | null): string {
   const h = String(imageHash ?? '').trim();
   return h ? `ar:${String(menuId)}:${h}` : `ar:${String(menuId)}`;

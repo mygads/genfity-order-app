@@ -11,13 +11,13 @@ import { EXTRA_METHODS, xmDesc, xmLabel, type ExtraMethodId } from '../../lib/pa
 /**
  * Metode pembayaran lanjutan: transfer, deposit member, kompliment,
  * non-penjualan. Dua terakhir wajib otorisasi supervisor via kontrak BE BARU
- * (S7: SupervisorApprovalDialog — legacy {pin} NOL, Real mode 404).
+ * (S7: SupervisorApprovalDialog - legacy {pin} NOL, Real mode 404).
  *
  * COND-2 (PP-028): approval compliment WAJIB action persis
  * COMPLIMENT_SETTLE + refId = id-desimal order BE (BUKAN salesNum/nomor
  * struk). `orderId` = id desimal dari pemanggil bila alur sudah punya order
  * BE (create-first); bila absen/tak-desimal, refId dikosongkan dan TIDAK
- * dikunci — approval itu tercatat tapi TAKKAN cocok untuk settle (403 yang
+ * dikunci - approval itu tercatat tapi TAKKAN cocok untuk settle (403 yang
  * benar). Batas jujur: alur offline-first APP (saveSale lokal → sync
  * order/finish) tak punya id BE pra-approval; who-supplies-orderId adalah
  * keputusan koordinator (E2E memasok via API).
@@ -85,7 +85,7 @@ export default function ExtraPaySection({ onDone, orderId, online }: { onDone: (
     if (m) onDone(xmLabel(m, t), ref.toUpperCase());
   };
 
-  /** S7: sesudah dialog V1 disetujui — teruskan approvalId (jadi approvalCode
+  /** S7: sesudah dialog V1 disetujui - teruskan approvalId (jadi approvalCode
    * di Pay) + ID supervisor (jadi approvedBy). Beda vs lama: dulu ref kosong
    * dan approver hanya ada di jalur lokal; kini audit BE selalu tercatat. */
   const approved = (r: { approvalId?: string; supervisorUserId: string }) => {
@@ -113,7 +113,7 @@ export default function ExtraPaySection({ onDone, orderId, online }: { onDone: (
       {xpMsg ? <Text style={styles.msg}>{xpMsg}</Text> : null}
 
       {/* COND-2: compliment = aksi kanonis COMPLIMENT_SETTLE (konstanta, bukan
-          literal 'compliment' — itu 403 permanen yang benar) + refId id-desimal
+          literal 'compliment' - itu 403 permanen yang benar) + refId id-desimal
           order yang DIKUNCI bila pemanggil memasok orderId desimal valid.
           OFFLINE-RULE: dialog ini hanya tercapai bila tap() lolos (online +
           desimal); refId di sini selalu desimal-valid. */}

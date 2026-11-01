@@ -36,7 +36,7 @@ type Props = {
       table?: string;
       customer?: string;
       memberId?: string;
-      /** Ronde-3 Q1: customerId GO (int) — diteruskan rantai ke Pay. */
+      /** Ronde-3 Q1: customerId GO (int) - diteruskan rantai ke Pay. */
       customerId?: number;
       ongkir?: number;
       packaging?: number;
@@ -63,7 +63,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [table, setTable] = useState(route?.params?.table ?? '');
   const [customer, setCustomer] = useState(route?.params?.customer ?? '');
   const [memberId, setMemberId] = useState(route?.params?.memberId ?? '');
-  /** Ronde-3 Q1: ref GO — dibawa di semua rantai keluar (Pay/Split/BillPreview). */
+  /** Ronde-3 Q1: ref GO - dibawa di semua rantai keluar (Pay/Split/BillPreview). */
   const [customerId, setCustomerId] = useState<number | null>(parseCustomerId(route?.params?.customerId));
   /** Nomor struk draft: dipakai ulang saat bayar + kunci hapus draft di Success. */
   const [salesNum, setSalesNum] = useState(route?.params?.salesNum ?? '');

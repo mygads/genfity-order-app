@@ -6,7 +6,7 @@
  * - ongkirNet = max(0, ongkir - min(ongkir, voucherOngkir))
  * - dasar = subtotal - diskonBelanja
  * - service = server-driven (audit trisisi #1): enabled/type/rate/fixed dari
- *   ms_setting Service/* via getServiceConfig() — cermin BE serviceChargeForOrder
+ *   ms_setting Service/* via getServiceConfig() - cermin BE serviceChargeForOrder
  *   (service_charge.go: enabled? FIXED? round(fixed) : round(dasar*rate/100)).
  *   Tanpa baris setting (lane ESB / offline-murni) = legacy 5% + label estimasi.
  * - pajakTampil = round(dasar * taxRate / (100 + taxRate)), taxRate default 11 (PPN,
@@ -15,12 +15,12 @@
  * - feeESB = round(dasar * 5 / 100), hanya order ESB/marketplace
  * - packaging = nominal kemasan per mode (DINE IN = 0; TAKE AWAY/DELIVERY =
  *   info merchant bila tersedia; kosong/tak dikenal = 0; dibaca via
- *   getPackagingFee — lokal saja, TANPA kirim ke BE karena pos/payment
+ *   getPackagingFee - lokal saja, TANPA kirim ke BE karena pos/payment
  *   tak punya field kemasan; cermin ongkir yang menempel pada bill)
  * - bruto = dasar + service + ongkirNet + feeESB + packaging
  * - grandTotal = bulatkan(bruto, step); rounding = grandTotal - bruto
  *
- * ATURAN PEMBULATAN TRISISI (audit #3 — satu kontrak, tiga repo):
+ * ATURAN PEMBULATAN TRISISI (audit #3 - satu kontrak, tiga repo):
  * - Lane Go: step = 1 (integer rupiah). Ditulis server-wins oleh pullGoCatalog
  *   ke ms_setting(Rounding, Step); cermin BE validatePOSPaymentAmountsCurrency
  *   (due IDR dibulatkan ke presisi currency = integer; nilai kirim pun wajib
@@ -28,13 +28,13 @@
  *   integer = due yang divalidasi BE saat settle (E2E 2026-10-25: stored
  *   totalAmount 27037.5 → cash/card 27038 hijau, stepped 400).
  *   Catatan: stored totalAmount BE (round2) boleh bawa .5; yang diuji saat
- *   settle adalah due presisi-currency — keduanya 27038 untuk kasus di atas.
+ *   settle adalah due presisi-currency - keduanya 27038 untuk kasus di atas.
  * - Lane ESB: step = 100 (NEAREST, dari branch-settings server lama).
- * - JANGAN tambah endpoint rounding; JANGAN ubah step sepihak — tiga repo
+ * - JANGAN tambah endpoint rounding; JANGAN ubah step sepihak - tiga repo
  *   harus tetap selaras (BE integer / FE integer / APP step-setting).
  *
  * DISCOUNT_BACKSTOP: diskonBelanja eksplisit di-clamp ke gross (flag
- * backstopHit) agar diskon tak pernah melebihi bruto — dasarBelanja/voucher
+ * backstopHit) agar diskon tak pernah melebihi bruto - dasarBelanja/voucher
  * persen dihitung dari dasar yang sudah dijaga, bukan dari nilai negatif.
  *
  * Voucher:
@@ -43,7 +43,7 @@
  *   -> potong = min(round(dasar * pct / 100), cap, dasar), SEBELUM service/pajak
  * - selain itu -> diskon flat nominal sebesar min(amount, cap, dasar)
  * - minSpend: patokan gross (bruto item); tak terpenuhi = voucher diabaikan
- *   (voucherAmt 0 + ongkirCut 0). Backstop kanonis — entry (PromotionList pakai,
+ *   (voucherAmt 0 + ongkirCut 0). Backstop kanonis - entry (PromotionList pakai,
  *   Pay applyVoucher) sudah menegakkan duluan.
  */
 import { initDb, query, queryFirst } from './db';
@@ -81,7 +81,7 @@ export function voucherExtras(
 export const TAX_DEFAULT = 11;
 
 /**
- * Konfigurasi service charge merchant (audit trisisi #1 — server-driven).
+ * Konfigurasi service charge merchant (audit trisisi #1 - server-driven).
  * Cermin baris BE: enable_service_charge / service_charge_type /
  * service_charge_percent (skala persen, mis. 5 = 5%) / service_charge_fixed_amount.
  */
@@ -101,7 +101,7 @@ export interface ServiceConfig {
  * Fallback legacy: lane ESB / offline-murni tanpa pull = service 5% seperti
  * perilaku lama. Pemanggil WAJIB melabeli hasil ini sebagai estimasi
  * (lihat serviceLabel() + kunci i18n serviceEst) karena server bisa
- * menetapkan 0% / FIXED / persen lain — settle BE selalu menang.
+ * menetapkan 0% / FIXED / persen lain - settle BE selalu menang.
  */
 export const SERVICE_LEGACY: ServiceConfig = {
   enabled: true,
@@ -119,7 +119,7 @@ export const SERVICE_LEGACY: ServiceConfig = {
  * - ('Service','Rate') = persen (skala persen)
  * - ('Service','Fixed') = nominal tetap
  * Baris absen (BE lama / lane ESB / belum pull) = SERVICE_LEGACY.
- * Catatan: baris legacy ('Service','Charge') era ESB/seed SENGAJA tak dibaca —
+ * Catatan: baris legacy ('Service','Charge') era ESB/seed SENGAJA tak dibaca -
  * itu konstanta tampilan, bukan knob server.
  */
 export async function getServiceConfig(): Promise<ServiceConfig> {
@@ -172,7 +172,7 @@ export function serviceLabel(
 
 /**
  * Label baris fee platform ESB/marketplace dari tarif efektif.
- * Angka {r} diisi dari FEE_DEFAULTS.platformFeeRate (hari ini 5) — label
+ * Angka {r} diisi dari FEE_DEFAULTS.platformFeeRate (hari ini 5) - label
  * tak lagi meng-hardcode "5%" di kamus (audit trisisi R1: kejujuran label;
  * ID+EN via kunci feeESB). Nilai fee tetap dari totals().
  * (Lane ESB: EsbOrderScreen milik W2 - kunci esb_fee tak tersentuh sesi ini.)
@@ -212,7 +212,7 @@ export const FEE_DEFAULTS: {
 };
 
 /** Ongkir bawaan untuk mode order; 0 bila mode tak dikenal (tetap bisa diubah manual).
- * S-F3: jadwal server opsional (base/perKm/min/max dari pos-config BE) —
+ * S-F3: jadwal server opsional (base/perKm/min/max dari pos-config BE) -
  * bila base valid → base (absen = peta legacy di bawah = perilaku lama).
  * Jarak (perKm) dihitung via calculateDeliveryFee bila jarak diketahui. */
 export function defaultOngkirForMode(mode?: string, schedule?: DeliveryFeeSchedule | null): number {
@@ -253,7 +253,7 @@ export function calculateDeliveryFee(distanceKm: unknown, s?: DeliveryFeeSchedul
  * → eksplisit global ms_setting('Tax', 'PPN') → default per currency
  * (IDR = TAX_DEFAULT 11 PPN, AUD = 10 GST). Tanpa baris per-cabang =
  * perilaku lama persis. branchId default = cabang aktif
- * (ms_setting('Branch','Name').value2 — B001/B004 di alur seed).
+ * (ms_setting('Branch','Name').value2 - B001/B004 di alur seed).
  */
 export async function getTaxRate(currency?: string, branchId?: string): Promise<number> {
   try {
@@ -296,7 +296,7 @@ export async function getActiveBranchId(): Promise<string> {
  * Langkah pembulatan grand total per currency. Urutan menang (S-F4):
  * 1. cache pos-config server (`genfity.pos.roundingStep`, ditulis
  *    syncPosConfigFromServer dari BE roundingStep currency-derived);
- * 2. setting eksplisit ms_setting(Rounding, Step) — dua layout ala
+ * 2. setting eksplisit ms_setting(Rounding, Step) - dua layout ala
  *    getRoundingSetting di lib/db.ts;
  * 3. default currency (argumen; pemanggil isi getCachedCurrency().code):
  *    AUD = 1 (sen), selain itu FEE_DEFAULTS.roundStep (100, kompatibel).
@@ -340,7 +340,7 @@ export async function getRoundStep(currency?: string): Promise<number> {
  * ('Packaging','Fee': value1 = nominal, value2 = '1' aktif / '0' mati),
  * ditulis oleh pull katalog masterGo dari info merchant BE
  * (enablePackagingFee + packagingFeeAmount).
- * - DINE IN (varian) = 0 — makan di tempat tak kena kemasan.
+ * - DINE IN (varian) = 0 - makan di tempat tak kena kemasan.
  * - TAKE AWAY / DELIVERY / agregator (varian) = nominal bila diaktifkan.
  * - kosong / tak dikenal = 0 (tanpa tuduhan biaya).
  * Tanpa baris setting (BE lama / belum pull) = 0: perilaku lama persis.
@@ -375,7 +375,7 @@ export type TotalsInput = {
   discountTotal?: number;
   voucher?: TotalsVoucher | null;
   ongkir?: number;
-  /** Biaya kemasan nominal (Rp utuh) per mode order — default 0 (DINE IN /
+  /** Biaya kemasan nominal (Rp utuh) per mode order - default 0 (DINE IN /
    * mode tak dikenal). Diisi pemanggil dari getPackagingFee(mode). Masuk
    * bruto apa adanya (tanpa persen/pembulatan sendiri). */
   packaging?: number;
@@ -393,7 +393,7 @@ export type TotalsInput = {
   serviceRate?: number;
   serviceFixed?: number;
   /** Langkah pembulatan grand total; default FEE_DEFAULTS.roundStep (100 =
-   * rupiah). Cabang AUD memakai 1 (sen) — diisi pemanggil dari
+   * rupiah). Cabang AUD memakai 1 (sen) - diisi pemanggil dari
    * getRoundStep() atau eksplisit per order (seed AUD). */
   roundStep?: number;
 };
@@ -505,7 +505,7 @@ export function totals(input: TotalsInput): TotalsResult {
           : Math.min(cappedFlat, dasarBelanja);
   const subtotal = Math.max(0, gross - discount - voucherAmt);
   /**
-   * Service server-driven (audit trisisi #1) — cermin BE serviceChargeForOrder
+   * Service server-driven (audit trisisi #1) - cermin BE serviceChargeForOrder
    * (FIXED? round(fixed) : round(dasar*rate/100), disabled/rate<=0/fixed<=0 = 0).
    * Default tanpa input server = legacy 5% (perilaku lama persis).
    */

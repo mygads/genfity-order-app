@@ -14,14 +14,14 @@ showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OP
   { id: 'r2', group: 'Makanan Ringan', items: 12, station: 'dapur', printLabel: false },
   { id: 'r3', group: 'Minuman', items: 18, station: 'checker', printLabel: false },
   { id: 'r4', group: 'Dessert', items: 8, station: 'checker', printLabel: false },
-  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** M9/R53: cabang routing = id cabang aktif; '' = unbound — persistRoutes
+  { id: 'r5', group: 'Paket / Bundle', items: 6, station: 'dapur', printLabel: true },];const DEFAULT_OPTS: PrintOpts = { topMargin: '2', showPaymentInfo: false, showSalesTime: true };/** M9/R53: cabang routing = id cabang aktif; '' = unbound - persistRoutes
  * MENOLAK seluruh tulis DB (bukan hanya per-cabang) + banner unbound;
  * cache JSON pemanggil tetap menyimpan. */
 
 /** APP-PRINTER (audit row 7/11, tag-consistent): routing MENU→STATION di sini
  * adalah peta fisik (menu grup → printer kasir/dapur/checker/label), BUKAN
  * feature gate. Tag terminal (kasir/dapur/full_access/view_*) mengatur ROUTING
- * event/notifikasi di dispatcher, bukan memblokir fitur — kasir/dapur/full =
+ * event/notifikasi di dispatcher, bukan memblokir fitur - kasir/dapur/full =
  * fitur penuh. Station kanonis ST-KASIR/ST-DAPUR/ST-CHECKER/ST-LABEL di bawah
  * adalah address book printer; SELEKSI aktif di-scope per terminal klaim
  * (scopeRank di lib/print.ts), jadi routing ini tetap valid lintas terminal.
@@ -30,10 +30,10 @@ showSalesTime: boolean;}const LS_ROUTES = 'genfity.menuPrint.routes';const LS_OP
  * = DEVICE-LOCAL by design (BE tak punya konsep station; pull katalog
  * masterGo.ts sengaja mempertahankan stationId lokal). Server hanya memiliki
  * definisi destinasi/template (pos-config S-F12, editor FE PrintBridgeTab).
- * Konsekuensi: dua terminal BISA divergen — owner wajib mengonfigurasi tiap
+ * Konsekuensi: dua terminal BISA divergen - owner wajib mengonfigurasi tiap
  * terminal identik. Jangan pindahkan ke server tanpa migrasi + endpoint BE.
  *
- * R4-DOCS(c): ditegaskan ulang — routing menu-print tetap SoT DEVICE-LOCAL
+ * R4-DOCS(c): ditegaskan ulang - routing menu-print tetap SoT DEVICE-LOCAL
  * (tak ada snapshot server R4 untuk ini; S-F12 hanya destinasi/template).
  */
 /** Pilihan station UI -> id station kanonis (kolom id ms_station, dibaca KitchenScreen). */
@@ -52,7 +52,7 @@ const STATION_ID_OF: Record<StationId, string | null> = {
  * persisten dan ikut sync master. */
 async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void> {
   try {
-    // R53: unbound = tolak tulis DB seluruhnya — tanpa branch, stationId grup
+    // R53: unbound = tolak tulis DB seluruhnya - tanpa branch, stationId grup
     // bisa menimpa menu cabang lain; cache JSON pemanggil tetap menyimpan.
     const branchId = (getBranchId() || '').trim();
     if (!branchId) return;
@@ -72,7 +72,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
       );
     }
     // 2. Routing per grup: tulis stationId ke tiap menu dalam grup tersebut.
-    // R52: grup UI = nama tampil — selesaikan ke CODE kategori via
+    // R52: grup UI = nama tampil - selesaikan ke CODE kategori via
     // ms_category (categoryId menyimpan id, bukan nama); fallback cocokkan
     // mentah untuk data lama yang menyimpan nama di categoryId.
     for (const r of routes) {
@@ -132,7 +132,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const isTablet = width >= TABLET_BP;
   const { t } = useLang(); const [routes, setRoutes] = useState<MenuRoute[]>(DEFAULT_ROUTES);
   const [opts, setOpts] = useState<PrintOpts>(DEFAULT_OPTS);
-  // M9/R53: '' = unbound — banner jujur (tulis DB ditolak persistRoutes).
+  // M9/R53: '' = unbound - banner jujur (tulis DB ditolak persistRoutes).
   const unboundBranch = (() => {
     try {
       return !getBranchId();
@@ -143,7 +143,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const [cachedRoutes, cachedOpts] = await Promise.all([ getJSON<MenuRoute[]>(LS_ROUTES, DEFAULT_ROUTES), getJSON<PrintOpts>(LS_OPTS, DEFAULT_OPTS), ]); if (!alive) return; const base = cachedRoutes.length > 0 ? cachedRoutes : DEFAULT_ROUTES; if (cachedRoutes.length > 0) setRoutes(cachedRoutes); setOpts({ ...DEFAULT_OPTS, ...cachedOpts });
       // Hitungan item jujur dari ms_menu live per grup (bukan angka contoh
       // 24/12/18/8/6); grup merchant sendiri tetap dipertahankan.
-      // R52: categoryId menyimpan CODE — petakan ke nama tampil via
+      // R52: categoryId menyimpan CODE - petakan ke nama tampil via
       // ms_category (fallback kode mentah untuk baris legacy tanpa kategori).
       try {
         await initDb();
@@ -188,7 +188,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   const patch = (id: string, p: Partial<MenuRoute>) =>
     { setRoutes((rs) => { const next = rs.map((r) => (r.id === id ? { ...r, ...p } : r)); void setJSON(LS_ROUTES, next); void persistRoutes(next, opts); return next; }); };
 
-  // R53: UI mati yang dihapus — switch printLabel per rute + kartu opsi dapur
+  // R53: UI mati yang dihapus - switch printLabel per rute + kartu opsi dapur
   // (topMargin/showPay/showTime). Model data (printLabel, PrintOpts) tetap
   // dipertahankan + ikut tersimpan (persistRoutes/ms_setting) tanpa UI.
   const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');

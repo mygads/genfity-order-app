@@ -182,7 +182,7 @@ const extraLabelToMethod = (label: string): string => {
 };
 
 // HP-E2E-FIX-DRAWER (2026-10-24): 1 terminal = 1 drawer default. Dulu ada
-// pilihan Laci 1/2/3 (CASH_DRAWERS) — dihapus: kasir/owner/full-access tak
+// pilihan Laci 1/2/3 (CASH_DRAWERS) - dihapus: kasir/owner/full-access tak
 // lagi memilih drawer; pembayaran tunai selalu ke drawer default terminal.
 // Kunci i18n pay_drawer_* dipertahankan (tak dipakai lagi, tanpa referensi).
 
@@ -215,7 +215,7 @@ export default function PayScreen({ navigation, route }: Props) {
    * semua CTA pelunasan mati + banner blokir beraksi Sync; bangun split lokal
    * (Tambah) tetap boleh. Qris/Edc tak terjangkau karena hanya via Pay. */
   const syncBlocked = syncWarnLevel() === 'block7';
-  // Nominal wajib dari kasir (route.params.total) — tanpa params tampilkan
+  // Nominal wajib dari kasir (route.params.total) - tanpa params tampilkan
   // empty-state jujur (pay_empty_total), bukan Rp266rb fiktif.
   const totalParam = route?.params?.total;
   const hasTotal =
@@ -224,7 +224,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const orderMode = route?.params?.mode;
   const tableNo = route?.params?.table;
   const ongkir = route?.params?.ongkir ?? 0;
-  /** Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa — diteruskan ke sale + struk. */
+  /** Vertical Shell Fase 3: jadwal/teknisi/DP/alamat jasa - diteruskan ke sale + struk. */
   const serviceDateParam = (route?.params?.serviceDate ?? '').trim();
   const serviceTimeParam = (route?.params?.serviceTime ?? '').trim();
   const technicianParam = (route?.params?.technician ?? '').trim();
@@ -267,7 +267,7 @@ export default function PayScreen({ navigation, route }: Props) {
   // DUAL-CURRENCY §4a: QRIS/EDC/dompet-ID hanya untuk cabang IDR. Gerbang
   // dibaca dari profil currency live (disinkron saat login); tab ID disembunyikan
   // + usulan metode ID jatuh ke Tunai. Tunai/member/tender netral-currency.
-  // (ms_paymentmethod seed tak dikonsumsi UI — tab hardcode ini satu-satunya
+  // (ms_paymentmethod seed tak dikonsumsi UI - tab hardcode ini satu-satunya
   // sumber daftar metode, sehingga gerbang hidup di sini, bukan kolom DB mati.)
   const isAudBranch = getCachedCurrency().code === 'AUD';
   const [tab, setTab] = useState<Tab>(() => {
@@ -332,7 +332,7 @@ export default function PayScreen({ navigation, route }: Props) {
     };
   }, []);
   /** R4-4: kartu dompet online yang tampil (QRIS disembunyikan bila owner
-   * menonaktifkan via server; dompet lain tak digerbang — lihat peta flag). */
+   * menonaktifkan via server; dompet lain tak digerbang - lihat peta flag). */
   const visibleWallets = useMemo(
     () => filterOnlineWallets(WALLETS, { ...PAYMENT_METHODS_DEFAULT, qrisEnabled, gpayEnabled }),
     [qrisEnabled, gpayEnabled],
@@ -385,7 +385,7 @@ export default function PayScreen({ navigation, route }: Props) {
     : false;
   // Diskon belanja bawaan = angka discount pemanggil apa adanya (sudah neto:
   // discountTotal + voucherAmt belanja; untuk voucher ongkir = discountTotal
-  // saja karena voucherAmt=0). Jangan di-nol-kan untuk kind Ongkir — itu
+  // saja karena voucherAmt=0). Jangan di-nol-kan untuk kind Ongkir - itu
   // menghilangkan diskon order saat voucher ongkir dipakai.
   const discountParam = Math.max(0, Math.round(Number(route?.params?.discount) || 0));
   const orderDiscount = orderVoucher ? discountParam : 0;
@@ -415,7 +415,7 @@ export default function PayScreen({ navigation, route }: Props) {
   const effVoucherCode = boxVoucher?.code ?? orderVoucher?.code ?? '';
   const effDiscount = orderDiscount + boxBelanjaAmt;
   const totalOngkirCut = cutToRecord + (isSplitGroup ? 0 : boxOngkirCut);
-  // Tip/gratuity pelanggan (fitur tip v1, 2026-10): diputuskan di layar ini —
+  // Tip/gratuity pelanggan (fitur tip v1, 2026-10): diputuskan di layar ini -
   // satu-satunya PENAMBAH payable (voucher box hanya mengurangi; total
   // pemanggil sudah final). Basis = subtotal item (Σ lineSubtotal); tanpa
   // items = mundur dari total (total − service − fee − rounding − ongkirNet).
@@ -488,7 +488,7 @@ export default function PayScreen({ navigation, route }: Props) {
     customerIdFromLocalKey(fwdMemberId);
   /** Guard ketuk-ganda goSuccess (dideklarasi di sini agar di atas goSuccess). */
   const goRef = useRef(false);
-  // P1-1b: prompt PIN manajer transport-only — dibuka hanya bila merchant
+  // P1-1b: prompt PIN manajer transport-only - dibuka hanya bila merchant
   // mewajibkan PIN payment DAN sale tertaut order server; batal = bayar
   // dibatalkan (paritas FE: gate memblokir konfirmasi).
   const [mgrPinOpen, setMgrPinOpen] = useState(false);
@@ -610,7 +610,7 @@ export default function PayScreen({ navigation, route }: Props) {
   // sudah mencakup service + ongkirNet + voucher + rounding). Params ongkir/
   // voucher/diskon hanya diteruskan untuk dicatat, bukan dihitung ulang di sini.
   // Satu-satunya pengurang adalah voucher yang dipasang di layar ini: belanja
-  // (boxBelanjaAmt) dan — bila kind Ongkir — sisa ongkir (boxOngkirCut).
+  // (boxBelanjaAmt) dan - bila kind Ongkir - sisa ongkir (boxOngkirCut).
   // Satu-satunya penambah = tip/gratuity pelanggan (tipAmount; 0 bila tanpa
   // tip atau kunjungan split grup).
   const payable = Math.max(0, total - boxBelanjaAmt - boxOngkirCut + tipAmount);
@@ -644,7 +644,7 @@ export default function PayScreen({ navigation, route }: Props) {
    * server (bukan konstanta), minSpend ditegakkan atas total resmi pemanggil.
    * Kind-aware (selaras totals.ts): kind Ongkir memotong SISA ongkir
    * (min(nominal, ongkir - cut bawaan), tolak bila ongkir habis) dan dicatat
-   * sebagai ongkirCut — bukan diskon belanja. Split grup DILARANG: voucher
+   * sebagai ongkirCut - bukan diskon belanja. Split grup DILARANG: voucher
    * grup sudah diaporsi SplitBill; box menambah diskon di luar head grup
    * (ghost remainder: head grand penuh vs visit pay lebih kecil).
    */
@@ -663,12 +663,15 @@ export default function PayScreen({ navigation, route }: Props) {
       // (bukan NOT_FOUND, bukan offline) → pesan i18n + STOP (jangan
       // fail-open ke ESB: kode milik universe GO). GO NOT_FOUND/offline →
       // lanjut alur ESB di bawah (kode mungkin milik universe ESB/lokal).
+      // LOYAL- adalah universe GO: jangan pernah fallback ke ESB/lokal agar
+      // tidak menampilkan nominal bohong saat offline atau owner mismatch.
       const goItems = mapSaleItemsToPreviewItems(route?.params?.items);
       if (goItems) {
         const goSubtotal = goItems.reduce((a, it) => a + it.subtotal, 0);
         if (goSubtotal > 0) {
           const g = await validatePosVoucherPreview(
             code, goSubtotal, goItems, mapAppModeToGoOrderType(orderMode),
+            undefined, fwdCustomerId ?? undefined,
           );
           if (g.ok) {
             const amt = Math.min(g.amount, total);
@@ -687,7 +690,19 @@ export default function PayScreen({ navigation, route }: Props) {
             setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(g.minSpend)));
             return;
           }
+          // LOYAL- tidak boleh fallback ke ESB/lokal: GO sudah menjawab
+          // (atau offline) dan kode ini hanya dikenal universe GO.
+          if (code.indexOf('LOYAL-') === 0) {
+            setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(g.minSpend)));
+            return;
+          }
         }
+      }
+      // Sabuk pengaman: LOYAL- tanpa item valid (goItems null) juga jangan
+      // divalidasi ke universe ESB/lokal.
+      if (code.indexOf('LOYAL-') === 0) {
+        setVoucherMsg(t('pay_voucher_invalid').replace('{m}', rp(0)));
+        return;
       }
       const v = await validateVoucherCode(code, total);
       if (!v.ok || (v.minSpend > 0 && total < v.minSpend)) {
@@ -780,7 +795,7 @@ export default function PayScreen({ navigation, route }: Props) {
   /**
    * APP-PRINTER-SALES (Q7) + P0-4: SATU client_id per sale untuk SELURUH rantai.
    * Diselesaikan sekali di Pay (params → head → terbitkan baru) lalu
-   * diteruskan WAJIB ke Qris/Edc/Success — Qris/Edc memakai ulang, tak
+   * diteruskan WAJIB ke Qris/Edc/Success - Qris/Edc memakai ulang, tak
    * menerbitkan sendiri, agar QR tak basi dan upsert server satu kunci.
    * Bila nomor sale sudah ada, kunci dipersist SEBELUM saveSale pertama
    * (getOrCreatePayChainId) agar retry/drain memakai kunci yang SAMA.
@@ -802,11 +817,11 @@ export default function PayScreen({ navigation, route }: Props) {
  *  SELECTION_REQUIRED tanpa sesi eksplisit disembuhkan otomatis bila hanya satu sesi OPEN
  *  (adopsi + retry SEKALI; >1 sesi = rejection jujur → antre → catatan ramah di Sync).
  *  Immediate gagal (offline/ditolak) = antre GO_OP_SETTLE agar drain
- *  memfinalisasi (retry saat offline, 'gagal'+catatan saat 4xx) — jujur di
+ *  memfinalisasi (retry saat offline, 'gagal'+catatan saat 4xx) - jujur di
  *  SyncScreen, tanpa Success palsu dan tanpa kirim buta. Tak pernah melempar.
  *  P1-2: sesi kas W1 yang diketahui disertakan (atribusi setoran benar);
  *  tak diketahui = BE me-resolve sendiri (sesi tunggal) atau menolak jujur
- *  bila register kasir diwajibkan — tanpa blokir-buta kasir offline (buka
+ *  bila register kasir diwajibkan - tanpa blokir-buta kasir offline (buka
  *  shift offline = id sesi belum ada di perangkat ini). */
   const mirrorSettleToServer = (
     salesNum: string, methodLabel: string, amount: number,
@@ -819,7 +834,7 @@ export default function PayScreen({ navigation, route }: Props) {
         const serverId = await getServerOrderIdForSale(salesNum);
         if (serverId == null) return;
         // A4 (APP-9: transfer kini MIRRORED via MANUAL_TRANSFER): deposit/member
-        // TAK punya padanan enum — cermin server DILARANG untuk keduanya
+        // TAK punya padanan enum - cermin server DILARANG untuk keduanya
         // (hanya ledger lokal + antre ESB).
         const beMethod = mapPayMethodToBe(methodLabel);
         if (!beMethod) return;
@@ -836,7 +851,7 @@ export default function PayScreen({ navigation, route }: Props) {
         // APP-9: ref kaki (transfer/EDC approvalCode) ikut sebagai notes.
         const notesClean = String(notes ?? '').trim().slice(0, 500);
         // SESI-FINAL-APP: proofUrl https≤2048 ditempel aditif (settle jalan
-        // tanpa proof bila kosong — BE menolak jujur via 409 PROOF_REQUIRED).
+        // tanpa proof bila kosong - BE menolak jujur via 409 PROOF_REQUIRED).
         const proofClean = /^https:\/\/.{1,2040}$/i.test(proofUrl.trim()) ? proofUrl.trim().slice(0, 2048) : '';
         const res = await settlePosPayment({
           serverId, method: beMethod, amountPaid: amount,
@@ -904,7 +919,7 @@ export default function PayScreen({ navigation, route }: Props) {
     let saleClientId: string;
     try {
       orderNo = paramSalesNum || (await nextSalesNum());
-      // APP-PRINTER-SALES (Q7): SATU client_id per sale — diselesaikan sekali
+      // APP-PRINTER-SALES (Q7): SATU client_id per sale - diselesaikan sekali
       // di Pay via resolveChainClientId; saveSale memakai apa adanya agar QR tak basi.
       saleClientId = await resolveChainClientId();
     } catch (e) {
@@ -1133,13 +1148,13 @@ export default function PayScreen({ navigation, route }: Props) {
   // (transport-only; salah/berubah = fail-once PIN_REQUIRED jujur).
   // A-P1-4 fail-closed: PIN wajib TAPI sid tak bisa dipastikan (null/lookup
   // gagal/exception, atau status-wajib tak diketahui) = HOLD sebagai
-  // unpaid/offline-hold — TANPA goSuccess, TANPA navigasi Success, TANPA
+  // unpaid/offline-hold - TANPA goSuccess, TANPA navigasi Success, TANPA
   // tulis lunas. Kasir tetap di layar (keranjang/tender utuh) + banner hold;
   // ulangi setelah order tertaut / online kembali. TANPA persist tambahan:
   // tagihan meja yang sudah ada tetap 'open'; keranjang baru tetap di
   // keranjang (tanpa struk-hantu, tanpa burn voucher, tanpa debit deposit).
   /** Vertical Shell Fase 2: PREPAID (pulsa) tak boleh hold/simpan-hutang.
-   * SN/token tak bisa ditarik — tahan = rugi pasti. Blokir jujur + arahkan lunas. */
+   * SN/token tak bisa ditarik - tahan = rugi pasti. Blokir jujur + arahkan lunas. */
   const holdAsUnpaidOffline = () => {
     try {
       const reason = payPolicyBlockReason(getCachedVerticalId());
@@ -1265,7 +1280,7 @@ export default function PayScreen({ navigation, route }: Props) {
     if (!wallet || payable <= 0 || !ovoPhoneOk) return;
     if (wallet === 'qris') {
       // client_id diselesaikan dulu (async) agar Qris SELALU menerima kunci
-      // rantai — tak ada penerbitan baru di daun (QR tak basi).
+      // rantai - tak ada penerbitan baru di daun (QR tak basi).
       void (async () => {
         try {
         const chainClientId = await resolveChainClientId();
@@ -1351,6 +1366,13 @@ export default function PayScreen({ navigation, route }: Props) {
   const checkTender = async (): Promise<boolean> => {
     const code = tenderCode.trim().toUpperCase();
     if (code.length < 3 || tenderNum <= 0) return false;
+    // LOYAL- is a discount voucher, not a tender slip: keep it in the voucher
+    // box where owner binding and min-spend are enforced. Tender path uses the
+    // ESB/local universe and would mis-handle it.
+    if (code.indexOf('LOYAL-') === 0) {
+      setTenderMsg(t('pay_tender_invalid').replace('{m}', rp(0)));
+      return false;
+    }
     setTenderBusy(true);
     setTenderMsg(t('pay_tender_checking'));
     try {
@@ -1424,7 +1446,7 @@ export default function PayScreen({ navigation, route }: Props) {
   /**
    * Rincian tagihan terlihat: Total order (neto, sudah termasuk orderVoucher +
    * orderDiscount), potongan voucher Pay yang dipasang di layar ini (belanja
-   * dan potongan ongkir dipisah — ongkirCut bukan diskon), dan Harus dibayar
+   * dan potongan ongkir dipisah - ongkirCut bukan diskon), dan Harus dibayar
    * (= Sisa saat belum ada split). Sebelumnya voucher box tak muncul di
    * penjumlahan mana pun sehingga terasa "tidak masuk hitungan".
    */
@@ -1518,7 +1540,7 @@ export default function PayScreen({ navigation, route }: Props) {
         </View>
       </View>
       {(() => {
-        // Vertical Shell: PREPAID (pulsa) wajib lunas — tanpa tempo; DP (jasa) beri hint.
+        // Vertical Shell: PREPAID (pulsa) wajib lunas - tanpa tempo; DP (jasa) beri hint.
         try {
           const v = VERTICALS[getCachedVerticalId()];
           if (v?.payPolicy === 'PREPAID') return <Text style={styles.ctaHint}>{t('pay.prepaidOnly')}</Text>;
@@ -1533,7 +1555,7 @@ export default function PayScreen({ navigation, route }: Props) {
       ) : null}
       {(() => {
         // Fase 3 kasbon: warung/grocery boleh simpan-hutang dengan nama + limit.
-        // PREPAID (pulsa) dan fashion/jasa tak boleh kasbon — tombol tak tampil.
+        // PREPAID (pulsa) dan fashion/jasa tak boleh kasbon - tombol tak tampil.
         try {
           const vid = String(getCachedVerticalId() ?? '');
           const pol = (VERTICAL_POLICY as Record<string, { kasbonAllowed: boolean; kasbonLimit: number }>)[vid];
@@ -1544,7 +1566,7 @@ export default function PayScreen({ navigation, route }: Props) {
           return (
             <View style={styles.kasbonBox}>
               <Text style={styles.kasbonT}>
-                {nm ? (over ? `Kasbon melebihi limit (${remaining} > ${pol.kasbonLimit}). Kurangi atau tambah bayar.` : `Simpan kasbon ${nm} — sisa ${remaining}`) : 'Isi nama pelanggan di kasir untuk kasbon.'}
+                {nm ? (over ? `Kasbon melebihi limit (${remaining} > ${pol.kasbonLimit}). Kurangi atau tambah bayar.` : `Simpan kasbon ${nm} - sisa ${remaining}`) : 'Isi nama pelanggan di kasir untuk kasbon.'}
               </Text>
               <AppButton
                 title={nm && !over ? `Simpan kasbon (${remaining})` : 'Kasbon (belum bisa)'}
@@ -2129,7 +2151,7 @@ export default function PayScreen({ navigation, route }: Props) {
   return (
     <View style={styles.root}>
       {renderHeader()}
-      {/* P1-1b: PIN manajer transport-only — hanya bila gerbang payment aktif. */}
+      {/* P1-1b: PIN manajer transport-only - hanya bila gerbang payment aktif. */}
       <ManagerPinPrompt
         visible={mgrPinOpen}
         onSubmit={submitManagerPin}

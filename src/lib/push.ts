@@ -149,7 +149,7 @@ function activeTag(): string {
 }
 
 /**
- * R42: dedupe notifikasi lokal — kunci judul+isi+data dalam jendela 60 dtk
+ * R42: dedupe notifikasi lokal - kunci judul+isi+data dalam jendela 60 dtk
  * (echo WS + panggilan langsung tak membunyikan dua kali). Cap 500 entri
  * (buang terlama). Best-effort, tak pernah melempar.
  */
@@ -175,7 +175,7 @@ function markNotified(title: string, body: string, data?: Record<string, unknown
 }
 
 /**
- * R43: preferensi suara per-tag — BELUM ADA kunci i18n / kolom terminal-settings
+ * R43: preferensi suara per-tag - BELUM ADA kunci i18n / kolom terminal-settings
  * untuk bunyi per-tag (kasir vs dapur), sehingga tetap mewarisi toggle global
  * "Bunyi order baru" (perilaku tak berubah). Dicolok di sini kelak tanpa
  * mengubah pemanggil. Getar per-tag default MATI (perilaku eksisting).
@@ -200,7 +200,7 @@ export function isTagVibrateEnabled(_tag?: string): boolean {
 /** Notifikasi lokal: order online baru, sync warning, dsb. Bunyi mengikuti
  *  toggle Pengaturan "Bunyi order baru" (soundNewOrder) agar "masuk dan bunyi"
  *  benar-benar terjadi saat ON dan diam saat OFF. Param ke-4 opsional:
- *  string tag atau {tag/targetTag, vibrate} — notifikasi untuk tag lain
+ *  string tag atau {tag/targetTag, vibrate} - notifikasi untuk tag lain
  *  dibuang diam-diam (dispatcher realtime sudah memfilter WS; ini lapis kedua
  *  untuk panggilan langsung). */
 export async function notifyLocal(

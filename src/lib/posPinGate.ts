@@ -2,7 +2,7 @@
  * P1-1b: gerbang PIN manajer ala FE (posPinGate.ts: shouldRequirePosPinGate +
  * withPosPin). APP membaca posBehaviorSettings dari pos-config terminal
  * (fetchTerminalPosConfig, cache TTL 5 mnt) lalu memutuskan apakah aksi
- * butuh PIN — PIN dikumpulkan via ManagerPinPrompt dan ditempel ke body
+ * butuh PIN - PIN dikumpulkan via ManagerPinPrompt dan ditempel ke body
  * live (param pin posWire).
  *
  * A-P1-4: antrean GO_OP_SETTLE BOLEH membawa konteks PIN (transport-only,
@@ -11,10 +11,10 @@
  * (sync.ts goMerchantOp) meneruskannya ke /pos/payment agar pelunasan
  * terverifikasi PIN tetap final saat online kembali. PIN salah/berubah =
  * fail-once PIN_REQUIRED jujur (kasir ulangi live + PIN). Op antrean lain
- * (refund/cancel/void) tetap TANPA pin — live-only.
+ * (refund/cancel/void) tetap TANPA pin - live-only.
  *
  * Fail-open false saat tak diketahui (tanpa binding / fetch gagal): server
- * sumber kebenaran — BE menjawab 400 PIN_REQUIRED jujur (drain fail-once +
+ * sumber kebenaran - BE menjawab 400 PIN_REQUIRED jujur (drain fail-once +
  * catatan), bukan alasan memblokir kasir offline.
  */
 import { getBoundSupervisorTerminalId } from './supervisor';

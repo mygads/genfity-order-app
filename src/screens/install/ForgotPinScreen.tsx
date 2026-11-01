@@ -11,7 +11,7 @@ import { removePinHash } from '../../lib/pin';
 import { clearPinChangeRequired } from '../../lib/supervisor';
 import { loadBinding, requestPinReset } from '../../lib/terminalContract';
 // APP-FIXUP (fix-app-contract D1): merchantId (scope body pin-reset server)
-// diambil dari binding/sesi — perangkat tak menyimpan merchant id terpisah.
+// diambil dari binding/sesi - perangkat tak menyimpan merchant id terpisah.
 import {
   getBinding as getSessionBinding,
   getSession,
@@ -20,7 +20,7 @@ import {
 
 type Nav = { goBack: () => void };
 
-/** B9: PIN lemah — semua berulang atau berurutan umum. */
+/** B9: PIN lemah - semua berulang atau berurutan umum. */
 const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
 const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);
 
@@ -30,7 +30,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { lang, t } = useLang();
   const [username, setUsername] = useState('');
   // APP-FIXUP (fix-app-contract D1): kontrak fix-be butuh PIN baru langsung
-  // di body {merchantId, pin, username?/userId?} — bukan alur tautan email.
+  // di body {merchantId, pin, username?/userId?} - bukan alur tautan email.
   // PIN hanya hidup di state komponen (tak pernah disimpan) + dibersihkan
   // tiap sukses. Label literal ID/EN netral, tanpa kunci i18n baru (lane beku).
   const [pin, setPin] = useState('');
@@ -39,7 +39,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   // Jujur offline-first: tanpa server (local/dummy) tak ada "instruksi"
-  // yang bisa dikirim — tunjukkan arahan reset via owner, bukan klaim palsu.
+  // yang bisa dikirim - tunjukkan arahan reset via owner, bukan klaim palsu.
   const offline = getApiMode() !== 'real';
 
   // Fix CONFIRMED-3 (audit row 16, paket app-login) + D1 (fix-app-contract):
@@ -91,11 +91,11 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
       }
       const r = await requestPinReset({ userIdOrUsername: u, merchantId, newPin: pin });
       if (r.ok) {
-        // R34: server kini sumber benar PIN baru — buang hash lokal basi agar
+        // R34: server kini sumber benar PIN baru - buang hash lokal basi agar
         // login/absensi berikutnya memakai PIN baru, bukan hash lama.
         // Best-effort: gagal resolve/hapus tak menggagalkan sukses server.
         // Bila username tak ketemu di ms_posuser lokal (mis. user hanya ada di
-        // server / beda ejaan), hash lokal tak tersentuh — catat jujur.
+        // server / beda ejaan), hash lokal tak tersentuh - catat jujur.
         try {
           await initDb();
           const row = await queryFirst<{ id: string }>(
@@ -113,7 +113,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
               /* best-effort */
             }
           } else {
-            console.warn(`[forgot-pin] reset ok tapi user lokal '${u}' tak ditemukan — hash lokal tak dibersihkan`);
+            console.warn(`[forgot-pin] reset ok tapi user lokal '${u}' tak ditemukan - hash lokal tak dibersihkan`);
           }
         } catch (e) {
           console.warn(`[forgot-pin] bersih hash lokal gagal: ${e instanceof Error ? e.message : e}`);
@@ -136,7 +136,7 @@ export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
         <>
           <Text style={[styles.desc, isTablet && styles.descBig]}>
             {/* APP-FIXUP (fix-app-contract D1): salinan sukses jujur untuk
-                reset langsung — alur lama mengklaim "tautan dikirim ke email
+                reset langsung - alur lama mengklaim "tautan dikirim ke email
                 supervisor" padahal body baru menyetel PIN langsung. */}
             {sent === 'offline' || offline ? t('g_forgot_offline') : (
               <>{t('forgot_reset_ok').replace('{user}', username || t('g_forgot_cashier_fb'))}</>

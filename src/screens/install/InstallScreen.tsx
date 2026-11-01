@@ -249,7 +249,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
       return;
     }
     setChecking(true); setError('');
-    // Q10: ganti terminal wajib re-bind penuh (pilih ulang + PIN terminal) —
+    // Q10: ganti terminal wajib re-bind penuh (pilih ulang + PIN terminal) -
     // klaim kode legacy tak boleh menimpa ikatan yang sudah ada (tanpa PIN,
     // tanpa logout/clearGrant). Perangkat terikat → tolak fail-closed; pakai
     // tombol ikat-ulang di kartu atas (aliran E03 ber-PIN). Tanpa kunci i18n
