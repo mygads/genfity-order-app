@@ -156,11 +156,13 @@ function run() {
   try {
     const diff = execSync('git diff --name-only', { cwd: ROOT, encoding: 'utf8' });
     const touched = diff.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    const w2Guard = ['src/lib/history.ts', 'src/lib/apiSource.ts',
+    const w2Guard = ['src/lib/apiSource.ts',
       'src/screens/history/EsbOrderScreen.tsx',
       'src/screens/history/HistoryScreen.tsx', 'test/tripwire-poswire-w2.cjs'];
     // NB: src/lib/posWire.ts dikeluarkan dari w2Guard — dijaga blok
     // FINAL-APP di bawah (penanda kontrak, bukan blanko).
+    // NB: src/lib/history.ts dikeluarkan dari w2Guard — kontrak owner
+    // 2026-11-01: 1 baris aditif (id unik op table-clear, paritas GAP-F).
     // NB: src/screens/booking/BookingScreen.tsx dikeluarkan dari w2Guard —
     // kontrak owner 2026-11-01: pola GAP-F TablesScreen diterapkan di file ini.
     // NB: src/screens/history/KitchenScreen.tsx dikeluarkan dari w2Guard —
