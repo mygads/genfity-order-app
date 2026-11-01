@@ -521,9 +521,26 @@ function toGoPosRequest(
     const legs = Array.isArray(payload.payments) ? payload.payments : [];
     const first = (legs[0] ?? {}) as { method?: unknown; amount?: unknown; approvalCode?: unknown };
     const mKey = String(first.method ?? payload.method ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
-    const method = mKey === 'qris'
-      ? 'QRIS'
-      : (/tunai|cash/.test(mKey) || !mKey ? 'CASH_ON_COUNTER' : 'CARD_ON_COUNTER');
+    // Fail-closed: deposit/member/split TAK punya padanan di
+    // group-bill/payments. Dulu default ke CARD_ON_COUNTER = salah catat
+    // uang. Kembalikan null agar jatuh ke cabang C8 (gagal jujur fail-once),
+    // bukan 400-retry atau salah catat.
+    // Multi-leg juga null: satu panggilan hanya membawa satu kaki.
+    if (legs.length > 1) return null;
+    let method: string;
+    if (mKey === 'qris') {
+      method = 'QRIS';
+    } else if (/tunai|cash/.test(mKey) || !mKey) {
+      method = 'CASH_ON_COUNTER';
+    } else if (/edc|card|debit|kredit|nontunai|kartu|ovo|gopay|dana|shopee|wallet|online/.test(mKey)) {
+      method = 'CARD_ON_COUNTER';
+    } else if (/transfer|banktransfer/.test(mKey)) {
+      // Single-leg transfer kini punya padanan jujur di BE
+      // (group-bill/payments menerima MANUAL_TRANSFER).
+      method = 'MANUAL_TRANSFER';
+    } else {
+      return null;
+    }
     const amount = Math.round(Number(first.amount) || 0);
     return {
       path: `api/merchant/orders/${orderId}/group-bill/payments`,
@@ -635,6 +652,8 @@ function goMerchantOp(
         orderId: serverId,
         paymentMethod: method,
         amountPaid: amount,
+        ...(Math.round(Number(p.cashAmount) || 0) > 0 ? { cashAmount: Math.round(Number(p.cashAmount) || 0) } : {}),
+        ...(Math.round(Number(p.cardAmount) || 0) > 0 ? { cardAmount: Math.round(Number(p.cardAmount) || 0) } : {}),
         ...(p.changeAmount !== undefined ? { changeAmount: Math.round(Number(p.changeAmount) || 0) } : {}),
         // APP-9: ref transfer (approvalCode kaki) ikut sebagai notes agar
         // terekam di payments.notes/metadata BE, bukan hilang di jalan.
@@ -1728,10 +1747,10 @@ async function repairUnsettledSales(): Promise<number> {
           String(((o.payload ?? {}) as { salesNum?: unknown }).salesNum ?? '') === no,
       );
       if (dup) continue;
-      let legs: Array<{ paymentMethod?: unknown; refNo?: unknown }>;
+      let legs: Array<{ paymentMethod?: unknown; refNo?: unknown; amount?: unknown }>;
       try {
-        legs = await all<{ paymentMethod?: unknown; refNo?: unknown }>(
-          `SELECT paymentMethod, refNo FROM tr_salespayment WHERE salesNum = ?`,
+        legs = await all<{ paymentMethod?: unknown; refNo?: unknown; amount?: unknown }>(
+          `SELECT paymentMethod, refNo, amount FROM tr_salespayment WHERE salesNum = ?`,
           [no],
         );
       } catch {
@@ -1742,12 +1761,32 @@ async function repairUnsettledSales(): Promise<number> {
       if (!bem.every((m): m is BePayMethod => m != null)) continue;
       const uniq = [...new Set<string>(bem)];
       if (uniq.length !== 1 && uniq.includes('MANUAL_TRANSFER')) continue;
+      // SPLIT server hanya memodelkan tunai+kartu (cashAmount/cardAmount).
+      // Kaki QRIS/komplimen/transfer dalam campuran tak terwakili di sana -
+      // lewati agar tak salah catat (kasir selesaikan manual), bukan default
+      // tunai penuh.
+      if (uniq.length !== 1 && uniq.some((m) => m !== 'CASH_ON_COUNTER' && m !== 'CARD_ON_COUNTER')) continue;
       const only = uniq.length === 1 ? String(uniq[0] ?? '') : '';
       const method =
         only === 'CASH_ON_COUNTER' || only === 'CARD_ON_COUNTER' || only === 'QRIS' ||
         only === 'COMPLIMENT' || only === 'MANUAL_TRANSFER'
           ? only
           : 'SPLIT';
+      // Rincian tunai/kartu untuk SPLIT: tanpa ini BE default seluruhnya
+      // tunai (salah catat bauran bayar + atribusi sesi kas).
+      let splitCash: number | undefined;
+      let splitCard: number | undefined;
+      if (uniq.length !== 1) {
+        let cashSum = 0;
+        let cardSum = 0;
+        legs.forEach((l, i) => {
+          const amt = Math.max(0, Math.round(Number(l.amount) || 0));
+          if (bem[i] === 'CASH_ON_COUNTER') cashSum += amt;
+          else if (bem[i] === 'CARD_ON_COUNTER') cardSum += amt;
+        });
+        if (cashSum > 0) splitCash = cashSum;
+        if (cardSum > 0) splitCard = cardSum;
+      }
       const ref = String(legs[0]?.refNo ?? '').trim();
       const tipN = Math.max(0, Math.round(Number(h.tip) || 0));
       const vch = String(h.voucherCode ?? '').trim();
@@ -1757,6 +1796,8 @@ async function repairUnsettledSales(): Promise<number> {
         serverId: sid,
         method,
         amountPaid: amt,
+        ...(splitCash !== undefined ? { cashAmount: splitCash } : {}),
+        ...(splitCard !== undefined ? { cardAmount: splitCard } : {}),
         ...(tipN > 0 ? { tipAmount: tipN } : {}),
         ...(vch ? { voucherCode: vch.slice(0, 64) } : {}),
         ...(ref && uniq.length === 1 ? { notes: ref.slice(0, 500) } : {}),
