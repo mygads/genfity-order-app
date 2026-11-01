@@ -1,7 +1,7 @@
 import { useState } from 'react';import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import { createPinOnServer, getApiMode } from '../../lib/apiSource';import { savePinHash } from '../../lib/pin';import { clearPinChangeRequired } from '../../lib/supervisor';import { useLang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void };type Props = { navigation?: Nav; route?: { params?: { branch?: string; userId?: string } } };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** B9: PIN lemah - semua berulang atau berurutan umum. */
-const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
+const WEAK_PINS = new Set(['000000', '111111', '222222', '333333', '444444', '555555', '666666', '777777', '888888', '999999', '123456', '654321']);
 const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default function CreatePinScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const isTablet = width >= TABLET_BP;
@@ -11,7 +11,7 @@ const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default functi
   const [error, setError] = useState('');
   const [ok, setOk] = useState(false);
 
-  const [saving, setSaving] = useState(false); const active = pin.length < 4 ? 'pin' : 'confirm';
+  const [saving, setSaving] = useState(false); const active = pin.length < 6 ? 'pin' : 'confirm';
   const val = active === 'pin' ? pin : confirm;
   const setVal = active === 'pin' ? setPin : setConfirm;
 
@@ -37,10 +37,10 @@ const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default functi
     if (saving) return; setError('');
     if (k === 'C') setVal('');
     else if (k === '⌫') setVal(val.slice(0, -1));
-    else if (val.length < 4) {
+    else if (val.length < 6) {
       const next = val + k;
       setVal(next);
-      if (next.length === 4 && active === 'confirm') {
+      if (next.length === 6 && active === 'confirm') {
         if (next === pin) {
           // B9: tolak PIN lemah (berulang/berurutan).
           if (isWeakPin(next)) {
@@ -84,7 +84,7 @@ const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default functi
         {branch} · {active === 'pin' ? t('inst_pin_new') : t('inst_pin_confirm')}
       </Text>
       <View style={styles.pinRow}>
-        {[0, 1, 2, 3].map((i) => (
+        {[0, 1, 2, 3, 4, 5].map((i) => (
           <View key={i} style={[styles.pinDot, val[i] && styles.pinDotOn, isTablet && styles.pinDotBig]}>
             <Text style={styles.pinChar}>{val[i] ? '●' : '○'}</Text>
           </View>
@@ -116,7 +116,7 @@ const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);export default functi
   title: { fontFamily: fonts.bold, fontSize: 20, color: colors.navy, marginTop: 16, textAlign: 'center' },
   desc: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
   pinRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
-  pinDot: { width: 56, height: 56, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
+  pinDot: { width: 40, height: 48, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
   pinDotOn: { borderColor: colors.navy, backgroundColor: colors.paleBlue },
   pinChar: { fontSize: 20, color: colors.navy },
   error: { fontFamily: fonts.medium, fontSize: 13, color: colors.red, marginTop: 8 },

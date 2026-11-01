@@ -1619,7 +1619,7 @@ const STR: Record<string, Entry> = {
   inst_pin_done_desc: { id: '{b} berhasil ditautkan. PIN kasir tersimpan di perangkat ini - gunakan untuk masuk.', en: '{b} linked. The cashier PIN is stored on this device - use it to sign in.' },
   inst_pin_enter: { id: 'Masuk ke POS ›', en: 'Enter POS ›' },
   inst_pin_title: { id: 'Buat PIN Kasir', en: 'Create Cashier PIN' },
-  inst_pin_new: { id: 'Masukkan 4 digit PIN baru.', en: 'Enter a new 4-digit PIN.' },
+  inst_pin_new: { id: 'Masukkan 6 digit PIN baru.', en: 'Enter a new 6-digit PIN.' },
   inst_pin_confirm: { id: 'Ulangi PIN untuk konfirmasi.', en: 'Repeat the PIN to confirm.' },
   inst_web_title: { id: 'Pendaftaran POS', en: 'POS Registration' },
 
