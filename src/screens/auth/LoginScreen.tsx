@@ -40,8 +40,8 @@ import {
 } from '../../session';
 import { ApiPath, apiPost } from '../../config/server';
 import { startRealtime } from '../../lib/realtime';
-import { flushPendingRevokes, restoreAutoSyncPrefs } from '../../lib/sync';
-import { pullMaster } from '../../lib/master';
+import { flushPendingRevokes, pushAll, restoreAutoSyncPrefs } from '../../lib/sync';
+import { ensureFirstSessionMaster, pullMaster } from '../../lib/master';
 import { setWsForeground } from '../../native/printer';
 import { getApiMode, loginByQrCode, parseQrLoginPayload, type EmployeeSession } from '../../lib/apiSource';
 import { pinVerifyTerminalPin, fetchTerminalReadiness } from '../../lib/terminalApi';
@@ -817,7 +817,22 @@ async function completeOnline(
   // agar kasir tak jualan dengan harga/stok basi bila WS/FORCE_PULL
   // terlewat (mis. WS mati saat owner ubah menu). Fire-and-forget
   // best-effort — login tak diblokir bila gagal.
-  try { void pullMaster(['menu', 'branchmenu']).catch(() => {}); } catch { /* abaikan */ }
+  // LOGIN-FLUSH (audit): login online = bukti konektivitas — kuras antrean
+  // offline (penjualan/absensi/deposit tertunda) segera, tak tunggu timer
+  // 5 mnt. Fire-and-forget best-effort — login tak diblokir bila gagal.
+  try { void pushAll().catch(() => {}); } catch { /* abaikan */ }
+  // LOGIN-PULL sesi-pertama: instalasi segar / ganti cabang-terminal = master
+  // non-menu (meja/member/voucher/promo/pengguna/aturan terminal) masih
+  // kosong. Full sekali per cabang+terminal; login biasa = light pull
+  // menu/branchmenu seperti semula. Fire-and-forget best-effort.
+  try {
+    void (async () => {
+      try {
+        const didFull = await ensureFirstSessionMaster(ctx.branchId, ctx.terminalId);
+        if (!didFull) await pullMaster(['menu', 'branchmenu']);
+      } catch { /* abaikan */ }
+    })().catch(() => {});
+  } catch { /* abaikan */ }
   // SYNC-02 (C12): timer auto-sync ikut login online (bukan hanya buka SyncScreen).
   try { void restoreAutoSyncPrefs().catch(() => {}); } catch { /* abaikan */ }
   try { void setWsForeground(true); } catch { /* abaikan */ }

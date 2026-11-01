@@ -387,6 +387,18 @@ function openSocket(ch: Channel, url: string): void {
       } catch {
         /* master belum siap - reconnect soket tetap sah */
       }
+      // LOGIN-FLUSH cermin: reconnect = jaringan kembali hidup → kuras antrean
+      // penjualan offline segera (best-effort piggyback; gagal = timer 5 mnt
+      // + sync manual yang menangani). Lazy require ala master/cetak di atas.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sy = require('./sync') as typeof import('./sync');
+        void sy.pushAll().catch(() => {
+          /* gagal reconnect-flush = jadwal sync biasa yang menangani */
+        });
+      } catch {
+        /* sync belum siap - reconnect soket tetap sah */
+      }
       // C10: reconnect = jaringan kembali hidup → kuras antrean cetak
       // (best-effort piggyback; lazy require ala master di atas agar nol tepi
       // statis baru; gagal = antrean tetap untuk piggyback cetak berikut).

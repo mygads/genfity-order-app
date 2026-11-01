@@ -405,6 +405,47 @@ export interface PullResult {
  * bernama itu yang ditarik; nama tak dikenal (mis. promotion yang tabelnya
  * belum ada, lihat TODO M9-4) diabaikan diam-diam.
  */
+/** Kunci pull sesi-pertama: full master sekali per cabang+terminal. */
+const FIRST_MASTER_KEY = 'genfity.pos.firstmaster.v1';
+/** Domain berat (riwayat) — tak ikut pull sesi-pertama; SyncScreen yang menangani. */
+const FIRST_MASTER_SKIP = new Set(['sales', 'shiftlog']);
+/**
+ * LOGIN-PULL sesi-pertama (audit): instalasi segar / ganti cabang-terminal =
+ * master non-menu (meja/member/voucher/promo/pengguna/aturan terminal) masih
+ * kosong — layar kasir/meja/voucher tampil kosong sampai sync manual/WS.
+ * Full pull (minus riwayat berat sales/shiftlog) SEKALI per cabang+terminal,
+ * dicatat di flag storage. Login biasa / flag cocok = false (pemanggil
+ * lanjut light pull menu/branchmenu seperti semula). Fail-open: kondisi
+ * apapun yang gagal = false, bukan blokir login. Watermark per-domain membuat
+ * retry berikutnya inkremental bila pull terputus di tengah.
+ */
+export async function ensureFirstSessionMaster(branchId?: string, terminalId?: string): Promise<boolean> {
+  try {
+    if (getApiMode() !== 'real') return false;
+    if (getServerEnv() !== 'custom' || !getBaseUrl()) return false;
+    const b = (branchId ?? getBranchId() ?? '').trim();
+    const t = (terminalId ?? '').trim();
+    let cur: { branch?: unknown; terminal?: unknown } | null = null;
+    try {
+      const raw = await getItem(FIRST_MASTER_KEY);
+      cur = raw ? (JSON.parse(raw) as { branch?: unknown; terminal?: unknown }) : null;
+    } catch {
+      cur = null;
+    }
+    if (cur && (!b || String(cur.branch ?? '') === b) && (!t || String(cur.terminal ?? '') === t)) return false;
+    const keys = DOMAINS.map((d) => d.key).filter((k) => !FIRST_MASTER_SKIP.has(k));
+    await pullMaster(keys);
+    try {
+      await setItem(FIRST_MASTER_KEY, JSON.stringify({ branch: b, terminal: t, at: new Date().toISOString() }));
+    } catch {
+      /* flag best-effort - watermark tetap membuat retry inkremental */
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function pullMaster(only?: string[]): Promise<PullResult> {
   if (getApiMode() !== 'real') {
     return { total: 0, per: {}, skipped: [], at: new Date().toISOString() };
