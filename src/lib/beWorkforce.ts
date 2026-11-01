@@ -662,11 +662,19 @@ export async function cashCloseBe(
   const be = beErrorOf(res.data);
   if (res.status === 409 && be.code === 'SESSION_CLOSED') {
     await clearCashSessionId();
+    // Jujur: BE menyertakan status aktual di data 409 (PENDING_REVIEW vs
+    // CLOSED). Pakai kebenaran server agar kartu approve tak terlewat;
+    // fallback 0/false bila BE lama tanpa data (kompatibel mundur).
+    const raw409 = (res.data ?? {}) as Record<string, unknown>;
+    const inner409 = ((raw409.data ?? {}) as Record<string, unknown>);
     return {
       ok: true,
       data: {
-        sessionId: sid, status: 'CLOSED', pendingManagerReview: false,
-        expectedCash: 0, actualCash: body.actualCash as number, variance: 0, replayed: true,
+        sessionId: sid, status: strOf(inner409.status) || 'CLOSED',
+        pendingManagerReview: inner409.pendingManagerReview === true,
+        expectedCash: numOf(inner409.expectedCash),
+        actualCash: numOf(inner409.actualCash ?? body.actualCash),
+        variance: numOf(inner409.variance), replayed: true,
       },
     };
   }
