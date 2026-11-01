@@ -387,6 +387,21 @@ function openSocket(ch: Channel, url: string): void {
       } catch {
         /* master belum siap - reconnect soket tetap sah */
       }
+      // BOOT-SYNC cermin: reconnect = konfigurasi kasir (tier paket Pro-gate,
+      // tab bayar, threshold stok) bisa basi mid-session — segarkan server-wins
+      // best-effort (gagal = cache lama; debit BE 1 GET/reconnect ≤1/90 dtk).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pc = require('./posConfigSync') as typeof import('./posConfigSync');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sess = require('../session') as typeof import('../session');
+        const tid = String(sess.getBinding?.()?.terminalId ?? '').trim();
+        if (tid) void pc.syncPosConfigFromServer(tid).catch(() => {
+          /* gagal = cache lama yang menangani */
+        });
+      } catch {
+        /* pos-config belum siap - reconnect soket tetap sah */
+      }
       // LOGIN-FLUSH cermin: reconnect = jaringan kembali hidup → kuras antrean
       // penjualan offline segera (best-effort piggyback; gagal = timer 5 mnt
       // + sync manual yang menangani). Lazy require ala master/cetak di atas.
