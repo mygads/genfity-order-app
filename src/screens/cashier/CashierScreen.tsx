@@ -559,6 +559,17 @@ export default function CashierScreen({ navigation, route }: Props) {
   /** Muat order saat keranjang terisi: tahan dulu, minta konfirmasi hapus keranjang. */
   const [pendingLoad, setPendingLoad] = useState<CartItem[] | null>(null);
   const appliedLoad = useRef('');
+  /* GAP-AF: single-flight simpan-order (ketuk-ganda = dua nomor + dua draft). */
+  const saveOrderRef = useRef(false);
+  /* GAP-AG: throttle navigasi anti layar-ganda (CartDetail/Pay ganda). */
+  const navCashAt = useRef(0);
+  /* GAP-AG: throttle navigasi anti layar-ganda (ketuk-ganda <800ms = satu navigasi). */
+  const navOnce = (ref: { current: number }, fn: () => void) => {
+    const now = Date.now();
+    if (now - ref.current < 800) return;
+    ref.current = now;
+    fn();
+  };
   // Editor catatan/diskon/void per item
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -1496,6 +1507,9 @@ export default function CashierScreen({ navigation, route }: Props) {
       }
     } catch { /* abaikan -> lanjut legacy */ }
 
+    /* GAP-AF: single-flight; reset di finally rantai async. */
+    if (saveOrderRef.current) return;
+    saveOrderRef.current = true;
     void (async () => {
       let num = salesNum.trim();
       if (!num) {
@@ -1521,7 +1535,7 @@ export default function CashierScreen({ navigation, route }: Props) {
           ...(customer.trim() ? { customer: customer.trim() } : {}),
         },
       });
-    })();
+    })().finally(() => { saveOrderRef.current = false; });
   };
 
   const today = new Date().toLocaleDateString(lang === 'en' ? 'en-US' : 'id-ID', {
@@ -2117,7 +2131,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.btnPay, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
           disabled={activeCart.length === 0 || branchUnbound || syncBlocked}
-          onPress={payImmediately ? goPayDirect : goCart}>
+          onPress={() => navOnce(navCashAt, payImmediately ? goPayDirect : goCart)}>
           <Image source={require('../../../assets/icons/money_white.webp')} style={styles.btnIcon} resizeMode="contain" />
           <Text style={styles.btnPayText} numberOfLines={1} adjustsFontSizeToFit>{t('pay')} | {rp(total)}</Text>
           <Text style={styles.btnPayArrow}>›</Text>
@@ -2319,7 +2333,7 @@ export default function CashierScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.cta, (activeCart.length === 0 || branchUnbound || syncBlocked) && styles.ctaDisabled]}
           disabled={activeCart.length === 0 || branchUnbound || syncBlocked}
-          onPress={goCart}
+          onPress={() => navOnce(navCashAt, goCart)}
           activeOpacity={0.85}>
           <View style={styles.ctaCount}>
             <Text style={styles.ctaCountLabel}>{t('amountCount')}</Text>
