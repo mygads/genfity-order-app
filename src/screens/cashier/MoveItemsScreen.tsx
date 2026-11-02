@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
@@ -149,6 +149,8 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
   const [pickedQty, setPickedQty] = useState<Record<string, number>>({});
   const [to, setTo] = useState(destList[0] ?? '');
   const [movedQty, setMovedQty] = useState<Record<string, number>>({});
+  /* GAP-AJ: single-flight belah-pindah item (ketuk-ganda = pindah ganda di SQLite). */
+  const moveRef = useRef(false);
   const [doneMsg, setDoneMsg] = useState('');
 
   const sourceItems = catalog[from] ?? [];
@@ -190,6 +192,9 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
 
   const move = () => {
     if (pickedItems.length === 0 || sameTable) return;
+    /* GAP-AJ: tolak tap kedua selama belah-pindah berjalan; reset di finally rantai async. */
+    if (moveRef.current) return;
+    moveRef.current = true;
     const snapshot = pickedItems.map((it) => ({ ...it }));
     const totalSnap = pickedTotal;
     const countSnap = pickedCount;
@@ -265,7 +270,7 @@ export default function MoveItemsScreen({ navigation, route }: Props) {
         /* antrean belum siap - status lokal di bawah tetap diubah */
       }
       markMoved();
-    })();
+    })().finally(() => { moveRef.current = false; });
   };
 
   return (
