@@ -234,6 +234,8 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           },
         },
       ],
+      /* GAP-X: back/backdrop (tanpa tombol) ikut melepas guard ketuk-ganda. */
+      { onDismiss: () => { submitBusy.current = false; } },
     );
   };
 
