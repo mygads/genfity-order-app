@@ -230,7 +230,7 @@ export default function EdcScreen({ navigation, route }: Props) {
             ...(serviceParam > 0 ? { serviceTotal: serviceParam } : {}),
             ...(taxParam > 0 ? { vatTotal: taxParam } : {}),
             ...(feeESBParam > 0 ? { feeESB: feeESBParam } : {}),
-        ...(packagingParam > 0 ? { packaging: packagingParam } : {}),
+        /* GAP-AU: kunci `packaging` mati di SaleInput (kanonis = packagingFee) - dibuang. */
             ...(packagingParam > 0 ? { packagingFee: packagingParam } : {}),
             ...(roundingParam !== 0 ? { rounding: roundingParam } : {}),
             approvalCode: approval,
