@@ -233,7 +233,21 @@ export async function pendingPrintCount(): Promise<number> {
  * Baris gagal ditandai 'gagal' + retry count naik, drain lanjut (tidak
  * berhenti). Tak melempar.
  */
+/* GAP-BJ: single-flight drain antrean cetak. Drain dipicu dari banyak titik
+ * (piggyback uji-cetak, autoPrint Receipt, print sukses) yang bisa jalan
+ * BERSAMAAN = baris sama tercetak DUA KALI (SELECT-DELETE race). Penelepon
+ * kedua+ ikut hasil drain yang sama. */
+let drainFlight: Promise<DrainResult> | null = null;
 export async function drainPrintQueue(deps?: DrainDeps): Promise<DrainResult> {
+  if (drainFlight) return drainFlight;
+  drainFlight = drainInner(deps);
+  try {
+    return await drainFlight;
+  } finally {
+    drainFlight = null;
+  }
+}
+async function drainInner(deps?: DrainDeps): Promise<DrainResult> {
   const out: DrainResult = { attempted: 0, sent: 0, failed: 0, remaining: 0 };
   try {
     await initDb();
