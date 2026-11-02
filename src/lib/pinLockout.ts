@@ -33,8 +33,8 @@ export function bodyRetryAfterSeconds(body: unknown): number {
 }
 
 /**
- * Akhiran countdown untuk pesan 423, mis. " — coba lagi dalam 4 mnt" /
- * " — try again in 4 min" (di bawah 60 dtk: detik). '' bila sec <= 0 agar
+ * Akhiran countdown untuk pesan 423, mis. " - coba lagi dalam 4 mnt" /
+ * " - try again in 4 min" (di bawah 60 dtk: detik). '' bila sec <= 0 agar
  * pemanggil jatuh ke pesan generik lama.
  */
 export function lockCountdownSuffix(sec: number, lang: string): string {
@@ -42,8 +42,8 @@ export function lockCountdownSuffix(sec: number, lang: string): string {
   const id = lang === 'id';
   if (sec >= 60) {
     const m = Math.max(1, Math.ceil(sec / 60));
-    return id ? ` — coba lagi dalam ${m} mnt` : ` — try again in ${m} min`;
+    return id ? ` - coba lagi dalam ${m} mnt` : ` - try again in ${m} min`;
   }
   const s = Math.max(1, Math.ceil(sec));
-  return id ? ` — coba lagi dalam ${s} dtk` : ` — try again in ${s}s`;
+  return id ? ` - coba lagi dalam ${s} dtk` : ` - try again in ${s}s`;
 }
