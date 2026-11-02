@@ -679,7 +679,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
         <AppButton
           size="md"
           title={t('sp_back')}
-          onPress={() => navigation?.navigate('Cashier')}
+          /* GAP-BF: throttle kembali-kasir (ketuk-ganda = dua layar Cashier). */
+          onPress={() => { const now = Date.now(); if (now - navPayAt.current < 800) return; navPayAt.current = now; navigation?.navigate('Cashier'); }}
           style={[styles.backBtn, { marginTop: 16 }]}
           textStyle={styles.backBtnT}
         />
