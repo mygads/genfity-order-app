@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
@@ -122,6 +122,8 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   );
   const [methods, setMethods] = useState<string[]>(['Tunai', 'QRIS']);
   const [paid, setPaid] = useState<boolean[]>([false, false]);
+  /* GAP-AG: throttle ketuk-ganda Bayar-per-bill (dua layar Pay = kaki ganda). */
+  const navPayAt = useRef(0);
   // Nomor grup: SATU salesNum untuk semua kunjungan split (dari pengirim =
   // salesNum draft agar Success hapus draft tepat sasaran; fallback terbitkan
   // bila pengirim lama tak mengirim). Head grup dibuat kunjungan pertama,
@@ -338,6 +340,10 @@ export default function SplitBillScreen({ navigation, route }: Props) {
   const paidCount = paid.filter(Boolean).length;
 
   const payBill = (i: number) => {
+    /* GAP-AG: throttle ketuk-ganda Bayar-per-bill (dua layar Pay = kaki ganda). */
+    const now = Date.now();
+    if (now - navPayAt.current < 800) return;
+    navPayAt.current = now;
     const val = billVal(i);
     if (val <= 0 || paid[i]) return;
     // Tanpa nomor grup = belum siap (nomor fallback masih diterbitkan).
