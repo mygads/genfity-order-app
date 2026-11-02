@@ -365,6 +365,8 @@ export default function MemberScreen({ navigation, route }: Props) {
   // Guard ketuk-ganda deposit cepat: ref sinkron (anti-interleave antar-tap)
   // + state untuk menonaktifkan tombol modal selama menyimpan.
   const depositBusy = useRef(false);
+  /* GAP-AH: single-flight tambah-member (ketuk-ganda = dua baris member). */
+  const addBusy = useRef(false);
   const [depositSaving, setDepositSaving] = useState(false);
   // U4: error gerbang identitas tambah-member (tampil di modal tambah).
   const [addErr, setAddErr] = useState('');
@@ -732,16 +734,21 @@ export default function MemberScreen({ navigation, route }: Props) {
         );
 
   const saveMember = async () => {
+    /* GAP-AH: single-flight tambah-member; reset di tiap pintu keluar. */
+    if (addBusy.current) return;
+    addBusy.current = true;
     // U4: member-create = gerbang identitas (bound terminal + shift buka, fail-closed).
     // A-P1-5: DB-error = pesan DB (bukan "shift tutup"); fresh/closed = pesan buka-shift.
     if (!getBranchId().trim()) {
       setAddErr(t('terminal_unbound_hint'));
+      addBusy.current = false;
       return;
     }
     {
       const blockKind = await getShiftBlockKind();
       if (blockKind) {
         setAddErr(blockKind === 'db-error' ? t('shift_db_error') : `${t('dash_shift_closed')} - ${t('shf_open_btn')}`);
+        addBusy.current = false;
         return;
       }
     }
@@ -749,6 +756,7 @@ export default function MemberScreen({ navigation, route }: Props) {
     const mail = email.trim();
     if (mail && !isValidEmail(mail)) {
       setAddErr(t('mem_email_bad'));
+      addBusy.current = false;
       return;
     }
     setAddErr('');
@@ -772,6 +780,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       setMembers((ms) => [...ms, { id, nama: nm, noHp: hp, email: mail, tipe: 'Regular', saldo: 0, poin: 0, loyalty: false }]);
       setRiwayat((rw) => ({ ...rw, [id]: [] }));
     }
+    addBusy.current = false;
     setAddVisible(false);
     setNama('');
     setNoHp('');
