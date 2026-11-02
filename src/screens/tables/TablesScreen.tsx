@@ -354,9 +354,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   const bookingSavingRef = useRef(false);
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
     if (bookingSavingRef.current) return;
-    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null }); bookingSavingRef.current = false;
+    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
     // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
-    void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); }
+    void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); } /* GAP-S: reset guard SELALU (selected null = tombol tak mati permanen). */ bookingSavingRef.current = false;
   setBookingVisible(false);
     setSelected(null);
     setNamaBooking('');
