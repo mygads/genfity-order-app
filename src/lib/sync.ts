@@ -1826,6 +1826,13 @@ async function repairUnsettledSales(): Promise<number> {
   return fixed;
 }
 
+/* GAP-BB: single-flight drain. pushAll dipanggil dari 4 arah (login-otomatis,
+ * tombol Sync manual, realtime, background-task 15 mnt) yang bisa jalan
+ * BERSAMAAN = baris sama ter-POST ganda; idempotensi server (client_id) tak
+ * selamatkan race check-then-insert di sisi server. Penelepon kedua+ ikut
+ * menunggu dan menerima hasil drain yang SAMA. Validasi konfigurasi tetap
+ * per-penelepon (di atas) agar pesan setting tetap jujur. */
+let pushFlight: Promise<PushResult> | null = null;
 export async function pushAll(): Promise<PushResult> {
   hydrate();
   if (getServerEnv() !== 'custom') {
@@ -1835,6 +1842,16 @@ export async function pushAll(): Promise<PushResult> {
   if (!getCustomBaseUrl().trim()) {
     throw new Error(tr('sync_no_url'));
   }
+  if (pushFlight) return pushFlight;
+  pushFlight = drainPushAll();
+  try {
+    return await pushFlight;
+  } finally {
+    pushFlight = null;
+  }
+}
+/** Isi drain pushAll (dipanggil sekali per flight via pushAll di atas). */
+async function drainPushAll(): Promise<PushResult> {
   // M13 re-drive kepala-kotor: tunggu restore boot selesai sebelum drain.
   // Tanpa ini pushAll pertama setelah boot bisa menguras SEBELUM item
   // tersimpan masuk memori (balapan-hydrasi) → badge antrean bohong.
