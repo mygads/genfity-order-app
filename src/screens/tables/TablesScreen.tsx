@@ -351,7 +351,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   );
 
   // GAP-F: guard ketuk-ganda simpan booking (dua op tanpa id = booking ganda).
-  const bookingSavingRef = useRef(false);
+  const bookingSavingRef = useRef(false); /* GAP-T: nomor meja yang sedang diproses (anti duplikat double-tap; state tables basi antar-ketuk). */ const pendingTableNosRef = useRef(new Set<string>());
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
     if (bookingSavingRef.current) return;
     if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
@@ -376,10 +376,11 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       setManageWarn(t('tbl_warn_cap'));
       return;
     }
-    if (tables.some((tb) => normNo(tb.no) === no)) {
+    if (tables.some((tb) => normNo(tb.no) === no) || pendingTableNosRef.current.has(no.toLowerCase())) {
       setManageWarn(t('tbl_warn_exists').replace('{no}', no));
       return;
     }
+    pendingTableNosRef.current.add(no.toLowerCase());
     const section = newSection.trim() || 'Dalam';
     setManageWarn('');
     const id = `t-${Date.now()}`;
@@ -405,6 +406,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         queueTableOp('table-add', { id, table: no, section, capacity: kap });
       } catch {
         /* abaikan: denah memori tetap tampil */
+      } finally {
+        /* GAP-T: bebaskan nomor pending agar tambah berikut valid. */
+        pendingTableNosRef.current.delete(no.toLowerCase());
       }
     })();
   };
