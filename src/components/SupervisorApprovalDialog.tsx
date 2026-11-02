@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '../theme';
 import { useLang } from '../lib/i18n';
@@ -84,7 +84,7 @@ export default function SupervisorApprovalDialog({
   const [refId, setRefId] = useState(refIdProp ?? '');
   const [reason, setReason] = useState(reasonPreset ?? '');
   const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); /* GAP-Q: ref single-flight anti double-tap (state busy basi antar-ketuk cepat). */ const busyRef = useRef(false);
 
   // Reset tiap dibuka; resolve ID terminal BE yang ter-bound (sinkron).
   useEffect(() => {
@@ -96,7 +96,7 @@ export default function SupervisorApprovalDialog({
     setRefId(refIdProp ?? '');
     setReason(reasonPreset ?? '');
     setMsg('');
-    setBusy(false);
+    busyRef.current = false; setBusy(false);
   }, [visible, refIdProp, reasonPreset]);
 
   const terminalId = (boundTerminal || terminalManual).trim();
@@ -114,7 +114,8 @@ export default function SupervisorApprovalDialog({
     (!isCompliment || isDecimalOrderId(refId));
 
   const approve = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setMsg(t('xp_requesting'));
     const ref = refId.trim();
@@ -130,13 +131,13 @@ export default function SupervisorApprovalDialog({
     // OFFLINE-RULE: compliment DILARANG lewat fallback lokal - approval lokal
     // tak punya approvalId dan settle BE pasti 403. Tampilkan syarat online.
     if (!r.ok && (r.code === 'offline' || r.code === 'unconfigured')) {
-      setBusy(false);
+      busyRef.current = false; setBusy(false);
       if (isCompliment) {
         setMsg(t('xp_compliment_offline'));
         return;
       }
       const local = await verifyLocalEscalation(pin, fallbackAccessKey);
-      setBusy(false);
+      busyRef.current = false; setBusy(false);
       if (!local.ok) {
         setMsg(local.code === 'locked' ? local.message : `${local.message} (${attemptsLeft()} ${t('cx_attempts')})`);
         return;
@@ -144,7 +145,7 @@ export default function SupervisorApprovalDialog({
       onApproved({ supervisorUserId: local.userId ?? '', action, refId: ref });
       return;
     }
-    setBusy(false);
+    busyRef.current = false; setBusy(false);
     if (!r.ok) {
       setMsg(r.code === 'locked' ? r.message : `${r.message} (${attemptsLeft()} ${t('cx_attempts')})`);
       return;
