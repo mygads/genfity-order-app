@@ -257,5 +257,7 @@ export function isValidEmail(email: string): boolean {
 
 /** Catat permintaan kirim struk via email (isi body ikut kontrak server Anda). */
 export function recordReceiptEmail(email: string, no: string, total: number, method: string): void {
-  enqueueSync('receipt', { email: email.trim(), no, total: Math.round(total), method });
+  /* GAP-AM: id eksplisit per (nota+email) agar ketuk-ganda Kirim = satu job email (tanpa struk ganda). */
+  const id = `rcpt-mail-${String(no ?? '').trim()}-${email.trim().toLowerCase()}`;
+  enqueueSync('receipt', { email: email.trim(), no, total: Math.round(total), method }, id);
 }
