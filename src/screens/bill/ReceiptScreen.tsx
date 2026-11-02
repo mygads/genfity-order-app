@@ -211,6 +211,15 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
   /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
    * lain (pratinjau/arsip/void) tetap manual via tombol. */
   const autoPrinted = useRef(false);
+  /* GAP-BA: throttle aksi struk (ketuk-ganda WA = dialog share ganda;
+   * Kasir Baru = dua layar Cashier menumpuk). */
+  const actAt = useRef(0);
+  const actOnce = () => {
+    const now = Date.now();
+    if (now - actAt.current < 800) return false;
+    actAt.current = now;
+    return true;
+  };
   useEffect(() => {
     if (route?.params?.autoPrint === true && !autoPrinted.current) {
       autoPrinted.current = true;
@@ -338,9 +347,9 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
       <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={printing ? '...' : t('rc_print')} variant="secondary" onPress={() => void doPrint()} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title="WA" variant="secondary" onPress={() => { void (async () => { try { const mod = await import("../../lib/posWire"); const ok = await mod.openWaShare(shareText); if (!ok) await shareReceipt(shareText); } catch { try { await shareReceipt(shareText); } catch { /* abaikan */ } } })(); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title="WA" variant="secondary" onPress={() => { if (!actOnce()) return; void (async () => { try { const mod = await import("../../lib/posWire"); const ok = await mod.openWaShare(shareText); if (!ok) await shareReceipt(shareText); } catch { try { await shareReceipt(shareText); } catch { /* abaikan */ } } })(); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={t('ok_email')} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={t('rc_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
+      <AppButton title={t('rc_new')} onPress={() => { if (actOnce()) navigation?.navigate('Cashier'); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />
     </View>
   );
 
