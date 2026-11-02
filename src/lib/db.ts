@@ -73,7 +73,9 @@ export async function exec(source: string): Promise<void> {
  */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   const d = getDb();
-  await d.execAsync('BEGIN');
+  /* GAP-AN: BEGIN IMMEDIATE agar klaim sekuens (tr_sales_seq) + belah/void
+     tak interleave antar-transaksi (BEGIN deferred = dua klaim baca lastN sama). */
+  await d.execAsync('BEGIN IMMEDIATE');
   try {
     const out = await fn();
     await d.execAsync('COMMIT');
