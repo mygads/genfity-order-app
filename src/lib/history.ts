@@ -150,7 +150,46 @@ export async function loadHistory(limit = 300): Promise<Transaction[]> {
  * verifyLocalEscalation); fallback = sesi kasir. Tanpa ini jejak audit selalu
  * menuduh kasir padahal supervisor yang menyetujui.
  */
+/* GAP-Y: peta void sedang-berjalan per salesNum. Dua void konkuren (mis.
+ * approve ganda cepat) sama-sama membaca head 'paid' sebelum salah satunya
+ * menulis 'void' - guard alreadyVoid tak lindungi race ini sehingga
+ * stok/kuota/deposit balik ganda. Penelepon kedua menunggu yang pertama lalu
+ * kembali tanpa kerja ulang (hasil pertama idempoten). Jalur W2
+ * (cancel->void->refund) di bawah tak berubah; hanya serialisasi. */
+const voidInflight = new Map<string, Promise<void>>();
 export async function persistVoidDb(
+  salesNum: string,
+  reason: string,
+  approvedBy?: string,
+  getPin?: ManagerPinProvider,
+): Promise<void> {
+  const vKey = String(salesNum ?? '').trim();
+  if (vKey) {
+    const prev = voidInflight.get(vKey);
+    if (prev) {
+      try {
+        await prev;
+      } catch {
+        /* abaikan: hasil pertama tetap sah */
+      }
+      return;
+    }
+  }
+  let release!: () => void;
+  const gate = new Promise<void>((res) => {
+    release = res;
+  });
+  if (vKey) voidInflight.set(vKey, gate);
+  try {
+    await persistVoidDbInner(salesNum, reason, approvedBy, getPin);
+  } finally {
+    if (vKey && voidInflight.get(vKey) === gate) voidInflight.delete(vKey);
+    release();
+  }
+}
+
+/* Inti void (dijalankan serial per salesNum via persistVoidDb di atas). */
+async function persistVoidDbInner(
   salesNum: string,
   reason: string,
   approvedBy?: string,
