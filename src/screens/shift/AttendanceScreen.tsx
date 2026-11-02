@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
+import { useEffect, useRef, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { updatePinOnServer } from '../../lib/apiSource';
 import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1, updateWorkforcePinOnServer } from '../../lib/beWorkforce';
 import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinPendingSync, isPinPendingSync, markPinPendingSync, savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
@@ -17,7 +17,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
   const [inTime, setInTime] = useState<string | null>(null);
   const [outTime, setOutTime] = useState<string | null>(null);
   const [onBreak, setOnBreak] = useState(false);
-  const [syncNote, setSyncNote] = useState(''); const [busy, setBusy] = useState(false); const [now, setNow] = useState(() => new Date());
+  const [syncNote, setSyncNote] = useState(''); const [busy, setBusy] = useState(false); /* GAP-AA: ref single-flight (state busy basi antar-ketuk cepat = 2 baris absen yatim). */ const opRef = useRef(false); const [now, setNow] = useState(() => new Date());
 
   // Ganti PIN
   const [oldPin, setOldPin] = useState('');
@@ -131,7 +131,8 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
   /** Catat clock ke tr_shiftlog + antrean sync employee-attendance. */ const recordClock = async (kind: 'in' | 'out', verifiedUserId: string, verifiedName: string) => { const nowIso = new Date().toISOString(); const term = getTerminal(); try { await initDb(); if (kind === 'in') { const id = `att-${Date.now()}`; await run( `INSERT INTO tr_shiftlog (id, branchId, terminalId, userId, cashierName, shiftName, clockIn, clockOut, cashInDrawer, totalSales, status, syncDate) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, 'absen', NULL)`, [id, term.branchId || null, term.terminalCode || null, verifiedUserId, verifiedName, 'Absensi', nowIso], ); } else { const open = await queryFirst<{ id: string }>( `SELECT id FROM tr_shiftlog WHERE clockOut IS NULL AND status = 'absen' AND (userId = ? OR cashierName = ?) ORDER BY clockIn DESC LIMIT 1`, [verifiedUserId, verifiedName], ); if (open) { await run('UPDATE tr_shiftlog SET clockOut = ?, syncDate = NULL WHERE id = ?', [nowIso, open.id]); } } } catch { /* DB belum siap - antrean sync di bawah tetap dicoba */ } try { enqueueSync('attendance', { type: kind === 'in' ? 'clock-in' : 'clock-out', userId: verifiedUserId, user: verifiedName, branchId: term.branchId || null, terminalCode: term.terminalCode || null, at: nowIso, }); } catch { /* antrean belum siap */ } }; const clockIn = async () => {
     // GAP-4: guard ganda ala changePin - ketuk ganda saat verifikasi async
     // berjalan ditolak (tombol juga disabled via busy).
-    if (busy) return;
+    /* GAP-AA: ref menutup celah stale-state antar-ketuk dalam satu tick. */
+    if (busy || opRef.current) return; opRef.current = true;
     if (pin.length < 4) { setError(t('att_pin_short')); return; } setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null (DB kosong/belum siap) DITOLAK seperti PIN salah; clock diikat ke pemilik PIN.
     const vIn = await verifyAttendancePin(pin);
@@ -154,10 +155,10 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
       }
     } catch { setSyncNote(t('att_queued')); }
     setPin('');
-  } finally { setBusy(false); } };
+  } finally { opRef.current = false; setBusy(false); } };
 
   const toggleBreak = async () => {
-    if (busy) return;
+    if (busy || opRef.current) return; opRef.current = true;
     if (pin.length < 4) { setError(t('att_pin_short')); return; }
     setBusy(true);
     setError('');
@@ -179,12 +180,12 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
       }
     } catch {
       setError(t('att_break_error'));
-    } finally { setBusy(false); }
+    } finally { opRef.current = false; setBusy(false); }
   };
 
   const clockOut = async () => {
     // GAP-4: guard ganda ala changePin (cermin clockIn di atas).
-    if (busy) return;
+    if (busy || opRef.current) return; opRef.current = true;
     if (pin.length < 4) { setError(t('att_pin_need_out')); return; }
     setBusy(true); try {
     // APP-SHIFT titip-absen: ok===null DITOLAK; clock-out menutup baris milik pemilik PIN.
@@ -211,7 +212,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
       }
     } catch { setSyncNote(t('att_queued')); }
     setPin('');
-  } finally { setBusy(false); } };
+  } finally { opRef.current = false; setBusy(false); } };
 
   /** * Ganti PIN: verifikasi PIN lama (hash), simpan hash baru - plaintext TIDAK * PERNAH ditulis ke DB. Perubahan dikirim ke server bila online, selebihnya * antre via sync (server sumber akhir). */ const changePin = async () => {
     const clean = (v: string) => v.replace(/[^0-9]/g, '').slice(0, 8);
