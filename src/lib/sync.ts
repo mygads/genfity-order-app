@@ -1284,6 +1284,14 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
     } catch {
       /* abaikan */
     }
+    /* GAP-P: baris sumber ikut bersih (best-effort) agar badge SyncScreen
+       "syncDate NULL" tak phantom selamanya - id rusak tak pernah bisa
+       terkirim sehingga tak ada data deliverable yang hilang. */
+    try {
+      await markClean(table, composite);
+    } catch {
+      /* abaikan */
+    }
     return 'sent';
   }
   const tid = boundTerminalId();
