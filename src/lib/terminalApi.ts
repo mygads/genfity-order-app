@@ -1435,7 +1435,7 @@ function guessUploadMime(uri: string): string {
 function guessUploadName(uri: string): string {
   const base = String(uri ?? '').split(/[?#]/)[0].split('/').pop()?.trim() ?? '';
   if (/^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/.test(base) && base.includes('.')) return base;
-  return `proof-${Date.now()}.jpg`;
+  return `proof-${Date.now()}-${Math.floor(Math.random() * 1e6)}.jpg`; /* GAP-AZ: anti tabrakan nama file bukti. */
 }
 
 function readUploadUrl(body: unknown): string {

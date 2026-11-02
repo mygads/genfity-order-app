@@ -427,7 +427,7 @@ async function persistVoidDbInner(
       if (Math.round(Number(other?.c) || 0) <= 0) {
         await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = TRIM(?)', ['kosong', preTableNo]);
         try {
-          enqueueSync('other', { op: 'table-clear', id: `tc-${Date.now()}`, table: preTableNo, at: now });
+          enqueueSync('other', { op: 'table-clear', id: `tc-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now. */, table: preTableNo, at: now });
         } catch {
           /* abaikan */
         }
