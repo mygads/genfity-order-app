@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -79,6 +79,9 @@ export default function DineInScreen({ navigation, route }: Props) {
   const [section, setSection] = useState(() => sectionOf(initTable));
   const [table, setTable] = useState(initTable);
   const [pax, setPax] = useState('2');
+  /* GAP-AK/AL: single-flight simpan-draft + split (ketuk-ganda = nomor/draft ganda). */
+  const saveRef = useRef(false);
+  const splitRef = useRef(false);
   const [guest, setGuest] = useState(route?.params?.customer ?? '');
   const [mode, setMode] = useState(
     route?.params?.mode && MODES.includes(route.params.mode)
@@ -182,6 +185,9 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(guest.trim() ? { customer: guest.trim() } : {}),
     });
   const goSave = () => {
+    /* GAP-AK: tolak tap kedua selama simpan berjalan; reset di finally rantai async. */
+    if (saveRef.current) return;
+    saveRef.current = true;
     // Nomor dibangkitkan di sini agar draft selalu membawa salesNum (kunci
     // hapus draft di Success + pakai ulang nomor saat bayar, anti hantu G2).
     // Voucher/member/tamu ikut agar rantai draft utuh (G4).
@@ -209,12 +215,15 @@ export default function DineInScreen({ navigation, route }: Props) {
           ...(guest.trim() ? { customer: guest.trim() } : {}),
         },
       });
-    })();
+    })().finally(() => { saveRef.current = false; });
   };
   /** Split bill: nomor grup diterbitkan di sini agar semua kunjungan memakai
    * SATU salesNum (anti struk/item/stok ganda, anti hantu draft di Success). */
   const goSplit = () => {
     if (active.length === 0) return;
+    /* GAP-AL: tolak tap kedua selama terbit nomor grup; reset di finally rantai async. */
+    if (splitRef.current) return;
+    splitRef.current = true;
     void (async () => {
       let num = '';
       try {
@@ -238,7 +247,7 @@ export default function DineInScreen({ navigation, route }: Props) {
         ...(customerId != null ? { customerId } : {}),
         discount: discountTotal + voucherAmt,
       });
-    })();
+    })().finally(() => { splitRef.current = false; });
   };
   /** Paket struk penuh ala POSLite: item + diskon + voucher + ongkir + meja + tamu. */
   const discountForChain = discountTotal + voucherAmt;
