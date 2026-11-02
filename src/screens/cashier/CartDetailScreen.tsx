@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
@@ -142,6 +142,10 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   const [priceDraft, setPriceDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [savedTick, setSavedTick] = useState(false);
+  /* GAP-AE: single-flight simpan-draft (ketuk-ganda = dua baris draft). */
+  const saveRef = useRef(false);
+  /* GAP-AG: throttle navigasi Pay anti layar-ganda (risiko bayar ganda). */
+  const navPayAt = useRef(0);
   /** Eskalasi void: gate RBAC order.void, deny -> dialog persetujuan supervisor
    * V1 (kontrak BE baru; S7, legacy NOL). */
   const [voidTarget, setVoidTarget] = useState<{ id: string; wantVoid: boolean } | null>(null);
@@ -243,6 +247,13 @@ export default function CartDetailScreen({ navigation, route }: Props) {
   // Rantai Pay (kontrak PayScreen): total penuh + items/mode/table/ongkir/voucher/customer/memberId
   // + diskon belanja + rincian info-only (service/pajak/pembulatan/fee) agar Pay teruskan ke Success > Receipt.
   // Voucher sebagai OBJEK {code, amount, kind} (Pay dahulukan discount angka, tanpa hitung ganda).
+  /* GAP-AG: throttle navigasi anti layar-ganda (ketuk-ganda <800ms = satu navigasi). */
+  const navOnce = (ref: { current: number }, fn: () => void) => {
+    const now = Date.now();
+    if (now - ref.current < 800) return;
+    ref.current = now;
+    fn();
+  };
   const goPay = () =>
     navigation?.navigate('Pay', {
       total,
@@ -300,6 +311,9 @@ export default function CartDetailScreen({ navigation, route }: Props) {
       if (reason) { setBlockMsg(reason); return; }
     } catch { /* lanjut legacy */ }
 
+    /* GAP-AE: single-flight simpan-draft; reset di finally rantai async. */
+    if (saveRef.current) return;
+    saveRef.current = true;
     setSavedTick(true);
     const title = `${modeLabel} · ${customer.trim() || t('guestFallback')}`;
     const now = new Date().toISOString();
@@ -366,7 +380,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         /* offline-first: abaikan gagal tulis, daftar DB tetap tampil */
       }
       navigation?.navigate('LoadOrder');
-    })();
+    })().finally(() => { saveRef.current = false; });
   };
 
   return (
@@ -783,7 +797,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
             <AppButton
               size="lg"
               title={`${t('pay')} | ${rp(total)} ›`}
-              onPress={goPay}
+              onPress={() => navOnce(navPayAt, goPay)}
               style={styles.payBtn}
             />
           </>
