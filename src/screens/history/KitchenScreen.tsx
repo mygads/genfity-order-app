@@ -179,6 +179,8 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   // R18: echo WS persis (id::status sama) - data tetap merge, hanya
   // side-effect (notif/cetak) yang ditekan. Cap 200, buang terlama.
   const pushSeenRef = useRef<Set<string>>(new Set());
+  /* GAP-AP: throttle cetak-ulang (<800ms = satu navigasi struk, anti cetak ganda). */
+  const reprintAt = useRef(0);
   const [liveNotice, setLiveNotice] = useState('');
 
   const [now, setNow] = useState(() => Date.now());
@@ -420,6 +422,10 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
                     title={t('c_reprint')}
                     variant="secondary"
                     onPress={() => {
+                      /* GAP-AP: throttle ketuk-ganda cetak-ulang. */
+                      const nowRp = Date.now();
+                      if (nowRp - reprintAt.current < 800) return;
+                      reprintAt.current = nowRp;
                       const s = selected;
                       setSelected(null);
                       // R25: cetak ulang dari DB (head+menu), bukan state
