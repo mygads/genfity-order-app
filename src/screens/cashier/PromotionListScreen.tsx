@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
@@ -257,6 +257,8 @@ export default function PromotionListScreen({ navigation, route }: Props) {
   })();
   const callerSalesNum = route?.params?.salesNum;
   const [warn, setWarn] = useState('');
+  /* GAP-AO: single-flight pakai-promo (ketuk-ganda = validasi + navigasi ganda). */
+  const pakaiBusy = useRef(false);
 
   // Katalog live: SQLite ms_voucher + ms_promotion dulu (offline-first),
   // lalu API get-voucher|get-promotion. Kosong = empty-state.
@@ -308,69 +310,76 @@ export default function PromotionListScreen({ navigation, route }: Props) {
       setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(p.minBelanja)).replace('{code}', p.code));
       return;
     }
-    setWarn('');
-    const go = (amount: number) => {
-      // Teruskan kind (tag) agar pemanggil tahu voucher ongkir vs diskon belanja.
-      // GRATISONGKIR dipotong dari ongkir di layar pemanggil bila ongkir > 0.
-      // Rate/cap/minSpend ikut agar totals() hitung persen + backstop minSpend (#15/#16).
-      // Konteks cart di-echo agar kembali dari promo tak me-wipe keranjang
-      // (S4-APP-323): kontrak voucher tak berubah, hanya tambahan echo.
-      navigation?.navigate(returnTo, {
-        ...(callerItems !== undefined ? { items: callerItems } : {}),
-        ...(callerMode !== undefined ? { mode: callerMode } : {}),
-        ...(callerTable !== undefined ? { table: callerTable } : {}),
-        ...(callerCustomer !== undefined ? { customer: callerCustomer } : {}),
-        ...(callerMemberId !== undefined ? { memberId: callerMemberId } : {}),
-        ...(callerSalesNum !== undefined ? { salesNum: callerSalesNum } : {}),
-        voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
-    };
-    // G-005: preview live mesin-POS dulu bila konteks cart tersedia (engine
-    // SAMA dengan settle: nominal server menang; server menolak definitif =
-    // TOLAK tanpa fallback lintas-engine; offline = jatuh ke legacy di bawah).
+    /* GAP-AO: tolak tap kedua selama validasi berjalan; reset di finally. */
+    if (pakaiBusy.current) return;
+    pakaiBusy.current = true;
     try {
-      const previewItems = mapSaleItemsToPreviewItems(callerItems);
-      if (previewItems && subtotal !== undefined && subtotal > 0) {
-        const pv = await validatePosVoucherPreview(
-          p.code, subtotal, previewItems, mapAppModeToGoOrderType(callerMode),
-          undefined, promoCustomerId ?? undefined);
-        if (pv.ok) {
-          go(pv.amount);
-          return;
-        }
-        if (!pv.offline) {
-          if (pv.minSpend > 0 && subtotal < pv.minSpend) {
-            setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(pv.minSpend)).replace('{code}', p.code));
+      setWarn('');
+      const go = (amount: number) => {
+        // Teruskan kind (tag) agar pemanggil tahu voucher ongkir vs diskon belanja.
+        // GRATISONGKIR dipotong dari ongkir di layar pemanggil bila ongkir > 0.
+        // Rate/cap/minSpend ikut agar totals() hitung persen + backstop minSpend (#15/#16).
+        // Konteks cart di-echo agar kembali dari promo tak me-wipe keranjang
+        // (S4-APP-323): kontrak voucher tak berubah, hanya tambahan echo.
+        navigation?.navigate(returnTo, {
+          ...(callerItems !== undefined ? { items: callerItems } : {}),
+          ...(callerMode !== undefined ? { mode: callerMode } : {}),
+          ...(callerTable !== undefined ? { table: callerTable } : {}),
+          ...(callerCustomer !== undefined ? { customer: callerCustomer } : {}),
+          ...(callerMemberId !== undefined ? { memberId: callerMemberId } : {}),
+          ...(callerSalesNum !== undefined ? { salesNum: callerSalesNum } : {}),
+          voucher: { code: p.code, amount, kind: p.tag, ...(p.rate != null ? { rate: p.rate } : {}), ...(p.maxAmount != null ? { maxAmount: p.maxAmount } : {}), ...(p.minBelanja > 0 ? { minSpend: p.minBelanja } : {}) }, ...(ongkir !== undefined ? { ongkir } : {}) });
+      };
+      // G-005: preview live mesin-POS dulu bila konteks cart tersedia (engine
+      // SAMA dengan settle: nominal server menang; server menolak definitif =
+      // TOLAK tanpa fallback lintas-engine; offline = jatuh ke legacy di bawah).
+      try {
+        const previewItems = mapSaleItemsToPreviewItems(callerItems);
+        if (previewItems && subtotal !== undefined && subtotal > 0) {
+          const pv = await validatePosVoucherPreview(
+            p.code, subtotal, previewItems, mapAppModeToGoOrderType(callerMode),
+            undefined, promoCustomerId ?? undefined);
+          if (pv.ok) {
+            go(pv.amount);
             return;
           }
-          setWarn(pv.message || t('vou_unknown').replace('{k}', p.code));
-          return;
+          if (!pv.offline) {
+            if (pv.minSpend > 0 && subtotal < pv.minSpend) {
+              setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(pv.minSpend)).replace('{code}', p.code));
+              return;
+            }
+            setWarn(pv.message || t('vou_unknown').replace('{k}', p.code));
+            return;
+          }
         }
+      } catch {
+        /* offline - lanjut jalur legacy di bawah */
       }
-    } catch {
-      /* offline - lanjut jalur legacy di bawah */
-    }
-    // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
-    // server menang bila backend asli menjawab; offline pakai nilai lokal.
-    try {
-      const r = await validateVoucherCode(p.code, subtotal ?? p.minBelanja);
-      if (!r.fromDummy) {
-        if (r.ok) {
-          go(r.amount);
+      // Validasi ulang ke server (apiSource.ts validateVoucherCode): nominal
+      // server menang bila backend asli menjawab; offline pakai nilai lokal.
+      try {
+        const r = await validateVoucherCode(p.code, subtotal ?? p.minBelanja);
+        if (!r.fromDummy) {
+          if (r.ok) {
+            go(r.amount);
+            return;
+          }
+          if (r.minSpend > 0 && subtotal !== undefined && subtotal < r.minSpend) {
+            setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(r.minSpend)).replace('{code}', p.code));
+            return;
+          }
+          // Server menjawab definitif-tak-valid: TOLAK, jangan fail-open ke
+          // nilai lokal (backstop saveSale tetap menolak saat simpan).
+          setWarn(t('vou_unknown').replace('{k}', p.code));
           return;
         }
-        if (r.minSpend > 0 && subtotal !== undefined && subtotal < r.minSpend) {
-          setWarn(t('promo_min_spend_warn').replace('{total}', rp(subtotal)).replace('{min}', rp(r.minSpend)).replace('{code}', p.code));
-          return;
-        }
-        // Server menjawab definitif-tak-valid: TOLAK, jangan fail-open ke
-        // nilai lokal (backstop saveSale tetap menolak saat simpan).
-        setWarn(t('vou_unknown').replace('{k}', p.code));
-        return;
+      } catch {
+        /* offline - pakai nilai lokal */
       }
-    } catch {
-      /* offline - pakai nilai lokal */
+      go(p.amount);
+    } finally {
+      pakaiBusy.current = false;
     }
-    go(p.amount);
   };
 
   return (
