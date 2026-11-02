@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending, uploadExpensePhotoFirst, retryPendingExpensePhotos } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
+import { useEffect, useMemo, useState, useRef } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import * as ImagePicker from 'expo-image-picker';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { fmtDate } from '../../lib/datefmt';import { tOf, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { postExpenseToTerminal, isRemotePhoto, markPhotoPending, uploadExpensePhotoFirst, retryPendingExpensePhotos } from '../../lib/terminalExpense';import { getBranchId } from '../../config/server';import { initDb, query, queryFirst, run } from '../../lib/db';import { ApiPath } from '../../config/server';import { apiFetch, unwrap } from '../../lib/apiSource';import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { verifyLocalEscalation } from '../../lib/supervisor';
 import { uuidv7 } from '../../lib/uuidv7';
 import { preparePhoto } from '../../lib/photo';
@@ -134,8 +134,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   /** Buka modal PIN owner untuk satu expense (audit trail, bukan auto-approve). */
   const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
   /** Konfirmasi approve: PIN owner via eskalasi lokal, catat approver + timestamp + sync. */
-  const confirmApprove = async () => {
-    if (!pendingId) return;
+  const approveBusyRef = useRef(false); const confirmApprove = async () => { /* GAP-R paritas PettyCash: single-flight approve. */ if (!pendingId || approveBusyRef.current) return; approveBusyRef.current = true; try {
     const esc = await verifyLocalEscalation(pin, 'settings.edit');
     if (!esc.ok) { setPinErr(esc.message); return; }
     // WIRE-APPROVAL: approver wajib userId nyata - tanpa identitas = tolak.
@@ -144,7 +143,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
     const id = pendingId;
     setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e)));
     await markApproved(id, approver);
-    setPinVisible(false); setPin(''); setPendingId(null);
+    setPinVisible(false); setPin(''); setPendingId(null); } finally { approveBusyRef.current = false; }
   }; return (
     <View style={s.root}>
       <ScreenHeader title={t('expense.title')} left={

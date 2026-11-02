@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { fmtDate, fmtTime } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import { getBranchId } from '../../config/server';import { initDb, query } from '../../lib/db';
+import { useEffect, useMemo, useRef, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { fmtDate, fmtTime } from '../../lib/datefmt';import { useLang } from '../../lib/i18n';import { getBranchId } from '../../config/server';import { initDb, query } from '../../lib/db';
 import { getApprovals, markApproved, subscribeApprovals } from '../../lib/pettyApproval';import { verifyLocalEscalation } from '../../lib/supervisor';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type Arus = 'Masuk' | 'Keluar';type Txn = {
   id: string;
   tanggal: string;
@@ -37,8 +37,7 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
   /** Buka modal PIN staff/owner untuk satu transaksi (audit trail, bukan auto-approve). */
   const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
   /** Konfirmasi approve: PIN staff/owner via eskalasi lokal, catat approver + timestamp + sync. */
-  const confirmApprove = async () => {
-    if (!pendingId) return;
+  const approveBusyRef = useRef(false); const confirmApprove = async () => { /* GAP-R: single-flight approve (double-OK = verifikasi PIN ganda = makan jatah lockout). */ if (!pendingId || approveBusyRef.current) return; approveBusyRef.current = true; try {
     const esc = await verifyLocalEscalation(pin, 'petty.approve');
     if (!esc.ok) { setPinErr(esc.message); return; }
     const approver = (esc.userId ?? '').trim();
@@ -46,7 +45,7 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
     const id = pendingId;
     setItems((xs) => xs.map((x) => (x.id === id ? { ...x, disetujui: true } : x)));
     await markApproved(id, approver);
-    setPinVisible(false); setPin(''); setPendingId(null);
+    setPinVisible(false); setPin(''); setPendingId(null); } finally { approveBusyRef.current = false; }
   }; const go = (route: string) => navigation?.navigate(route); return (
     <View style={s.root}>
       <ScreenHeader title={t('petty.title')} left={
