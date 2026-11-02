@@ -52,6 +52,7 @@ const terbilang = (n: number): string => {
   const [pinVisible, setPinVisible] = useState(false);
   const [error, setError] = useState('');
   const openingRef = useRef(false); // cegah ketuk ganda tombol OK selama verifikasi async berjalan
+  /* GAP-AB: ref single-flight approve manager (state approveBusy basi antar-ketuk cepat = approve ganda). */ const approveBusyRef = useRef(false);
 
   const [lastShift, setLastShift] = useState<LastShift | null>(null);
   // Sesi kas menunggu review manager kedua (diset EndShiftScreen saat tutup
@@ -70,7 +71,7 @@ const terbilang = (n: number): string => {
   useEffect(() => { let on = true; (async () => { try { const g = await getWorkforceGates(); if (on) setWfGates({ requirePinForPos: g.requirePinForPos, requireCashRegisterForPos: g.requireCashRegisterForPos }); } catch { /* abaikan: OFF */ } })(); return () => { on = false; }; }, []);
 
   const submitApprove = async () => {
-    if (!pendingSid || approveBusy) return;
+    if (!pendingSid || approveBusy || approveBusyRef.current) return; approveBusyRef.current = true;
     const note = approveNote.trim();
     if (!note) {
       setApproveMsg(t('appr_need_note'));
@@ -101,7 +102,7 @@ const terbilang = (n: number): string => {
     } catch {
       setApproveMsg(t('appr_failed'));
     } finally {
-      setApproveBusy(false);
+      approveBusyRef.current = false; setApproveBusy(false);
     }
   };
 
