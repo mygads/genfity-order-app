@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions } from 'react-native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
@@ -143,6 +143,9 @@ export default function TableTimerScreen({ navigation }: Props) {
   useEffect(() => {
     if (!enabled) return;
     const timer = setInterval(() => {
+      /* GAP-BI: skip tick + tulis storage saat background (paritas TablesScreen
+       * 60-detik; hemat baterai/storage, presisi milik foreground). */
+      try { if (AppState.currentState !== 'active') return; } catch { /* lanjut */ }
       setTables((ts) => {
         const next = ts.map((x) => {
           const elapsed = Math.round((x.elapsed + 10 / 60) * 100) / 100;
