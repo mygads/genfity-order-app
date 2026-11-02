@@ -365,6 +365,8 @@ export default function MemberScreen({ navigation, route }: Props) {
   // Guard ketuk-ganda deposit cepat: ref sinkron (anti-interleave antar-tap)
   // + state untuk menonaktifkan tombol modal selama menyimpan.
   const depositBusy = useRef(false);
+  /* GAP-BH: throttle buka-topup (ketuk-ganda = dua layar TopupDeposit). */
+  const topupAt = useRef(0);
   /* GAP-AH: single-flight tambah-member (ketuk-ganda = dua baris member). */
   const addBusy = useRef(false);
   const [depositSaving, setDepositSaving] = useState(false);
@@ -857,6 +859,9 @@ export default function MemberScreen({ navigation, route }: Props) {
 
   const goTopup = () => {
     if (!selected) return;
+    const now = Date.now();
+    if (now - topupAt.current < 800) return;
+    topupAt.current = now;
     setDepositVisible(false);
     setDepositErr('');
     navigation?.navigate('TopupDeposit', { memberId: selected.id, nama: selected.nama, saldo: selected.saldo });
