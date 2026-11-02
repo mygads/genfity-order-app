@@ -526,7 +526,9 @@ export default function PayScreen({ navigation, route }: Props) {
   /** Ambil foto bukti (kamera → galeri; resize via preparePhoto, cermin picker
    *  ExpenseScreen). Tak pernah melempar; batal/gagal = state tak berubah. */
   const takeProof = async () => {
-    if (proofBusy) return;
+    /* GAP-AT: ref (bukan state) agar ketuk se-tick kedua langsung ditolak. */
+    if (proofBusy || proofPickRef.current) return;
+    proofPickRef.current = true;
     setProofBusy(true);
     try {
       try {
@@ -550,6 +552,7 @@ export default function PayScreen({ navigation, route }: Props) {
         setProofUrl('');
       }
     } finally {
+      proofPickRef.current = false;
       setProofBusy(false);
     }
   };
@@ -615,6 +618,12 @@ export default function PayScreen({ navigation, route }: Props) {
   });
   const [tenderAmt, setTenderAmt] = useState('');
   const [tenderBusy, setTenderBusy] = useState(false);
+  /* GAP-AS: single-flight validasi tender (closure basi = cek ganda = split ganda). */
+  const tenderCheckRef = useRef(false);
+  /* GAP-AR: throttle navigasi QRIS (layar-QRIS ganda = charge ganda). */
+  const navQrisAt = useRef(0);
+  /* GAP-AT: single-flight ambil-foto-bukti (picker ganda). */
+  const proofPickRef = useRef(false);
   const [tenderMsg, setTenderMsg] = useState('');
 
   // Total pemanggil adalah angka resmi (selaras kontrak SplitBill/CartDetail/DineIn:
@@ -1349,6 +1358,10 @@ export default function PayScreen({ navigation, route }: Props) {
   const onOnlineLanjut = () => {
     if (!wallet || payable <= 0 || !ovoPhoneOk) return;
     if (wallet === 'qris') {
+      /* GAP-AR: throttle ketuk-ganda tombol QRIS. */
+      const nowQ = Date.now();
+      if (nowQ - navQrisAt.current < 800) return;
+      navQrisAt.current = nowQ;
       // client_id diselesaikan dulu (async) agar Qris SELALU menerima kunci
       // rantai - tak ada penerbitan baru di daun (QR tak basi).
       void (async () => {
@@ -1434,6 +1447,8 @@ export default function PayScreen({ navigation, route }: Props) {
    * tidak bisa dipakai. Berhasil = approvalCode = kode tervalidasi.
    */
   const checkTender = async (): Promise<boolean> => {
+    /* GAP-AS: tolak validasi bersamaan; reset di finally. */
+    if (tenderCheckRef.current) return false;
     const code = tenderCode.trim().toUpperCase();
     if (code.length < 3 || tenderNum <= 0) return false;
     // LOYAL- is a discount voucher, not a tender slip: keep it in the voucher
@@ -1443,6 +1458,7 @@ export default function PayScreen({ navigation, route }: Props) {
       setTenderMsg(t('pay_tender_invalid').replace('{m}', rp(0)));
       return false;
     }
+    tenderCheckRef.current = true;
     setTenderBusy(true);
     setTenderMsg(t('pay_tender_checking'));
     try {
@@ -1457,6 +1473,7 @@ export default function PayScreen({ navigation, route }: Props) {
       setTenderMsg(t('pay_tender_invalid').replace('{m}', rp(0)));
       return false;
     } finally {
+      tenderCheckRef.current = false;
       setTenderBusy(false);
     }
   };
