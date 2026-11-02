@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -167,7 +167,7 @@ export default function VoucherScreen({ navigation }: Props) {
   const [items, setItems] = useState<Voucher[]>([]);
   const [applied, setApplied] = useState<Voucher | null>(null);
   const [cancelVisible, setCancelVisible] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null); /* GAP-Z: ref single-flight (state busy basi antar-ketuk cepat = op voucher ganda beda clientId). */ const opBusyRef = useRef(false);
   // U10: bakar voucher = gerbang PIN eskalasi (fail-closed). Kunci (lock)
   // tetap ungated - deliberate.
   const [burnPinVisible, setBurnPinVisible] = useState(false);
@@ -179,7 +179,7 @@ export default function VoucherScreen({ navigation }: Props) {
   type LookupSource = 'local' | 'online' | 'external';
   type LookupResult = { source: LookupSource; kode: string; amount: number; minSpend: number };
   const [result, setResult] = useState<LookupResult | null>(null);
-  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupBusy, setLookupBusy] = useState(false); const lookupBusyRef = useRef(false);
 
   // Guard online seperti Member: offline tampilkan banner, operasi antre via outbox.
   const [online, setOnline] = useState(true);
@@ -269,6 +269,8 @@ export default function VoucherScreen({ navigation }: Props) {
    * lalu validateOnlineVoucher, lalu external validate. Hasil digabung ke
    * SATU msg + SATU result (source: local|online|external). */
   const lookup = async () => {
+    /* GAP-Z: tolak lookup konkuren (tanpa guard = validate ganda + result balapan). */
+    if (lookupBusyRef.current) return; lookupBusyRef.current = true;
     const kode = kodeManual.trim().toUpperCase();
     if (kode.length < 3) {
       setResult(null);
@@ -340,7 +342,7 @@ export default function VoucherScreen({ navigation }: Props) {
       }
       setMsg(t('vou_unknown').replace('{k}', kode));
     } finally {
-      setLookupBusy(false);
+      lookupBusyRef.current = false; setLookupBusy(false);
     }
   };
 
@@ -399,7 +401,7 @@ export default function VoucherScreen({ navigation }: Props) {
   };
 
   const claimResult = async () => {
-    if (!result || lookupBusy) return;
+    if (!result || lookupBusy || lookupBusyRef.current) return; lookupBusyRef.current = true;
     const kode = result.kode;
     if (result.source === 'local') {
       const found = items.find((v) => v.kode === kode);
@@ -429,7 +431,7 @@ export default function VoucherScreen({ navigation }: Props) {
     } catch {
       setMsg(t('vou_unknown').replace('{k}', kode));
     } finally {
-      setLookupBusy(false);
+      lookupBusyRef.current = false; setLookupBusy(false);
     }
   };
 
@@ -440,6 +442,8 @@ export default function VoucherScreen({ navigation }: Props) {
       setMsg('');
       return;
     }
+    /* GAP-Z: unburn ganda = op server ganda. */
+    if (lookupBusyRef.current) return; lookupBusyRef.current = true;
     if (result.source === 'external') {
       setLookupBusy(true);
       try {
@@ -448,7 +452,7 @@ export default function VoucherScreen({ navigation }: Props) {
       } catch {
         /* abaikan */
       } finally {
-        setLookupBusy(false);
+        lookupBusyRef.current = false; setLookupBusy(false);
       }
     }
     setResult(null);
@@ -458,21 +462,21 @@ export default function VoucherScreen({ navigation }: Props) {
   /* Jalur terpisah REA-7/REA-6 dilebur ke lookup()/claimResult()/clearResult di atas. */
 
   /** Kunci voucher agar tidak dipakai transaksi lain. */
-  const lock = (v: Voucher) => {    if (v.status !== 'tersedia' || busy) return;
+  const lock = (v: Voucher) => {    /* GAP-Z */ if (v.status !== 'tersedia' || busy || opBusyRef.current) return; opBusyRef.current = true;
     setBusy(v.id);
     void persistVoucherOp('lock', v).finally(() => {
       setStatus(v.id, 'terkunci');
-      setBusy(null);
+      opBusyRef.current = false; setBusy(null);
     });
   };
 
   /** Buka kunci voucher. */
   const unlock = (v: Voucher, done?: () => void) => {
-    if (v.status !== 'terkunci' || busy) return;
+    /* GAP-Z */ if (v.status !== 'terkunci' || busy || opBusyRef.current) return; opBusyRef.current = true;
     setBusy(v.id);
     void persistVoucherOp('unlock', v).finally(() => {
       setStatus(v.id, 'tersedia');
-      setBusy(null);
+      opBusyRef.current = false; setBusy(null);
       done?.();
     });
   };
@@ -481,14 +485,16 @@ export default function VoucherScreen({ navigation }: Props) {
    * U10: bakar = aksi uang → wajib lolos eskalasi supervisor 'sale.refund'
    * (PIN salah/tanpa hak = ditolak, fail-closed). */
   const burn = (v: Voucher) => {
-    if (v.status !== 'terkunci' || busy) return;
+    if (v.status !== 'terkunci' || busy || opBusyRef.current) return;
     setPendingBurn(v);
     setBurnPin('');
     setBurnPinErr('');
     setBurnPinVisible(true);
   };
   const confirmBurn = async () => {
-    if (!pendingBurn || busy) return;
+    /* GAP-Z: PIN verify + burn ganda (beda clientId) bila ketuk cepat. */
+    if (!pendingBurn || busy || opBusyRef.current) return; opBusyRef.current = true;
+    try {
     const v = pendingBurn;
     const esc = await verifyLocalEscalation(burnPin, 'sale.refund');
     if (!esc.ok) {
@@ -502,9 +508,10 @@ export default function VoucherScreen({ navigation }: Props) {
     setBusy(v.id);
     void persistVoucherOp('burn', v).finally(() => {
       setStatus(v.id, 'terpakai');
-      setBusy(null);
+      opBusyRef.current = false; setBusy(null);
       setApplied({ ...v, status: 'terpakai' });
     });
+    } finally { opBusyRef.current = false; }
   };
 
   /** Batalkan promo: unlock di server + antrean, lalu lepas applied. */
@@ -519,8 +526,11 @@ export default function VoucherScreen({ navigation }: Props) {
         return;
       }
       // Sudah burn: kembalikan ke terkunci agar kasir bisa putuskan ulang.
+      /* GAP-Z: unlock ganda = op server ganda beda clientId. */
+      if (opBusyRef.current) return; opBusyRef.current = true;
       void persistVoucherOp('unlock', applied).finally(() => {
         setStatus(applied.id, 'terkunci');
+        opBusyRef.current = false;
         setApplied(null);
         setCancelVisible(false);
       });
