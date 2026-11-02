@@ -412,7 +412,7 @@ export default function VoucherScreen({ navigation }: Props) {
     setLookupBusy(true);
     try {
       if (result.source === 'online') {
-        const r = await claimOnlineVoucher(kode, `TRX-${Date.now()}`);
+        const r = await claimOnlineVoucher(kode, `TRX-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */);
         if (!r.ok) {
           setMsg(t('vou_unknown').replace('{k}', kode));
           return;

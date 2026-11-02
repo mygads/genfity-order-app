@@ -6,7 +6,7 @@ import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
 import { getLang, useLang } from '../../lib/i18n';
 import { getJSON, setJSON } from '../../lib/storage';
 import { initDb, query, run } from '../../lib/db';
-import { shareReceipt } from '../../lib/print';
+import { shareReceipt } from '../../lib/print';import { uuidv7 } from '../../lib/uuidv7';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -40,7 +40,7 @@ export async function logApp(level: LogLevel, tag: string, message: string, deta
     const items = await getJSON<AppLog[]>(LS_LOGS, []);
     const now = new Date();
     const entry: AppLog = {
-      id: `l-${Date.now()}`,
+      id: `l-${uuidv7()}`, /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */
       time: `${now.toLocaleDateString(getLang() === 'en' ? 'en-US' : 'id-ID', { day: 'numeric', month: 'short' })} ${now.toLocaleTimeString(getLang() === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' })}`,
       level,
       tag,

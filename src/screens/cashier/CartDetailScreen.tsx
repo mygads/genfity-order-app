@@ -12,7 +12,7 @@ import { itemTotal, unitPrice, type CartItem } from './CashierScreen';
 import { initDb, run } from '../../lib/db';
 import { enqueueSync, payPolicyBlockReason } from '../../lib/sync';
 import { getCachedVerticalId } from '../../lib/posModes';
-import { nextSalesNum } from '../../lib/sales';
+import { nextSalesNum } from '../../lib/sales';import { uuidv7 } from '../../lib/uuidv7';
 import { getSession } from '../../session';
 import { requireAccess } from '../../lib/access';
 import { postTableTransition } from '../../lib/terminalTable';
@@ -353,7 +353,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
         total,
         ts: Date.now(),
       });
-      const id = `draft-${Date.now()}`;
+      const id = `draft-${uuidv7()}`; /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */
       try {
         await initDb();
         await run(
@@ -365,7 +365,7 @@ export default function CartDetailScreen({ navigation, route }: Props) {
           try {
             await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', table.trim()]);
             try {
-              enqueueSync('other', { op: 'table-occupy', id: `to-${Date.now()}`, table, at: now });
+              enqueueSync('other', { op: 'table-occupy', id: `to-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table, at: now });
             } catch {
               /* abaikan */
             }

@@ -299,7 +299,7 @@ async function applyVoidLocal(
       if (Math.round(Number(other?.c) || 0) <= 0) {
         await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = TRIM(?)', ['kosong', head.tableNo]);
         try {
-          enqueueSync('other', { op: 'table-clear', id: `tc-${Date.now()}`, table: head.tableNo, at: now });
+          enqueueSync('other', { op: 'table-clear', id: `tc-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: head.tableNo, at: now });
         } catch {
           /* abaikan */
         }

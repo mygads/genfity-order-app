@@ -18,7 +18,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { ApiPath, getBranchId, getTerminal } from '../../config/server';import { apiFetch, memberErpApi, unwrap } from '../../lib/apiSource';
 import { initDb, query, queryFirst, run } from '../../lib/db';
-import { getJSON, setJSON } from '../../lib/storage';
+import { getJSON, setJSON } from '../../lib/storage';import { uuidv7 } from '../../lib/uuidv7';
 import { newDepositKey, postDepositOnce } from '../../lib/deposit';
 import { searchServerCustomers } from '../../lib/posWire';
 import {
@@ -709,7 +709,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       ...rw,
       [mid]: [
         // Riwayat mencatat nominal top up-nya, bukan saldo akhir.
-        { id: `r-${Date.now()}`, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_full'), nominal: typeof topup === 'number' ? topup : baru },
+        { id: `r-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_full'), nominal: typeof topup === 'number' ? topup : baru },
         ...(rw[mid] ?? []),
       ],
     }));
@@ -843,7 +843,7 @@ export default function MemberScreen({ navigation, route }: Props) {
       setRiwayat((rw) => ({
         ...rw,
         [mid]: [
-          { id: `r-${Date.now()}`, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_quick'), nominal: n },
+          { id: `r-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, tanggal: fmtDateInTz(new Date(), lang), keterangan: t('mem_topup_quick'), nominal: n },
           ...(rw[mid] ?? []),
         ],
       }));

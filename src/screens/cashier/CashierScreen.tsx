@@ -22,7 +22,7 @@ import { SUPERVISOR_ACTION_ORDER_DISCOUNT, SUPERVISOR_ACTION_ORDER_VOID, getBoun
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import { initDb, query as queryDb, queryFirst, run } from '../../lib/db';
-import { getJSON } from '../../lib/storage';
+import { getJSON } from '../../lib/storage';import { uuidv7 } from '../../lib/uuidv7';
 import { dbNowLocal } from '../../lib/datefmt';
 import { getBinding, getSession } from '../../session';
 import { requireAccess, requireTerminalAccess } from '../../lib/access';
@@ -947,7 +947,7 @@ export default function CashierScreen({ navigation, route }: Props) {
       if (appliedCustom.current !== key) {
         appliedCustom.current = key;
         const ci = p.customItem;
-        const id = `custom-${Date.now()}`;
+        const id = `custom-${uuidv7()}`; /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */
         setCart((prev) => [
           ...prev,
           { id, name: ci.name, basePrice: ci.price, qty: Math.max(1, ci.qty), modifiers: [], discount: 0, note: ci.note },

@@ -17,7 +17,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   getPendingReviewSid,
   shouldQueueW1,
 } from '../../lib/beWorkforce';import { notifyShiftChanged } from '../../lib/shiftGuard';import { authorizeSupervisor } from '../../lib/supervisor';import { pinVerifyTerminalPin } from '../../lib/terminalApi';import { verifyAttendancePin } from '../../lib/pin';import { getCachedTimezone } from '../../lib/timezone';import { getWorkforceGates } from '../../lib/posConfigSync';
-import { getCachedCurrency } from '../../lib/currency';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang -
+import { getCachedCurrency } from '../../lib/currency';import { uuidv7 } from '../../lib/uuidv7';type Props = { navigation?: any };/** Batas kas awal sesuai hint chip di bawah (PW-4: ikut currency cabang -
  *  maks IDR 10jt tak masuk akal untuk merchant AUD). */
 const MAX_KAS_AWAL_IDR = 10000000;
 const MAX_KAS_AWAL_AUD = 10000;
@@ -195,7 +195,7 @@ const terbilang = (n: number): string => {
       }
       // Catat buka shift ke SQLite + antrean sync (offline-first).
       const nowIso = new Date().toISOString();
-      const shiftId = `shift-${Date.now()}`;
+      const shiftId = `shift-${uuidv7()}`; /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */
       const term = getTerminal();
       // Kolom userId WAJIB id user nyata (dipakai rekap/hak/eskalasi), BUKAN
       // nama tampilan; cashierName menyimpan nama untuk struk/rekap.

@@ -12,7 +12,7 @@ import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
 import { getGroupPaid } from '../../lib/sales';
 import { getSettleMemberView, takeMemberChanged } from '../../lib/memberChangedStore';
-import { enqueueSync } from '../../lib/sync';
+import { enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';
 import { postTableTransition } from '../../lib/terminalTable';
 import { getAutoPrintEnabled } from '../../lib/posConfigSync';
 
@@ -244,7 +244,7 @@ export default function SuccessScreen({ navigation, route }: Props) {
         /* abaikan */
       }
       try {
-        enqueueSync('other', { op: 'table-clear', id: `tc-${Date.now()}`, table: tb, at: new Date().toISOString() });
+        enqueueSync('other', { op: 'table-clear', id: `tc-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: tb, at: new Date().toISOString() });
       } catch {
         /* abaikan */
       }

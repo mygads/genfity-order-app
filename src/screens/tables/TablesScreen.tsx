@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -241,7 +241,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       }),
     );
     // GAP-F: id unik per aksi agar retry drain tak menggandakan mutasi server.
-    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { id: `tm-${Date.now()}`, from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); }
+    queueTableOp(moveMode === 'pindah' ? 'move-table' : 'merge-table', { id: `tm-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, from: sel.no, to: target.no, total: sel.total ?? 0, }); if (moveMode === 'pindah') { persistTableStatus(target, 'terisi'); persistTableStatus(sel, 'kosong'); } else { persistTableStatus(target, 'gabung'); persistTableStatus(sel, 'gabung'); }
     // Bill SQLite ikut pindah agar "pembayaran meja" tetap benar offline (dulu
     // hanya memori + ms_table sehingga bill yatim di meja asal): pindah maupun
     // gabung memindahkan bill terbuka (bukan paid/void) ke meja tujuan.
@@ -308,7 +308,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
           tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
         ),
       );
-      queueTableOp('table-clear', { id: `tc-${Date.now()}`, table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal(); cancelBusyRef.current = false;
+      queueTableOp('table-clear', { id: `tc-${uuidv7()}`, table: no /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */ }); persistTableStatus({ id, no }, 'kosong'); closeModal(); cancelBusyRef.current = false;
       // A11: kosongkan meja di server terminal (best-effort; antrean sync di
       // atas tetap jadi fallback offline; sukses AVAILABLE membersihkan banner).
       void postTableTransition({ tableRef: no, status: 'AVAILABLE' }).then((h) => {
@@ -338,7 +338,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
       })();
       return next;
     });
-  queueTableOp('order-hold-toggle', { id: `th-${Date.now()}`, table: selected.no, held: nextVal }); };
+  queueTableOp('order-hold-toggle', { id: `th-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: selected.no, held: nextVal }); };
 
   /** Transaksi cepat (QS): order tanpa meja - langsung buka kasir mode TAKE AWAY. */
   const quickTransaction = () => {
@@ -358,7 +358,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   const bookingSavingRef = useRef(false); /* GAP-T: nomor meja yang sedang diproses (anti duplikat double-tap; state tables basi antar-ketuk). */ const pendingTableNosRef = useRef(new Set<string>()); /* GAP-U: single-flight pindah/gabung (double-tap merge = total menggelembung + op server ganda). */ const moveBusyRef = useRef(false); /* GAP-V: single-flight kosongkan meja (triple-tap = table-clear ganda). */ const cancelBusyRef = useRef(false); /* GAP-W: single-flight hold-toggle (double-tap = op server ganda + toggle lokal 2x = divergen). */ const holdBusyRef = useRef(false);
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
     if (bookingSavingRef.current) return;
-    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
+    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
     // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
     void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); } /* GAP-S: reset guard SELALU (selected null = tombol tak mati permanen). */ bookingSavingRef.current = false;
   setBookingVisible(false);
@@ -387,7 +387,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     pendingTableNosRef.current.add(no.toLowerCase());
     const section = newSection.trim() || 'Dalam';
     setManageWarn('');
-    const id = `t-${Date.now()}`;
+    const id = `t-${uuidv7()}`; /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */
     setTables((list) =>
       [...list, { id, no, section, kapasitas: kap, status: 'kosong' as TableStatus }].sort((a, b) =>
         a.no.localeCompare(b.no),
