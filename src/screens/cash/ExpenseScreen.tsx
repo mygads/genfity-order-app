@@ -30,7 +30,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
   // F7: muat ulang tiap layar jadi fokus agar approve dari daftar lain langsung
   // terlihat (focus-listener; aman: guard addListener + alive).
   // SESI-FINAL-APP: tiap fokus = retry ringan foto-pending (fire-and-forget).
-  const [saving, setSaving] = useState(false); const [saveNotice, setSaveNotice] = useState(''); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY createdAt DESC", [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: biarkan state apa adanya */ } }; void load(); void retryPendingExpensePhotos().then((n) => { if (n > 0 && alive) void load(); }).catch(() => { /* best-effort */ }); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); if (alive) void retryPendingExpensePhotos().then((n) => { if (n > 0 && alive) void load(); }).catch(() => { /* best-effort */ }); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
+  const [saving, setSaving] = useState(false); /* GAP-AD: ref single-flight simpan expense (double-tap = 2 baris EX- + foto ganda). */ const saveBusyRef = useRef(false); const [saveNotice, setSaveNotice] = useState(''); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); const load = async () => { const approved = await getApprovals(); try { await initDb(); const rows = await query<ExpenseRow>( "SELECT id, coaName, amount, note, userId, expenseDate, photoPath, createdAt FROM tr_branchexpense WHERE id LIKE 'EX-%' AND (branchId = ? OR branchId IS NULL OR branchId = '') ORDER BY createdAt DESC", [getBranchId()], ); if (!alive) return; if (rows.length === 0) { setItems([]); return; } setItems( rows.map((r) => ({ id: r.id, nama: (r.note ?? '-').split(' | ')[0], tanggal: shortDate(r.expenseDate ?? r.createdAt, lang), coa: r.coaName ?? 'Operasional', jumlah: Math.abs(Number(r.amount ?? 0)), disetujui: approved[r.id] ?? false, photo: r.photoPath ?? undefined, })), ); } catch { /* abaikan: biarkan state apa adanya */ } }; void load(); void retryPendingExpensePhotos().then((n) => { if (n > 0 && alive) void load(); }).catch(() => { /* best-effort */ }); const nav = navigation as unknown as { addListener?: (event: string, cb: () => void) => () => void } | undefined; const unsub = nav?.addListener?.('focus', () => { if (alive) void load(); if (alive) void retryPendingExpensePhotos().then((n) => { if (n > 0 && alive) void load(); }).catch(() => { /* best-effort */ }); }); return () => { alive = false; if (typeof unsub === 'function') unsub(); }; }, [navigation]); useEffect(() => subscribeApprovals((id) => { setItems((l) => l.map((e) => (e.id === id ? { ...e, disetujui: true } : e))); }), []); const totalBulan = useMemo(() => items.reduce((s, e) => s + e.jumlah, 0), [items]);
   const jumlahNum = Number(jumlah.replace(/\D/g, '')) || 0;
   const ready = nama.trim().length >= 3 && jumlahNum > 0 && !saving;
 
@@ -58,7 +58,9 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
 
   /** Simpan expense ke tr_branchexpense + dokumen foto, antrekan outbox. ID UUID-style (Q7): EX- + UUIDv7 agar unik lintas-device; prefix EX- dipertahankan agar filter daftar 'EX-%' tetap cocok. */ const tambah = async () => {
 
-    if (!ready) return;
+    /* GAP-AD: tolak tap kedua selama simpan berjalan (state saving basi antar-ketuk). */
+    if (!ready || saveBusyRef.current) return; saveBusyRef.current = true;
+    try {
     // UNBOUND-GUARD: device belum terikat terminal (branchId kosong) = tulis
     // lokal DILEWATI + pesan jujur; form tetap terbuka agar input tak hilang.
     if (!getBranchId().trim()) { setSaveNotice(t('terminal_unbound_hint')); return; }
@@ -129,7 +131,7 @@ coaName: string | null; amount: number | null; note: string | null; userId: stri
       setPhoto(null);
       setFormOpen(false);
     }
-  setSaving(false); };
+  setSaving(false); } finally { saveBusyRef.current = false; } };
 
   /** Buka modal PIN owner untuk satu expense (audit trail, bukan auto-approve). */
   const setujui = (id: string) => { setPendingId(id); setPin(''); setPinErr(''); setPinVisible(true); };
