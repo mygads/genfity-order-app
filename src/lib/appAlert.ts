@@ -15,6 +15,8 @@ export interface AppAlertRequest {
   message?: string;
   buttons: AlertButton[];
   cancelable: boolean;
+  /* GAP-X: dipanggil saat dialog ditutup TANPA tombol (back/backdrop) - guard call-site tak nyangkut. */
+  onDismiss?: () => void;
 }
 
 export type { AlertButton };
@@ -63,7 +65,7 @@ export function appAlert(
   title: string,
   message?: string,
   buttons?: AlertButton[],
-  options?: { cancelable?: boolean },
+  options?: { cancelable?: boolean; onDismiss?: () => void },
 ): void {
   if (Platform.OS !== 'web') {
     Alert.alert(title, message, buttons, options);
@@ -74,6 +76,8 @@ export function appAlert(
     message,
     buttons: buttons ?? [],
     cancelable: options?.cancelable !== false,
+    /* GAP-X: teruskan callback dismiss (web host; native Alert tanpa onDismiss). */
+    ...(options?.onDismiss ? { onDismiss: options.onDismiss } : {}),
   };
   if (current) {
     // Satu dialog dalam satu waktu; sisanya antre berurutan.

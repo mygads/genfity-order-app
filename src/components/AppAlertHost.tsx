@@ -29,7 +29,8 @@ export default function AppAlertHost() {
       visible
       onRequestClose={() => {
         // Android back: hormati cancelable seperti Alert.alert bawaan.
-        if (req.cancelable) dismissAppAlert();
+        /* GAP-X: beritahu pemilik agar guard tak nyangkut (best-effort). */
+        if (req.cancelable) { try { req.onDismiss?.(); } catch { /* abaikan */ } dismissAppAlert(); }
       }}>
       <View style={styles.wrap}>
         <View style={[styles.dialog, styles.dialogNarrow]}>
