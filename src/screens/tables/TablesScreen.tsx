@@ -152,7 +152,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   );
 
   const openDetail = (tb: Table) => {
-    setSelected(tb);
+    moveBusyRef.current = false; cancelBusyRef.current = false; setSelected(tb);
     setMoveMode(null);
     setConfirmCancel(false);
     // A11: segarkan banner konflik (bisa diset layar kasir saat duduki).
@@ -216,7 +216,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
 
   /** Pindah: tamu+total pindah ke meja kosong. Gabung: total digabung ke meja terisi. */
   const applyMove = (target: Table) => {
-    if (!selected) return;
+    if (!selected || moveBusyRef.current) return; moveBusyRef.current = true;
     const sel = selected;
     setTables((list) =>
       list.map((tb) => {
@@ -277,9 +277,9 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   };
 
   const cancelTable = () => {
-    if (!selected) return;
+    if (!selected || cancelBusyRef.current) return; cancelBusyRef.current = true;
     if (!confirmCancel) {
-      setConfirmCancel(true);
+      cancelBusyRef.current = false; setConfirmCancel(true);
       setCancelWarn('');
       return;
     }
@@ -297,6 +297,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         if ((open[0]?.c ?? 0) > 0) {
           setCancelWarn(t('tbl_warn_open_bill').replace('{no}', no));
           setConfirmCancel(false);
+          cancelBusyRef.current = false;
           return;
         }
       } catch {
@@ -307,7 +308,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
           tb.id === id ? { ...tb, status: 'kosong' as TableStatus, namaTamu: undefined, total: undefined, seatedMin: undefined } : tb,
         ),
       );
-      queueTableOp('table-clear', { id: `tc-${Date.now()}`, table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal();
+      queueTableOp('table-clear', { id: `tc-${Date.now()}`, table: no }); persistTableStatus({ id, no }, 'kosong'); closeModal(); cancelBusyRef.current = false;
       // A11: kosongkan meja di server terminal (best-effort; antrean sync di
       // atas tetap jadi fallback offline; sukses AVAILABLE membersihkan banner).
       void postTableTransition({ tableRef: no, status: 'AVAILABLE' }).then((h) => {
@@ -320,21 +321,24 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   };
 
   const toggleHold = () => {
-    if (!selected) return;
+    if (!selected || holdBusyRef.current) return;
     const id = selected.id;
+    /* GAP-W: kunci nilai SEKALI per ketuk agar op server selaras toggle lokal. */
+    const nextVal = !held[id];
+    holdBusyRef.current = true;
     // Hold bertahan saat aplikasi dibuka ulang (dulu memori saja).
     setHeld((h) => {
-      const next = { ...h, [id]: !h[id] };
+      const next = { ...h, [id]: nextVal };
       void (async () => {
         try {
           await setJSON(HELD_KEY, next);
         } catch {
           /* abaikan */
-        }
+        } finally { holdBusyRef.current = false; }
       })();
       return next;
     });
-  queueTableOp('order-hold-toggle', { id: `th-${Date.now()}`, table: selected.no, held: !held[id] }); };
+  queueTableOp('order-hold-toggle', { id: `th-${Date.now()}`, table: selected.no, held: nextVal }); };
 
   /** Transaksi cepat (QS): order tanpa meja - langsung buka kasir mode TAKE AWAY. */
   const quickTransaction = () => {
@@ -351,7 +355,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
   );
 
   // GAP-F: guard ketuk-ganda simpan booking (dua op tanpa id = booking ganda).
-  const bookingSavingRef = useRef(false); /* GAP-T: nomor meja yang sedang diproses (anti duplikat double-tap; state tables basi antar-ketuk). */ const pendingTableNosRef = useRef(new Set<string>());
+  const bookingSavingRef = useRef(false); /* GAP-T: nomor meja yang sedang diproses (anti duplikat double-tap; state tables basi antar-ketuk). */ const pendingTableNosRef = useRef(new Set<string>()); /* GAP-U: single-flight pindah/gabung (double-tap merge = total menggelembung + op server ganda). */ const moveBusyRef = useRef(false); /* GAP-V: single-flight kosongkan meja (triple-tap = table-clear ganda). */ const cancelBusyRef = useRef(false); /* GAP-W: single-flight hold-toggle (double-tap = op server ganda + toggle lokal 2x = divergen). */ const holdBusyRef = useRef(false);
   /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
     if (bookingSavingRef.current) return;
     if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${Date.now()}`, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
