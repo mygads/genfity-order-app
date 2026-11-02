@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import {
+import { useEffect, useRef, useState } from 'react';import {
   Image,
   Pressable,
   ScrollView,
@@ -7,7 +7,8 @@ import { useEffect, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, pollServerPrintJobs, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { buildReceiptOrderTypeLine, fetchReceiptTemplates, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';
+import { uuidv7 } from '../../lib/uuidv7';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, pollServerPrintJobs, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { buildReceiptOrderTypeLine, fetchReceiptTemplates, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
   role: StationRole;
@@ -147,6 +148,8 @@ function backupBindings(ss: Station[]): void {
   const isTablet = width >= TABLET_BP;
   const { t } = useLang();
   const [stations, setStations] = useState<Station[]>([]);
+  /* GAP-AQ: throttle tambah-stasiun + id unik (Date.now = tabrakan same-ms). */
+  const addBusy = useRef(0);
   const [bonded, setBonded] = useState<Bonded[]>([]);
   const [pairing, setPairing] = useState(false);
   const [bleScanning, setBleScanning] = useState(false);
@@ -440,9 +443,13 @@ function backupBindings(ss: Station[]): void {
   const addStation = () => {
     const name = stName.trim();
     if (!name) return;
+    /* GAP-AQ: throttle ketuk-ganda (dua stasiun kembar). */
+    const nowSt = Date.now();
+    if (nowSt - addBusy.current < 800) return;
+    addBusy.current = nowSt;
     const entry: Station =
       {
-        id: `st-${Date.now()}`,
+        id: `st-${uuidv7()}`,
         name,
         role: stRole,
         conn: stConn,
