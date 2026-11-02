@@ -82,6 +82,16 @@ export default function DineInScreen({ navigation, route }: Props) {
   /* GAP-AK/AL: single-flight simpan-draft + split (ketuk-ganda = nomor/draft ganda). */
   const saveRef = useRef(false);
   const splitRef = useRef(false);
+  /* GAP-AW: throttle navigasi anti layar-ganda (ketuk-ganda <800ms = satu
+   * navigasi; cermin GAP-AG di CartDetail/Cashier). Berlaku untuk
+   * goCashier/goPay/goPrint yang semuanya navigate sinkron. */
+  const navAt = useRef(0);
+  const navOnce = () => {
+    const now = Date.now();
+    if (now - navAt.current < 800) return false;
+    navAt.current = now;
+    return true;
+  };
   const [guest, setGuest] = useState(route?.params?.customer ?? '');
   const [mode, setMode] = useState(
     route?.params?.mode && MODES.includes(route.params.mode)
@@ -179,11 +189,13 @@ export default function DineInScreen({ navigation, route }: Props) {
 
   const seats = SECTIONS[section] ?? [];
 
-  const goCashier = () =>
+  const goCashier = () => {
+    if (!navOnce()) return;
     navigation?.navigate('Cashier', {
       table, mode,
       ...(guest.trim() ? { customer: guest.trim() } : {}),
     });
+  };
   const goSave = () => {
     /* GAP-AK: tolak tap kedua selama simpan berjalan; reset di finally rantai async. */
     if (saveRef.current) return;
@@ -251,7 +263,8 @@ export default function DineInScreen({ navigation, route }: Props) {
   };
   /** Paket struk penuh ala POSLite: item + diskon + voucher + ongkir + meja + tamu. */
   const discountForChain = discountTotal + voucherAmt;
-  const goPrint = () =>
+  const goPrint = () => {
+    if (!navOnce()) return;
     navigation?.navigate('Receipt', {
       total, mode, table,
       items: active,
@@ -263,21 +276,22 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(ongkir > 0 ? { ongkir } : {}),
       ...(ongkirCut > 0 ? { ongkirCut } : {}),
       ...(packaging > 0 ? { packaging } : {}),
-      unpaid: true,
+      unpaid: true, // GAP-AW: duplikat packaging di bawah dibuang (satu kunci satu nilai).
       // Rincian info-only agar baris struk pas dengan total (service/pajak/fee/pembulatan).
       ...(service > 0 ? { service } : {}),
       ...(taxIncl > 0 ? { tax: taxIncl } : {}),
       ...(feeESB > 0 ? { feeESB } : {}),
-      ...(packaging > 0 ? { packaging } : {}),
       ...(rounding !== 0 ? { rounding } : {}),
       ...(guest.trim() ? { customer: guest.trim() } : {}),
       ...(memberId ? { memberId } : {}),
       ...(customerId != null ? { customerId } : {}),
     });
+  };
   // Rantai Pay (kontrak PayScreen): total penuh + items/mode/table/ongkir/voucher/customer/memberId
   // + diskon belanja + rincian info-only agar Pay teruskan ke Success > Receipt.
   // Voucher sebagai OBJEK {code, amount, kind} (Pay dahulukan discount angka, tanpa hitung ganda).
-  const goPay = () =>
+  const goPay = () => {
+    if (!navOnce()) return;
     navigation?.navigate('Pay', {
       total,
       items: active,
@@ -297,6 +311,7 @@ export default function DineInScreen({ navigation, route }: Props) {
       ...(memberId ? { memberId } : {}),
       ...(customerId != null ? { customerId } : {}),
     });
+  };
 
   return (
     <View style={styles.root}>

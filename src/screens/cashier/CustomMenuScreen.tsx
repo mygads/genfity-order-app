@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppInput from '../../components/AppInput';
@@ -30,6 +30,8 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
   const [free, setFree] = useState('');
   const [added, setAdded] = useState<string[]>([]);
   const [warn, setWarn] = useState('');
+  /* GAP-AV2: throttle tambah-item (ketuk-ganda = item custom ganda di kasir). */
+  const addAt = useRef(0);
 
   useEffect(() => {
     let on = true;
@@ -63,6 +65,9 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
     setNotes((l) => (l.includes(n) ? l.filter((x) => x !== n) : [...l, n]));
 
   const add = () => {
+    const now = Date.now();
+    if (now - addAt.current < 800) return;
+    addAt.current = now;
     if (!name.trim()) {
       setWarn(t('fillNameFirst'));
       return;

@@ -355,7 +355,13 @@ export default function DashboardScreen({ navigation }: Props) {
     { label: t('nav_settings'), sub: t('nav_settings_sub'), route: 'Settings' },
   ];
 
+  /* GAP-AX: throttle buka-menu (ketuk-ganda kartu = layar ganda; cabang
+   * Cashier async tanpa ini bisa lolos dua ensureShiftOpen paralel). */
+  const menuAt = useRef(0);
   const openMenu = (m: MenuItem) => {
+    const now = Date.now();
+    if (now - menuAt.current < 800) return;
+    menuAt.current = now;
     if (!m.route) {
       setNotice(`${m.label} ${t('dash_not_available')}`);
       return;
