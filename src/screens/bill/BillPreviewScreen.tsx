@@ -150,6 +150,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   // Pay > appendGroupPayment). Dibangkitkan sekali lalu dipakai ulang agar
   // kunjungan ke-2+ menempel ke head yang sama (stok/voucher/dapur sekali).
   const groupNoRef = useRef<string>('');
+  /* GAP-AC: single-flight bayar-split (double-tap = dua nomor terbit + navigasi ganda). */ const payBusyRef = useRef(false);
   // Kebenaran DB saat tombol split ditekan (getGroupPaid): banner jujur di
   // bawah penghitung manual agar kasir tahu yang benar-benar tercatat.
   const [dbPaid, setDbPaid] = useState<number | null>(null);
@@ -159,8 +160,10 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
   // Total split sudah neto (termasuk diskon) + share proporsional
   // service/pajak/pembulatan, tanpa diskon/voucher ganda.
   const paySplit = (val: number, mode: Mode) => {
-    if (val <= 0 || !nominalGateOk(mode)) return;
+    if (val <= 0 || !nominalGateOk(mode) || payBusyRef.current) return;
+    payBusyRef.current = true;
     void (async () => {
+      try {
       let g = groupNoRef.current;
       let grouped = true;
       if (!g) {
@@ -193,6 +196,7 @@ export default function BillPreviewScreen({ navigation, route }: Props) {
       // P10: jalur non-grup membawa diskon/voucher seperti jalur grup agar
       // rincian struk di Pay konsisten (total split tetap neto).
       navigation?.navigate('Pay', { total: val, items: saleItems, discount: discountVal, ...(voucherCode ? { voucher: { code: voucherCode, amount: discountVal, ...(voucherKind ? { kind: voucherKind } : {}) } } : {}), ...(voucherCode ? { voucherCode } : {}), ...orderCtx, ...splitShareCtx(val) });
+      } finally { payBusyRef.current = false; }
     })();
   };
 
