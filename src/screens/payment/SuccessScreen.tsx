@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, successCheck, rp, wideCenterLg } from '../../theme';
 import ScreenHeader from '../../components/ScreenHeader';
@@ -260,10 +260,24 @@ export default function SuccessScreen({ navigation, route }: Props) {
     (it.discount ?? 0);
   const miniSubtotal = miniItems.reduce((s, it) => s + lineTotal(it), 0);
   const isCash = method === 'cash' || method.toLowerCase().includes('tunai');
+  /* GAP-BG: throttle aksi sukses. Ketuk-ganda Cetak = dua layar Receipt
+   * autoPrint = CETAK FISIK GANDA; Transaksi Baru/Riwayat ganda = layar
+   * menumpuk. Kirim-email tak ikut (sudah idempoten rcpt-mail). */
+  const actAt = useRef(0);
+  const actOnce = () => {
+    const now = Date.now();
+    if (now - actAt.current < 800) return false;
+    actAt.current = now;
+    return true;
+  };
   const doPrint = () => {
     // Cetak via layar struk (cetak nyata ESC/POS + tendang laci bila tunai),
     // bukan dialog info - autoPrint picu sekali saat Receipt dibuka.
+    if (!actOnce()) return;
     navigation?.navigate('Receipt', { ...receiptParams, autoPrint: true });
+  };
+  const goOnce = (screen: string) => {
+    if (actOnce()) navigation?.navigate(screen);
   };
   const receiptParams = {
     total, method: methodLabel(method), cash, change,
@@ -533,8 +547,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
         <View style={[styles.footer, styles.footerTablet]}>
           <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
           <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
-          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
-          <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
+          <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => goOnce('History')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
+          <AppButton title={t('ok_new')} onPress={() => goOnce('Cashier')} fullWidth={false} size="md" style={[styles.footBtnFlex, styles.footTabletBtn]} />
         </View>
         {mailModal}
       </View>
@@ -556,8 +570,8 @@ export default function SuccessScreen({ navigation, route }: Props) {
       <View style={[styles.footer, styles.footerGrid]}>
         <AppButton title={t('ok_print')} variant="secondary" onPress={doPrint} fullWidth={false} size="md" style={styles.footGridBtn} />
         <AppButton title={t('ok_email_long')} variant="secondary" onPress={() => setMailOpen(true)} fullWidth={false} size="md" style={styles.footGridBtn} />
-        <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => navigation?.navigate('History')} fullWidth={false} size="md" style={styles.footGridBtn} />
-        <AppButton title={t('ok_new')} onPress={() => navigation?.navigate('Cashier')} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_history_long')} variant="secondary" onPress={() => goOnce('History')} fullWidth={false} size="md" style={styles.footGridBtn} />
+        <AppButton title={t('ok_new')} onPress={() => goOnce('Cashier')} fullWidth={false} size="md" style={styles.footGridBtn} />
       </View>
       {mailModal}
     </View>
