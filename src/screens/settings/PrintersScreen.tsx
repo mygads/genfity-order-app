@@ -150,6 +150,10 @@ function backupBindings(ss: Station[]): void {
   const [stations, setStations] = useState<Station[]>([]);
   /* GAP-AQ: throttle tambah-stasiun + id unik (Date.now = tabrakan same-ms). */
   const addBusy = useRef(0);
+  /* GAP-BC: single-flight aksi printer fisik (ketuk-ganda uji-cetak = kertas
+   * ganda; tendang-laci ganda = tendangan ganda). Satu ref berbagi dengan
+   * semua aksi; reset di finally rantai async. */
+  const devBusy = useRef(false);
   const [bonded, setBonded] = useState<Bonded[]>([]);
   const [pairing, setPairing] = useState(false);
   const [bleScanning, setBleScanning] = useState(false);
@@ -587,6 +591,9 @@ function backupBindings(ss: Station[]): void {
 
   /** Buka drawer kas: pulse ESC/POS via printer kasir. */
   const openDrawer = async (s: Station) => {
+    if (devBusy.current) return;
+    devBusy.current = true;
+    try {
     // R57: tanpa target kirim valid, jangan panggil native.
     const target = stationTarget(s);
     if (!target) {
@@ -599,6 +606,9 @@ function backupBindings(ss: Station[]): void {
         ? t('printers.drawerOk').replace('{x}', s.name)
         : t('printers.drawerFail').replace('{x}', s.name),
     );
+    } finally {
+      devBusy.current = false;
+    }
   };
 
   /** Tarik manual antrean cetak server (print-bridge FULL): terminalCode klaim
@@ -745,6 +755,9 @@ function backupBindings(ss: Station[]): void {
 
   /** Test print per station: pratinjau + hex ESC/POS, lalu kirim nyata bila bisa. */
   const testPrintStation = async (s: Station) => {
+    if (devBusy.current) return;
+    devBusy.current = true;
+    try {
     // R57: alamat tak bisa kirim = null - tolak eksplisit (kunci noPrinter
     // yang sudah ada), jangan kirim target buta.
     const target = stationTarget(s);
@@ -878,6 +891,9 @@ function backupBindings(ss: Station[]): void {
       const changed = { ...s, connected: false, lastCheckedAt: nowIso };
       setStations((ss) => ss.map((x) => (x.id === s.id ? changed : x)));
       void persistStation(changed);
+    }
+    } finally {
+      devBusy.current = false;
     }
   };
 
