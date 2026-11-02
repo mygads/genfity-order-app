@@ -182,6 +182,12 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
   const pushSeenRef = useRef<Set<string>>(new Set());
   /* GAP-AP: throttle cetak-ulang (<800ms = satu navigasi struk, anti cetak ganda). */
   const reprintAt = useRef(0);
+  /* GAP-BE: single-flight advance per tiket. Tanpa ini ketuk-ganda dalam
+   * satu tick mengirim transisi yang SAMA dua kali (mirror BE + antrean
+   * GO_OP_STATUS ganda; reject TRANSITION kedua bisa me-rollback override
+   * lokal ke status basi), atau — bila render menyela — melompat dua tahap
+   * (Baru→Selesai) tanpa sengaja. */
+  const advRef = useRef<Set<string>>(new Set());
   const [liveNotice, setLiveNotice] = useState('');
 
   const [now, setNow] = useState(() => Date.now());
@@ -292,8 +298,10 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
 
   const counts = useMemo(() => { const c: Record<KitchenStatus, number> = { Baru: 0, Diproses: 0, Selesai: 0 }; for (const tk of tickets) { const s = moved[tk.id] ?? tk.status; c[s] += 1; } return c; }, [tickets, moved]); const elapsedOf = (tk: KitchenTicket): { text: string; sla: boolean } => { const mins = minutesSince(tk.time, now); if (mins === null) return { text: tk.elapsed, sla: false }; return { text: fmtElapsed(mins, t), sla: mins >= 30 && (moved[tk.id] ?? tk.status) !== 'Selesai' }; }; const advance = (tk: KitchenTicket) => {
     const next = NEXT[moved[tk.id] ?? tk.status];
-    const prev = moved[tk.id] ?? tk.status;
     if (!next) return;
+    if (advRef.current.has(tk.id)) return;
+    advRef.current.add(tk.id);
+    const prev = moved[tk.id] ?? tk.status;
     setMoved((m) => ({ ...m, [tk.id]: next }));
     setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: next } : sel));
     void persistKitchenStatus(tk, next);
@@ -324,7 +332,9 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
           setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: prev } : sel));
         }
         if (res.reason === 'rejected') setLiveNotice(res.message || '');
-      } catch { /* abaikan: status lokal tetap sah */ }
+      } catch { /* abaikan: status lokal tetap sah */ } finally {
+        advRef.current.delete(tk.id);
+      }
     })();
   };
 
