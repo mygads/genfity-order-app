@@ -10,7 +10,7 @@ import { ensureShiftOpen } from '../../lib/shiftGuard';
 import { initDb, query, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
-import { enqueueSync } from '../../lib/sync';
+import { enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';
 import { postTableTransition } from '../../lib/terminalTable';
 import {
   cancelServerReservation,
@@ -313,6 +313,8 @@ export default function BookingScreen({ navigation }: Props) {
     const paxNum = Number(tamu) || 2;
     if (picked && paxNum > picked.kap) {
       setWarn(t('bok_warn_capacity'));
+      /* GAP-AY: reset guard — tanpa ini tombol simpan mati permanen. */
+      savingRef.current = false;
       return;
     }
     if (editingId) {
@@ -340,7 +342,7 @@ export default function BookingScreen({ navigation }: Props) {
       return;
     }
     const row: Resv = {
-      id: `r${Date.now()}`, name: name.trim(), tamu: Number(tamu) || 2,
+      id: `r${uuidv7()}`, name: name.trim() /* GAP-AZ: uuid ganti Date.now. */, tamu: Number(tamu) || 2,
       table: code, phone: phone.trim() || '-', note: note.trim() || '-',
       date, time: time.trim(), status: 'Terjadwal',
     };
@@ -348,7 +350,7 @@ export default function BookingScreen({ navigation }: Props) {
     // Sinkron ke denah: tandai meja dipesan di master + antre sync (best-effort).
     try {
       enqueueSync('other', {
-        op: 'booking-create', id: `bk-${Date.now()}`, table: code, name: row.name, time: row.time,
+        op: 'booking-create', id: `bk-${uuidv7()}` /* GAP-AZ: kunci unik, bukan ms. */, table: code, name: row.name, time: row.time,
         pax: row.tamu, date: row.date, at: new Date().toISOString(),
       });
     } catch {
@@ -454,13 +456,17 @@ export default function BookingScreen({ navigation }: Props) {
       })();
     }
     persist(list.filter((x) => x.id !== r.id));
-    try {
-      enqueueSync('other', {
-        op: 'booking-cancel', id: r.id, table: r.table, name: r.name,
-        at: new Date().toISOString(),
-      });
-    } catch {
-      /* antrean belum siap */
+    /* GAP-AY: baris server-linked diurus cabang cancel BE/GO_OP_RESV_CANCEL di
+     * atas — enqueue lokal di sini = perintah batal ganda ke server. */
+    if (typeof r.serverId !== 'number') {
+      try {
+        enqueueSync('other', {
+          op: 'booking-cancel', id: r.id, table: r.table, name: r.name,
+          at: new Date().toISOString(),
+        });
+      } catch {
+        /* antrean belum siap */
+      }
     }
     // Bebaskan denah hanya bila tamu belum datang (Terjadwal): bila sudah
     // Datang/Selesai, meja dikuasai order kasir - jangan timpa jadi kosong.
@@ -479,7 +485,12 @@ export default function BookingScreen({ navigation }: Props) {
   };
 
   /** Buka reservasi ke kasir: status ikut maju Terjadwal → Datang (tamu tiba). */
+  /* GAP-AY: throttle buka-kasir (ketuk-ganda = dua layar Cashier). */
+  const openAt = useRef(0);
   const openResv = (r: Resv) => {
+    const now = Date.now();
+    if (now - openAt.current < 800) return;
+    openAt.current = now;
     void (async () => {
       const params = { table: r.table, customer: r.name, mode: 'DINE IN', tamu: r.tamu };
       if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setGateNotice))) return;
