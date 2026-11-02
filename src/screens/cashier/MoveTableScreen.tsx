@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import AppButton from '../../components/AppButton';
@@ -39,6 +39,8 @@ export default function MoveTableScreen({ navigation, route }: Props) {
   const [from, setFrom] = useState(() => canonTableNo(route?.params?.from ?? ''));
   const [to, setTo] = useState('');
   const [done, setDone] = useState(false);
+  /* GAP-AI: single-flight pindah-meja (ketuk-ganda = antrean ganda + tulis ganda). */
+  const moveRef = useRef(false);
   /** Peringatan validasi tujuan (meja sama / asal belum dipilih). */
   const [warn, setWarn] = useState('');
   // T7: katalog live dari SQLite (bill aktif + ms_table); tanpa bill
@@ -142,6 +144,9 @@ export default function MoveTableScreen({ navigation, route }: Props) {
     if (!destCode) { setWarn(t('mov_warn_dst')); return; }
     if (destCode === src.table) { setWarn(t('mov_same_table').replace('{from}', src.table)); return; }
     setWarn('');
+    /* GAP-AI: tolak tap kedua selama pindah berjalan; reset di finally rantai async. */
+    if (moveRef.current) return;
+    moveRef.current = true;
     // Catat pindah meja ke antrean sync agar diteruskan ke server (offline-first).
     try {
       enqueueSync('other', {
@@ -204,7 +209,7 @@ export default function MoveTableScreen({ navigation, route }: Props) {
       } catch {
         /* SQLite belum siap - antrean sync di atas tetap jalan */
       }
-    })();
+    })().finally(() => { moveRef.current = false; });
     setDone(true);
   };
 
