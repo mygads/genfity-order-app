@@ -979,6 +979,7 @@ const STR: Record<string, Entry> = {
   'petty.out': { id: 'Keluar', en: 'Out' },
   'petty.emptyTitle': { id: 'Belum Ada Transaksi', en: 'No Transactions Yet' },
   'petty.emptySub': { id: 'Kas kecil yang dicatat akan muncul di sini', en: 'Recorded petty cash will appear here' },
+  'petty.pushOnlyHint': { id: 'Catatan via web belum turun ke perangkat (sinkron kas satu arah).', en: 'Web-created entries do not sync down yet (one-way cash sync).' },
   'petty.recordBtn': { id: '+ Catat Kas Kecil', en: '+ Record Petty Cash' },
   'petty.formTitle': { id: 'Form Kas Kecil', en: 'Petty Cash Form' },
   'petty.flow': { id: 'Arus Kas', en: 'Cash Flow' },

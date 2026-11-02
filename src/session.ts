@@ -148,14 +148,14 @@ export type GrantProblem = 'no-grant' | 'grant-mismatch' | 'grant-expired';
 /**
  * Basis sesi netral - BUKAN identitas fiktif. Nama/username selalu ditimpa
  * hasil validateEmployee saat login nyata (loginEmployee di bawah); outlet +
- * shift mengikuti identitas cabang seed (B001 'Genfity Cabang Poris').
+ * diisi dari merchant/branch binding saat login ('' sampai ada binding).
  * clockIn/cash mulai kosong sampai shift nyata dibaca Dashboard.
  */
 const DEMO: Session = {
   name: '',
   username: '',
   role: 'Merchant Staff',
-  outlet: 'Genfity Cabang Poris',
+  outlet: '',
   shift: 'Shift Pagi',
   clockIn: '--:--',
   cash: 0,
@@ -1552,6 +1552,8 @@ export function loginEmployee(
   if (keepTag) current.terminalTag = keepTag;
   if (keepDevice) current.deviceId = keepDevice;
   if (keepMerchant) current.merchantName = keepMerchant;
+  // Outlet tampil = cermin merchant/branch binding (FIX bocor 'Poris').
+  current.outlet = keepMerchant || '';
   // F17: ctx terminal eksplisit (hasil E01) menang di atas binding + prev.
   if (ctx) {
     const cxBranch = String(ctx.branchId ?? '').trim();
@@ -1849,7 +1851,10 @@ export function setSessionTerminal(ctx: SessionTerminalContext): Session | null 
     if (t !== undefined) next.terminalCode = t;
     if (g !== undefined) next.terminalTag = g;
     if (tn !== undefined) next.terminalName = tn;
-    if (mn !== undefined) next.merchantName = mn;
+    if (mn !== undefined) {
+      next.merchantName = mn;
+      next.outlet = mn;
+    }
     if (dv !== undefined) next.deviceId = dv;
     if (ak !== undefined) next.authKey = ak;
     current = next;

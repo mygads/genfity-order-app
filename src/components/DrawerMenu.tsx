@@ -214,7 +214,7 @@ export default function DrawerMenu({ visible, onClose, navigate, outlet, user, s
       <View style={styles.root}>
         <View style={[styles.panel, { width: drawerW }]}>
           <View style={styles.head}>
-            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet ?? t('outlet_fallback')}</Text>
+            <Text style={[styles.outlet, isTablet && styles.outletTablet]}>{outlet?.trim() ? outlet : t('outlet_fallback')}</Text>
             <View style={styles.shiftRow}>
               <View
                 style={[

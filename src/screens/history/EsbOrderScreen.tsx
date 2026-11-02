@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';import
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { totals } from '../../lib/totals';
+import { clockHHMM } from '../../lib/datefmt';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';
 import ManagerPinPrompt from '../../components/ManagerPinPrompt';import type { EsbOrder, EsbStatus } from '../../data/mock';import { notifyLocal } from '../../lib/push';import { onWsMessage, startRealtime } from '../../lib/realtime';import { getSession } from '../../session';import { getDeviceRole, normalizeTag, type TerminalTag } from '../../lib/deviceRole';import { useLang } from '../../lib/i18n';import { ApiPath, getTerminal } from '../../config/server';import { apiFetch, deliveryApi, unwrap } from '../../lib/apiSource';
 import { uuidv7 } from '../../lib/uuidv7';import { enqueueOutbox, enqueueSync, withTimeout } from '../../lib/sync';
 import {
@@ -39,7 +40,7 @@ function mapGoActiveToRow(a: ServerActiveOrder): EsbRow | null {
     customer: a.customerName || '-',
     phone: '',
     type,
-    time: String(a.createdAt ?? '').slice(11, 16) || '--:--',
+    time: clockHHMM(a.createdAt) || '--:--',
     items: [],
     total: a.total,
     status: local,
@@ -77,7 +78,7 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
   const [dlvMsg, setDlvMsg] = useState(''); const [dlvBusy, setDlvBusy] = useState(false); const queryDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); setDlvMsg(''); try { const term = getTerminal(); const res = await deliveryApi('search-ongoing', { orderNo: orderCode, branchId: term.branchId }); const { data } = unwrap<Record<string, unknown>>(res.data); const info = String((data as { status?: unknown })?.status ?? (data as { state?: unknown })?.state ?? ''); setDlvMsg(info ? `${t('dlv_title')}: ${orderCode} - ${info}` : `${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]); const scheduleDelivery = useCallback(async (orderCode: string) => { if (dlvBusy) return; setDlvBusy(true); try { const term = getTerminal(); await deliveryApi('schedule-order', { orderNo: orderCode, branchId: term.branchId, schedule: scheduleOf({ id: orderCode } as EsbRow) }); setDlvMsg(`${t('dlv_title')}: ${orderCode} - OK`); } catch { setDlvMsg(''); } finally { setDlvBusy(false); } }, [dlvBusy, t]);
   // T9: order live dari pull sales (apiSource: backend asli bila env terisi,
   // order online datang dari pull saat backend ada; offline = kosong, bukan palsu.
-  const [liveOrders, setLiveOrders] = useState<EsbRow[] | null>(null); const [liveOngkir, setLiveOngkir] = useState<Record<string, number>>({}); const pullLive = useCallback(async () => { try { const res = await apiFetch(ApiPath.pullSales, { method: 'GET' }); const { data } = unwrap<{ items?: SalePull[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; if (items.length === 0) { setLiveOrders([]); setLiveOngkir({}); return; } const rows: EsbRow[] = []; const ong: Record<string, number> = {}; for (const s of items) { const code = String(s.salesNum ?? '').trim(); if (!code) continue; const mode = String(s.salesMode ?? '').toUpperCase(); const type = mode.includes('DELIVER') || mode.includes('DIANTAR') ? 'Diantar' : 'Ambil Sendiri'; const mapped = (Array.isArray(s.items) ? s.items : []).map((it) => ({ name: String(it.name ?? '-'), qty: Math.max(1, Math.round(Number(it.qty) || 0)), price: Math.round(Number(it.unitPrice ?? it.price) || 0), ...(it.note ? { note: String(it.note) } : {}), })); const sub = Number(s.subtotal); const total = Number.isFinite(sub) && sub > 0 ? Math.round(sub) : mapped.reduce((a, it) => a + it.qty * it.price, 0); const time = String(s.salesDate ?? '').slice(11, 16) || '--:--'; rows.push({ id: code, code, customer: String(s.customerName ?? s.tableNo ?? '-'), phone: '', type, time, items: mapped, total, status: 'Baru', }); const fee = Number(s.ongkirNet ?? s.ongkir); ong[code] = Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0; } if (rows.length === 0) { setLiveOrders([]); } else { setLiveOrders(rows); } setLiveOngkir(rows.length === 0 ? {} : ong);
+  const [liveOrders, setLiveOrders] = useState<EsbRow[] | null>(null); const [liveOngkir, setLiveOngkir] = useState<Record<string, number>>({}); const pullLive = useCallback(async () => { try { const res = await apiFetch(ApiPath.pullSales, { method: 'GET' }); const { data } = unwrap<{ items?: SalePull[] }>(res.data); const items = Array.isArray(data?.items) ? data.items : []; if (items.length === 0) { setLiveOrders([]); setLiveOngkir({}); return; } const rows: EsbRow[] = []; const ong: Record<string, number> = {}; for (const s of items) { const code = String(s.salesNum ?? '').trim(); if (!code) continue; const mode = String(s.salesMode ?? '').toUpperCase(); const type = mode.includes('DELIVER') || mode.includes('DIANTAR') ? 'Diantar' : 'Ambil Sendiri'; const mapped = (Array.isArray(s.items) ? s.items : []).map((it) => ({ name: String(it.name ?? '-'), qty: Math.max(1, Math.round(Number(it.qty) || 0)), price: Math.round(Number(it.unitPrice ?? it.price) || 0), ...(it.note ? { note: String(it.note) } : {}), })); const sub = Number(s.subtotal); const total = Number.isFinite(sub) && sub > 0 ? Math.round(sub) : mapped.reduce((a, it) => a + it.qty * it.price, 0); const time = clockHHMM(s.salesDate) || '--:--'; rows.push({ id: code, code, customer: String(s.customerName ?? s.tableNo ?? '-'), phone: '', type, time, items: mapped, total, status: 'Baru', }); const fee = Number(s.ongkirNet ?? s.ongkir); ong[code] = Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0; } if (rows.length === 0) { setLiveOrders([]); } else { setLiveOrders(rows); } setLiveOngkir(rows.length === 0 ? {} : ong);
     // W2: cermin order aktif server (read-only merge; SQLite/state ESB tak
     // ditulis). Tanpa items — lihat mapGoActiveToRow. Gagal/offline = baris
     // srv-* dibersihkan agar tak ada baris server basi.
@@ -105,10 +106,12 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
     [base, moved, rejectOf],
   );
 
+  // FIX count-vs-list: hitungan kartu + header menghormati filter tipe &
+  // tanggal yang sama dengan daftar (dulu semua-data -> "3 baru" vs list kosong).
   const counts = useMemo(() => { const c: Record<EsbStatusLocal, number> = {
     Baru: 0,
     Diproses: 0,
-    Selesai: 0, Batal: 0 }; for (const o of withMoved) c[o.status] += 1; return c; }, [withMoved]);
+    Selesai: 0, Batal: 0 }; for (const o of withMoved) { if (typeFilter !== 'Semua' && o.type !== typeFilter) continue; const day = dayOf(o); if (history === 'today' && day !== 'today') continue; if (history === 'yesterday' && day !== 'yesterday') continue; c[o.status] += 1; } return c; }, [withMoved, typeFilter, history]);
 
   /** Filter tanggal benar-benar memfilter daftar, bukan cuma subtitle. */ const list = useMemo(
     () => withMoved.filter((o) => { if (o.status !== tab) return false; if (typeFilter !== 'Semua' && o.type !== typeFilter) return false; const day = dayOf(o); if (history === 'today') return day === 'today'; if (history === 'yesterday') return day === 'yesterday'; return true;

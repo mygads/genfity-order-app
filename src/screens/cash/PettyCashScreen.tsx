@@ -81,6 +81,7 @@ photo?: string;};type ExpenseRow = { id: string; coaName: string | null; amount:
             <Image source={require('../../../assets/images/no_trx_petty_cash.webp')} style={s.emptyImg} resizeMode="contain" />
             <Text style={s.emptyTitle}>{t('petty.emptyTitle')}</Text>
             <Text style={s.emptySub}>{t('petty.emptySub')}</Text>
+            <Text style={[s.emptySub, { marginTop: 6 }]}>{t('petty.pushOnlyHint')}</Text>
           </View>
         ) : (
           <View style={isTablet ? s.gridTablet : undefined}>

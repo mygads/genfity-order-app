@@ -1,5 +1,5 @@
 import { getSession, logout, getBinding } from '../../session';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import { getBranchId, getTerminal } from '../../config/server';
@@ -17,6 +17,7 @@ import { getCachedVerticalId, setCachedVerticalId, syncMerchantTypeFromProfile, 
 import VerticalOnboarding from '../../components/vertical/VerticalOnboarding';
 import { VERTICALS, type VerticalId } from '../../lib/verticals';
 import { insightFor } from '../../lib/verticalReports';
+import { clockHHMM } from '../../lib/datefmt';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -266,7 +267,7 @@ export default function DashboardScreen({ navigation }: Props) {
           [bid],
         );
         if (alive && shiftRow) {
-          const hhmm = String(shiftRow.clockIn ?? '').slice(11, 16);
+          const hhmm = clockHHMM(shiftRow.clockIn);
           setShift({
             open: shiftRow.status === 'open' || !shiftRow.clockOut,
             clockIn: hhmm || s?.clockIn || '--:--',
@@ -495,7 +496,7 @@ export default function DashboardScreen({ navigation }: Props) {
           // navigasi; tutup = notice + arahkan Shift. Tanpa status bebas lagi.
           const st = await getShiftStatus();
           if (st === null || st.dbError || !st.open) {
-            const hhmm = String(st?.clockIn ?? '').slice(11, 16);
+            const hhmm = clockHHMM(st?.clockIn);
             setShift((prev) => ({ open: false, clockIn: hhmm || prev.clockIn, cash: st?.cashInDrawer ?? prev.cash }));
             if (st !== null && st.dbError) {
               setNotice(t('shift_db_error'));
@@ -505,7 +506,7 @@ export default function DashboardScreen({ navigation }: Props) {
             navigation?.navigate('Shift');
             return;
           }
-          const hhmm = String(st.clockIn ?? '').slice(11, 16);
+          const hhmm = clockHHMM(st.clockIn);
           setShift((prev) => ({ open: st.open, clockIn: hhmm || prev.clockIn, cash: st.cashInDrawer }));
           setNotice('');
           navigation?.navigate('Cashier');

@@ -334,6 +334,16 @@ const terbilang = (n: number): string => {
 
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
+        {lastShift && lastShift.status === t('dash_shift_open') ? (
+          <View style={[s.card, { borderColor: colors.green, borderWidth: 1.5 }]}>
+            <Text style={[s.cardTitle, { color: colors.green }]}>{t('dash_shift_open')}</Text>
+            <Text style={s.hint}>{t('shf_double_open')}</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <AppButton title={t('nav_recap')} style={{ flex: 1, marginTop: 0 }} onPress={() => navigation?.navigate?.('Recap')} />
+              <AppButton title={t('nav_history')} variant="secondary" style={{ flex: 1, marginTop: 0 }} onPress={() => navigation?.navigate?.('EndShift')} />
+            </View>
+          </View>
+        ) : null}
         <View style={s.card}>
           <Text style={s.cardTitle}>{t('shf_last')}</Text>
           <View style={s.shiftRow}>

@@ -7,6 +7,7 @@ import { useLang } from '../../lib/i18n';
 import { getSession } from '../../session';
 import { getBranchId } from '../../config/server';
 import { initDb, queryFirst } from '../../lib/db';
+import { clockHHMM } from '../../lib/datefmt';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -217,7 +218,7 @@ export default function RecapScreen({ navigation }: Props) {
           gross: Math.round(gross),
           trx: heads.length,
           expense: Math.round(num(exp?.total)),
-          hours: shift?.clockIn ? `${shift.clockIn.slice(11, 16)} - ${shift.clockOut ? shift.clockOut.slice(11, 16) : '... '}` : '',
+          hours: shift?.clockIn ? `${clockHHMM(shift.clockIn)} - ${shift.clockOut ? clockHHMM(shift.clockOut) : '... '}` : '',
           shiftLabel: `${shift?.shiftName ?? t('title_shift')} · ${t('c_cashier')} ${shift?.cashierName || shift?.userId || nm}`,
           fromDb: true,
         });

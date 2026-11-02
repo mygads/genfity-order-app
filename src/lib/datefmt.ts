@@ -138,6 +138,24 @@ export function dbNowInTz(d = new Date(), timeZone?: string): string {
   return `${s.getUTCFullYear()}-${pad(s.getUTCMonth() + 1)}-${pad(s.getUTCDate())} ${pad(s.getUTCHours())}:${pad(s.getUTCMinutes())}:${pad(s.getUTCSeconds())}`;
 }
 
+/**
+ * 'HH:MM' dari string jam DB apa adanya (FIX zona-merchant):
+ * - ISO pakai 'T' (mis. toISOString UTC dari Shift/Attendance) -> konversi ke
+ *   zona merchant via fmtTimeInTz (dulu di-slice mentah = jam UTC tampil).
+ * - 'YYYY-MM-DD HH:MM:SS' lokal (dbNowLocal legacy) -> slice langsung
+ *   (sudah dinding-waktu merchant, jangan dikonversi ganda).
+ */
+export function clockHHMM(raw: unknown, timeZone?: string): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  if (s.includes('T')) {
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s.slice(11, 16);
+    return fmtTimeInTz(d, timeZone);
+  }
+  return s.slice(11, 16);
+}
+
 /** ISO → { date, time } DALAM zona merchant. */
 export function fmtSalesDateInTz(
   iso: string,

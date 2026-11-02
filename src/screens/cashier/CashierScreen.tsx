@@ -615,8 +615,15 @@ export default function CashierScreen({ navigation, route }: Props) {
         await initDb();
         // M9: '' = unbound (tanpa fallback B001) - peta sold-out kosong, jujur.
         const branchId = (getTerminal().branchId ?? '').trim();
+        // FIX phantom-order: perangkat ter-bound ke merchant nyata JANGAN
+        // menampilkan menu demo seed (id 'm-*') - tak ada di server -> push
+        // 400 "Menu item not found" tapi kasir terlanjur sukses lokal.
+        // Unbound (demo offline) tetap tampil semua agar bisa UAT offline.
+        const menuWhere = branchId
+          ? "SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1 AND id NOT LIKE 'm-%'"
+          : 'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1';
         let rows: { id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }[] = await queryDb<{ id: string; menuName: string | null; categoryId: string | null; price: number | null; unitLabel?: string | null; sizeLabel?: string | null; colorLabel?: string | null; sku?: string | null }>(
-          'SELECT id, menuName, categoryId, price FROM ms_menu WHERE flagActive = 1',
+          menuWhere,
         );
         let sold: { menuId: string; flagSoldOut: number | null; qty?: number | null; lowThreshold?: number | null }[] = await queryDb<{ menuId: string; flagSoldOut: number | null; qty?: number | null; lowThreshold?: number | null }>(
           'SELECT menuId, flagSoldOut FROM ms_branchmenu WHERE branchId = ?',
@@ -686,6 +693,8 @@ export default function CashierScreen({ navigation, route }: Props) {
             [branchId],
           );
         }
+        // FIX phantom-order (2): saring menu demo seed bila bound (server tak kenal 'm-*').
+        if (branchId) rows = rows.filter((r) => !String((r as { id: unknown }).id ?? '').startsWith('m-'));
         if (!alive) return;
         if (rows.length === 0) { if (alive) setDbProducts([]); return; }
         const soldMap = new Map(sold.map((r) => [r.menuId, (r.flagSoldOut ?? 0) === 1]));
@@ -816,7 +825,7 @@ export default function CashierScreen({ navigation, route }: Props) {
 
   /** Header ala DashboardScreen: outlet dinamis + nama kasir sesi + status shift nyata. */
   const sess = getSession();
-  const outletName = sess?.outlet || getTerminal().branchName || 'Genfity Cabang Poris';
+  const outletName = sess?.outlet || (sess as unknown as { merchantName?: string } | null)?.merchantName || getTerminal().branchName || '';
   const shiftOpen = shiftInfo?.open ?? true;
   const shiftLabel = `${sess?.name ?? sess?.username ?? ''} | ${shiftOpen ? t('dash_shift_open') : t('dash_shift_closed')}`;
 
