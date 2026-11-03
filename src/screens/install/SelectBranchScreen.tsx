@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import AppButton from '../../components/AppButton';
+import { countPhysicalQueue, pushAll, withTimeout } from '../../lib/sync';
 import ScreenRoot from '../../components/ScreenRoot';
 import BackChevron from '../../components/BackChevron';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -181,6 +182,17 @@ const DEV_BRANCHES: BranchItem[] = [
           // Kontrak antar-paket: exitBranchAll = logout + clear SEMUA store
           // binding (sesi, kontrak, server) + clear grant sekaligus.
           void (async () => {
+            // GAP-CC: kuras antrean fisik DULU (batas 10 dtk, best-effort)
+            // selagi klaim cabang lama masih aktif. identityFields mencap
+            // branchId/terminalCode dari klaim AKTIF saat drain, bukan saat
+            // enqueue - tanpa ini baris kotor cabang lama yang terkuras
+            // sesudah rebind ikut tercap cabang baru (salah atribusi
+            // penjualan/pengeluaran). Offline/gagal = lanjut keluar apa
+            // adanya (sisa ikut klaim baru; kegagalan tercatat di antrean).
+            try {
+              const dirty = await countPhysicalQueue();
+              if (dirty > 0) await withTimeout(pushAll(), 10_000);
+            } catch { /* abaikan: keluar tetap sah, catat via antrean */ }
             try {
               await exitBranchAll();
             } catch { /* abaikan: lanjut bereskan sisa lokal */ }
