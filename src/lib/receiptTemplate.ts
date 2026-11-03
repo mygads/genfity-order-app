@@ -678,10 +678,25 @@ export async function syncMerchantLogoRaster(logoUrl?: string, maxDots = 576): P
   } catch {
     /* lanjut unduh */
   }
+  // GAP-BY: timeout 15 dtk unduhan logo (fetch mentah tanpa sinyal =
+  // blackhole host logo = promise gantung selamanya + soket bocor tiap pull;
+  // abort jatuh ke null di catch bawah, cache lama utuh, tanpa blokir kasir).
+  const logoCtrl = new AbortController();
+  const logoTimer = setTimeout(() => {
+    try {
+      logoCtrl.abort();
+    } catch {
+      /* abaikan */
+    }
+  }, 15_000);
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
+    const resp = await fetch(url, { signal: logoCtrl.signal });
+    if (!resp.ok) {
+      clearTimeout(logoTimer);
+      return null;
+    }
     const buf = new Uint8Array(await resp.arrayBuffer());
+    clearTimeout(logoTimer);
     if (buf.length === 0 || buf.length > 4_000_000) return null;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
