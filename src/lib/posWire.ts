@@ -228,7 +228,13 @@ export function beErrorOf(body: unknown): BeErr {
 }
 
 /** Kode replay/sudah-ada = sukses idempoten (409 = sukses, replay echo ok). */
-const REPLAY_OK_RE = /PAYMENT_ALREADY_RECORDED|IDEMPOTENCY_KEY_REUSED|ORDER_ALREADY_REFUNDED|ORDER_CLOSED|already[\s_-]?(exist|sync|recorded|refunded)|replayed|duplicate|TERKIRIM/i;
+// GAP-CE: IDEMPOTENCY_KEY_REUSED SENGAJA tak di sini. BE T-080: kunci sama +
+// fingerprint SAMA = replay 200 + replayed:true (masih cocok via `replayed`);
+// kunci sama + fingerprint BEDA = 409 REJECTED (tanpa pembayaran tercatat utk
+// request ini). Dulu kode 409 itu ikut cocok -> drain menandai 'terkirim' +
+// markClean atas pembayaran yang server TOLAK (kasus: tip/nominal diubah lalu
+// settle ulang dengan kunci sama). Kini jatuh ke 'failed-once' jujur di drain.
+const REPLAY_OK_RE = /PAYMENT_ALREADY_RECORDED|ORDER_ALREADY_REFUNDED|ORDER_CLOSED|already[\s_-]?(exist|sync|recorded|refunded)|replayed|duplicate|TERKIRIM/i;
 
 export function isReplaySuccess(body: unknown): boolean {
   if (!body || typeof body !== 'object') return false;
