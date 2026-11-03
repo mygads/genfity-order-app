@@ -520,7 +520,13 @@ async function drainPullMaster(only?: string[]): Promise<PullResult> {
     }
   }
   const beKeys = BE_PULL_KEYS as readonly string[];
-  for (const d of targets) {
+  // GAP-CA: satu domain gagal (5xx/jaringan/parse) tak lagi menggugurkan
+  // domain lain (menu macet = promo/member basi). Tiap domain ditarik
+  // via pullOneDomain; yang gagal dicatat + dilewati, error PERTAMA
+  // dilempar ulang di akhir (sinyal fail-closed ke pemanggil lestari,
+  // watermark domain gagal tak maju = retry tetap beres). Sukses penuh
+  // = perilaku identik seperti sebelumnya.
+  const pullOneDomain = async (d: Domain): Promise<void> => {
     // PULLMASTER-6DOMAIN (2026-10-27): backend terbukti Go (goOk) -> domain
     // table/promotion/member/voucher/expensecoa DITARIK via adapter BE nyata
     // (lib/masterBe.ts), BUKAN path ESB-legacy (main/get-*, v1/pull/*) yang
@@ -532,10 +538,10 @@ async function drainPullMaster(only?: string[]): Promise<PullResult> {
       const r = await pullBeDomain(d.key as BePullKey);
       if (r.status === 'missing-endpoint' || r.status === 'forbidden') {
         skipped.push(`${d.key}(${r.status}${r.note ? `: ${r.note}` : ''})`);
-        continue;
+        return;
       }
       per[d.key] = r.count;
-      continue;
+      return;
     }
     const wm = await getWatermark(d.key);
     const res = await apiGet(d.path, { ...(wm.pull ? { since: wm.pull } : {}), limit: 200 });
@@ -550,7 +556,7 @@ async function drainPullMaster(only?: string[]): Promise<PullResult> {
       // mis. terminalsettings) tanpa bukti Go tetap ketat seperti semula.
       if (res.status === 404 && goOk) {
         skipped.push(d.key);
-        continue;
+        return;
       }
       throw new Error(`Pull ${d.key}: HTTP ${res.status}`);
     }
@@ -586,7 +592,17 @@ async function drainPullMaster(only?: string[]): Promise<PullResult> {
     }
     per[d.key] = rows.length;
     await setWatermark(d.key, { pull: now });
+  };
+  let firstErr: unknown = null;
+  for (const d of targets) {
+    try {
+      await pullOneDomain(d);
+    } catch (e) {
+      if (!firstErr) firstErr = e;
+      skipped.push(`${d.key}(error)`);
+    }
   }
+  if (firstErr) throw firstErr;
   const total = Object.values(per).reduce((a, b) => a + b, 0);
   const at = new Date().toISOString();
   // W-FULL §14: stempel pull-otomatis (boot/reconnect/manual) agar layar Sync
