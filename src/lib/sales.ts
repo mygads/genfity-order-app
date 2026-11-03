@@ -1506,6 +1506,8 @@ export async function moveSaleItems(args: {
   // now ikut di luar agar dipakai mirror pasca-commit di bawah.
   const preDestNum = (args.toSalesNum ?? '').trim() ? '' : await nextSalesNumRetry();
   const now = new Date().toISOString();
+  /* GAP-DB: salesDate wall ala saveSale (ISO = pindahan tak masuk window shift/rekap). */
+  const nowWall = dbNowLocal();
   let destNumOut = '';
   let destCidOut = '';
   const movedIdsOut: string[] = [];
@@ -1532,7 +1534,7 @@ export async function moveSaleItems(args: {
         grandTotal, status, cashierName, createdAt, updatedAt, syncDate)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 'open', ?, ?, ?, NULL)`,
       [
-        destNum, uuidv7(), src.branchId, src.terminalId, src.userId, src.shiftId, now,
+        destNum, uuidv7(), src.branchId, src.terminalId, src.userId, src.shiftId, nowWall,
         src.salesMode ?? 'DINE_IN', toTableNo, src.memberId, src.customerId ?? null, src.customerName, queueNoOf(destNum),
         src.cashierName ?? src.userId ?? '', now, now,
       ],
