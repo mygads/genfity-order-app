@@ -1,4 +1,4 @@
-import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';import { verifyLocalEscalation } from '../../lib/supervisor';import { getSession } from '../../session';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
+import { useRef, useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { markApproved } from '../../lib/pettyApproval';import { verifyLocalEscalation } from '../../lib/supervisor';import { getSession } from '../../session';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = {
   navigation?: Nav;
   route?: {
     params?: {
@@ -25,18 +25,27 @@ import { useState } from 'react';import { Image, Modal, ScrollView, StyleSheet, 
   const [pin, setPin] = useState('');
   const [pinVisible, setPinVisible] = useState(false);
   const [pinErr, setPinErr] = useState('');
+  // GAP-BZ: kunci anti-tap-ganda approve (ketuk OK 2x / Enter-repeat =
+  // verifikasi PIN + markApproved + antrean sync ganda untuk baris sama).
+  const approvingRef = useRef(false);
 
   /** Buka modal PIN staff/owner (audit trail, bukan auto-approve). */
   const setujui = () => { setPin(''); setPinErr(''); setPinVisible(true); };
   /** Konfirmasi approve: PIN staff/owner via eskalasi lokal, catat approver + timestamp + sync. */
   const confirmApprove = async () => {
-    const esc = await verifyLocalEscalation(pin, 'petty.approve');
-    if (!esc.ok) { setPinErr(esc.message); return; }
-    const approver = (esc.userId ?? '').trim();
-    if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
-    setDisetujui(true);
-    await markApproved(id, approver);
-    setPinVisible(false); setPin('');
+    if (approvingRef.current) return;
+    approvingRef.current = true;
+    try {
+      const esc = await verifyLocalEscalation(pin, 'petty.approve');
+      if (!esc.ok) { setPinErr(esc.message); return; }
+      const approver = (esc.userId ?? '').trim();
+      if (!approver) { setPinErr(t('petty_unknown_approver')); return; }
+      setDisetujui(true);
+      await markApproved(id, approver);
+      setPinVisible(false); setPin('');
+    } finally {
+      approvingRef.current = false;
+    }
   }; return (
     <View style={s.root}>
       <ScreenHeader title={t('petty.detailTitle')} onBack={() => navigation?.goBack?.()}  />
