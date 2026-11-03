@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, numGrouping, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { clockSkewText } from '../../lib/clockSkew';import { getBranchId, getTerminal } from '../../config/server';import { getSession } from '../../session';import { initDb, query, queryFirst, run } from '../../lib/db';import { enqueueOutbox, enqueueSync, noteServerContact } from '../../lib/sync';import {
   cashApproveBe,
   cashApprovePayload,
   cashOpenBe,
@@ -60,6 +60,7 @@ const terbilang = (n: number): string => {
   // S-F6: gerbang workforce server (absen = OFF).
   const [wfGates, setWfGates] = useState({ requirePinForPos: false, requireCashRegisterForPos: false });
   const [pendingSid, setPendingSid] = useState<string | null>(null);
+  const [skewMsg, setSkewMsg] = useState<string | null>(null);
   const [approveNote, setApproveNote] = useState('');
   const [approveBusy, setApproveBusy] = useState(false);
   const [approveMsg, setApproveMsg] = useState('');
@@ -68,7 +69,7 @@ const terbilang = (n: number): string => {
   // Muat sid menunggu-review tiap mount (persist di storage).
   useEffect(() => { let on = true; (async () => { try { const sid = await getPendingReviewSid(); if (on) setPendingSid(sid); } catch { /* abaikan */ } })(); return () => { on = false; }; }, []);
   // S-F6: muat gerbang workforce sekali saat layar dibuka (cache gagal = OFF).
-  useEffect(() => { let on = true; (async () => { try { const g = await getWorkforceGates(); if (on) setWfGates({ requirePinForPos: g.requirePinForPos, requireCashRegisterForPos: g.requireCashRegisterForPos }); } catch { /* abaikan: OFF */ } })(); return () => { on = false; }; }, []);
+  useEffect(() => { let on = true; (async () => { try { const g = await getWorkforceGates(); if (on) setWfGates({ requirePinForPos: g.requirePinForPos, requireCashRegisterForPos: g.requireCashRegisterForPos }); } catch { /* abaikan: OFF */ } })(); return () => { on = false; }; }, []); useEffect(() => { const nav = navigation as unknown as { addListener?: (e: string, cb: () => void) => () => void } | undefined; let on = true; const refresh = () => { try { if (on) setSkewMsg(clockSkewText(lang)); } catch { /* abaikan */ } }; refresh(); const unsub = nav?.addListener?.('focus', refresh); return () => { on = false; if (typeof unsub === 'function') unsub(); }; }, [navigation, lang]);
 
   const submitApprove = async () => {
     if (!pendingSid || approveBusy || approveBusyRef.current) return; approveBusyRef.current = true;
@@ -334,6 +335,13 @@ const terbilang = (n: number): string => {
 
 
       <ScrollView contentContainerStyle={[s.body, isTablet && wideCenterLg]}>
+        {/* GAP-DD: banner selisih jam perangkat vs server (sampel header Date) - refresh tiap fokus agar sampel terbaru tampil. */}
+        {skewMsg ? (
+          <View style={[s.card, { borderColor: '#d97706', borderWidth: 1.5, backgroundColor: '#fffbeb' }]}>
+            <Text style={[s.cardTitle, { color: '#92400e' }]}>{lang === 'id' ? 'Perhatian jam' : 'Time warning'}</Text>
+            <Text style={[s.hint, { color: '#92400e' }]}>{skewMsg}</Text>
+          </View>
+        ) : null}
         {lastShift && lastShift.status === t('dash_shift_open') ? (
           <View style={[s.card, { borderColor: colors.green, borderWidth: 1.5 }]}>
             <Text style={[s.cardTitle, { color: colors.green }]}>{t('dash_shift_open')}</Text>

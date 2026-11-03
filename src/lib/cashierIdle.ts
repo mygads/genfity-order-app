@@ -9,11 +9,11 @@ let lastActivityAt = Date.now();
 let lockListeners = new Set<(locked: boolean) => void>();
 let warnListeners = new Set<(secondsLeft: number) => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
-let warned = false;
+let lockNotified = false;
 
 export function touchCashierActivity() {
   lastActivityAt = Date.now();
-  warned = false;
+  lockNotified = false;
 }
 
 export function timeSinceCashierActivity(): number {
@@ -48,10 +48,14 @@ export function startCashierIdleWatcher(): void {
     if (left <= CASHIER_WARN_MS && left > 0) {
       const s = Math.ceil(left / 1000);
       warnListeners.forEach((fn) => { try { fn(s); } catch {} });
-      warned = true;
     }
+    /* GAP-DE: fire lock HANYA saat transisi (dulu tiap 5 dtk selama terkunci
+     * = render ulang + efek samping subscriber tanpa henti). */
     if (left <= 0) {
-      lockListeners.forEach((fn) => { try { fn(true); } catch {} });
+      if (!lockNotified) {
+        lockNotified = true;
+        lockListeners.forEach((fn) => { try { fn(true); } catch {} });
+      }
     }
   }, 5000);
 }

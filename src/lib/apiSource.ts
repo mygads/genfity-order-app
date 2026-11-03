@@ -38,6 +38,7 @@ import { dbNowLocal } from './datefmt';
 import { initDb, queryFirst } from './db';
 import { loadPinRecord, verifyPinHash } from './pin';
 import { randomHex as randomHexCsprng } from './uuidv7';
+import { noteClockSample } from './clockSkew';
 
 export type ApiMode = 'dummy' | 'real' | 'local';
 
@@ -432,6 +433,11 @@ export async function apiFetch<T = unknown>(
                   token: opts?.token,
                   signal: opts?.signal,
                 });
+      try {
+        noteClockSample(res.headers?.get?.('Date') ?? null);
+      } catch {
+        /* abaikan - sampling jam tak boleh ganggu fetch */
+      }
       const body = (await res.json()) as T;
       if (!res.ok) {
         // Backend menjawab error: teruskan apa adanya (bukan dummy).
