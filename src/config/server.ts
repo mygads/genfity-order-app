@@ -513,6 +513,27 @@ function needsSessionBearer(path: string): boolean {
  * (kandidat yang ADA: authKey, deviceID/UDID, Authorization/Bearer, ApiKey).
  * Dipertahankan sebagai [KONTRAK] milik kita - lihat docs/API-CONTRACT.md §2.
  */
+/* GAP-BW: default-timeout 25 dtk semua fetch mentah (apiGet/apiPost/
+ * apiDelete). Tanpa ini koneksi macet (blackhole/WiFi gantung) = pull master,
+ * fleet, stok, pos-config gantung SELAMANYA (mayoritas pemanggil tanpa sinyal).
+ * Sinyal eksplisit pemanggil (mis. timeout per-attempt) menang bila ada.
+ * Paritas GAP-BV terminalApi; GET disamakan 25 dtk karena payload katalog
+ * besar (menu 500 baris) di jaringan lambat. */
+const RAW_FETCH_TIMEOUT_MS = 25_000;
+/** Sinyal fetch: eksplisit pemanggil menang; tanpa itu = abort 25 dtk. */
+function fetchSignal(explicit?: AbortSignal): { signal?: AbortSignal; done: () => void } {
+  if (explicit) return { done: () => {} };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try {
+      ctrl.abort();
+    } catch {
+      /* abaikan */
+    }
+  }, RAW_FETCH_TIMEOUT_MS);
+  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
+}
+
 export async function apiGet(
   path: string,
   params?: Record<string, string | number>,
@@ -536,11 +557,16 @@ export async function apiGet(
       ? resolveSessionToken()
       : '';
   if (getToken) headers['Authorization'] = `Bearer ${getToken}`;
-  return fetch(url, {
-    headers,
-    // GAP-1/5: teruskan sinyal abort (timeout per-attempt / pembatalan user).
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-  });
+  const gs = fetchSignal(opts?.signal);
+  try {
+    return await fetch(url, {
+      headers,
+      // GAP-1/5: teruskan sinyal abort (timeout per-attempt / pembatalan user).
+      ...(gs.signal ? { signal: gs.signal } : {}),
+    });
+  } finally {
+    gs.done();
+  }
 }
 
 export async function apiPost(
@@ -567,14 +593,19 @@ export async function apiPost(
       ? resolveSessionToken()
       : '';
   if (postToken) headers['Authorization'] = `Bearer ${postToken}`;
-  return fetch(apiUrl(path), {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    // S4-APP-313: teruskan sinyal abort pemanggil (timeout per-attempt /
-    // pembatalan user) - aditif, pemanggil lama tanpa signal tetap jalan.
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-  });
+  const ps = fetchSignal(opts?.signal);
+  try {
+    return await fetch(apiUrl(path), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      // S4-APP-313: teruskan sinyal abort pemanggil (timeout per-attempt /
+      // pembatalan user) - aditif, pemanggil lama tanpa signal tetap jalan.
+      ...(ps.signal ? { signal: ps.signal } : {}),
+    });
+  } finally {
+    ps.done();
+  }
 }
 
 /**
@@ -597,11 +628,16 @@ export async function apiDelete(
       ? resolveSessionToken()
       : '';
   if (delToken) headers['Authorization'] = `Bearer ${delToken}`;
-  return fetch(apiUrl(path), {
-    method: 'DELETE',
-    headers,
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-  });
+  const ds = fetchSignal(opts?.signal);
+  try {
+    return await fetch(apiUrl(path), {
+      method: 'DELETE',
+      headers,
+      ...(ds.signal ? { signal: ds.signal } : {}),
+    });
+  } finally {
+    ds.done();
+  }
 }
 
 /**
@@ -625,12 +661,17 @@ export async function apiPatch(
       ? resolveSessionToken()
       : '';
   if (patchToken) headers['Authorization'] = `Bearer ${patchToken}`;
-  return fetch(apiUrl(path), {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-  });
+  const hs = fetchSignal(opts?.signal);
+  try {
+    return await fetch(apiUrl(path), {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+      ...(hs.signal ? { signal: hs.signal } : {}),
+    });
+  } finally {
+    hs.done();
+  }
 }
 
 /**
@@ -658,12 +699,17 @@ export async function apiPut(
       ? resolveSessionToken()
       : '';
   if (putToken) headers['Authorization'] = `Bearer ${putToken}`;
-  return fetch(apiUrl(path), {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify(body),
-    ...(opts?.signal ? { signal: opts.signal } : {}),
-  });
+  const us = fetchSignal(opts?.signal);
+  try {
+    return await fetch(apiUrl(path), {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+      ...(us.signal ? { signal: us.signal } : {}),
+    });
+  } finally {
+    us.done();
+  }
 }
 
 /**

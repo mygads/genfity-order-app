@@ -16,7 +16,33 @@
  * login pertama wajib online, SPEC §2 + Q6 CLOSED).
  */
 import { ApiPath, apiUrl, getTerminal } from '../config/server';
-import { apiFetch, getApiMode, getDeviceId, unwrap } from './apiSource';
+import { apiFetch as rawApiFetch, getApiMode, getDeviceId, unwrap } from './apiSource';
+import type { ApiResult, FetchOpts } from './apiSource';
+
+/* GAP-BV: default-timeout 20 dtk SEMUA panggilan terminalApi. apiFetch tak
+ * punya timeout global (hanya sinyal per-pemanggil di supervisor/login) -
+ * koneksi macet (blackhole/WiFi gantung) = bind/login/claim gantung
+ * SELAMANYA + guard single-flight pemanggil macet-true. Wrapper ini
+ * menyuntik AbortSignal 20 dtk bila pemanggil tak membawa sinyal sendiri;
+ * abort jatuh ke jalur offline jujur pemanggil (catch apiFetch).
+ * Local/dummy short-circuit di dalam apiFetch (tanpa network) tak terpengaruh. */
+const TERMINAL_API_TIMEOUT_MS = 20_000;
+async function apiFetch<T = unknown>(path: string, opts?: FetchOpts): Promise<ApiResult<T>> {
+  if (opts?.signal) return rawApiFetch<T>(path, opts);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => {
+    try {
+      ctrl.abort();
+    } catch {
+      /* abaikan */
+    }
+  }, TERMINAL_API_TIMEOUT_MS);
+  try {
+    return await rawApiFetch<T>(path, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 // F10: validasi tag BE via parseDeviceRole (standalone, tanpa siklus impor).
 import { parseDeviceRole } from './deviceRole';
 // Ronde-3 Q5: gate memberLookupEnabled dari pos-config (murni, tanpa siklus).
