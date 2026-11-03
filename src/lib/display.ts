@@ -140,6 +140,7 @@ function ensureSocket(): void {
     ws.onopen = () => {
       retry = 0;
       setWsLive(true);
+      flushPendingPublish();
       stopBeat();
       beat = setInterval(() => {
         try {
@@ -206,6 +207,23 @@ function ensureSocket(): void {
   }
 }
 
+/* GAP-DF: antrean siaran saat WS belum OPEN. publishDisplay saat soket masih
+ * connecting (readyState 0) = order ke kitchen display hilang diam-diam
+ * (tanpa retry). Buffer dibatasi 20 (tanpa OOM), flush FIFO saat onopen. */
+const pendingPublish: string[] = [];
+const PENDING_PUBLISH_MAX = 20;
+function flushPendingPublish(): void {
+  try {
+    if (!socket || socket.readyState !== 1) return;
+    while (pendingPublish.length > 0) {
+      const msg = pendingPublish.shift();
+      if (!msg) continue;
+      socket.send(msg);
+    }
+  } catch {
+    /* abaikan - siklus reconnect berikutnya mencoba lagi */
+  }
+}
 /** Siarkan event ke layar lain + WS (best-effort, tak pernah melempar). */
 export function publishDisplay(e: DisplayEvent): void {
   emitLocal(e);
@@ -213,8 +231,12 @@ export function publishDisplay(e: DisplayEvent): void {
     const url = getWsUrl();
     if (!url) return;
     ensureSocket();
+    const msg = JSON.stringify({ ...e, terminal: getTerminal().terminalCode });
     if (socket && socket.readyState === 1) {
-      socket.send(JSON.stringify({ ...e, terminal: getTerminal().terminalCode }));
+      socket.send(msg);
+      flushPendingPublish();
+    } else if (pendingPublish.length < PENDING_PUBLISH_MAX) {
+      pendingPublish.push(msg);
     }
   } catch {
     /* offline - tampilan lokal tetap sinkron */

@@ -40,21 +40,29 @@ export function requiresDiscountPin(discountPercent: number): boolean {
 let cacheAt = 0;
 let cached: Record<string, unknown> | null = null;
 const TTL_MS = 5 * 60_000;
+/* GAP-DG: single-flight fetch config (N aksi konkuren = N fetch tanpa ini). */
+let behaviorInflight: Promise<Record<string, unknown> | null> | null = null;
 
 async function loadPosBehavior(): Promise<Record<string, unknown> | null> {
   const now = Date.now();
   if (cached && now - cacheAt < TTL_MS) return cached;
-  try {
-    const terminalId = getBoundSupervisorTerminalId();
-    if (!terminalId) return cached;
-    const r = await fetchTerminalPosConfig(terminalId);
-    if (!r.ok) return cached;
-    cached = (r.data.posBehavior ?? {}) as Record<string, unknown>;
-    cacheAt = now;
-    return cached;
-  } catch {
-    return cached;
-  }
+  if (behaviorInflight) return behaviorInflight;
+  behaviorInflight = (async (): Promise<Record<string, unknown> | null> => {
+    try {
+      const terminalId = getBoundSupervisorTerminalId();
+      if (!terminalId) return cached;
+      const r = await fetchTerminalPosConfig(terminalId);
+      if (!r.ok) return cached;
+      cached = (r.data.posBehavior ?? {}) as Record<string, unknown>;
+      cacheAt = Date.now();
+      return cached;
+    } catch {
+      return cached;
+    } finally {
+      behaviorInflight = null;
+    }
+  })();
+  return behaviorInflight;
 }
 
 /** True bila merchant mewajibkan PIN manajer untuk aksi ini. */
