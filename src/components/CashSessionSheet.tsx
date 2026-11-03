@@ -7,7 +7,7 @@
  * pemanggil mengulang settle SEKALI ke sesi terpilih. Tak pernah melempar
  * ke pemanggil (gagal = pesan di sheet, pilih "Nanti" = antre jujur).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, fonts } from '../theme';
 import AppButton from './AppButton';
@@ -54,9 +54,12 @@ export default function CashSessionSheet({ visible, onPicked, onCancel }: CashSe
     }
   }, [visible, load]);
 
+  /* GAP-BT: ref single-flight pilih-sesi (state picked basi antar-ketuk cepat = adopt sesi ganda + retry settle ganda). */
+  const pickedRef = useRef(false);
   const use = async (sid: string) => {
     const id = sid.trim();
-    if (!id || picked) return;
+    if (!id || picked || pickedRef.current) return;
+    pickedRef.current = true;
     setPicked(id);
     try {
       const ok = await chooseCashSessionId(id);
@@ -69,6 +72,7 @@ export default function CashSessionSheet({ visible, onPicked, onCancel }: CashSe
       setErr('offline');
     } finally {
       setPicked('');
+      pickedRef.current = false;
     }
   };
 

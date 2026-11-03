@@ -468,7 +468,26 @@ export async function ensureFirstSessionMaster(branchId?: string, terminalId?: s
   }
 }
 
+/* GAP-BS: single-flight pull-master per argumen (paritas GAP-BB pushAll).
+ * Tombol Sync ganda / reconnect + manual bersamaan = pull ganda: beban
+ * server ganda + watermark balapan. Penelepon kedua+ dengan argumen SAMA
+ * ikut menunggu hasil yang SAMA; argumen beda jalan sendiri. */
+const pullFlights = new Map<string, Promise<PullResult>>();
 export async function pullMaster(only?: string[]): Promise<PullResult> {
+  const key = [...(only ?? [])].sort().join(',');
+  const flying = pullFlights.get(key);
+  if (flying) return flying;
+  const flight = drainPullMaster(only);
+  pullFlights.set(key, flight);
+  try {
+    return await flight;
+  } finally {
+    if (pullFlights.get(key) === flight) pullFlights.delete(key);
+  }
+}
+
+/** Isi pull pullMaster (dipanggil sekali per flight via pullMaster di atas). */
+async function drainPullMaster(only?: string[]): Promise<PullResult> {
   if (getApiMode() !== 'real') {
     return { total: 0, per: {}, skipped: [], at: new Date().toISOString() };
   }
