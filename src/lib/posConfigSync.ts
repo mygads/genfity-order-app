@@ -379,7 +379,10 @@ export async function getServerRoundStep(): Promise<number | null> {
     const s = cur?.step;
     if (s === undefined || s === null || s === '') return null;
     const n = Number(s);
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+    /* GAP-CT paritas getRoundStep: step pecahan (0,1) = round 0 (bagi-nol di
+     * pemakai). Tanpa pemanggil aktif saat ini, tapi kontrak fungsi = step
+     * valid >= 1 atau null. */
+    return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n)) : null;
   } catch {
     return null;
   }

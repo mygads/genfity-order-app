@@ -673,7 +673,8 @@ export default function CashierScreen({ navigation, route }: Props) {
                   seedBranch,
                   menuId,
                   it.stationId === undefined || it.stationId === null ? null : String(it.stationId),
-                  Number.isFinite(qty) ? Math.round(qty) : 0,
+                  /* GAP-CX paritas masterGo: qty asing = NULL (tak diketahui), bukan 0. */
+                  Number.isFinite(qty) ? Math.round(qty) : null,
                   it.flagSoldOut === undefined || it.flagSoldOut === null ? 0 : Number(it.flagSoldOut) ? 1 : 0,
                   it.flagActive === undefined || it.flagActive === null ? 1 : Number(it.flagActive) ? 1 : 0,
                   at,

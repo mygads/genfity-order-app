@@ -766,6 +766,12 @@ export async function ensureSeeded(): Promise<void> {
   // matematika kanonis totals() yang sama + penomoran SEED-xxx. Masing-masing
   // hanya bila nomornya belum ada; SEED-001 dimundurkan ke kemarin agar
   // History/Dashboard/Rekap ada baseline.
+  // GAP-CV: perangkat BOUND = merchant nyata. Jangan fabrikasi order paid:
+  // jalur saveSale = push ke server merchant (polusi revenue + burn kuota
+  // promo asli HEMAT10/ONGKIR10); baseline demo hanya untuk perangkat unbound.
+  // Baris demo pra-bind yang telanjur ada dibiarkan (kasatmata di laporan
+  // lokal; penghapusan = keputusan produk di alur bind, bukan seed).
+  const boundAtSeed = isTerminalBound();
   for (const spec of SEED_SPECS) {
     try {
       const exists = await queryFirst<{ salesNum: string }>(
@@ -773,6 +779,7 @@ export async function ensureSeeded(): Promise<void> {
         [spec.salesNum],
       );
       if (exists) continue;
+      if (boundAtSeed) continue;
       const canon = seedCanon(spec);
       if (isTerminalBound()) {
         try {

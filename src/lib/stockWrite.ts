@@ -187,9 +187,13 @@ export async function setBranchThreshold(kind: StockKind, id: string, threshold:
   await initDb();
   const branchId = getBranchId();
   const { branch, idCol } = branchTables(kind);
+  /* GAP-CW: baris baru = qty NULL (tak diketahui), BUKAN 0. qty 0 = Habis
+   * (kanonis tracked && qty<=0): set ambang saja tak boleh mengnolkan stok -
+   * drain Opsi A membaca LIVE (0 ikut ter-push absolute-set ke server) +
+   * decrement penjualan ikut kurang (syarat IS NOT NULL lolos). */
   await run(
     `INSERT INTO ${branch} (branchId, ${idCol}, qty, lowThreshold, flagActive, syncDate)
-     VALUES (?, ?, 0, ?, 1, NULL)
+     VALUES (?, ?, NULL, ?, 1, NULL)
      ON CONFLICT(branchId, ${idCol}) DO UPDATE SET lowThreshold = excluded.lowThreshold, syncDate = NULL`,
     [branchId, id, threshold],
   );

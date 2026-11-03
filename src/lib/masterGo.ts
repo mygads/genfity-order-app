@@ -183,7 +183,10 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     const price = m.promoPrice !== undefined && m.promoPrice !== null
       ? num(m.promoPrice)
       : num(m.price);
-    const active = m.isActive ? 1 : 0;
+    /* GAP-CY: absen = aktif (selaras addon `=== false ? 0 : 1` di bawah).
+     * `m.isActive ? 1 : 0` = field hilang (BE lama/proxy) = SELURUH katalog
+     * nonaktif diam-diam, kasir tak bisa jualan. Eksplisit false tetap 0. */
+    const active = m.isActive === false ? 0 : 1;
     // trackStock milik server (cermin BE menus.track_stock): server-wins.
     // Menentukan apakah qty lokal ikut turun saat penjualan + derivasi Habis
     // (paritas BE orders decrement + filter publik track=false → tampil).
@@ -233,7 +236,10 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
     // Stok cabang: habis = trackStock + stockQty <= 0. stationId +
     // lowThreshold lokal dipertahankan (printer milik layar Printer; ambang
     // milik Stock Management - pull tak mengirim keduanya).
-    const qty = m.stockQty !== undefined && m.stockQty !== null ? num(m.stockQty) : 0;
+    /* GAP-CX: stockQty absen = TAK DIKETAHUI (NULL), bukan 0. Default 0 =
+     * Habis palsu (kanonis qty<=0) + decrement pertama langsung negatif +
+     * drain push absolute-set 0 padahal server tak pernah bilang 0. */
+    const qty: number | null = m.stockQty !== undefined && m.stockQty !== null ? num(m.stockQty) : null;
     const soldOut = m.trackStock && m.stockQty !== undefined && m.stockQty !== null && num(m.stockQty) <= 0 ? 1 : 0;
     await run(
       `INSERT INTO ms_branchmenu (branchId, menuId, stationId, qty, flagSoldOut, flagActive, syncDate)
@@ -284,7 +290,8 @@ export async function pullGoCatalog(): Promise<GoCatalogResult> {
         );
         // Stok cabang addon: pola ms_branchmenu; lowThreshold lokal
         // dipertahankan (pull tak mengirimnya, milik Stock Management).
-        const aQty = a?.stockQty !== undefined && a?.stockQty !== null ? num(a.stockQty) : 0;
+        /* GAP-CX: sama seperti menu - absen = NULL (tak diketahui). */
+        const aQty: number | null = a?.stockQty !== undefined && a?.stockQty !== null ? num(a.stockQty) : null;
         const aSold = a?.trackStock === true && a?.stockQty !== undefined && a?.stockQty !== null && num(a.stockQty) <= 0 ? 1 : 0;
         await run(
           `INSERT INTO ms_branchaddon (branchId, addonId, qty, flagSoldOut, flagActive, syncDate)

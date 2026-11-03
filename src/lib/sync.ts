@@ -1315,7 +1315,12 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
     }
     return 'sent';
   }
-  const qty = Math.max(0, Math.round(Number(live.qty) || 0));
+  /* GAP-CW: qty NULL (baris ambang-saja, stok tak diketahui) = stockQty
+   * DIHILANGKAN dari body (pola sama seperti lowStockThreshold null):
+   * kirim 0 = absolute-set mengnolkan stok server + badge Habis palsu. */
+  const qty = live.qty === null || live.qty === undefined
+    ? null
+    : Math.max(0, Math.round(Number(live.qty) || 0));
   const lt = live.lowThreshold === null || live.lowThreshold === undefined
     ? null
     : Math.max(0, Math.min(100000, Math.round(Number(live.lowThreshold))));
@@ -1357,7 +1362,8 @@ async function pushBranchMenuPhysicalRow(row: PhysicalQueueRow): Promise<'sent' 
     const r = await apiFetch(path, {
       method: 'POST',
       body: {
-        type: bodyType, id: Math.round(numId), stockQty: qty,
+        type: bodyType, id: Math.round(numId),
+        ...(qty === null ? {} : { stockQty: qty }),
         ...(lt === null ? {} : { lowStockThreshold: lt }),
         ...(baseQty !== null ? { baseQty } : {}),
       },

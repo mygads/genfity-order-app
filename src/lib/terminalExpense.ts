@@ -122,7 +122,7 @@ type ExpenseRowLite = {
  *  duplikat sukses; DB lokal photoPath/docPath dimutakhirkan ke URL remote.
  *  Fire-and-forget dari focus/mount layar; tak pernah melempar.
  *  Kembalikan jumlah baris yang lunas-pending. */
-export async function retryPendingExpensePhotos(limit = 10): Promise<number> {
+async function runPhotoRetry(limit: number): Promise<number> {
   let settled = 0;
   let pend: Array<{ rowId: string; docPath: string }>;
   try {
@@ -192,6 +192,23 @@ export async function retryPendingExpensePhotos(limit = 10): Promise<number> {
     }
   }
   return settled;
+}
+
+/* GAP-CU: single-flight retry foto (mount + focus menembak bersamaan =
+ * upload ganda + re-post ganda; re-post idempoten jadi aman fungsional,
+ * tapi upload ganda buang bandwidth/kuota). Penelepon kedua menumpang
+ * promise penelepon pertama. */
+let photoRetryInflight: Promise<number> | null = null;
+
+export async function retryPendingExpensePhotos(limit = 10): Promise<number> {
+  if (photoRetryInflight) return photoRetryInflight;
+  const p = runPhotoRetry(limit);
+  photoRetryInflight = p;
+  try {
+    return await p;
+  } finally {
+    if (photoRetryInflight === p) photoRetryInflight = null;
+  }
 }
 
 export interface ExpenseHandoffInput {
