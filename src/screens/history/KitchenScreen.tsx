@@ -325,7 +325,26 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
         if (sid == null) { bumpConfirmed(); return; }
         const target = beStatusForLocal(next);
         if (!target) { bumpConfirmed(); return; }
-        const res = await pushOrderStatus(sid, target);
+        let res = await pushOrderStatus(sid, target);
+        if (!res.ok && target === 'READY' && res.reason === 'rejected' && /TRANSITION|VALIDATION/i.test(res.code ?? '')) {
+          // Rantai BE PENDING→ACCEPTED→IN_PROGRESS→READY tak bisa dilompati:
+          // Selesai lokal (Diproses→Selesai) memetakan ACCEPTED→READY bila
+          // tiket tak pernah menyentuh IN_PROGRESS. Jalan pelan satu takik
+          // (IN_PROGRESS dulu, lalu READY) sebelum menyerah + rollback.
+          const step = await pushOrderStatus(sid, 'IN_PROGRESS');
+          if (step.ok) {
+            res = await pushOrderStatus(sid, 'READY');
+          } else if (step.reason === 'offline') {
+            try {
+              enqueueSync('other', { op: GO_OP_STATUS, serverId: sid, target: 'IN_PROGRESS', salesNum, at: new Date().toISOString() });
+              enqueueSync('other', { op: GO_OP_STATUS, serverId: sid, target, salesNum, at: new Date().toISOString() });
+            } catch { /* antrean belum siap */ }
+            bumpConfirmed();
+            return;
+          } else {
+            res = step;
+          }
+        }
         if (res.ok) { bumpConfirmed(); return; }
         try {
           enqueueSync('other', {
