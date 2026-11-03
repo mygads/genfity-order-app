@@ -522,7 +522,9 @@ function needsSessionBearer(path: string): boolean {
 const RAW_FETCH_TIMEOUT_MS = 25_000;
 /** Sinyal fetch: eksplisit pemanggil menang; tanpa itu = abort 25 dtk. */
 function fetchSignal(explicit?: AbortSignal): { signal?: AbortSignal; done: () => void } {
-  if (explicit) return { done: () => {} };
+  // GAP-BX: teruskan sinyal eksplisit pemanggil (sebelumnya hilang di sini
+  // = timeout per-attempt pemanggil diam-diam mati + tanpa default juga).
+  if (explicit) return { signal: explicit, done: () => {} };
   const ctrl = new AbortController();
   const timer = setTimeout(() => {
     try {
