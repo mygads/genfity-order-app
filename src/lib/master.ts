@@ -55,9 +55,12 @@ const DOMAINS: Domain[] = [
       const menuId = str(r.menuId) ?? '';
       if (!menuId) return;
       const sold = flag(r.soldOut, 0);
+      /* GAP-CX paritas masterGo: baris baru = qty NULL (tak diketahui),
+       * bukan 0. Hook ini jalan untuk menu tanpa baris cabang; 0 = Habis
+       * palsu sebelum domain branchmenu sempat mengisi. */
       await run(
         `INSERT INTO ms_branchmenu (branchId, menuId, qty, flagSoldOut, flagActive, syncDate)
-         VALUES (?, ?, 0, ?, ?, ?)
+         VALUES (?, ?, NULL, ?, ?, ?)
          ON CONFLICT (branchId, menuId) DO UPDATE SET flagSoldOut = excluded.flagSoldOut, flagActive = excluded.flagActive`,
         [getBranchId(), menuId, sold, flag(r.flagActive), now],
       );
@@ -68,7 +71,8 @@ const DOMAINS: Domain[] = [
     path: ApiPath.pullBranchMenu,
     table: 'ms_branchmenu',
     cols: ['branchId', 'menuId', 'stationId', 'qty', 'flagSoldOut', 'flagActive'],
-    map: (r) => [str(r.branchId) ?? '', str(r.menuId) ?? '', str(r.stationId), num(r.qty), flag(r.flagSoldOut, 0), flag(r.flagActive)],
+    /* GAP-CX: qty absen = NULL (tak diketahui), bukan 0 (Habis palsu). */
+    map: (r) => [str(r.branchId) ?? '', str(r.menuId) ?? '', str(r.stationId), r.qty === undefined || r.qty === null ? null : num(r.qty), flag(r.flagSoldOut, 0), flag(r.flagActive)],
   },
   {
     key: 'branchsettings',

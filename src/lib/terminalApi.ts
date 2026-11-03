@@ -1514,12 +1514,17 @@ export async function uploadTerminalFile(
       type: guessUploadMime(src),
     } as unknown as Blob);
     const url = apiUrl(withId(ApiPath.terminalUploads, tid));
-    const res = await Promise.race([
-      fetch(url, { method: 'POST', headers, body: form }),
-      new Promise<Response>((_, reject) => {
-        setTimeout(() => reject(new Error('timeout')), 25000);
-      }),
-    ]);
+    /* GAP-CZ: abort fetch saat timeout (bukan race-dangling): upload yang
+     * telanjur-timeout tetap jalan di background = dobel-unggah saat retry
+     * (file yatim di server; upload tak idempoten, hanya re-post yang ya). */
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => { try { ctrl.abort(); } catch { /* abaikan */ } }, 25000);
+    let res: Response;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body: form, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 0) return fail<TerminalUploadDone>(0, false);
     let body: unknown = null;
     try {
