@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { getTerminal, setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { adoptTerminalBinding, getBinding, hydrateTerminalState } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
+import { useEffect, useRef, useState, type ReactNode } from 'react';import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import { getTerminal, setTerminal, WEB_URLS } from '../../config/server';import { validateTerminal, fetchPosVersion, notifyTerminalVerification } from '../../lib/apiSource';import { useLang } from '../../lib/i18n';import { parseDeviceRole, setDeviceRoleForTag } from '../../lib/deviceRole';import { adoptTerminalBinding, getBinding, hydrateTerminalState } from '../../session';import { TERMINAL_CODE_RE, normalizeTerminalCode } from '../../lib/sales';import {
   bindTerminal,
   fetchBranches,
   fetchTerminals,
@@ -152,8 +152,11 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
     setShowPin(true);
   };
 
+  /* GAP-BQ: ref single-flight bind-terminal (state busy basi antar-ketuk cepat = bind server ganda + kick ganda). */
+  const bindBusyRef = useRef(false);
   const doBind = async () => {
-    if (busy || !selBranch || !selTerminal) return;
+    if (busy || bindBusyRef.current || !selBranch || !selTerminal) return;
+    bindBusyRef.current = true;
     if (termPin.trim().length < 4) { setBindError(L.pinShort); return; }
     setBusy(true); setBindError('');
     // Tag terminal lama HANYA dipertahankan untuk bind ULANG ke terminal yang
@@ -213,6 +216,7 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
       navigation?.navigate('InstallProgress', { branch: selBranch.name });
     } finally {
       setBusy(false);
+      bindBusyRef.current = false;
     }
   };
 

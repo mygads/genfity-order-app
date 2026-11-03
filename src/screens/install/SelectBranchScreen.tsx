@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import AppButton from '../../components/AppButton';
+import { useEffect, useRef, useState } from 'react';import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';import { ApiPath } from '../../config/server';import { exitBranchAll, getBinding } from '../../session';import { fetchMyBranches, releaseTerminal, type BranchItem } from '../../lib/terminalApi';import { apiFetch } from '../../lib/apiSource';import { setDeviceRoleForTag } from '../../lib/deviceRole';import { verifyLocalEscalation } from '../../lib/supervisor';import { removeItem } from '../../lib/storage';import { useLang } from '../../lib/i18n';import { appAlert } from '../../lib/appAlert';import AppButton from '../../components/AppButton';
 import ScreenRoot from '../../components/ScreenRoot';
 import BackChevron from '../../components/BackChevron';type Nav = {
   navigate: (screen: string, params?: Record<string, unknown>) => void;
@@ -60,7 +60,12 @@ const DEV_BRANCHES: BranchItem[] = [
    * diam, bukan lanjut). Tombol juga disabled (lihat chooseDisabled) +
    * bergaya pucat agar tak dikira bisa ditekan; kartu dev di-tap pun hanya
    * memunculkan alert yang sama (lihat onPress kartu). */
+  /* GAP-BR: throttle pilih-cabang anti layar-ganda (ketuk-ganda <800ms = satu navigasi). */
+  const navSelAt = useRef(0);
   const goSelect = () => {
+    const nowTap = Date.now();
+    if (nowTap - navSelAt.current < 800) return;
+    navSelAt.current = nowTap;
     if (loading || !branchId) return;
     if (needBe && branches.length === 0) {
       appAlert(t('need_be'));
@@ -102,8 +107,11 @@ const DEV_BRANCHES: BranchItem[] = [
    * bawaan verifyLocalEscalation (5x/60 dtk) + offline honesty (DB belum
    * siap/unbound = tolak dengan pesan jujur, bukan bypass). Sukses → lanjut
    * konfirmasi dengan attribution approvedBy. */
+  /* GAP-BR paritas BQ: ref single-flight verifikasi-PIN keluar-branch (state basi = bakar 2 jatah lockout sekali ketuk). */
+  const exitPinBusyRef = useRef(false);
   const submitExitPin = () => {
-    if (pinBusy) return;
+    if (pinBusy || exitPinBusyRef.current) return;
+    exitPinBusyRef.current = true;
     const clean = pin.replace(/[^0-9]/g, '');
     if (!clean || clean.length < 4) {
       setPinError(t('sup_invalid'));
@@ -125,6 +133,7 @@ const DEV_BRANCHES: BranchItem[] = [
         confirmExitBranch(b, approvedBy);
       } finally {
         setPinBusy(false);
+        exitPinBusyRef.current = false;
       }
     })();
   };

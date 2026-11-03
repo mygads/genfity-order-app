@@ -6,7 +6,7 @@
  * tak pernah membuat binding — hanya pesan bind_failed / need_be /
  * sup_offline yang jujur. PIN tak pernah disimpan di device.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { adoptTerminalBinding } from '../../session';
@@ -110,8 +110,11 @@ export default function TerminalPinScreen({
     return true;
   };
 
+  /* GAP-BQ paritas InstallScreen: ref single-flight bind/claim (state basi antar-ketuk cepat = bind server ganda). */
+  const bindBusyRef = useRef(false);
   const submit = async () => {
-    if (busy || done) return;
+    if (busy || bindBusyRef.current || done) return;
+    bindBusyRef.current = true;
     if (pin.trim().length < 4) {
       setError(t('terminal_pin_hint'));
       return;
@@ -162,6 +165,7 @@ export default function TerminalPinScreen({
       await finishBinding(r.data.tag || '', r.data.kickedUserId || '', deviceId);
     } finally {
       setBusy(false);
+      bindBusyRef.current = false;
     }
   };
 
@@ -170,7 +174,8 @@ export default function TerminalPinScreen({
    * PIN salah/terkunci (401/423) → kembali ke form PIN; konflik tag (409) →
    * pesan server di kartu claim; offline → pesan jujur. */
   const submitClaim = async () => {
-    if (claimBusy || done) return;
+    if (claimBusy || bindBusyRef.current || done) return;
+    bindBusyRef.current = true;
     if (pin.trim().length < 4) {
       setOccupied('');
       setError(t('terminal_pin_hint'));
@@ -207,6 +212,7 @@ export default function TerminalPinScreen({
       await finishBinding(r.data.tag || '', r.data.kickedUserId || '', deviceId);
     } finally {
       setClaimBusy(false);
+      bindBusyRef.current = false;
     }
   };
 

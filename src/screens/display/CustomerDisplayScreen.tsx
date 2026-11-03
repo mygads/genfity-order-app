@@ -342,7 +342,12 @@ type Lang } from '../../lib/i18n';type Nav = { navigate: (screen: string, params
 
   /** Notice penolakan aksi operator di peran view (tanpa silent fail). */
   const [opNotice, setOpNotice] = useState('');
+  /* GAP-BL: throttle panggil-tiket anti lompat-ganda (ketuk-ganda <800ms = satu tiket). */
+  const callNextAt = useRef(0);
   const callNext = () => {
+    const nowTap = Date.now();
+    if (nowTap - callNextAt.current < 800) return;
+    callNextAt.current = nowTap;
     // GAP-10: gerbang peran yang sama dengan goCashier IdleScreen - hanya tag
     // fitur-penuh (FULL_FEATURE_TAGS kanonis) boleh memanggil; view/asing
     // ditolak via notice, tanpa silent fail.

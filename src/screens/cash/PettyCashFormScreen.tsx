@@ -17,12 +17,14 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
   const [catatan, setCatatan] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoErr, setPhotoErr] = useState('');
-  const [saving, setSaving] = useState(false); /* GAP-AD paritas ExpenseScreen: single-flight simpan (double-tap = baris ganda). */ const saveBusyRef = useRef(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null; photoPending?: boolean }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); void retryPendingExpensePhotos().catch(() => { /* best-effort */ }); return () => { alive = false; }; }, []);
+  const [saving, setSaving] = useState(false); /* GAP-AD paritas ExpenseScreen: single-flight simpan (double-tap = baris ganda). */ const saveBusyRef = useRef(false); /* GAP-BN: single-flight picker foto (double-tap = kamera/galeri ganda menumpuk). */ const photoBusyRef = useRef(false); const [done, setDone] = useState<null | { id: string; arus: string; coa: string; jumlah: number; photo: string | null; photoPending?: boolean }>(null); useEffect(() => { let alive = true; void loadCoa().then((list) => { if (!alive) return; setCoaList(list); setCoa((c) => (list.includes(c) ? c : list[0])); }); void retryPendingExpensePhotos().catch(() => { /* best-effort */ }); return () => { alive = false; }; }, []);
 
   const jumlahNum = Math.round((Number(String(jumlah).replace(/[^0-9.,]/g, '').replace(/,/g, '.')) || 0) * 100) / 100;
   const ready = keterangan.trim().length >= 3 && jumlahNum > 0 && !saving;
 
   const pickPhoto = async () => {
+    if (photoBusyRef.current) return;
+    photoBusyRef.current = true;
     setPhotoErr('');
     try {
       // Tanpa izin pustaka media, galeri gagal diam-diam di Android (khususnya
@@ -43,10 +45,14 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
       }
     } catch {
       setPhotoErr(t('petty.photoFailed'));
+    } finally {
+      photoBusyRef.current = false;
     }
   };
 
   const takePhoto = async () => {
+    if (photoBusyRef.current) return;
+    photoBusyRef.current = true;
     setPhotoErr('');
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -62,6 +68,8 @@ interface CoaPullItem { coaId?: unknown; coaName?: unknown; name?: unknown; flag
       }
     } catch {
       setPhotoErr(t('petty.photoFailed'));
+    } finally {
+      photoBusyRef.current = false;
     }
   };
 

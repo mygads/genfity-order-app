@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { pushStockCount } from '../../lib/stockCountSync';import { getRoundingSetting, initDb, query, type RoundingSetting } from '../../lib/db';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
+import { useEffect, useRef, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import AppInput from '../../components/AppInput';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { getSession } from '../../session';import { pushStockCount } from '../../lib/stockCountSync';import { getRoundingSetting, initDb, query, type RoundingSetting } from '../../lib/db';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };interface StockItem {
   id: string;
   name: string;
   group: string;
@@ -19,8 +19,11 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
   // Opname-lite (audit-5d80): dorong hasil hitung ke draf server; finalisasi owner-only.
   const [pushing, setPushing] = useState(false);
   const [pushMsg, setPushMsg] = useState('');
+  /* GAP-BO: ref single-flight kirim-opname (state pushing basi antar-ketuk cepat = submit item ganda ke draf server). */
+  const pushBusyRef = useRef(false);
   const pushOpname = async () => {
-    if (pushing) return;
+    if (pushing || pushBusyRef.current) return;
+    pushBusyRef.current = true;
     setPushing(true);
     setPushMsg('');
     try {
@@ -28,7 +31,7 @@ import { useEffect, useState } from 'react';import { Image, Pressable, ScrollVie
       if (!tid) { setPushMsg(t('stock.opnameNoTerminal')); return; }
       const r = await pushStockCount(tid, items.map((x) => ({ name: x.name, stock: x.stock })));
       setPushMsg(t('stock.opnameResult').replace('{ok}', String(r.submitted)).replace('{skip}', String(r.skipped)).replace('{fail}', String(r.failed)));
-    } catch { setPushMsg(t('stock.opnameFailed')); } finally { setPushing(false); }
+    } catch { setPushMsg(t('stock.opnameFailed')); } finally { setPushing(false); pushBusyRef.current = false; }
   };
   // REA-14 display-only: info pembulatan dari ms_setting (tanpa ubah rumus).
   const [rounding, setRounding] = useState<RoundingSetting>({ mode: '', nearest: 0, step: 100 });
