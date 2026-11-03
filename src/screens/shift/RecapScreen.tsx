@@ -7,7 +7,7 @@ import { useLang } from '../../lib/i18n';
 import { getSession } from '../../session';
 import { getBranchId } from '../../config/server';
 import { initDb, queryFirst } from '../../lib/db';
-import { clockHHMM } from '../../lib/datefmt';
+import { clockHHMM, dbNowLocal } from '../../lib/datefmt';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
 type Props = { navigation?: Nav };
@@ -46,15 +46,20 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** Batas ISO rentang rekap. */
+// GAP-CD: batas WALL-LOCAL 'YYYY-MM-DD HH:MM:SS' (dbNowLocal), BUKAN ISO.
+// salesDate ditulis wall-device (SALESDATE-LOCAL) sementara toISOString =
+// UTC: banding string campur-format salah meng-bucket (zona UTC- keluarkan
+// penjualan hari-ini; bill pindahan ISO beda hari). Konsisten dgn Dashboard
+// (substr date-prefix wall). ISO pra-10-28/residu pindahan tetap terbaca
+// best-effort via prefix-tanggal.
 function rangeBounds(range: Range): { since: string; until: string } {
   const day = new Date();
   day.setHours(0, 0, 0, 0);
-  if (range === 'Hari Ini') return { since: day.toISOString(), until: new Date(day.getTime() + 86400000).toISOString() };
+  if (range === 'Hari Ini') return { since: dbNowLocal(day), until: dbNowLocal(new Date(day.getTime() + 86400000)) };
   if (range === 'Kemarin') {
-    return { since: new Date(day.getTime() - 86400000).toISOString(), until: day.toISOString() };
+    return { since: dbNowLocal(new Date(day.getTime() - 86400000)), until: dbNowLocal(day) };
   }
-  return { since: new Date(day.getTime() - 6 * 86400000).toISOString(), until: new Date(day.getTime() + 86400000).toISOString() };
+  return { since: dbNowLocal(new Date(day.getTime() - 6 * 86400000)), until: dbNowLocal(new Date(day.getTime() + 86400000)) };
 }
 
 /** Rekap dari SQLite (tr_saleshead/menu/payment, tr_cancelmenu, tr_branchexpense). */
