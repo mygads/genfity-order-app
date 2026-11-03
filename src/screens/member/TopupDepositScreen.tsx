@@ -44,7 +44,10 @@ const MIN_TOPUP_AUD = 10;
  * `dep-…` bersama untuk direct + fisik + light (direct-or-one-light); 409 =
  * server sudah punya = posted. inquiry-deposit hanya untuk cek saldo.
  */
-async function persistTopup(memberId: string, nominal: number, method: string, note?: string, balanceAfter?: number): Promise<void> {
+// Jujur: kembalikan {posted, stored} agar pemanggil tak menampilkan sukses
+// palsu saat DB lokal gagal total (uang sudah diambil tapi tanpa catatan). stored
+// = saldo lokal bergerak (sumber baca kasir + tertandai kotor untuk push).
+async function persistTopup(memberId: string, nominal: number, method: string, note?: string, balanceAfter?: number): Promise<{ posted: boolean; stored: boolean }> {
   // SATU kunci idempotensi untuk semua kanal tap ini (ledger id + fisik
   // orderID + light id/clientId + direct clientId/header).
   const key = newDepositKey();
@@ -52,6 +55,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
   // MemberScreen.saveDeposit) agar layar Member + pembayaran deposit langsung
   // konsisten offline; syncDate NULL menandai untuk push berikutnya.
   let after = balanceAfter ?? null;
+  let memberOk = false;
   try {
     await initDb();
     if (after == null) {
@@ -61,9 +65,10 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
       );
       after = Math.max(0, Math.round(Number(cur?.depositBalance) || 0)) + nominal;
     }
-    await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, memberId]);
+    const mr = await run('UPDATE ms_member SET depositBalance = ?, syncDate = NULL WHERE id = ?', [after, memberId]);
+    memberOk = ((mr as { changes?: unknown } | null)?.changes == null) || Number((mr as { changes?: unknown }).changes) > 0;
   } catch {
-    /* abaikan */
+    memberOk = false;
   }
   try {
     await enqueueOutbox('ms_member', memberId, 'update');
@@ -80,7 +85,7 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
     // Kolom userId wajib id user (bukan nama tampilan) - selaras saveSale.
     const userId = getSession()?.userId || getSession()?.username || null;
     await run(
-      `INSERT INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
+      `INSERT OR IGNORE INTO tr_memberdeposit (id, memberId, branchId, trxType, amount, balanceAfter, userId, trxDate, syncDate) VALUES (?, ?, ?, 'topup', ?, ?, ?, ?, NULL)`,
       [key, memberId, getTerminal().branchId || null, nominal, after ?? null, userId, nowIso],
     );
     // Fisik SAJA (tanpa light generik kembar {table,rowId,op}): light twin di
@@ -97,15 +102,20 @@ async function persistTopup(memberId: string, nominal: number, method: string, n
   } catch {
     posted = false;
   }
+  // Kembaran antre offline ikut dihitung tersimpan: saldo + antrean = kasir
+  // boleh lanjut (banner top_queued menjelaskan), konvergensi via drain.
+  let twinOk = false;
   if (!posted) {
     try {
       // Alias kanonis kontrak §5.2 (amount/paymentMethod) di samping kunci
       // ringan lama (nominal/method) agar server ketat tetap memproses retry.
       enqueueSync('other', { kind: 'deposit-topup', memberId, nominal, method, amount: nominal, paymentMethod: method, clientId: key }, key);
+      twinOk = true;
     } catch {
       /* abaikan */
     }
   }
+  return { posted, stored: memberOk || twinOk };
 }
 
 export default function TopupDepositScreen({ navigation, route }: Props) {
@@ -226,10 +236,20 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
           text: t('top_confirm_go'),
           onPress: () => {
             setSaving(true);
-            void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).finally(() => {
+            void persistTopup(memberId, nominalNum, method, catatan, saldoAkhir).then((r) => {
               submitBusy.current = false;
               setSaving(false);
-              setDone(true);
+              // Gagal total (server tak posted + saldo lokal tak bergerak) =
+              // JANGAN Done palsu; kasir diminta coba lagi sebelum ambil uang.
+              if (r.posted || r.stored) {
+                setDone(true);
+              } else {
+                setSaveErr(t('top_save_fail'));
+              }
+            }).catch(() => {
+              submitBusy.current = false;
+              setSaving(false);
+              setSaveErr(t('top_save_fail'));
             });
           },
         },

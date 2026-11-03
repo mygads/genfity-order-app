@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';
+  useWindowDimensions,} from 'react-native';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';
 import { uuidv7 } from '../../lib/uuidv7';import { getJSON, setJSON } from '../../lib/storage';import { buildKitchenTicketBytes, buildQueueSlipBytes, buildReceiptBytes, fromBase64, toHex } from '../../lib/escpos';import { resolveDrainTarget, shareReceipt, effectiveKind, type StationKind } from '../../lib/print';import { drainPrintQueue } from '../../lib/printqueue';import { ackTerminalPrintJob, claimTerminalPrintJob, isAutoPrintJob, pollServerPrintJobs, printAutoServerJob } from '../../lib/printBridge';import { fetchBranchTerminals, updatePrintDestination } from '../../lib/terminalApi';import { getFleetCache, syncFleetFromServer, syncStationToServer, type FleetTerminal } from '../../lib/fleetSync';import { buildReceiptOrderTypeLine, fetchReceiptTemplates, getEffectiveTogglesForMode, getReceiptTemplateToggles, hasReceiptTemplate, type ReceiptTemplateRef } from '../../lib/receiptTemplate';import { ensureBtPermission, hasNativePrinter, listBlePrinters, listBondedBtPrinters, listUsbDevices, openCashDrawer, printBytes, type PrinterTarget } from '../../native/printer';import type { UsbDeviceInfo } from '../../specs/GenfityPrinter';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { NATIVE_PREF_KEYS } from '../../lib/master';import { getBranchId, getTerminal } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type ConnType = 'Bluetooth' | 'LAN' | 'Star';type StationRole = 'Kasir' | 'Dapur' | 'Checker' | 'Label';interface Station {
   id: string;
   name: string;
@@ -245,8 +245,9 @@ function backupBindings(ss: Station[]): void {
       setFleetLoading(false);
     }
   };
-  /** Sinkron satu station lokal ke BE (terminalId+kind; tugas A). */
+  /** Sinkron satu station lokal ke BE (terminalId+kind; tugas A). Push server = khusus Owner. */
   const syncOneStation = async (s: Station) => {
+    if (!(await guardSetup())) return;
     let branch = '';
     let termCode = '';
     let termIdBe = '';
@@ -272,8 +273,9 @@ function backupBindings(ss: Station[]): void {
       setStatusMsg(t('printers.stationSyncFail').replace('{x}', s.name).replace('{e}', String(r.reason ?? 'offline')));
     }
   };
-  /** Ganti template struk satu destinasi server (tugas B; null = Default). */
+  /** Ganti template struk satu destinasi server (tugas B; null = Default). Mutasi server = khusus Owner. */
   const setDestinationTemplate = async (destinationId: number, templateId: number | null) => {
+    if (!(await guardSetup())) return;
     const r = await updatePrintDestination(destinationId, { receiptTemplateId: templateId });
     if (!r.ok) {
       setStatusMsg(t('printers.tplFail').replace('{e}', 'offline'));
@@ -425,9 +427,28 @@ function backupBindings(ss: Station[]): void {
 
   const changed = next.find((x) => x.id === id); if (changed) void persistStation(changed); return next; }); };
 
-  const removeStation = (id: string) =>
-    setStations((ss) => {
-      if (ss.length <= 1) return ss;
+  /** Setup printer = ubah roster station / template server (khusus Owner, fail-closed).
+   * Operasional (uji-cetak, tendang-laci, tarik job server, binding terminal) tetap terbuka. */
+  const guardSetup = async (): Promise<boolean> => {
+    try {
+      const sess = getSession();
+      const gate = await requireAccess(sess?.userId || sess?.username || '', 'settings.edit');
+      if (!gate.ok) {
+        setStatusMsg(t('sett_denied_msg').replace('{r}', gate.reason));
+        return false;
+      }
+      return true;
+    } catch {
+      setStatusMsg(t('sett_denied_msg').replace('{r}', 'db-unready'));
+      return false;
+    }
+  };
+
+  const removeStation = (id: string) => {
+    void (async () => {
+      if (!(await guardSetup())) return;
+      setStations((ss) => {
+        if (ss.length <= 1) return ss;
       const next = ss.filter((x) => x.id !== id);
       // Cerminkan hapus ke ms_station agar daftar live KitchenScreen ikut bersih.
       // R53: tanpa branch klaim, hapus DB/outbox ditahan (cache JSON tetap).
@@ -441,11 +462,15 @@ function backupBindings(ss: Station[]): void {
           /* abaikan: cache JSON di bawah tetap menyimpan */
         }
       })();
-      return next;
-    });
+        return next;
+      });
+    })();
+  };
 
   const addStation = () => {
-    const name = stName.trim();
+    void (async () => {
+      if (!(await guardSetup())) return;
+      const name = stName.trim();
     if (!name) return;
     /* GAP-AQ: throttle ketuk-ganda (dua stasiun kembar). */
     const nowSt = Date.now();
@@ -463,7 +488,8 @@ function backupBindings(ss: Station[]): void {
         isDefault: stations.length === 0,
         connected: false,
       }; setStations((ss) => [...ss, entry]); void persistStation(entry);
-    setStName('');
+      setStName('');
+    })();
   };
 
   /** Pairing BT: daftar bonded nyata via modul native (dev-client), kosong di Expo Go/web. */

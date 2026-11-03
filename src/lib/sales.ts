@@ -1499,19 +1499,30 @@ export async function moveSaleItems(args: {
   const valid = moves.filter((m) => byId.has(m.id));
   if (valid.length === 0) throw new Error('Item yang dipilih tidak ada di bill asal.');
 
+  // Atomik: seluruh tulis belah (head tujuan, baris, hitung ulang, anak)
+  // dalam SATU transaksi - crash di tengah tak lagi merobek bill.
+  // Nomor dest disiapkan di luar (nextSalesNumRetry punya transaksinya
+  // sendiri sehingga tak boleh nested di dalam withTransaction).
+  // now ikut di luar agar dipakai mirror pasca-commit di bawah.
+  const preDestNum = (args.toSalesNum ?? '').trim() ? '' : await nextSalesNumRetry();
+  const now = new Date().toISOString();
+  let destNumOut = '';
+  let destCidOut = '';
+  const movedIdsOut: string[] = [];
+  await withTransaction(async () => {
   // Head tujuan: gabung bila toSalesNum sudah ada, sonst buat baru.
-  let destNum = (args.toSalesNum ?? '').trim();
+  let destNum = (args.toSalesNum ?? '').trim() || preDestNum;
   let dest: HeadLite | null = destNum
     ? await queryFirst<HeadLite>('SELECT * FROM tr_saleshead WHERE salesNum = ? LIMIT 1', [destNum])
     : null;
   if (dest && (dest.status ?? 'open') === 'paid') {
     throw new Error(`Bill tujuan ${destNum} sudah lunas - pilih bill lain.`);
   }
-  const now = new Date().toISOString();
   // L15: destCreated menandai head baru (memberId/customerId diwarisi di bawah).
   let destCreated = false;
   if (!dest) {
-    if (!destNum) destNum = await nextSalesNumRetry();
+    if (!destNum) destNum = preDestNum;
+    if (!destNum) throw new Error('Gagal menyiapkan bill tujuan.');
     if (destNum === fromSalesNum) throw new Error('Bill tujuan sama dengan bill asal.');
     // Bill tujuan = sale baru: client_id UUIDv7 sendiri (Q7). Gabung ke dest
     // yang ada tetap by salesNum selama transisi terima-dua-format.
@@ -1759,6 +1770,16 @@ export async function moveSaleItems(args: {
   } catch {
     /* referensi anak gagal ikut - item sudah pindah, dapur/bayar selisih terlihat di layar pemilik */
   }
+  // Ekspor identitas keluar transaksi (mirror server + display
+  // di bawah jalan pasca-commit, cermin pola saveSale postCommit).
+  destNumOut = destNum;
+  destCidOut = destCid;
+  movedIdsOut.push(...movedIds);
+  });
+  const destNum = destNumOut;
+  const destCid = destCidOut;
+  const movedIds = movedIdsOut;
+
   // S6 immediate-first: coba live apiFetch DULU (kunci dest sama:
   // toSalesNum + client_id agar server korelasikan tanpa push); antrean
   // ringan (twin) HANYA bila live gagal - sebelumnya urutan terbalik

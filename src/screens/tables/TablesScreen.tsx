@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';import { appAlert } from '../../lib/appAlert';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -368,6 +368,25 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     setPax('');
   };
 
+/** Kelola denah = ubah master meja (tulis ms_table + sync server) - khusus Owner.
+   * Operasional harian (pindah/gabung/hold/booking) tetap terbuka untuk kasir. */
+  const openManage = () => {
+    void (async () => {
+      try {
+        const sess = getSession();
+        const gate = await requireAccess(sess?.userId || sess?.username || '', 'settings.edit');
+        if (!gate.ok) {
+          appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', gate.reason));
+          return;
+        }
+      } catch {
+        appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', 'db-unready'));
+        return;
+      }
+      setManageOpen(true); setManageWarn(''); setConfirmDelTable(null);
+    })();
+  };
+
   /** Tambah meja master: validasi nomor unik + kapasitas, tulis ms_table + outbox/sync. */
   const addTable = () => {
     const no = normNo(newNo);
@@ -477,7 +496,7 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
         ))}
         <View style={s.legendRight}>
         {qsCount > 0 && <Text style={s.qsNote}>{t('tbl.qsNote').replace('{n}', String(qsCount))}</Text>}
-        <TouchableOpacity onPress={() => { setManageOpen(true); setManageWarn(''); setConfirmDelTable(null); }} style={s.qsBtn}>
+        <TouchableOpacity onPress={openManage} style={s.qsBtn}>
           <Text style={[s.qsTxt, isTablet && s.qsTxtBig]}>{t('tbl_manage')}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={quickTransaction} style={s.qsBtn}>

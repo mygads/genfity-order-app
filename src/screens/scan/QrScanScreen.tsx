@@ -11,7 +11,10 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
   const [result, setResult] = useState(false);
   const [msg, setMsg] = useState('');
   // Hasil validasi lokal: label nyata dari DB (nama voucher/member), bukan fiksi.
-  const [found, setFound] = useState<{ kind: 'voucher' | 'member'; label: string; amount: number } | null>(null);
+  // `code` = nilai yang lolos validasi; Pakai menolak hasil basi (GAP-BK).
+  const [found, setFound] = useState<{ kind: 'voucher' | 'member'; code: string; label: string; amount: number } | null>(null);
+  /** GAP-BK: throttle pindaian kamera (Expo memanggil handler per frame). */
+  const scanAt = useRef(0);
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   // Auto-start kamera saat mount (parity POSLite: izin -> kamera langsung buka; web tetap manual).
@@ -54,15 +57,15 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     setCode(TAB_DEFAULT_CODE[x]);
   };
 
-  /** Cek kode ke SQLite lokal: voucher/member harus dikenal (status aktif,
-   * kuota > 0 / flag aktif). claim/esb hanya format - validasi final tetap
-   * di layar Install/EsbOrder. */
-  const check = async () => {
-    const clean = code.trim();
+  /** GAP-BK: validasi satu nilai untuk tab voucher/member; dipakai tombol
+   * Cek, pindaian kamera, dan gerbang Pakai (fail-closed bila belum valid).
+   * Mengembalikan data validasi agar pemanggil tak bergantung state basi. */
+  const validateValue = async (raw: string): Promise<{ kind: 'voucher' | 'member'; code: string; label: string; amount: number } | null> => {
+    const clean = raw.trim();
     if (!clean) {
       setMsg(t('scan_need_code'));
       setResult(false);
-      return;
+      return null;
     }
     setFound(null);
     if (tab === 'voucher' || tab === 'member') {
@@ -85,9 +88,13 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
           if (!usable) {
             setMsg(t('scan_unknown_voucher'));
             setResult(false);
-            return;
+            return null;
           }
-          setFound({ kind: 'voucher', label: String(row.voucherName ?? row.voucherCode ?? clean), amount: Math.max(0, Math.round(Number(row.amount) || 0)) });
+          const vf = { kind: 'voucher' as const, code: clean, label: String(row.voucherName ?? row.voucherCode ?? clean), amount: Math.max(0, Math.round(Number(row.amount) || 0)) };
+          setFound(vf);
+          setMsg('');
+          setResult(true);
+          return vf;
         } else {
           const row = await queryFirst<{ id: string; memberName: string | null }>(
             'SELECT id, memberName FROM ms_member WHERE UPPER(id) = UPPER(?) LIMIT 1',
@@ -96,21 +103,35 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
           if (!row) {
             setMsg(t('scan_unknown_member'));
             setResult(false);
-            return;
+            return null;
           }
-          setFound({ kind: 'member', label: String(row.memberName ?? row.id), amount: 0 });
+          const mf = { kind: 'member' as const, code: clean, label: String(row.memberName ?? row.id), amount: 0 };
+          setFound(mf);
+          setMsg('');
+          setResult(true);
+          return mf;
         }
       } catch {
-        setMsg(t('scan_unknown_voucher'));
+        setMsg(t(tab === 'member' ? 'scan_unknown_member' : 'scan_unknown_voucher'));
         setResult(false);
-        return;
+        return null;
       }
     }
     setMsg('');
     setResult(true);
+    return null;
   };
 
-  const useCode = async () => {
+  const check = () => {
+    void validateValue(code);
+  };
+
+  /* GAP-BM: throttle pakai-kode anti layar-ganda (ketuk-ganda <800ms = satu navigasi). */
+  const useAt = useRef(0);
+  const applyCode = async () => {
+    const nowTap = Date.now();
+    if (nowTap - useAt.current < 800) return;
+    useAt.current = nowTap;
     const clean = code.trim();
     if (clean.length < 3) { setMsg(t('scan_short')); setResult(false); return; } if (tab === 'claim') {
       // S4-APP-333: Install WAJIB terdaftar di stack aktif (authed). Tanpa
@@ -130,14 +151,22 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     }
     // Gerbang kasir: shift tutup → pesan + buka shift dulu.
     if (!(await ensureShiftOpen(navigation, `${t('dash_shift_closed')} - ${t('shf_open_btn')}`, setMsg, t('shift_db_error')))) return;
-    if (tab === 'member') {
-      navigation?.navigate('Cashier', { memberId: clean });
+    if (tab === 'member' || tab === 'voucher') {
+      // GAP-BK: tanpa hasil validasi untuk nilai saat ini = validasi dulu;
+      // pindaian langsung-Pakai dan edit-setelah-Cek tak bisa lolos mentah.
+      let f = found && found.kind === tab && found.code === clean ? found : null;
+      if (!f) {
+        f = await validateValue(clean);
+        if (!f) return;
+      }
+      if (tab === 'member') {
+        navigation?.navigate('Cashier', { memberId: clean });
+        return;
+      }
+      navigation?.navigate('Cashier', { voucher: { code: clean, amount: f.amount } });
       return;
     }
-    // Voucher yang lolos check() membawa nominal hasil validasi lokal.
-    navigation?.navigate('Cashier', found?.kind === 'voucher'
-      ? { voucher: { code: clean, amount: found.amount } }
-      : { voucherCode: clean });
+    navigation?.navigate('Cashier', { voucherCode: clean });
   };
 
   const descFor = () => {
@@ -166,10 +195,21 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
             facing="back"
             barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={({ data }) => {
-              setCode(String(data));
-              setResult(true);
+              const nowScan = Date.now();
+              if (nowScan - scanAt.current < 1500) return;
+              scanAt.current = nowScan;
+              const raw = String(data);
+              setCode(raw);
               setMsg('');
               setScanning(false);
+              // GAP-BK: hasil pindaian wajib lewat validasi yang sama dengan
+              // input manual (kuota/status/validitas voucher, member dikenal).
+              if (tab === 'voucher' || tab === 'member') {
+                setResult(false);
+                void validateValue(raw);
+              } else {
+                setResult(true);
+              }
             }}
           />
         ) : (
@@ -196,7 +236,7 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
             <TouchableOpacity style={styles.ghost} onPress={() => setResult(false)}>
               <Text style={styles.ghostT}>{t('scan_rescan')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.primary} onPress={() => void useCode()}>
+            <TouchableOpacity style={styles.primary} onPress={() => void applyCode()}>
               <Text style={styles.primaryT}>{t('scan_use')}</Text>
             </TouchableOpacity>
           </View>

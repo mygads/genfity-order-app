@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
+import { useEffect, useState } from 'react';import { Image, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import ScreenHeader from '../../components/ScreenHeader';import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { hasAccess, requireAccess } from '../../lib/access';import { appAlert } from '../../lib/appAlert';import { getJSON, setJSON } from '../../lib/storage';import { initDb, query, run } from '../../lib/db';import { enqueueOutbox } from '../../lib/sync';import { getBranchId } from '../../config/server';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };type StationId = 'kasir' | 'dapur' | 'checker' | 'label' | 'none';interface MenuRoute {
   id: string;
   group: string;
   items: number;
@@ -56,6 +56,14 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
     // bisa menimpa menu cabang lain; cache JSON pemanggil tetap menyimpan.
     const branchId = (getBranchId() || '').trim();
     if (!branchId) return;
+    // Routing = ubah master menu + sync server (khusus Owner, fail-closed).
+    // Tanpa alert di sini (dipanggil tiap effect); penolakan beralert ada di patch.
+    try {
+      const sess = getSession();
+      if (!(await hasAccess(sess?.userId || sess?.username || '', 'settings.edit'))) return;
+    } catch {
+      return;
+    }
     await initDb();
     // 1. Pastikan definisi station kanonis ada; baris pull master menang bila
     // sudah ada (DO NOTHING) agar alamat printer dari server tidak tertimpa.
@@ -185,8 +193,23 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.topMargin, opts.showPaymentInfo, opts.showSalesTime]);
 
-  const patch = (id: string, p: Partial<MenuRoute>) =>
-    { setRoutes((rs) => { const next = rs.map((r) => (r.id === id ? { ...r, ...p } : r)); void setJSON(LS_ROUTES, next); void persistRoutes(next, opts); return next; }); };
+  /** Ubah routing = ubah master menu (khusus Owner); kasir baca saja. */
+  const patch = (id: string, p: Partial<MenuRoute>) => {
+    void (async () => {
+      try {
+        const sess = getSession();
+        const gate = await requireAccess(sess?.userId || sess?.username || '', 'settings.edit');
+        if (!gate.ok) {
+          appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', gate.reason));
+          return;
+        }
+      } catch {
+        appAlert(t('sett_denied_title'), t('sett_denied_msg').replace('{r}', 'db-unready'));
+        return;
+      }
+      setRoutes((rs) => { const next = rs.map((r) => (r.id === id ? { ...r, ...p } : r)); void setJSON(LS_ROUTES, next); void persistRoutes(next, opts); return next; });
+    })();
+  };
 
   // R53: UI mati yang dihapus - switch printLabel per rute + kartu opsi dapur
   // (topMargin/showPay/showTime). Model data (printLabel, PrintOpts) tetap

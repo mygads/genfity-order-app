@@ -317,6 +317,17 @@ export default function BookingScreen({ navigation }: Props) {
       savingRef.current = false;
       return;
     }
+    // Cegah reservasi ganda: meja + tanggal + jam sama yang masih terjadwal.
+    // (Slot beda jam di hari sama tetap boleh - makan siang vs malam.)
+    const clash = list.some((r) => r.id !== editingId
+      && (r.status === 'Terjadwal' || r.status === 'Datang')
+      && canonTableNo(r.table) === code && r.date === date && r.time.trim() === time.trim());
+    if (clash) {
+      setWarn(t('bok_warn_clash'));
+      /* GAP-AY: reset guard - tanpa ini tombol simpan mati permanen. */
+      savingRef.current = false;
+      return;
+    }
     if (editingId) {
       const next = list.map((r) =>
         r.id === editingId

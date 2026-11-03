@@ -299,6 +299,7 @@ const STR: Record<string, Entry> = {
   top_hint: { id: 'Nominal minimal {m} dan metode bayar wajib dipilih.', en: 'Minimum {m} and a payment method is required.' },
   top_queued: { id: 'Tersimpan ke antrean sync bila offline.', en: 'Saved to the sync queue when offline.' },
   top_success: { id: 'Top Up Berhasil', en: 'Top Up Successful' },
+  top_save_fail: { id: 'Top up gagal tersimpan - jangan ambil uang dulu, coba lagi.', en: 'Top up was not saved - do not take the money yet, try again.' },
   billing_trial: { id: 'PRO Trial - sisa {n} hari. Nikmati semua fitur, hubungi owner untuk upgrade.', en: 'PRO trial - {n} days left. Enjoy all features; ask the owner to upgrade.' },
   billing_pastdue: { id: 'Tagihan tertunda - sisa {n} hari. Kasir tetap jalan. Hubungi owner untuk bayar/topup.', en: 'Payment overdue - {n} days left. Cashier still works. Ask the owner to pay/top up.' },
   billing_readonly: { id: 'Mode baca saja - kasir tetap jalan. Hubungi owner untuk bayar agar fitur admin terbuka.', en: 'Read-only mode - cashier still works. Ask the owner to pay to unlock admin.' },
@@ -1551,6 +1552,7 @@ const STR: Record<string, Entry> = {
   // ---- B2c kasir/split (bill_rata_hint) + titipan batch-1 (booking/move warns) ----
   bill_rata_hint: { id: 'Dibagi sama besar ke tiap bill - sisa pembulatan masuk bill terakhir.', en: 'Split evenly across bills - rounding remainder goes to the last bill.' },
   bok_warn_capacity: { id: 'Tamu melebihi kapasitas meja.', en: 'Guests exceed table capacity.' },
+  bok_warn_clash: { id: 'Meja itu sudah dibooking di tanggal + jam yang sama.', en: 'That table is already booked at the same date and time.' },
   bok_auto_table: { id: 'Otomatis (data lokal) - ketuk chip untuk pilih manual.', en: 'Auto (local data) - tap a chip to pick manually.' },
   mov_warn_same: { id: 'Meja tujuan sama dengan meja asal.', en: 'Destination table is the same as the source table.' },
   mov_warn_nosrc: { id: 'Tidak ada tagihan aktif di meja asal.', en: 'No active bill on the source table.' },
@@ -1820,6 +1822,7 @@ const STR: Record<string, Entry> = {
   mov_pick_merge: { id: ' (gabung)', en: ' (merged)' },
   mov_warn_src: { id: 'Pilih meja asal yang terisi dulu.', en: 'Select an occupied source table first.' },
   mov_warn_dst: { id: 'Pilih meja tujuan dulu.', en: 'Select a destination table first.' },
+  mov_warn_dst_busy: { id: 'Meja tujuan sudah terisi - pilih meja kosong atau pakai Gabung di Denah.', en: 'Destination table is occupied - pick a free table or use Merge in Table Map.' },
   mov_from_label: { id: 'Dari meja (terisi)', en: 'From table (occupied)' },
   mov_card_items: { id: 'Item', en: 'Items' },
   mov_items_unit: { id: '{n} item', en: '{n} items' },

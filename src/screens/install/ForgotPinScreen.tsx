@@ -7,7 +7,7 @@ import ScreenRoot from '../../components/ScreenRoot';
 import { useLang } from '../../lib/i18n';
 import { getApiMode } from '../../lib/apiSource';
 import { initDb, queryFirst } from '../../lib/db';
-import { removePinHash } from '../../lib/pin';
+import { isWeakPin, removePinHash } from '../../lib/pin';
 import { clearPinChangeRequired } from '../../lib/supervisor';
 import { loadBinding, requestPinReset } from '../../lib/terminalContract';
 // APP-FIXUP (fix-app-contract D1): merchantId (scope body pin-reset server)
@@ -20,9 +20,7 @@ import {
 
 type Nav = { goBack: () => void };
 
-/** B9: PIN lemah - semua berulang atau berurutan umum. */
-const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
-const isWeakPin = (p: string): boolean => WEAK_PINS.has(p);
+/* B9: daftar PIN lemah terpusat di lib/pin isWeakPin (cakup 4-8 digit). */
 
 export default function ForgotPinScreen({ navigation }: { navigation?: Nav }) {
   const { width } = useWindowDimensions();

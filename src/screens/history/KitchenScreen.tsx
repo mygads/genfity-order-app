@@ -330,6 +330,9 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
         if (res.reason === 'rejected' && /TRANSITION|VALIDATION|CLOSED/i.test(res.code ?? '')) {
           setMoved((m) => { const n = { ...m }; delete n[tk.id]; return n; });
           setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: prev } : sel));
+          // GAP-BL: putar balik juga SQLite (persist optimistis sudah menulis
+          // status maju) agar KDS lokal tak divergen dari server.
+          try { await persistKitchenStatus(tk, prev); } catch { /* best-effort */ }
         }
         if (res.reason === 'rejected') setLiveNotice(res.message || '');
       } catch { /* abaikan: status lokal tetap sah */ } finally {

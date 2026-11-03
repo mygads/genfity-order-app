@@ -159,6 +159,41 @@ function clampIter(n: unknown): number {
   return Math.min(Math.max(v, 1), PIN_ITER);
 }
 
+/**
+ * PIN lemah: semua digit sama (0000, 111111), run berurutan naik/turun
+ * (1234, 4321, 123456, 654321), atau blocklist umum. Satu sumber untuk
+ * semua layar ganti-PIN (install, lupa-PIN, absensi) agar mode offline/lokal
+ * yang tak menyentuh server tetap menolak PIN tebakan. Server (BE) juga
+ * menolak via WEAK_PIN, jadi ini pertahanan lapis kedua, bukan satu-satunya.
+ */
+const WEAK_PIN_BLOCKLIST = new Set([
+  '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+  '00000', '11111', '22222', '33333', '44444', '55555', '66666', '77777', '88888', '99999',
+  '000000', '111111', '222222', '333333', '444444', '555555', '666666', '777777', '888888', '999999',
+  '0000000', '1111111', '2222222', '3333333', '4444444', '5555555', '6666666', '7777777', '8888888', '9999999',
+  '00000000', '11111111', '22222222', '33333333', '44444444', '55555555', '66666666', '77777777', '88888888', '99999999',
+  '1234', '4321', '12345', '54321', '123456', '654321', '1234567', '7654321', '12345678', '87654321',
+  '123123', '121212', '112233', '102030', '101010', '696969',
+]);
+
+export function isWeakPin(pin: unknown): boolean {
+  const p = String(pin ?? '').trim();
+  if (!/^\d{4,8}$/.test(p)) return true;
+  if (WEAK_PIN_BLOCKLIST.has(p)) return true;
+  let allSame = true;
+  for (let i = 1; i < p.length; i += 1) {
+    if (p[i] !== p[0]) { allSame = false; break; }
+  }
+  if (allSame) return true;
+  let asc = true;
+  let desc = true;
+  for (let i = 1; i < p.length; i += 1) {
+    if (p.charCodeAt(i) !== p.charCodeAt(i - 1) + 1) asc = false;
+    if (p.charCodeAt(i) !== p.charCodeAt(i - 1) - 1) desc = false;
+  }
+  return asc || desc;
+}
+
 /** Turunkan record hash dari PIN (PIN asli tidak dikembalikan). */
 export function hashPin(pin: string, salt?: string, iter?: number): {
   salt: string;

@@ -214,6 +214,8 @@ Yang **belum ada di RN** (prioritas):
 | 5 fix member/voucher/deposit (MEM-08) | ✅ DONE: persist outbox + Terapkan `{memberId, nama}` + Topup `saldoBaru` + Voucher lock/unlock/validate/burn via `ApiPath` + Pay→Member konteks order |
 | Kanonik totals/split/master/header/tablet/realtime/esb/promo/shift (P1 ×11) | ✅ DONE: `lib/totals.ts` + SplitBill rata/nominal + katalog/meja live + header tunggal + Login 2-panel + WS/push-retry + outbox ESB + `FEE_DEFAULTS` + `pushAll`/drain |
 | Komponen/log-tanggal/animasi-dark (P2 ×3) | ✅ DONE: `AppInput`/`AppButton` + `tr_applog`/`fmtDate` + §7.4 |
+| QR scan lolos tanpa validasi (GAP-BK) - hasil kamera langsung Pakai, voucher kedaluwarsa/kuota-habis & member asing bisa lolos; edit-setelah-Cek pakai nominal basi | ✅ Nov 2026: `QrScanScreen` - throttle pindaian 1,5 dtk + auto-validasi hasil scan + gerbang Pakai fail-closed (re-validasi bila nilai berubah) + rename `useCode`→`applyCode` (lint rules-of-hooks); tsc 0 + tripwire hijau |
+| Rollback dapur ditolak server hanya memutar balik memori (GAP-BL) - SQLite tetap status maju, divergen dari server | ✅ Nov 2026: `KitchenScreen` - rollback juga `persistKitchenStatus(tk, prev)` best-effort; tsc 0 + tripwire hijau |
 
 ---
 

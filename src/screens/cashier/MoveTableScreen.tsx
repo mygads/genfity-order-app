@@ -6,7 +6,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { useLang } from '../../lib/i18n';
 import { enqueueOutbox, enqueueSync } from '../../lib/sync';
 import { GO_OP_MOVE_TABLE, getServerOrderIdForSale } from '../../lib/posWire';
-import { initDb, query, run } from '../../lib/db';
+import { initDb, query, run, withTransaction } from '../../lib/db';
 import { postTableTransition } from '../../lib/terminalTable';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -147,24 +147,23 @@ export default function MoveTableScreen({ navigation, route }: Props) {
     /* GAP-AI: tolak tap kedua selama pindah berjalan; reset di finally rantai async. */
     if (moveRef.current) return;
     moveRef.current = true;
-    // Catat pindah meja ke antrean sync agar diteruskan ke server (offline-first).
-    try {
-      enqueueSync('other', {
-        op: 'move-table', from: src.table, to: destCode, total: src.total,
-        at: new Date().toISOString(),
-      });
-    } catch {
-      /* antrean belum siap - status lokal di bawah tetap diubah */
-    }
     // Pindah bill di SQLite: seluruh item, catatan (note), modifier, dan total
     // ikut pindah karena baris tr_salesmenu/menuextra menempel ke salesNum.
+    // Atomik + cek hunian di dalam transaksi: dua kasir berebut meja tujuan
+    // tak bisa gabung diam-diam (pakai alur Gabung di Denah untuk itu).
     void (async () => {
       try {
         await initDb();
-        await run(
-          `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status NOT IN ('paid','void')`,
-          [destCode, src.table],
-        );
+        await withTransaction(async () => {
+          const clash = await query<{ salesNum: string }>(
+            `SELECT salesNum FROM tr_saleshead WHERE TRIM(tableNo) = ? AND status NOT IN ('paid','void') LIMIT 1`,
+            [destCode],
+          );
+          if (clash.length > 0) throw new Error('dest-occupied');
+          await run(
+            `UPDATE tr_saleshead SET tableNo = ?, syncDate = NULL WHERE TRIM(tableNo) = ? AND status NOT IN ('paid','void')`,
+            [destCode, src.table],
+          );
         // Tandai bill pindahan kotor per salesNum agar ikut push berikutnya.
         try {
           const moved = await query<{ salesNum: string }>(
@@ -202,15 +201,29 @@ export default function MoveTableScreen({ navigation, route }: Props) {
         try {
           await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE TRIM(tableNo) = ?', ['terisi', destCode]);
         } catch { /* master meja opsional */ }
+        });
+        // L1: antre + Done HANYA setelah tulis lokal sukses (tulis gagal =
+        // tanpa antre yatim dan tanpa Done palsu).
+        try {
+          enqueueSync('other', {
+            op: 'move-table', from: src.table, to: destCode, total: src.total,
+            at: new Date().toISOString(),
+          });
+        } catch {
+          /* antrean belum siap - pindah lokal di atas tetap sah */
+        }
         // A11: pindah meja di server terminal (best-effort; antrean GO_OP_MOVE_TABLE
         // + tulis lokal di atas tetap jadi fallback offline).
         void postTableTransition({ tableRef: src.table, status: 'AVAILABLE' });
         void postTableTransition({ tableRef: destCode, status: 'OCCUPIED' });
-      } catch {
-        /* SQLite belum siap - antrean sync di atas tetap jalan */
+        setDone(true);
+      } catch (e) {
+        if (String((e as Error)?.message ?? '') === 'dest-occupied') {
+          setWarn(t('mov_warn_dst_busy'));
+        }
+        /* Tulis lokal gagal = tanpa antre yatim dan tanpa Done palsu */
       }
     })().finally(() => { moveRef.current = false; });
-    setDone(true);
   };
 
   return (

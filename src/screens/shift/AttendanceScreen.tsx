@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import ScreenHeader from '../../components/ScreenHeader';import { getLang, useLang } from '../../lib/i18n';import type { Lang } from '../../lib/i18n';import { getSession } from '../../session';import { getTerminal } from '../../config/server';import { initDb, markDirty, queryFirst, run } from '../../lib/db';import { enqueueSync, noteServerContact, withTimeout } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { updatePinOnServer } from '../../lib/apiSource';
 import { breakBe, breakPayload, clockInBe, clockInPayload, clockOutBe, clockOutPayload, getPosLocation, shouldQueueW1, updateWorkforcePinOnServer } from '../../lib/beWorkforce';
-import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinPendingSync, isPinPendingSync, markPinPendingSync, savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
+import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinPendingSync, isPinPendingSync, isWeakPin, markPinPendingSync, savePinHash, verifyAttendancePin } from '../../lib/pin';type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };type Props = { navigation?: Nav };const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'];/** Format jam-menit sesuai bahasa (S4-APP-336 display-only, EN = AM/PM). C11 EFF-09:
  * tick jam dinding 1 dtk → 60 dtk (layar ini hanya butuh presisi menit) +
  * fmtClock detik DIHAPUS (satu-satunya pemakai jam-live) agar tampilan = HM. */const fmtClockHM = (d: Date, curLang?: Lang) =>
   d.toLocaleTimeString((curLang ?? getLang()) === 'en' ? 'en-US' : 'id-ID', { hour: '2-digit', minute: '2-digit' }).replace(/\./g, ':');/** Absensi: PIN terverifikasi ke data user, clock-in/out lokal + live W1 ke BE.
@@ -225,6 +225,7 @@ import { isStarterPlanCached } from '../../lib/posConfigSync';import { clearPinP
     const c = clean(confirmPin);
     if (o.length < 4) { setPinMsg(t('att_old_short')); return; }
     if (n.length < 6) { setPinMsg(t('att_new_short')); return; }
+    if (isWeakPin(n)) { setPinMsg(t('pin_weak')); return; }
     if (n !== c) { setPinMsg(t('att_confirm_mismatch')); return; }
     if (o === n) { setPinMsg(t('att_same_pin')); return; }
     // SIDE-B: busy dikunci selama submit (tombol Save disabled) + panggilan
