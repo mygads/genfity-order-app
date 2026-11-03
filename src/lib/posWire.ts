@@ -994,7 +994,30 @@ export async function openWaShare(text: string, phone?: unknown): Promise<boolea
   } catch { return false; }
 }
 
+/* GAP-BU: single-flight kirim-email struk per (order+email) — paritas
+ * GAP-AM (jalur antrean sudah idempoten per kunci). Ketuk-ganda Kirim di
+ * Receipt/Success/History = satu POST server (tanpa email ganda).
+ * Penelepon konkuren dengan kunci SAMA ikut menunggu hasil yang SAMA;
+ * kirim ulang sekuensial (retry sadar user) tetap jalan normal. */
+const emailFlights = new Map<string, Promise<GoResult<{ queued: boolean }>>>();
 export async function sendPosReceiptEmail(
+  serverId: number,
+  email: string,
+): Promise<GoResult<{ queued: boolean }>> {
+  const key = `${Math.round(Number(serverId) || 0)}-${String(email ?? '').trim().toLowerCase()}`;
+  const flying = emailFlights.get(key);
+  if (flying) return flying;
+  const flight = drainSendReceiptEmail(serverId, email);
+  emailFlights.set(key, flight);
+  try {
+    return await flight;
+  } finally {
+    if (emailFlights.get(key) === flight) emailFlights.delete(key);
+  }
+}
+
+/** Isi kirim sendPosReceiptEmail (dipanggil sekali per flight). */
+async function drainSendReceiptEmail(
   serverId: number,
   email: string,
 ): Promise<GoResult<{ queued: boolean }>> {
