@@ -168,6 +168,9 @@ return 'today';}/** Jadwal tampil jam order nyata, else label 'segera' (i18n di 
   const submitCancelPin = (pin: string) => {
     const cur = cancelPin;
     if (!cur) return;
+    /* GAP-DH: guard ketuk-ganda (busy diset tapi tak pernah dicek - dua PIN
+     * submit konkuren = dua cancelMerchantOrder ke server). */
+    if (cancelPinBusy) return;
     if (!pin) { setCancelPin(null); return; }
     setCancelPinBusy(true);
     void (async () => {
