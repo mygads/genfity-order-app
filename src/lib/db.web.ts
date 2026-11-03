@@ -97,14 +97,45 @@ export async function exec(source: string): Promise<void> {
  * Transaksi atomik (#22): cermin db.ts untuk web (WASM). Satu koneksi
  * dbAsync + BEGIN/COMMIT; gagal = ROLLBACK + lempar ulang. Tidak bersarang.
  */
+let txnDepth = 0;
+/** GAP-CF: bersarang via SAVEPOINT (bukan error "cannot start a transaction"
+ * + rollback luar ikut hancur). Inner gagal = rollback parsial ke savepoint,
+ * outer tetap bisa commit/rollback sendiri. Top-level tetap BEGIN IMMEDIATE
+ * (klaim sekuens anti-interleave, GAP-AN). */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   const d = await dbAsync();
+  if (txnDepth > 0) {
+    const sp = `pos_nested_${txnDepth}`;
+    txnDepth += 1;
+    await d.execAsync(`SAVEPOINT "${sp}"`);
+    try {
+      const out = await fn();
+      await d.execAsync(`RELEASE "${sp}"`);
+      txnDepth -= 1;
+      return out;
+    } catch (e) {
+      try {
+        await d.execAsync(`ROLLBACK TO "${sp}"`);
+      } catch {
+        /* abaikan */
+      }
+      try {
+        await d.execAsync(`RELEASE "${sp}"`);
+      } catch {
+        /* abaikan */
+      }
+      txnDepth -= 1;
+      throw e;
+    }
+  }
+  txnDepth = 1;
   /* GAP-AN: BEGIN IMMEDIATE agar klaim sekuens (tr_sales_seq) + belah/void
      tak interleave antar-transaksi (BEGIN deferred = dua klaim baca lastN sama). */
   await d.execAsync('BEGIN IMMEDIATE');
   try {
     const out = await fn();
     await d.execAsync('COMMIT');
+    txnDepth = 0;
     return out;
   } catch (e) {
     try {
@@ -112,6 +143,7 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     } catch {
       /* abaikan */
     }
+    txnDepth = 0;
     throw e;
   }
 }
