@@ -19,11 +19,21 @@ export async function registerBackgroundSync(): Promise<boolean> {
     const tm = require('expo-task-manager') as { defineTask: (n: string, fn: () => Promise<unknown>) => void };
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const bf = require('expo-background-fetch') as { registerTaskAsync: (n: string, o: Record<string, unknown>) => Promise<void> };
+    /* GAP-DI: kembalikan Result ke OS (tanpa ini jadwal backgroundfetch
+     * bisa dipenalti). Baca via dynamic require agar dep tetap opsional. */
+    let Result: { NoData?: unknown; NewData?: unknown; Failed?: unknown } | null = null;
+    try {
+      const bfMod = require('expo-background-fetch') as { Result?: { NoData?: unknown; NewData?: unknown; Failed?: unknown } };
+      Result = bfMod?.Result ?? null;
+    } catch { /* abaikan - fallback undefined */ }
     tm.defineTask(TASK, async () => {
       try {
         const { pendingCount, pushAll } = await import('./sync');
         if (pendingCount() > 0) await pushAll().catch(() => {});
-      } catch { /* abaikan */ }
+        return Result?.NewData ?? Result?.NoData ?? undefined;
+      } catch {
+        return Result?.Failed ?? undefined;
+      }
     });
     await bf.registerTaskAsync(TASK, { minimumInterval: 15 * 60, stopOnTerminate: false, startOnBoot: true });
     registered = true;
