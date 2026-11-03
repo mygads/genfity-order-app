@@ -8,6 +8,7 @@ import { useLang } from '../../lib/i18n';
 import { SERVICE_LEGACY, getServiceConfig, serviceLabel, platformFeeLabel, type ServiceConfig } from '../../lib/totals';
 import { isValidEmail, recordReceiptEmail, type SaleItemIn } from '../../lib/payments';
 import { getSession } from '../../session';
+import { getServerOrderIdForSale, isInvoiceEmailEnabled, sendPosReceiptEmail, serverIdForTxnKey } from '../../lib/posWire';
 import { getTerminal } from '../../config/server';
 import { initDb, run } from '../../lib/db';
 import { getGroupPaid } from '../../lib/sales';
@@ -342,12 +343,35 @@ export default function SuccessScreen({ navigation, route }: Props) {
   const [mailTo, setMailTo] = useState('');
   const [mailMsg, setMailMsg] = useState('');
 
-  const sendMail = () => {
-    if (!isValidEmail(mailTo)) {
+  // S-F9: kirim via server bila invoice-email aktif (paritas ReceiptScreen);
+  // fallback antrean ESB lokal bila offline/setting mati.
+  const sendMail = async () => {
+    const mail = mailTo.trim();
+    if (!isValidEmail(mail)) {
       setMailMsg(t('hist_mail_bad'));
       return;
     }
-    recordReceiptEmail(mailTo, orderNo, total, method);
+    const cid = String(route?.params?.clientId ?? '').trim() || orderNo;
+    const sid = serverIdForTxnKey(cid) ?? (await getServerOrderIdForSale(orderNo));
+    const gate = await isInvoiceEmailEnabled();
+    if (gate === false) {
+      recordReceiptEmail(mail, orderNo, total, method);
+      setMailMsg(t('hist_mail_off'));
+      return;
+    }
+    if (typeof sid === 'number' && sid > 0) {
+      const res = await sendPosReceiptEmail(sid, mail);
+      if (res.ok) {
+        setMailMsg(t('hist_mail_sent'));
+        return;
+      }
+      if (res.reason === 'rejected') {
+        recordReceiptEmail(mail, orderNo, total, method);
+        setMailMsg(t('hist_mail_off'));
+        return;
+      }
+    }
+    recordReceiptEmail(mail, orderNo, total, method);
     setMailMsg(t('hist_mail_queued'));
   };
 

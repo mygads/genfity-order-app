@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { TABLET_BP, colors, fonts, rp, rpNum, wideCenterLg } from '../../theme';
+import { useFocusEffect } from '@react-navigation/native';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
 import { fmtDateInTz } from '../../lib/datefmt';
@@ -468,6 +469,21 @@ export default function MemberScreen({ navigation, route }: Props) {
           void cacheServerPoints(id, pts);
         }
         if (!live || mapped.length === 0) return;
+        // S-F9: saldo deposit otoritatif lokal (ledger ms_member terdebit
+        // in-txn saat bayar deposit; snapshot server bisa basi). Poin tetap
+        // server-wins. Tanpa ini daftar menimpa potongan deposit yang baru
+        // dibayar (mis. 150rb kembali padahal sudah 125rb).
+        try {
+          const freshLocal = await loadMembersFromSqlite();
+          if (freshLocal.length > 0) {
+            const byId = new Map(freshLocal.map((m) => [m.id, m.saldo]));
+            for (const m of mapped) {
+              if (byId.has(m.id)) m.saldo = byId.get(m.id) as number;
+            }
+          }
+        } catch {
+          /* abaikan - angka server tetap dipakai */
+        }
         setMembers(mapped);
         setSelected((sb) => (sb ? mapped.find((m) => m.id === sb.id) ?? sb : sb));
       } catch {
@@ -476,6 +492,35 @@ export default function MemberScreen({ navigation, route }: Props) {
     })();
     return () => { live = false; };
   }, []);
+
+  // S-F9: muat ulang saldo lokal tiap layar difokuskan (pembayaran deposit
+  // terjadi di layar lain; state mount bisa basi). Hanya saldo yang
+  // ditimpa - poin/tipe server tetap.
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      (async () => {
+        try {
+          const fresh = await loadMembersFromSqlite();
+          if (!live || fresh.length === 0) return;
+          const byId = new Map(fresh.map((m) => [m.id, m.saldo]));
+          setMembers((prev) =>
+            prev.length === 0
+              ? fresh
+              : prev.map((m) => (byId.has(m.id) ? { ...m, saldo: byId.get(m.id) as number } : m)),
+          );
+          setSelected((sb) =>
+            sb && byId.has(sb.id) ? { ...sb, saldo: byId.get(sb.id) as number } : sb,
+          );
+        } catch {
+          /* abaikan */
+        }
+      })();
+      return () => {
+        live = false;
+      };
+    }, []),
+  );
 
   // M1: pencarian server via /customers/search (GET ?q,take, debounce 400ms,
   // hanya saat online + kata kunci tak kosong). Baris server dicocokkan ke
