@@ -5,7 +5,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';
 import { useLang } from '../../lib/i18n';
 import { getJSON } from '../../lib/storage';
-import { initDb, query } from '../../lib/db';
+import { initDb, query, run } from '../../lib/db';
 import { isCatalogImageReady, noteCatalogImageError, prefetchCatalogImage } from '../../lib/catalogImages';
 import { getBranchId } from '../../config/server';
 import {
@@ -52,6 +52,9 @@ const DEFAULT_OPTS: StockOpts = { trackStock: true, lowWarn: false, lowLimit: '5
 
 function deriveStatus(r: StockRow, tracked: boolean, lowEff: number): Status {
   if (!r.active) return 'inactive';
+  // UAT 2026-11-04: flag Habis manual menang atas pelacakan - item tak
+  // dilacak pun bisa ditandai Habis (kasir gate flagSoldOut, bukan qty).
+  if (r.soldOut) return 'out';
   if (!tracked) return 'untracked';
   if (r.qty <= 0) return 'out';
   if (r.qty <= lowEff) return 'low';
@@ -82,6 +85,55 @@ function ItemCard(props: {
         globalTrack,
         localTrack: flags?.track ?? true,
       });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * UAT 2026-11-04: Mark Out manual = toggle flagSoldOut eksplisit.
+   * persistBranchQty saja tak cukup untuk item TAK dilacak (flag dipertahankan,
+   * bukan diturunkan dari qty) sehingga Habis tak pernah berlaku di kasir.
+   * Urutan: tulis qty dulu (antrean server + optimistic-lock utuh), lalu flag.
+   */
+  const setManualOut = async (out: boolean) => {
+    await initDb();
+    const branchId = getBranchId();
+    const table = row.kind === 'addon' ? 'ms_branchaddon' : 'ms_branchmenu';
+    const idCol = row.kind === 'addon' ? 'addonId' : 'menuId';
+    await run(
+      `INSERT INTO ${table} (branchId, ${idCol}, flagSoldOut, flagActive, syncDate) VALUES (?, ?, ?, 1, NULL)` +
+        ` ON CONFLICT(branchId, ${idCol}) DO UPDATE SET flagSoldOut = excluded.flagSoldOut, syncDate = NULL`,
+      [branchId, row.id, out ? 1 : 0],
+    );
+    try {
+      const { enqueueOutbox } = await import('../../lib/sync');
+      await enqueueOutbox(table, `${branchId}:${row.id}`, 'update');
+    } catch {
+      /* antrean gagal = flag lokal tetap, dorong server best-effort */
+    }
+  };
+
+  const toggleOut = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const flags = await getAllLocalFlags(row.kind).then((m) => m.get(row.id));
+      if (row.soldOut) {
+        const up = row.template ?? Math.max(row.qty, 1);
+        await persistBranchQty(row.kind, row.id, cleanQty(up, row.qty), {
+          globalTrack,
+          localTrack: flags?.track ?? true,
+        });
+        await setManualOut(false);
+      } else {
+        await persistBranchQty(row.kind, row.id, cleanQty(0, row.qty), {
+          globalTrack,
+          localTrack: flags?.track ?? true,
+        });
+        await setManualOut(true);
+      }
       onChanged();
     } finally {
       setBusy(false);
@@ -151,9 +203,10 @@ function ItemCard(props: {
             <Text style={styles.stepTextSm}>+10</Text>
           </Pressable>
         </View>
-        {/* FE handleMarkOutOfStock = set stockQty 0 (bukan flag) - konsisten web↔APP. */}
-        <Pressable style={[styles.outBtn, busy && styles.btnBusy]} onPress={() => saveQty(0)} disabled={busy}>
-          <Text style={styles.outText}>{t('stockMgmt.markOut')}</Text>
+        {/* UAT 2026-11-04: toggle Habis manual - flag eksplisit agar berlaku
+            untuk item tak dilacak; kasir gate flagSoldOut (bukan qty). */}
+        <Pressable style={[styles.outBtn, busy && styles.btnBusy]} onPress={() => void toggleOut()} disabled={busy}>
+          <Text style={styles.outText}>{row.soldOut ? t('stockMgmt.markAvailable') : t('stockMgmt.markOut')}</Text>
         </Pressable>
       </View>
       {/* FE handleResetToTemplate: kirim qty = template via jalur absolut yang sama

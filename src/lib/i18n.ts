@@ -1177,6 +1177,7 @@ const STR: Record<string, Entry> = {
   'stockMgmt.badgeLow': { id: 'MENIPIS', en: 'LOW' },
   'stockMgmt.badgeOk': { id: 'SEHAT', en: 'HEALTHY' },
   'stockMgmt.markOut': { id: 'Tandai Habis (= 0, terkirim ke server)', en: 'Mark Out (= 0, pushed to server)' },
+  'stockMgmt.markAvailable': { id: 'Tandai Tersedia', en: 'Mark Available' },
   'stockMgmt.resetTpl': { id: 'Reset ke template ({n})', en: 'Reset to template ({n})' },
   'stockMgmt.resetAll': { id: 'Reset semua ke template ({n})', en: 'Reset all to template ({n})' },
   'stockMgmt.threshold': { id: 'Ambang rendah', en: 'Low threshold' },
