@@ -46,6 +46,21 @@ export function customerIdFromLocalKey(key: unknown): number | null {
   return parseCustomerId(m[1]);
 }
 
+/**
+ * GAP-CF: True = id ruang loyalti (BUKAN akun deposit): numerik murni
+ * (membership lm.id BE) atau UUID berdashes. Akun deposit = alias M/MC/teks
+ * lain. Fail-open: format tak dikenal = dianggap deposit (perilaku lama),
+ * penolakan final tetap di server (4xx fail-once). Dipakai gerbang UI
+ * topup-deposit agar uang tak masuk baris poin.
+ */
+export function isLoyaltyOnlyMemberId(v: unknown): boolean {
+  const t = String(v ?? '').trim();
+  if (!t) return false;
+  if (/^[0-9]+$/.test(t)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return true;
+  return false;
+}
+
 /** True = token member ALIAS (prefix M/MC/teks lain) - bukan customerId GO.
  *  Dipakai guard runtime + tripwire: alias TAK BOLEH masuk payload settle. */
 export function isAliasMemberId(v: unknown): boolean {

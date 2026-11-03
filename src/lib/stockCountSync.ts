@@ -45,16 +45,20 @@ export function matchDraftItem(
 ): DraftCountItem | null {
   const key = normName(name);
   if (!key) return null;
-  let firstMenu: DraftCountItem | null = null;
+  let winner: DraftCountItem | null = null;
+  let menuDupes = 0;
   for (const it of draft) {
     if (!it || normName(it.name) !== key) continue;
     if (String(it.itemType ?? '').trim().toUpperCase() !== 'MENU') continue;
-    if (!firstMenu) firstMenu = it;
-    break;
+    menuDupes += 1;
+    if (!winner) winner = it;
   }
   // Menangkan MENU (sumber lokal = menu). Tanpa baris MENU = skip (null)
   // meski ada baris ADDON senama — submit-buta ke tipe salah = korupsi data.
-  return firstMenu;
+  // Dua baris MENU senama (duplikat lintas kategori, kontrak draf tak bawa
+  // kategori) = skip jujur juga: first-wins bisa mendarat di baris yang salah.
+  if (menuDupes !== 1) return null;
+  return winner;
 }
 
 function cleanQty(v: unknown): number {

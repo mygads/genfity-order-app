@@ -470,7 +470,7 @@ async function persistVoid( orderId: string, voidLines: { id: string; qty: numbe
    * outbox + antrean sync. */
   const approveVoid = (res: { supervisorUserId: string }) => { /* GAP-O: tolak panggilan kedua saat void pertama masih jalan. */ if (voidBusyRef.current) return; voidBusyRef.current = true;
    setApproveOpen(false);
-   const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); void persistVoid(orderId, lines, reason, res.supervisorUserId || undefined).finally(() => { voidBusyRef.current = false; setDone(true);
+   const lines = picked.map((i) => ({ id: i.id, qty: voidQty[i.id] ?? 0 })); setAuthMsg(''); void persistVoid(orderId, lines, reason, res.supervisorUserId || undefined).then(() => { setDone(true); }).catch(() => { setAuthMsg(t('hist_void_fail')); }).finally(() => { voidBusyRef.current = false; /* GAP-BQ: layar sukses HANYA sesudah tulis DB berhasil (dulu finally = sukses palsu). */
  }); };
 
   /** Empty-state: DB nol-baris / tanpa orderId - tanpa ITEMS/SPLITS/TRX-047 mock.

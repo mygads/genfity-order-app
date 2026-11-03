@@ -24,8 +24,7 @@ import { searchServerCustomers } from '../../lib/posWire';
 import {
   customerIdFromLocalKey,
   localMemberKeyForCustomer,
-  parseCustomerId,
-} from '../../lib/memberRef';
+  parseCustomerId, isLoyaltyOnlyMemberId } from '../../lib/memberRef';
 import { getMemberLookupEnabled, isStarterPlanCached } from '../../lib/posConfigSync';
 import { isValidEmail } from '../../lib/payments';
 import { enqueueOutbox, enqueueOutboxPhysical, enqueueSync } from '../../lib/sync';
@@ -35,7 +34,7 @@ import { getSession } from '../../session';
 import { getShiftBlockKind } from '../../lib/shiftGuard';
 import * as Network from 'expo-network';
 
-type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
+type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void; setParams?: (params: Record<string, unknown>) => void };
 /** Konteks order opsional (cermin params Pay): dibawa saat Member dibuka dari
  * alur transaksi agar Terapkan ke Pay tidak me-reset order berjalan. */
 type OrderCtx = {
@@ -703,6 +702,11 @@ export default function MemberScreen({ navigation, route }: Props) {
     const baru = route?.params?.saldoBaru;
     const topup = route?.params?.topupNominal;
     if (!mid || typeof baru !== 'number') return;
+    /* GAP-CJ: konsumsi SEKALI lalu bersihkan param. Tanpa ini saldo basi
+     * menempel di param rute (navigasi merge): tiap remount menerapkan
+     * ulang saldo lama + menumpuk baris riwayat hantu; navigasi gabungan
+     * berikut (Pay/BillPreview) ikut membawa saldo basi. */
+    try { navigation?.setParams?.({ saldoBaru: undefined, topupNominal: undefined }); } catch { /* abaikan */ }
     setMembers((ms) => ms.map((m) => (m.id === mid ? { ...m, saldo: baru } : m)));
     setSelected((sb) => (sb && sb.id === mid ? { ...sb, saldo: baru } : sb));
     // M1: tanpa earn poin lokal - poin milik loyalty server (muncul via pull /
@@ -763,7 +767,7 @@ export default function MemberScreen({ navigation, route }: Props) {
     }
     setAddErr('');
     if (nama.trim() && noHp.trim()) {
-      const id = `M${String(Date.now()).slice(-6)}`;
+      const id = `M${uuidv7().replace(/-/g, '').slice(0, 12).toUpperCase()}`; /* GAP-BO: uuid ganti Date.now 6-digit (tabrakan ms + antar-perangkat saat sync) */
       const nm = nama.trim();
       const hp = noHp.trim();
       void persistMember(id, nm, hp, mail || undefined);
@@ -824,6 +828,13 @@ export default function MemberScreen({ navigation, route }: Props) {
       }
       setDepositErr('');
       const mid = selected.id;
+      // GAP-CF: baris poin loyalti (id ruang lm BE) bukan akun deposit -
+      // tolak jujur di UI agar uang tak masuk baris poin (penolakan final
+      // tetap server via 4xx fail-once).
+      if (isLoyaltyOnlyMemberId(mid)) {
+        setDepositErr(t('mem_deposit_points_only'));
+        return;
+      }
       // A-P1-3: SATU jalur tulis (persistDeposit) server-dulu. Bump daftar/UI +
       // riwayat + tutup modal HANYA bila posted; bila antre/offline, modal tetap
       // terbuka dengan banner pending (tanpa saldo optimistis) - kredit server

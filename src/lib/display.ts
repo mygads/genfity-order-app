@@ -356,7 +356,10 @@ export function resolveDisplaySseTerminalId(): string {
 // Gagal resolve (offline/BE absen) = id mentah = kosong jujur (fail-closed).
 // ---------------------------------------------------------------------------
 
-const pairedCodeCache = new Map<string, string>();
+// TTL 10 mnt: kode terminal bisa berubah (pairing ulang/ganti perangkat);
+// tanpa kedaluwarsa, predikat D1 macet di kode lama seumur proses.
+const PAIRED_CODE_TTL_MS = 10 * 60_000;
+const pairedCodeCache = new Map<string, { code: string; at: number }>();
 
 /** Kode terminal kasir pasangan untuk predikat SQLite lokal (D1). */
 export async function resolvePairedKasirCode(branchId: string, pairedKasirId: string): Promise<string> {
@@ -364,7 +367,7 @@ export async function resolvePairedKasirCode(branchId: string, pairedKasirId: st
   if (!pid) return '';
   const key = `${String(branchId ?? '').trim()}::${pid}`;
   const hit = pairedCodeCache.get(key);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < PAIRED_CODE_TTL_MS) return hit.code;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const api = require('./terminalApi') as typeof import('./terminalApi');
@@ -374,7 +377,7 @@ export async function resolvePairedKasirCode(branchId: string, pairedKasirId: st
         if (String(t?.terminalId ?? '').trim() === pid) {
           const code = String(t?.terminalCode ?? '').trim();
           if (code) {
-            pairedCodeCache.set(key, code);
+            pairedCodeCache.set(key, { code, at: Date.now() });
             return code;
           }
         }

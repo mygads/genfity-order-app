@@ -131,15 +131,16 @@ function RealQr({ payload }: { payload: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrChainId, hasTotal]);
 
-  // Cek status  tiap 10 dtk saat menunggu (backend asli / simulasi dummy).
+  /* GAP-CK: cek-otomatis menumpang tick countdown (tiap seconds % 10 === 0).
+   * Dulu timeout 10 dtk di efek deps [status, seconds] = tiap tick 1 dtk me-reset
+   * timer sehingga cek-otomatis TAK PERNAH jalan (hanya tombol manual hidup).
+   * Bentuk interval terpisah tak dipakai agar closure doCheck selalu segar
+   * (charge/status terbaru); guard `waiting` cegah poll tumpang-tindih. */
   useEffect(() => {
     if (status !== 'waiting') return;
-    const t = setTimeout(() => {
-      void doCheck();
-    }, 10000);
-    return () => clearTimeout(t);
+    if (seconds % 10 === 0) void doCheck();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, seconds]);
+  }, [seconds]);
 
   /** Selesaikan pembayaran: satu nomor TRX untuk DB + Success (sekali saja).
    * Nomor + kaki split terusan dari Pay dipakai ulang (sisa QRIS = kaki

@@ -30,7 +30,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
   const [free, setFree] = useState('');
   const [added, setAdded] = useState<string[]>([]);
   const [warn, setWarn] = useState('');
-  /* GAP-AV2: throttle tambah-item (ketuk-ganda = item custom ganda di kasir). */
+  /* GAP-AV2: throttle tambah-item (ketuk-ganda = item custom ganda di kasir). GAP-BX: kunci list pakai indeks (label sama ganda = key duplikat). */
   const addAt = useRef(0);
 
   useEffect(() => {
@@ -107,7 +107,7 @@ export default function CustomMenuScreen({ navigation, route }: Props) {
       <Text style={styles.hint}>{t('customMenuHint')}</Text>
       {added.length === 0
         ? <Text style={styles.empty}>{t('emptyCustom')}</Text>
-        : added.map((a) =><Text key={a} style={styles.added}>• {a}</Text>)}
+        : added.map((a, i) =><Text key={`${a}-${i}`} style={styles.added}>• {a}</Text>)}
       {/* Tablet: form item kiri, notes+preview kanan; phone tetap susun vertikal. */}
       <View style={[isTablet && styles.cols]}>
       <View style={[isTablet && styles.col]}>

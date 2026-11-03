@@ -7,7 +7,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { useLang } from '../../lib/i18n';
 import { ensureShiftOpen } from '../../lib/shiftGuard';
-import { initDb, query, run } from '../../lib/db';
+import { initDb, query, queryFirst, run } from '../../lib/db';
 import { getJSON, setJSON } from '../../lib/storage';
 import { getBranchId, getTerminal } from '../../config/server';
 import { enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';
@@ -48,7 +48,30 @@ const NEXT: Record<Status, Status | null> = { Terjadwal: 'Datang', Datang: 'Sele
  * cabang A tak bocor ke cabang B. */
 /** M9: '' = unbound - segmen kunci 'unbound' (tanpa fallback B001 agar reservasi
  * cabang A tak bocor/terbaca sebagai cabang lain). */
-const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || '').trim() || 'unbound'}`;
+export const bookKeyFor = (branchId: string) => `genfity.booking.list.${(branchId || '').trim() || 'unbound'}`;
+
+/** GAP-BT: bentrok reservasi hari-ini untuk satu meja+jam (dipakai layar
+ * Tables agar booking denah tak menumpuk reservasi jalur kasir). Tak pernah
+ * melempar (gagal baca = anggap tak bentrok, denah tetap jalan). */
+export async function hasBookingClashToday(tableNo: string, timeHHMM: string): Promise<boolean> {
+  try {
+    let branch = '';
+    try { branch = getBranchId(); } catch { branch = ''; }
+    const list = await getJSON<Resv[]>(bookKeyFor(branch), []);
+    if (!Array.isArray(list) || list.length === 0) return false;
+    const wantTable = canonTableNo(tableNo);
+    const wantTime = String(timeHHMM ?? '').trim();
+    const todayIso = isoDayLocal(new Date());
+    return list.some((r) =>
+      (r.status === 'Terjadwal' || r.status === 'Datang') &&
+      canonTableNo(String(r.table ?? '')) === wantTable &&
+      String(r.time ?? '').trim() === wantTime &&
+      (String(r.date ?? '').trim() === 'Hari ini' || resvDateToIso(String(r.date ?? '')) === todayIso),
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** Baris meja untuk chip + validasi kapasitas (kanonis fallback / live ms_table). */
 interface LiveTable { no: string; section: string; kap: number; }
@@ -287,7 +310,7 @@ export default function BookingScreen({ navigation }: Props) {
   // GAP-F (paritas TablesScreen bookingSavingRef): guard ketuk-ganda save.
   const savingRef = useRef(false);
 
-  const save = () => {
+  const save = async () => {
     // U5: mutasi booking = gerbang bound terminal (fail-closed).
     if (!branchId.trim()) {
       setWarn(t('terminal_unbound_hint'));
@@ -317,6 +340,22 @@ export default function BookingScreen({ navigation }: Props) {
       savingRef.current = false;
       return;
     }
+    // GAP-BT: meja yang fisiknya terisi/gabung di denah tak bisa dibooking;
+    // 'dipesan' mengandalkan cek-bentrok daftar di bawah (store kini tunggal
+    // dua arah dengan booking denah). Master absen = lanjut cek-bentrok.
+    try {
+      await initDb();
+      const st = await queryFirst<{ status: string | null }>(
+        'SELECT status FROM ms_table WHERE TRIM(tableNo) = ? OR id = ? LIMIT 1',
+        [code, code],
+      );
+      const v = String(st?.status ?? '').trim().toLowerCase();
+      if (v === 'terisi' || v === 'gabung' || v === 'occupied' || v === 'busy' || v === 'merged' || v === 'merge') {
+        setWarn(t('tbl_bk_not_free'));
+        savingRef.current = false;
+        return;
+      }
+    } catch { /* master belum tersedia - lanjut cek-bentrok daftar */ }
     // Cegah reservasi ganda: meja + tanggal + jam sama yang masih terjadwal.
     // (Slot beda jam di hari sama tetap boleh - makan siang vs malam.)
     const clash = list.some((r) => r.id !== editingId
@@ -639,7 +678,7 @@ export default function BookingScreen({ navigation }: Props) {
       <AppButton
         size="md"
         title={editingId ? t('bok_save_changes') : `${t('bok_save')} ›`}
-        onPress={save}
+        onPress={() => void save()}
         style={styles.primary}
       />
       {editingId ? (

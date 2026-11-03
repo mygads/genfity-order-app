@@ -151,7 +151,9 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
   }, [promos.length]);
 
   const hasPromo = dbPromos.length > 0;
-  const promo = promos[idx];
+  /* GAP-CI: jepit indeks (dbPromos bisa menyusut sesudah sync saat idx
+   * besar = promos[idx] undefined = render crash pada promo.title). */
+  const promo = promos[idx % promos.length] ?? promos[0];
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.body, isTablet && wideCenterLg]}>
@@ -184,7 +186,7 @@ function ClockView({ isTablet }: { isTablet: boolean }) {
           <Text style={[styles.promoDescOver, isTablet && styles.promoDescOverBig]} numberOfLines={2}>{promo.desc}</Text>
           <View style={styles.dotsOver}>
             {promos.map((p, i) => (
-              <TouchableOpacity key={p.id} onPress={() => setIdx(i)} style={[styles.dot, i === idx && styles.dotActive]} />
+              <TouchableOpacity key={p.id} onPress={() => setIdx(i)} style={[styles.dot, i === (idx % promos.length) && styles.dotActive]} />
             ))}
           </View>
         </View>

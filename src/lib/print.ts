@@ -602,6 +602,64 @@ async function printReceiptToSingle(r: EscReceipt, d: ResolvedStation | null): P
   return { ok: true, bytes: res.bytes, printer: d.name, payloadBase64 };
 }
 
+/** GAP-CL: opsi tiket dapur MenuPrinting (device-local).
+ * Sumber: ms_setting('menuPrint','opts') -> AsyncStorage
+ * 'genfity.menuPrint.opts' -> default {topMargin:'2', showPaymentInfo:false,
+ * showSalesTime:true}. Tak pernah melempar (fail-closed ke default).
+ * - showSalesTime=false mematikan jam tiket (prioritas di bawah pemanggil
+ *   eksplisit + KitchenTemplateJSON).
+ * - topMargin = 0..10 baris kosong di atas tiket.
+ * - showPaymentInfo = legacy no-op (tiket dapur by design tanpa harga/
+ *   pembayaran; tak ada blok pembayaran yang bisa ditampilkan).
+ * - printLabel per rute = reserved (persist saja, belum ada printer label
+ *   terpisah di jalur KDS Dapur/Checker; tak dibaca agar tak salah-cetak). */
+export async function getMenuPrintOpts(): Promise<{ topMargin: number; showSalesTime: boolean }> {
+  const DEF = { topMargin: 2, showSalesTime: true };
+  try {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const db = require('./db') as typeof import('./db');
+      await db.initDb();
+      const row = await db.queryFirst<{ value1: string | null }>(
+        "SELECT value1 FROM ms_setting WHERE key1 = 'menuPrint' AND key2 = 'opts' LIMIT 1",
+      );
+      if (row?.value1) {
+        const raw = JSON.parse(String(row.value1)) as { topMargin?: unknown; showSalesTime?: unknown };
+        return {
+          topMargin: clampTopMargin(raw.topMargin, DEF.topMargin),
+          showSalesTime: raw.showSalesTime === false ? false : true,
+        };
+      }
+    } catch { /* fallback cache JSON */ }
+    const cached = await getJSON<{ topMargin?: unknown; showSalesTime?: unknown }>(
+      'genfity.menuPrint.opts',
+      {},
+    );
+    if (cached && (cached.topMargin !== undefined || cached.showSalesTime !== undefined)) {
+      return {
+        topMargin: clampTopMargin(cached.topMargin, DEF.topMargin),
+        showSalesTime: cached.showSalesTime === false ? false : true,
+      };
+    }
+  } catch { /* default aman */ }
+  return { ...DEF };
+}
+
+function clampTopMargin(v: unknown, fallback: number): number {
+  const n = typeof v === 'string' ? Number(v.trim()) : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(10, Math.floor(n)));
+}
+
+function withTopFeed(bytes: Uint8Array, feed: number): Uint8Array {
+  if (!feed || feed <= 0) return bytes;
+  const head = new Uint8Array(feed).fill(0x0a);
+  const out = new Uint8Array(head.length + bytes.length);
+  out.set(head, 0);
+  out.set(bytes, head.length);
+  return out;
+}
+
 /**
  * Cetak tiket dapur/checker ke station perannya (bukan printer kasir).
  * `station`: id kanonis ('ST-DAPUR') atau nama peran ('Dapur'/'Checker') -
@@ -635,6 +693,13 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
       if (t.lang === undefined) t = { ...t, lang: (k.receiptLanguage ?? 'en') };
     }
   } catch { /* default builder */ }
+  // GAP-CL: hormati opsi device-local MenuPrinting (prioritas terendah:
+  // pemanggil eksplisit + KitchenTemplateJSON menang).
+  try {
+    const mp = await getMenuPrintOpts();
+    if (t.showTime === undefined && mp.showSalesTime === false) t = { ...t, showTime: false };
+    // showPaymentInfo legacy no-op: tak ada blok pembayaran di tiket dapur.
+  } catch { /* default builder */ }
   const d = await kitchenStation(station);
   if (!d) {
     appAlert(
@@ -642,7 +707,12 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
       prn('prn_kitchen_no_station', { s: station }),
     );
     // Tanpa target pun byte MASUK antrean (tanpa-target) - bukan hilang.
-    const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32, cut: t.cut ?? (await globalAutocut()) });
+    // GAP-CL: topMargin ikut byte antrean agar hasil cetak ulang konsisten.
+    const topFeedQ = await getMenuPrintOpts().then((o) => o.topMargin).catch(() => 2);
+    const bytes = withTopFeed(
+      buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? 32, cut: t.cut ?? (await globalAutocut()) }),
+      topFeedQ,
+    );
     const queuedId = await enqueuePrintJob(bytes, null, {
       kind: 'kitchen',
       label: t.no,
@@ -651,7 +721,12 @@ export async function printKitchenTicket(station: string, t: EscKitchenTicket): 
     return { ok: false, reason: 'no-printer' };
   }
   // Lebar kertas ikut station dapur kecuali pemanggil menentukan sendiri.
-  const bytes = buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols, cut: t.cut ?? d.autocut ?? (await globalAutocut()) });
+  // GAP-CL: topMargin (baris kosong atas) dari MenuPrinting.
+  const topFeed = await getMenuPrintOpts().then((o) => o.topMargin).catch(() => 2);
+  const bytes = withTopFeed(
+    buildKitchenTicketBytes({ ...t, station, cols: t.cols ?? d.cols, cut: t.cut ?? d.autocut ?? (await globalAutocut()) }),
+    topFeed,
+  );
   const res = await printBytes(d.target, bytes);
   if (!res.ok) {
     appAlert(

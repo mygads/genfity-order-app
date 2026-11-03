@@ -215,6 +215,15 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
   // (topMargin/showPay/showTime). Model data (printLabel, PrintOpts) tetap
   // dipertahankan + ikut tersimpan (persistRoutes/ms_setting) tanpa UI.
   const stationLabel = (id: StationId) => id === 'kasir' ? t('mprint.st_kasir') : id === 'dapur' ? t('mprint.st_dapur') : id === 'checker' ? t('mprint.st_checker') : id === 'label' ? t('mprint.st_label') : t('mprint.st_none');
+  /** GAP-CL: KDS hanya punya filter Dapur/Checker (KitchenScreen.stationOf
+   * collapse: kasir->Checker, label/none->otomatis per mode/meja). Tanpa
+   * mengubah KitchenScreen (tripwire W1-05 K4 = komentar-saja), tampilkan
+   * tujuan KDS jujur agar pilihan Kasir/Label/None tak dikira printer
+   * terpisah. Routing stationId tetap ditulis ke ms_menu (Dapur/Checker
+   * efektif); opsi MenuPrinting kini dibaca printKitchenTicket
+   * (getMenuPrintOpts: topMargin + showSalesTime; showPaymentInfo legacy
+   * no-op karena tiket dapur tanpa harga; printLabel reserved). */
+  const effectiveHint = (id: StationId) => id === 'dapur' || id === 'checker' ? '' : id === 'kasir' ? ` - KDS: ${stationLabel('checker')}` : ` - KDS: ${t('mprint.kdsAuto')}`;
 
   return (
     <View style={styles.root}>
@@ -227,7 +236,7 @@ async function persistRoutes(routes: MenuRoute[], opts: PrintOpts): Promise<void
           <View style={styles.cardTop}>
             <View style={styles.cardLeft}>
               <Text style={styles.groupName}>{r.group}</Text>
-              <Text style={styles.groupMeta}>{t('mprint.groupMeta').replace('{n}', String(r.items)).replace('{s}', stationLabel(r.station))}</Text>
+              <Text style={styles.groupMeta}>{t('mprint.groupMeta').replace('{n}', String(r.items)).replace('{s}', stationLabel(r.station))}{effectiveHint(r.station)}</Text>
             </View>
             <Image source={require('../../../assets/images/empty_menu.webp')} style={styles.thumb} resizeMode="contain" />
           </View>

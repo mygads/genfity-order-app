@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { requireAccess } from '../../lib/access';import { appAlert } from '../../lib/appAlert';import { initDb, query, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
+  useWindowDimensions,} from 'react-native';import { TABLET_BP, colors, fonts, rp, wideCenterLg } from '../../theme';import ScreenHeader from '../../components/ScreenHeader';import AppInput from '../../components/AppInput';import AppButton from '../../components/AppButton';import DrawerMenu from '../../components/DrawerMenu';import { useLang } from '../../lib/i18n';import { getSession } from '../../session';import { getBranchId } from '../../config/server';import { requireAccess } from '../../lib/access';import { appAlert } from '../../lib/appAlert';import { initDb, query, queryFirst, run } from '../../lib/db';import { getJSON, setJSON } from '../../lib/storage';import { enqueueOutbox, enqueueSync } from '../../lib/sync';import { uuidv7 } from '../../lib/uuidv7';import { TABLE_TIMER_TIM_KEY, canonTableNo } from '../settings/TableTimerScreen';import { bookKeyFor, hasBookingClashToday } from '../booking/BookingScreen';import { postTableTransition, TABLE_SERVER_NOTE_KEY } from '../../lib/terminalTable';type Props = { navigation?: any };type TableStatus = 'kosong' | 'terisi' | 'dipesan' | 'gabung';type Table = {
   id: string;
   no: string;
   section: string;
@@ -211,6 +211,68 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
     } catch {
       /* DB belum siap - mulai order baru */
     }
+    // GAP-BZ: meja terisi tanpa draft tapi bill terbuka di tr_saleshead =
+    // jangan mulai order kosong ganda; muat bill terbuka ke kasir.
+    try {
+      await initDb();
+      const head = await queryFirst<{
+        salesNum: string | null; salesMode: string | null; customerName: string | null;
+        ongkir: number | null; memberId: string | null; voucherCode: string | null; voucherAmount: number | null;
+      }>(
+        "SELECT salesNum, salesMode, customerName, ongkir, memberId, voucherCode, voucherAmount FROM tr_saleshead WHERE TRIM(COALESCE(tableNo,'')) = TRIM(?) AND status NOT IN ('paid','void') ORDER BY createdAt DESC LIMIT 1",
+        [tb.no],
+      );
+      if (head && head.salesNum) {
+        const lines = await query<{
+          id: string | null; menuId: string | null; menuName: string | null;
+          qty: number | null; price: number | null; discount: number | null; note: string | null;
+        }>(
+          'SELECT id, menuId, menuName, qty, price, discount, note FROM tr_salesmenu WHERE salesNum = ?',
+          [head.salesNum],
+        );
+        if (lines.length > 0) {
+          let extras: { salesMenuId: string | null; extraName: string | null; price: number | null }[] = [];
+          try {
+            extras = await query<{ salesMenuId: string | null; extraName: string | null; price: number | null }>(
+              'SELECT salesMenuId, extraName, price FROM tr_salesmenuextra WHERE salesNum = ?',
+              [head.salesNum],
+            );
+          } catch {
+            extras = [];
+          }
+          const byMenu = new Map<string, { name: string; price: number }[]>();
+          for (const x of extras) {
+            const k = String(x.salesMenuId ?? '');
+            if (!k) continue;
+            const arr = byMenu.get(k) ?? [];
+            arr.push({ name: String(x.extraName ?? ''), price: Math.max(0, Math.round(Number(x.price) || 0)) });
+            byMenu.set(k, arr);
+          }
+          const modeLabel = String(head.salesMode ?? '').replace(/_/g, ' ').trim();
+          navigation?.navigate?.('Cashier', {
+            loadItems: lines.map((l) => ({
+              id: String(l.menuId ?? l.id ?? ''),
+              name: String(l.menuName ?? ''),
+              basePrice: Math.max(0, Math.round(Number(l.price) || 0)),
+              qty: Math.max(1, Math.round(Number(l.qty) || 1)),
+              modifiers: byMenu.get(String(l.id ?? '')) ?? [],
+              discount: Math.max(0, Math.round(Number(l.discount) || 0)),
+              ...(l.note ? { note: String(l.note) } : {}),
+            })),
+            ...(modeLabel ? { mode: modeLabel } : {}),
+            table: tb.no,
+            ...(Number(head.ongkir) > 0 ? { ongkir: Math.max(0, Math.round(Number(head.ongkir))) } : {}),
+            salesNum: String(head.salesNum),
+            ...(head.voucherCode ? { voucher: { code: String(head.voucherCode), amount: Math.max(0, Math.round(Number(head.voucherAmount) || 0)) } } : {}),
+            ...(head.memberId ? { memberId: String(head.memberId) } : {}),
+            ...(head.customerName ? { customer: String(head.customerName) } : {}),
+          });
+          return;
+        }
+      }
+    } catch {
+      /* abaikan - fallback order baru */
+    }
     navigation?.navigate?.('Cashier', base);
   };
 
@@ -356,16 +418,57 @@ catch { /* antrean belum siap */ }}/** Petakan status BE (free/occupied/reserved
 
   // GAP-F: guard ketuk-ganda simpan booking (dua op tanpa id = booking ganda).
   const bookingSavingRef = useRef(false); /* GAP-T: nomor meja yang sedang diproses (anti duplikat double-tap; state tables basi antar-ketuk). */ const pendingTableNosRef = useRef(new Set<string>()); /* GAP-U: single-flight pindah/gabung (double-tap merge = total menggelembung + op server ganda). */ const moveBusyRef = useRef(false); /* GAP-V: single-flight kosongkan meja (triple-tap = table-clear ganda). */ const cancelBusyRef = useRef(false); /* GAP-W: single-flight hold-toggle (double-tap = op server ganda + toggle lokal 2x = divergen). */ const holdBusyRef = useRef(false);
-  /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync. */ const saveBooking = () => {
+  /** Simpan booking: tandai meja sebagai dipesan di denah + antre sync.
+   * GAP-BT: tolak meja tak-kosong + bentrok reservasi jalur kasir (Booking)
+   * agar dua jalur tak menumpuk meja+jam yang sama. Modal + form ditutup
+   * HANYA bila booking tersimpan (gagal = tetap terbuka + pesan). */
+  const saveBooking = () => {
     if (bookingSavingRef.current) return;
-    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; } if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; } setBookingWarn(''); bookingSavingRef.current = true; const label = `${namaBooking.trim()} · ${jamBooking.trim()}`; if (selected) { const selId = selected.id; const selNo = selected.no; setTables((list) => list.map((tb) => tb.id === selId ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), ); queueTableOp('booking-create', { id: `tb-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: selNo, name: namaBooking.trim(), time: jamBooking.trim(), pax: pax.trim() || null });
-    // Sinkron ke master meja bila tersedia (best-effort, tidak memblokir).
-    void (async () => { try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', selNo]); } catch { /* master belum tersedia */ } })(); } /* GAP-S: reset guard SELALU (selected null = tombol tak mati permanen). */ bookingSavingRef.current = false;
-  setBookingVisible(false);
-    setSelected(null);
-    setNamaBooking('');
-    setJamBooking('');
-    setPax('');
+    if (!namaBooking.trim()) { setBookingWarn(t('tbl_bk_need_name')); return; }
+    if (!jamBooking.trim()) { setBookingWarn(t('tbl_bk_need_time')); return; }
+    if (!selected) return;
+    setBookingWarn('');
+    bookingSavingRef.current = true;
+    const sel = selected;
+    const jam = jamBooking.trim();
+    void (async () => {
+      try {
+        if (sel.status !== 'kosong') {
+          setBookingWarn(t('tbl_bk_not_free'));
+          return;
+        }
+        let clash = false;
+        try { clash = await hasBookingClashToday(sel.no, jam); } catch { clash = false; }
+        if (clash) {
+          setBookingWarn(t('bok_warn_clash'));
+          return;
+        }
+        const label = `${namaBooking.trim()} · ${jam}`;
+        setTables((list) => list.map((tb) => tb.id === sel.id ? { ...tb, status: 'dipesan' as TableStatus, namaTamu: label } : tb, ), );
+        queueTableOp('booking-create', { id: `tb-${uuidv7()}` /* GAP-AZ: uuid ganti Date.now (kunci/id unik). */, table: sel.no, name: namaBooking.trim(), time: jam, pax: pax.trim() || null });
+        // GAP-BT: cerminkan ke store reservasi jalur kasir (sumber tunggal
+        // cek-bentrok dua arah; tanggal = hari ini, slot sama = clash).
+        try {
+          let branch = '';
+          try { branch = getBranchId(); } catch { branch = ''; }
+          const key = bookKeyFor(branch);
+          const cur = await getJSON<unknown[]>(key, []);
+          const rows = Array.isArray(cur) ? cur : [];
+          const paxNum = Number(pax.trim()) || 2;
+          rows.push({ id: `r${uuidv7()}`, name: namaBooking.trim(), tamu: paxNum, table: sel.no, phone: '-', note: '-', date: 'Hari ini', time: jam, status: 'Terjadwal' });
+          await setJSON(key, rows);
+        } catch { /* denah tetap tersimpan; clash lintas-jalur best-effort */ }
+        try { await initDb(); await run('UPDATE ms_table SET status = ?, syncDate = NULL WHERE tableNo = ?', ['dipesan', sel.no]); } catch { /* master belum tersedia */ }
+        setBookingVisible(false);
+        setSelected(null);
+        setNamaBooking('');
+        setJamBooking('');
+        setPax('');
+      } finally {
+        /* GAP-S: reset guard SELALU (batal/gagal pun tombol tak mati permanen). */
+        bookingSavingRef.current = false;
+      }
+    })();
   };
 
 /** Kelola denah = ubah master meja (tulis ms_table + sync server) - khusus Owner.

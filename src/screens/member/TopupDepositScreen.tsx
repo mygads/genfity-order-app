@@ -20,6 +20,7 @@ import { useLang, tCur } from '../../lib/i18n';
 import { getCachedCurrency } from '../../lib/currency';
 import { appAlert } from '../../lib/appAlert';
 import { getShiftBlockKind } from '../../lib/shiftGuard';
+import { isLoyaltyOnlyMemberId } from '../../lib/memberRef';
 import * as Network from 'expo-network';
 
 type Nav = { navigate: (screen: string, params?: Record<string, unknown>) => void; goBack: () => void };
@@ -221,6 +222,12 @@ export default function TopupDepositScreen({ navigation, route }: Props) {
       }
     }
     setSaveErr('');
+    // GAP-CF: paritas saveDeposit MemberScreen - akun poin-only tak bisa topup.
+    if (isLoyaltyOnlyMemberId(memberId)) {
+      submitBusy.current = false;
+      setSaveErr(t('mem_deposit_points_only'));
+      return;
+    }
     // A8: konfirmasi sebelum gerak uang - kasir melihat nominal + metode +
     // penerima + saldo akhir; batal = lepas guard ketuk-ganda tanpa persist.
     appAlert(

@@ -305,8 +305,14 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     setMoved((m) => ({ ...m, [tk.id]: next }));
     setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: next } : sel));
     void persistKitchenStatus(tk, next);
-    // P2 KDS bump lintas device: siarkan best-effort (offline = lokal saja, dedupe id::status di penerima).
-    void broadcastKitchenBump(tk.id, next).catch(() => {});
+    // GAP-CG: bump lintas-device HANYA sesudah cermin server pasti tak
+    // menolak (dulu: tembak optimistis lalu rollback lokal saat BE menolak
+    // TRANSITION = perangkat lain terjebak status maju selamanya, karena
+    // guard "lokal menang" penerima mengabaikan segala koreksi susulan).
+    // Tiket lokal-only (tanpa salesNum/sid) tak bisa ditolak server = bump
+    // langsung; penolakan lunak/offline = optimistis dipertahankan + bump
+    // (drain antrean menyusul konfirmasi).
+    const bumpConfirmed = () => { void broadcastKitchenBump(tk.id, next).catch(() => {}); };
     // W2: cermin status ke BE bila tiket tertaut order server. Tanpa id server
     // = BLOCKED (lokal-only, tanpa kirim buta). Optimistik dipertahankan agar
     // dapur tetap jalan; drain menyusul saat offline; konflik transisi =
@@ -314,13 +320,13 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
     void (async () => {
       try {
         const salesNum = String((tk as { salesNum?: unknown }).salesNum ?? '');
-        if (!salesNum) return;
+        if (!salesNum) { bumpConfirmed(); return; }
         const sid = await getServerOrderIdForSale(salesNum);
-        if (sid == null) return;
+        if (sid == null) { bumpConfirmed(); return; }
         const target = beStatusForLocal(next);
-        if (!target) return;
+        if (!target) { bumpConfirmed(); return; }
         const res = await pushOrderStatus(sid, target);
-        if (res.ok) return;
+        if (res.ok) { bumpConfirmed(); return; }
         try {
           enqueueSync('other', {
             op: GO_OP_STATUS, serverId: sid, target, salesNum,
@@ -332,7 +338,11 @@ async function cachePushTicket(tk: { ticket: KitchenTicket; salesNum: string }):
           setSelected((sel) => (sel && sel.id === tk.id ? { ...sel, status: prev } : sel));
           // GAP-BL: putar balik juga SQLite (persist optimistis sudah menulis
           // status maju) agar KDS lokal tak divergen dari server.
+          // GAP-CG: tanpa bump di sini - penerima tak pernah melihat status
+          // maju sehingga tak ada yang perlu dikoreksi.
           try { await persistKitchenStatus(tk, prev); } catch { /* best-effort */ }
+        } else {
+          bumpConfirmed();
         }
         if (res.reason === 'rejected') setLiveNotice(res.message || '');
       } catch { /* abaikan: status lokal tetap sah */ } finally {

@@ -122,7 +122,14 @@ import { useEffect, useRef, useState } from 'react';import { Image, Platform, Sc
     return null;
   };
 
+  /* GAP-CH: throttle tombol Cek (tanpa ini ketuk-cepat = validasi
+   * tumpang-tindih; yang basi bisa menang dan menimpa hasil segar).
+   * Ref TERPISAH dari useAt Pakai agar Cek tak memblokir Pakai. */
+  const checkAt = useRef(0);
   const check = () => {
+    const nowCheck = Date.now();
+    if (nowCheck - checkAt.current < 800) return;
+    checkAt.current = nowCheck;
     void validateValue(code);
   };
 

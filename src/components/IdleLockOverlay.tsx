@@ -5,7 +5,9 @@
  * interaksi sampai PIN staff sesi aktif terverifikasi offline
  * (verifyGrantPin, triple user+terminal+device) — shift/kas tetap berjalan,
  * tanpa logout. Tanpa grant valid pemanggil JANGAN tampilkan overlay ini
- * (PIN tak bisa diverifikasi offline → kunci permanen).
+ * (PIN tak bisa diverifikasi offline → kunci permanen). Gerbang kedaluwarsa
+ * (GAP-BW): verifyGrantPin murni hash-compare tanpa cek expiry, jadi submit
+ * menolak bila isGrantValid gagal (grant kedaluwarsa/mismatch = paksa login ulang).
  */
 import { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';
@@ -13,7 +15,7 @@ import { colors, fonts } from '../theme';
 import AppButton from './AppButton';
 import AppInput from './AppInput';
 import { useLang } from '../lib/i18n';
-import { verifyGrantPin, type GrantTriple } from '../session';
+import { isGrantValid, verifyGrantPin, type GrantTriple } from '../session';
 import {
   checkGrantLoginThrottle,
   noteGrantLoginFailure,
@@ -50,6 +52,10 @@ export default function IdleLockOverlay({ visible, triple, onUnlocked, onLogout 
       if (th && th.locked) {
         const n = Math.max(1, th.remainingSec);
         setMsg(t('g_pin_offline_locked').replace('{n}', String(n)));
+        return;
+      }
+      if (!isGrantValid(triple.userId, triple.terminalId, triple.deviceId)) {
+        setMsg(t('idle_expired'));
         return;
       }
       if (verifyGrantPin(clean, triple)) {

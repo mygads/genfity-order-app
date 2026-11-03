@@ -5,7 +5,7 @@
  * glif ■/□/● di kunci dash_legend). Gagal BE → status need_be jujur;
  * fixture dev → label mode_local. Pilih → TerminalPin.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { TABLET_BP, colors, fonts, wideCenterSm } from '../../theme';
 import { fetchBranchTerminals, type TerminalItem } from '../../lib/terminalApi';
@@ -27,6 +27,15 @@ type Route = {
 
 const GREY = '#757575';
 const TITLE_DARK = '#2B2B2B';
+
+/* GAP-CB: throttle navigasi 800ms di scope modul (di luar komponen agar
+ * lolos react-hooks/purity; pola isi sama dengan navOnce kasir). */
+function navThrottleOnce(ref: { current: number }): boolean {
+  const now = Date.now();
+  if (now - ref.current < 800) return false;
+  ref.current = now;
+  return true;
+}
 
 export default function TerminalPickerScreen({
   navigation,
@@ -83,7 +92,10 @@ export default function TerminalPickerScreen({
     };
   }, [branchId]);
 
+  /* GAP-CB: throttle pilih-terminal (ketuk-ganda = dua layar TerminalPin menumpuk). */
+  const navAt = useRef(0);
   const choose = (terminal: TerminalItem) => {
+    if (!navThrottleOnce(navAt)) return;
     navigation?.navigate('TerminalPin', {
       branchId,
       branchName,

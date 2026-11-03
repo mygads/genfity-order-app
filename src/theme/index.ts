@@ -81,13 +81,21 @@ export const rp = (n: number) => {
 };
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
 /** Angka grouping ala Indonesia tanpa prefix - utk input yg sudah ada label "Rp". */
-export const rpNum = (n: number) =>
-  Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+/* GAP-CR: non-finite (NaN/Infinity/undefined cast) = 0. Tanpa ini satu kalkulasi
+ * bocor menampilkan "Rp NaN" di struk/layar (jalur AUD + formatCurrency sudah
+ * 0-defensif; jalur IDR ini satu-satunya yang lolos). */
+export const rpNum = (n: number) => {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+};
 /** Angka grouping ala Australia tanpa prefix - pasangan rpNum utk AUD.
  * INTEGER-only (cermin rpNum): JANGAN dipakai untuk nominal currency AUD
- * (butuh 2 desimal) - pakai formatCurrency()/rp() di bawah. */
-export const audNum = (n: number) =>
-  Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+ * (butuh 2 desimal) - pakai formatCurrency()/rp() di bawah.
+ * GAP-CR paritas: non-finite = 0 (jangan "NaN" di chip/input). */
+export const audNum = (n: number) => {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+  return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+};
 /** Grouping angka input/chip sadar-currency (S4): IDR = titik (rpNum),
  * AUD = koma (audNum). Untuk nominal TAMPIL (ada prefix) pakai rp()/formatCurrency. */
 export const numGrouping = (n: number) =>

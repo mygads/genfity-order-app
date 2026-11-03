@@ -208,10 +208,10 @@ export default function SuccessScreen({ navigation, route }: Props) {
     void (async () => {
       try {
         await initDb();
-        // Hapus draft via salesNum persis: karakter LIKE (\) di-escape agar
-        // nomor tak pernah cocok lebih luas dari dirinya sendiri.
+        // GAP-BR: hapus draft via kunci JSON persis "salesNum":"..." (bukan
+        // substring nomor - NNNN 5-digit / item bernama mirip nomor tak ikut kehapus).
         const esc = String(no).replace(/[\\%_]/g, (c) => `\\${c}`);
-        await run("DELETE FROM tr_draftorder WHERE payload LIKE ? ESCAPE '\\'", [`%${esc}%`]);
+        await run("DELETE FROM tr_draftorder WHERE payload LIKE ? ESCAPE '\\'", [`%\"salesNum\":\"${esc}\"%`]);
       } catch {
         /* abaikan */
       }

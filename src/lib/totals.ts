@@ -307,7 +307,9 @@ export async function getRoundStep(currency?: string): Promise<number> {
     const s = srv?.step;
     if (s !== undefined && s !== null && s !== '') {
       const n = Number(s);
-      if (Number.isFinite(n) && n > 0) return Math.round(n);
+      /* GAP-CT: step pecahan (0,1) = round 0 = bagi-nol di totals (total
+       * NaN/Infinity). Jepit bawah 1 di sumber (baris totals() dikunci DC-f). */
+      if (Number.isFinite(n) && n > 0) return Math.max(1, Math.round(n));
     }
   } catch {
     /* abaikan: lanjut ke ms_setting */
@@ -325,7 +327,7 @@ export async function getRoundStep(currency?: string): Promise<number> {
       const k = k1 === 'rounding' ? k2 : k1.replace(/^rounding\s+/, '');
       if (k === 'step') {
         const n = Number((r.value1 ?? '').trim());
-        if (Number.isFinite(n) && n > 0) return Math.round(n);
+        if (Number.isFinite(n) && n > 0) return Math.max(1, Math.round(n));
       }
     }
   } catch {
@@ -513,8 +515,12 @@ export function totals(input: TotalsInput): TotalsResult {
   const svcType: ServiceChargeType =
     input.serviceType === 'FIXED' ? 'FIXED' : 'PERCENT';
   const svcRateRaw = Number(input.serviceRate);
+  /* GAP-CQ: persen service dijepit 0..100 (satu-satunya input uang tanpa batas
+   * atas; rate server nyasar 1000 = service 10x lipat). Di atas 100 = jepit
+   * 100 (niat server dihormati maksimal, bukan fallback diam 5); invalid =
+   * legacy 5. FIXED nominal tetap server-wins tanpa clamp (Rp bebas). */
   const svcRate =
-    Number.isFinite(svcRateRaw) && svcRateRaw >= 0 ? svcRateRaw : 5;
+    Number.isFinite(svcRateRaw) && svcRateRaw >= 0 ? Math.min(100, svcRateRaw) : 5;
   const svcFixedRaw = Number(input.serviceFixed);
   const svcFixed =
     Number.isFinite(svcFixedRaw) && svcFixedRaw >= 0

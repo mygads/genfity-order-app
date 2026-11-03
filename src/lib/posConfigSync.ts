@@ -254,6 +254,20 @@ export async function syncPosConfigFromServer(terminalId: string): Promise<boole
     // jadi menyimpan raw aman untuk keduanya.
     await setJSON(PAYMENT_METHODS_KEY, r.data ?? {});
   } catch { /* abaikan */ }
+  // GAP-BV: perilaku PIN (posPinGate, TTL 5 mnt) ikut segar tiap sync sukses;
+  // tanpa ini window basi = gerbang PIN pakai aturan lama (impor dinamis
+  // agar nol-risiko siklus modul).
+  try {
+    const { clearPosPinCache } = await import('./posPinGate');
+    clearPosPinCache();
+  } catch { /* abaikan: TTL tetap memagar */ }
+  // GAP-CD: paritas GAP-BV - gerbang email-invoice posWire (cache sesi)
+  // ikut segar tiap sync sukses agar ganti merchant tak pakai flag basi
+  // (impor dinamis agar nol-risiko siklus modul).
+  try {
+    const { resetInvoiceEmailCache } = await import('./posWire');
+    resetInvoiceEmailCache();
+  } catch { /* abaikan */ }
   return true;
 }
 

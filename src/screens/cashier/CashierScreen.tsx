@@ -1525,7 +1525,13 @@ export default function CashierScreen({ navigation, route }: Props) {
         try {
           num = await nextSalesNum();
         } catch {
-          num = t('saved-fallback-num').replace('{t}', String(Date.now()));
+          /* GAP-CM01: fallback anti-kembar - Date.now() saja tabrakan bila dua
+           * simpan-gagal-DB dalam 1 ms yang sama (LoadOrder hapus-draft via kunci
+           * salesNum persis: kembar = draft pertama terhapus diam-diam). Sufiks
+           * acak 6 digit menjaga unik; format TRX-* tetap lolos tripwire ^TRX
+           * + BE displayNo opaque. nextSalesNum gagal = DB/unbound, jadi
+           * INSERT berikutnya pun best-effort (abaikan-gagal di bawah). */
+          num = t('saved-fallback-num').replace('{t}', `${Date.now()}-${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`);
         }
         setSalesNum(num);
       }

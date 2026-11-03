@@ -169,6 +169,8 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
     };
   }, []);
   const [printing, setPrinting] = useState(false);
+  /* GAP-CA: ref single-flight cetak (state `printing` basi antar-ketuk-cepat = struk ganda + tendang laci 2x). */
+  const printBusyRef = useRef(false);
   /** Cetak masuk antrean persisten (offline/printer putus): banner pending
    * eksplisit, bukan status tercetak. Kunci i18n yang dipakai sudah ada. */
   const [printQueued, setPrintQueued] = useState(false);
@@ -176,7 +178,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
    * default; sukses = printedCount+1 + dirty. Tunai sukses → tendang laci
    * kas ala POSLite (best-effort). APP-PRINTER-SALES (Q7): QR struk membawa
    * client_id rantai bayar (kunci upsert server), bukan nomor display saja. */
-  const doPrint = async () => { if (printing) return; // R24: struk sale void tak dicetak sebagai aktif - kunci
+  const doPrint = async () => { if (printing || printBusyRef.current) return; printBusyRef.current = true; // R24: struk sale void tak dicetak sebagai aktif - kunci
     // hist_deny_title + rc_void_title yang sudah ada.
     if (isVoidSale) {
       appAlert(t('hist_deny_title'), t('rc_void_title'));
@@ -207,7 +209,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
     if (res.ok && res.bytes > 0) { try { await initDb(); // R26: tandai tercetak hanya pada cetakan pertama (conditional
         // UPDATE - tak ada kolom lastPrintAt di skema, skema milik lane
         // lain sehingga tak ditambah di sini).
-        await run( 'UPDATE tr_saleshead SET printedCount = 1, syncDate = NULL WHERE salesNum = ? AND COALESCE(printedCount, 0) = 0', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { setPrinting(false); } };
+        await run( 'UPDATE tr_saleshead SET printedCount = 1, syncDate = NULL WHERE salesNum = ? AND COALESCE(printedCount, 0) = 0', [no], ); } catch { /* abaikan */ } if (isCash) { try { await openDefaultDrawer(); } catch { /* laci opsional */ } } } } finally { printBusyRef.current = false; setPrinting(false); } };
   /** Cetak otomatis sekali saat dibuka dari tombol Cetak (Success) - pemanggil
    * lain (pratinjau/arsip/void) tetap manual via tombol. */
   const autoPrinted = useRef(false);
@@ -318,7 +320,9 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
       return;
     }
     const cid = (route?.params?.clientId ?? '').trim() || no;
-    const sid = serverIdForTxnKey(cid) ?? getServerOrderIdForSale(no);
+    // GAP-CC: getServerOrderIdForSale async - tanpa await hasilnya Promise
+    // (truthy) sehingga gerbang typeof di bawah tak pernah lolos jalur langsung.
+    const sid = serverIdForTxnKey(cid) ?? (await getServerOrderIdForSale(no));
     const gate = await isInvoiceEmailEnabled();
     if (gate === false) {
       recordReceiptEmail(mail, no, total, method);
@@ -332,6 +336,10 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
         return;
       }
       if (res.reason === 'rejected') {
+        // GAP-CC: copy hist_mail_off menjanjikan "masuk antrean biasa" -
+        // antrekan juga di sini (ESB sales/receipt-email via salesNum),
+        // bukan hilang diam-diam (mis. order-not-found = settle belum drain).
+        recordReceiptEmail(mail, no, total, method);
         setMailMsg(t('hist_mail_off'));
         return;
       }
@@ -346,7 +354,7 @@ import { buildReceiptOrderTypeLine, getCachedMerchantInfo, getEffectiveReceiptLo
       {printQueued ? <Text style={styles.mailMsg}>{t('sync.queued')}</Text> : null}
       <AppButton title={t('c_back')} variant="secondary" onPress={() => navigation?.navigate('Dashboard')} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={printing ? '...' : t('rc_print')} variant="secondary" onPress={() => void doPrint()} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
-      <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { void shareReceipt(shareText); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
+      <AppButton title={`⤴ ${t('rc_share')}`} variant="secondary" onPress={() => { if (!actOnce()) return; void shareReceipt(shareText); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title="WA" variant="secondary" onPress={() => { if (!actOnce()) return; void (async () => { try { const mod = await import("../../lib/posWire"); const ok = await mod.openWaShare(shareText); if (!ok) await shareReceipt(shareText); } catch { try { await shareReceipt(shareText); } catch { /* abaikan */ } } })(); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={t('ok_email')} variant="secondary" onPress={() => { setMailMsg(''); setMailOpen(true); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionHalf]} />
       <AppButton title={t('rc_new')} onPress={() => { if (actOnce()) navigation?.navigate('Cashier'); }} fullWidth={false} size="md" style={[styles.actionBtn, isTablet ? styles.actionCol : styles.actionFull]} />

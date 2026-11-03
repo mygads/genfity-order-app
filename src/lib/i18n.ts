@@ -132,6 +132,7 @@ const STR: Record<string, Entry> = {
   hist_void_reason_ph: { id: 'Alasan pembatalan (wajib)', en: 'Void reason (required)' },
   hist_void_yes: { id: 'Ya, Void', en: 'Yes, Void' },
   hist_void_print: { id: 'Cetak Rincian Void', en: 'Print Void Detail' },
+  hist_void_fail: { id: 'Void gagal tersimpan - coba lagi.', en: 'Void was not saved - try again.' },
   hist_mail_title: { id: 'Kirim Struk via Email', en: 'Send Receipt via Email' },
   hist_mail_ph: { id: 'nama@email.com', en: 'name@email.com' },
   hist_mail_send: { id: 'Kirim', en: 'Send' },
@@ -1727,6 +1728,7 @@ const STR: Record<string, Entry> = {
   'mprint.st_checker': { id: 'Checker', en: 'Checker' },
   'mprint.st_label': { id: 'Label', en: 'Label' },
   'mprint.st_none': { id: 'Jangan Cetak', en: 'Do Not Print' },
+  'mprint.kdsAuto': { id: 'otomatis', en: 'auto' },
   'mprint.groupMeta': { id: '{n} menu - cetak ke {s}', en: '{n} items - print to {s}' },
 
   // ---- REA-FIX-A: voucher online - eksternal - delivery - member erp - shift log - verify ----
@@ -1933,6 +1935,7 @@ const STR: Record<string, Entry> = {
   pin_weak: { id: 'PIN terlalu mudah,hindari angka berulang/berurutan.', en: 'PIN too weak,avoid repeated/sequential digits.' },
   pin_wrong: { id: 'PIN salah,coba lagi.', en: 'Wrong PIN,try again.' },
   top_member_missing: { id: 'Buka layar ini dari daftar member agar ID member terbawa.', en: 'Open this screen from the member list so the member ID is carried over.' },
+  mem_deposit_points_only: { id: 'Akun ini hanya untuk poin loyalti - deposit tidak tersedia untuk akun ini.', en: 'This account is points-only - deposit is not available for this account.' },
   forgot_unbound: { id: 'Perangkat belum terikat terminal,minta owner mengikat dulu atau atur ulang PIN lewat Manajemen User.', en: 'Device is not bound to a terminal,ask the owner to bind it first or reset the PIN via User Management.' },
   forgot_rejected: { id: 'Reset ditolak server,periksa username atau hubungi owner outlet.', en: 'Server rejected the reset,check the username or contact the outlet owner.' },
   forgot_reset_ok: { id: 'PIN untuk {user} berhasil direset. Masuk dengan PIN baru Anda.', en: 'PIN for {user} has been reset. Sign in with your new PIN.' },
@@ -2014,6 +2017,7 @@ const STR: Record<string, Entry> = {
   // ---- REAUDIT-2 follow-up: tables/move leftovers ----
   tbl_bk_need_name: { id: 'Isi nama pelanggan dulu.', en: 'Enter the customer name first.' },
   tbl_bk_need_time: { id: 'Isi jam reservasi dulu.', en: 'Enter the reservation time first.' },
+  tbl_bk_not_free: { id: 'Meja tidak kosong - pilih meja kosong.', en: 'Table is not free - pick a free table.' },
   tbl_timer: { id: 'Timer {d}', en: 'Timer {d}' },
   mov_step_src: { id: '1 · Pilih meja sumber', en: '1 · Pick the source table' },
   mov_step_items: { id: '2 · Pilih item dari {from}…', en: '2 · Pick items from {from}…' },
@@ -2059,6 +2063,7 @@ const STR: Record<string, Entry> = {
   idle_title: { id: 'Kasir Terkunci Otomatis', en: 'Cashier Auto-Locked' },
   idle_sub: { id: 'Tak ada aktivitas 30 menit. Masukkan PIN staff Anda untuk lanjut (shift tetap berjalan).', en: 'No activity for 30 minutes. Enter your staff PIN to continue (shift keeps running).' },
   idle_wrong: { id: 'PIN salah - coba lagi.', en: 'Wrong PIN - try again.' },
+  idle_expired: { id: 'Sesi PIN kedaluwarsa - silakan keluar lalu masuk ulang.', en: 'PIN session expired - please sign out and sign in again.' },
   idle_unlock: { id: 'Buka Kunci', en: 'Unlock' },
   idle_logout: { id: 'Keluar', en: 'Sign out' },
   stock_opname_menu_only: { id: 'Hanya item menu yang dikirim (addon dihitung di Stok & finalisasi owner).', en: 'Only menu items are sent (addons are counted in Stock & owner finalization).' },

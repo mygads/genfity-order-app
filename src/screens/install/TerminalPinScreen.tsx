@@ -97,6 +97,9 @@ export default function TerminalPinScreen({
       setError(t('bind_failed'));
       return false;
     }
+    // GAP-BV: aturan PIN terminal lama basi - paksa baca ulang posBehavior.
+    try { const { clearPosPinCache } = await import('../../lib/posPinGate'); clearPosPinCache(); } catch { /* abaikan */ }
+    try { const { resetInvoiceEmailCache } = await import('../../lib/posWire'); resetInvoiceEmailCache(); } catch { /* abaikan */ }
     // Cermin peran dari tag tervalidasi yang SAMA (store peran bukan bagian
     // adopt) — home guard tetap fail-safe bila ini gagal.
     try {

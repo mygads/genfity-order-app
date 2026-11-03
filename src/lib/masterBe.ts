@@ -28,6 +28,7 @@
 import { ApiPath, apiGet } from '../config/server';
 import { initDb, run } from './db';
 import { setWatermark } from './sync';
+import { getJSON, setJSON } from './storage';
 
 export type BePullKey = 'table' | 'promotion' | 'member' | 'voucher' | 'expensecoa';
 
@@ -218,7 +219,10 @@ export function parseBePromos(rows: Row[]): BePromoRow[] {
 export interface BeMemberRow {
   id: string;
   memberName: string;
-  depositBalance: number;
+  // GAP-CE: poin loyalti (SATUAN POIN, bukan rupiah). Jangan tulis ke kolom
+  // uang ms_member.depositBalance (dulu `depositBalance: num(pointsBalance)` =
+  // poin tampil sebagai Saldo Rp + bisa dibayar sebagai deposit).
+  points: number;
 }
 
 /** api/merchant/loyalty/members -> [{id,name,status,pointsBalance,...}]. */
@@ -233,7 +237,7 @@ export function parseBeMembers(rows: Row[]): BeMemberRow[] {
     out.push({
       id,
       memberName: str(r.name) ?? '',
-      depositBalance: num(r.pointsBalance),
+      points: num(r.pointsBalance),
     });
   }
   return out;
@@ -439,6 +443,11 @@ async function pullBeMembers(): Promise<Omit<BeDomainResult, 'key'>> {
   const rows = parseBeMembers(Array.isArray(body) ? body : []);
   const now = new Date().toISOString();
   let enriched = 0;
+  // GAP-CE: cache poin server per id loyalti (kunci SAMA dengan MemberScreen
+  // `POINTS_KEY = 'genfity.member.points'`; loadMembersFromSqlite membaca
+  // poin dari sini, saldo dari depositBalance).
+  const MEMBER_POINTS_KEY = 'genfity.member.points';
+  const pts: Record<string, number> = {};
   for (const m of rows) {
     // Pengayaan telepon POS-side: kandidat via customers/search (q = nama
     // persis; take 50 = batas BE, minim risiko truncasi), lalu match 1:1
@@ -468,6 +477,11 @@ async function pullBeMembers(): Promise<Omit<BeDomainResult, 'key'>> {
     // topup/burn belum push) dipertahankan. Telepon preservasi dua arah:
     // (a) donasi NULL/'' = pertahankan lokal; (b) lokal sudah terisi =
     // pertahankan lokal; hanya lokal KOSONG + donasi valid yang diisi.
+    // GAP-CE: depositBalance = 0 (kolom UANG harus jujur; poin ada di
+    // cache MEMBER_POINTS_KEY). Baris bersih (syncDate NOT NULL) ikut
+    // sembuh ke 0 via excluded di bawah; baris kotor (topup/withdraw belum
+    // push) dipertahankan CASE L21.
+    pts[m.id] = Math.max(0, Math.round(Number(m.points) || 0));
     await run(
       `INSERT INTO "ms_member" (id, memberName, phone, email, depositBalance, syncDate)
        VALUES (?, ?, ?, NULL, ?, ?)
@@ -479,15 +493,23 @@ async function pullBeMembers(): Promise<Omit<BeDomainResult, 'key'>> {
            ELSE excluded.phone END,
          depositBalance = CASE WHEN ms_member.syncDate IS NULL THEN ms_member.depositBalance ELSE excluded.depositBalance END,
          syncDate = CASE WHEN ms_member.syncDate IS NULL THEN NULL ELSE excluded.syncDate END`,
-      [m.id, m.memberName, donor, m.depositBalance, now],
+      [m.id, m.memberName, donor, 0, now],
     );
+  }
+  // GAP-CE: tulis cache poin sekali (read-modify-write; best-effort).
+  try {
+    const cur = await getJSON<Record<string, number>>(MEMBER_POINTS_KEY, {});
+    const base = cur && typeof cur === 'object' ? cur : {};
+    await setJSON(MEMBER_POINTS_KEY, { ...base, ...pts });
+  } catch {
+    /* abaikan: poin tampil 0 sampai customers/search memperkaya */
   }
   await setWatermark('member', { pull: now });
   return {
     status: 'live',
     count: rows.length,
     at: now,
-    note: `Saldo = pointsBalance; telepon diisi ${enriched}/${rows.length} via customers/search 1:1 (preservasi: NULL/lokal-isi tak ditimpa).`,
+    note: `Saldo = 0 (poin di cache, bukan kolom uang - GAP-CE); telepon diisi ${enriched}/${rows.length} via customers/search 1:1 (preservasi: NULL/lokal-isi tak ditimpa).`,
   };
 }
 

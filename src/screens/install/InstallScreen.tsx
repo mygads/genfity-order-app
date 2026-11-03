@@ -189,6 +189,9 @@ import { removeItem } from '../../lib/storage';type Nav = { navigate: (screen: s
         setBindError(L.bindFail);
         return;
       }
+      // GAP-BV: aturan PIN terminal lama basi - paksa baca ulang posBehavior.
+      try { const { clearPosPinCache } = await import('../../lib/posPinGate'); clearPosPinCache(); } catch { /* abaikan */ }
+      try { const { resetInvoiceEmailCache } = await import('../../lib/posWire'); resetInvoiceEmailCache(); } catch { /* abaikan */ }
       // Station printer milik terminal lama tak berlaku lintas re-bind
       // (kunci store 'genfity.printer.stations' milik lib/print.ts,bukan
       // bagian adopt sehingga dibersihkan di sini).
