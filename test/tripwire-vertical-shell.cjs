@@ -11,6 +11,8 @@ const read = (p) => strip(readRaw(p));
 const readBE = (p) => fs.readFileSync(path.join(BE, p), 'utf8');
 
 function run() {
+  // CI single-repo: sibling BE tak di-checkout -> skip eksplisit (ketat saat payung lokal).
+  if (!fs.existsSync(BE)) { console.log('SKIP [tripwire-vertical-shell] sibling BE absen (bukan layout payung)'); return { checks: 0, failures: [] }; }
   const failures = [];
   let checks = 0;
   const ok = (cond, name) => { checks++; if (!cond) failures.push(name); };

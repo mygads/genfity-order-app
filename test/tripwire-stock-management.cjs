@@ -77,8 +77,8 @@ function run() {
   const mgmt = read('screens/settings/StockManagementScreen.tsx');
   ok(/persistBranchQty/.test(mgmt) && /setBranchThreshold/.test(mgmt) && /getAllLocalFlags/.test(mgmt),
     'SM-USE-3: StockManagement pakai persist+threshold+bulk-flags');
-  ok(/saveQty\(0\)/.test(mgmt),
-    'SM-USE-4: Tandai Habis = set qty 0 (cermin FE, bukan flag)');
+  ok(/cleanQty\(0/.test(mgmt) && /setManualOut\(true\)/.test(mgmt),
+    'SM-USE-4: Tandai Habis = qty 0 + flag manual (kasir gate flagSoldOut utk item tak dilacak)');
   ok(/GROUP_CONCAT/.test(mgmt),
     'SM-USE-5: kartu addon cantumkan menu induk (Varian)');
   // Reset-to-template (audit reset 2026-10-26): BE ekspos dailyStockTemplate

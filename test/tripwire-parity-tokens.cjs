@@ -17,6 +17,8 @@ function run() {
   const inputPath = path.join(appRoot, 'src', 'components', 'Input.tsx');
   const appButtonPath = path.join(appRoot, 'src', 'components', 'AppButton.tsx');
 
+  // CI single-repo: sibling FE tak di-checkout -> skip eksplisit (ketat saat payung lokal).
+  if (!fs.existsSync(feCssPath)) { console.log('SKIP [tripwire-parity-tokens] sibling FE absen (bukan layout payung)'); return { checks: 0, failures: [] }; }
   const css = fs.readFileSync(feCssPath, 'utf8');
   const theme = fs.readFileSync(themePath, 'utf8');
   const radius = fs.readFileSync(radiusPath, 'utf8');
