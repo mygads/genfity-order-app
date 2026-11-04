@@ -6,7 +6,7 @@ import AppButton from '../../components/AppButton';
 import ScreenHeader from '../../components/ScreenHeader';
 import DrawerMenu from '../../components/DrawerMenu';
 import { TABLET_BP, colors, fonts, wideCenterLg } from '../../theme';
-import { useLang, type Lang } from '../../lib/i18n';
+import { useLang, type Lang } from '../../lib/i18n';import { getLocalVersion } from '../../lib/appUpdate';
 import { appAlert } from '../../lib/appAlert';
 import { getSession, getBinding, logout, subscribeSession } from '../../session';
 import { getBaseUrl, getCustomBaseUrl, getServerEnv, getTerminal, setCustomBaseUrl, setServerEnv, type ServerEnv } from '../../config/server';
@@ -307,7 +307,7 @@ export default function SettingsScreen({ navigation }: Props) {
       />
       )}
       <MenuRow title={t('settings.help')} sub={t('settings.helpSub')} onPress={() => go('Help')} />
-      <MenuRow title={t('settings.about')} sub="Genfity Order v1.0.0" onPress={() => go('About')} />
+      <MenuRow title={t('settings.about')} sub={`Genfity Order v${getLocalVersion()}`} onPress={() => go('About')} />
 
       <SupervisorApprovalDialog
         visible={verticalPinOpen}
