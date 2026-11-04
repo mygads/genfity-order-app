@@ -400,7 +400,7 @@ export type TotalsInput = {
   roundStep?: number;
 };
 
-/** Mode agregator/online yang kena fee platform (GOFOOD/GRABFOOD/SHOPEEFOOD/ESB). */
+/** Mode agregator/online yang kena fee platform (GOFOOD/GRABFOOD/SHOPEEFOOD/ESB legacy + GENFITY). */
 export function isMarketplaceMode(mode?: string): boolean {
   const k = (mode ?? '').toUpperCase();
   return (
@@ -409,7 +409,8 @@ export function isMarketplaceMode(mode?: string): boolean {
     k.includes('GRAB') ||
     k.includes('SHOPEEFOOD') ||
     k.includes('SHOPEE') ||
-    k.includes('ESB')
+    k.includes('ESB') ||
+    k.includes('GENFITY')
   );
 }
 

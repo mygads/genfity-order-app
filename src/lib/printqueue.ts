@@ -274,8 +274,20 @@ async function drainInner(deps?: DrainDeps): Promise<DrainResult> {
   for (const row of rows) {
     const bytes = bytesOfPayload(row.payload ?? '');
     if (!bytes) {
-      // Baris rusak (payload tak bisa didekode dua format) - lewati tanpa
-      // menghentikan drain; dicoba lagi di drain berikut bila sembuh.
+      /* GAP-DK: baris rusak (payload tak bisa didekode dua format) tak akan
+       * pernah sembuh - tandai 'gagal' jujur agar tak macet 'antre'
+       * selamanya (inflasi pending abadi + drain buang siklus tiap
+       * putaran). Tanpa hitungan attempted (tak ada kirim yang dicoba);
+       * SyncScreen ikut jujur (agregat pending mencakup 'gagal'). */
+      try {
+        await run(`UPDATE tr_printqueue SET status = 'gagal', target = ? WHERE id = ?`, [
+          JSON.stringify({ ...envelopeOf(row.target ?? ''), retries: PRINT_QUEUE_MAX_RETRIES }),
+          row.id,
+        ]);
+        out.failed += 1;
+      } catch {
+        /* abaikan - baris dilewati, drain lanjut */
+      }
       continue;
     }
     const env = envelopeOf(row.target ?? '');

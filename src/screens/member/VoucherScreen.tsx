@@ -275,6 +275,9 @@ export default function VoucherScreen({ navigation }: Props) {
     if (kode.length < 3) {
       setResult(null);
       setMsg(t('vou_short'));
+      /* GAP-DL: lepas latch guard konkuren (tanpa ini lookup/claim/clear
+       * mati sunyi sampai remount). */
+      lookupBusyRef.current = false;
       return;
     }
     setLookupBusy(true);
@@ -407,6 +410,8 @@ export default function VoucherScreen({ navigation }: Props) {
       const found = items.find((v) => v.kode === kode);
       if (found && found.status === 'tersedia') lock(found);
       else setMsg(t('vou_local_valid').replace('{k}', kode).replace('{v}', rp(result.amount)).replace('{l}', t('vou_lock_first')));
+      /* GAP-DL: cabang lokal tanpa try/finally - lepas latch eksplisit. */
+      lookupBusyRef.current = false;
       return;
     }
     setLookupBusy(true);
@@ -455,6 +460,9 @@ export default function VoucherScreen({ navigation }: Props) {
         lookupBusyRef.current = false; setLookupBusy(false);
       }
     }
+    /* GAP-DL: jalur non-eksternal tak lewat finally di atas - lepas latch
+     * eksplisit agar lookup/claim berikut tak mati sunyi. */
+    lookupBusyRef.current = false;
     setResult(null);
     setMsg('');
   };

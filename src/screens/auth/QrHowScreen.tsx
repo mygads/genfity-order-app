@@ -59,7 +59,7 @@ export default function QrHowScreen({ navigation }: Props) {
           body={(
             <>
               <Text style={[styles.stepLead, isTablet && styles.stepLeadBig]}>
-                {t('g_qrhow_visit')} <Text style={styles.link}>erp.esb.co.id</Text>
+                {t('g_qrhow_visit')} <Text style={styles.link}>crm.genfity.com</Text>
               </Text>
               <Bullet>
                 <Text style={[styles.stepText, isTablet && styles.stepTextBig]}>{t('g_qrhow_enter')} <Text style={styles.em}>{t('g_qrhow_username')}</Text>{t('g_qrhow_and')}<Text style={styles.em}>{t('g_qrhow_password')}</Text>{t('g_qrhow_yours')}</Text>

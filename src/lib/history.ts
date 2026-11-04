@@ -33,9 +33,12 @@ import type { Transaction, TxnStatus } from '../data/mock';
  *  sadar-zona-merchant PW-4). */
 export { fmtSalesDateInTz };
 
-/** salesMode kontrak (DINE_IN/…) → label kartu ('Dine In', …). */
+/** salesMode kontrak (DINE_IN/…) → label kartu ('Dine In', …).
+ * Legacy 'ESB Order' + 'Genfity Order' dinormalisasi ke 'Genfity Order'
+ * agar riwayat tak pernah menampilkan brand lama. */
 export function modeLabel(salesMode?: string | null): string {
   const k = (salesMode ?? '').toUpperCase();
+  if (k.includes('GENFITY') || k.includes('ESB')) return 'Genfity Order';
   if (/DINE/.test(k)) return 'Dine In';
   if (/TAKE/.test(k)) return 'Take Away';
   if (/DELIVER/.test(k)) return 'Delivery';
